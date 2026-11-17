@@ -3,6 +3,18 @@
 #include <algorithm>
 #include <cstddef>
 namespace framevr::servertarget {
+// Read-only game-thread body dimensions; caller verifies the native stats signature.
+template<class Read,class Stats>
+bool ReadBody(uintptr_t unit,targetcone::Target& target,Read read,Stats stats) {
+    target.bodyWidth=target.bodyHeight=0;
+    uint32_t header[4]{};uint8_t bank=0,fields[16]{};
+    if(!unit||!read(unit,header,sizeof header)||header[0]!=1||header[2]!=target.id||
+       header[3]==0||header[3]==12||header[1]>4095||!read(unit+0x1bd,&bank,sizeof bank)||bank>3)return false;
+    const uintptr_t row=stats(bank,int(header[1]));
+    if(!row||!read(row,fields,sizeof fields)||fields[8]<1||fields[8]>8||fields[9]<1||fields[9]>8)return false;
+    target.bodyWidth=std::max(fields[8],fields[9]);target.bodyHeight=fields[13]?fields[13]:72;
+    return true;
+}
 // Game-thread only. Reader/call adapters are shared by production and tests.
 // No pointer leaves this bounded scan. Native relation: nonzero means hostile.
 template<class Read,class Lookup,class Relation,class Line,class Level>

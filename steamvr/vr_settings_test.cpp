@@ -972,7 +972,7 @@ int main(int argc,char** argv){
     {   // Left-handed (#307, hand_role.h): Off by default, experimental, a row of its own, saved alone
         Check(Defaults()[LeftHanded]==0&&std::wstring(Definitions[LeftHanded].section)==L"interactions"&&
               std::wstring(Definitions[LeftHanded].key)==L"left_handed"&&Definitions[LeftHanded].min==0&&Definitions[LeftHanded].max==1&&
-              HelpText(LeftHanded)[0]!=0&&LeftHanded<ChangeMask::Bits&&LeftHanded+1==HeldCollisions,
+              HelpText(LeftHanded)[0]!=0&&LeftHanded<ChangeMask::Bits&&LeftHanded+1==HeldCollisions&&ControllerMenuSize<AllyHealthBars&&AllyHealthBars==Count-1,
               "Left-handed: Off by default, [interactions] left_handed Off / On, explained, its own change bit, appended after the haptics (Weapons collide after it)");
         const auto* row=content::RowOf(LeftHanded);
         Check(row&&!row->beside&&row->page==View::Hands&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Left-handed (experimental)")==0&&
@@ -1057,7 +1057,7 @@ int main(int argc,char** argv){
     {   // Props have weight (prop_heft.h): On by default, a switch under Knock over small props, shown while it is on, saved alone
         Check(Defaults()[PropHeft]==1&&std::wstring(Definitions[PropHeft].section)==L"interactions"&&
               std::wstring(Definitions[PropHeft].key)==L"prop_heft"&&Definitions[PropHeft].min==0&&Definitions[PropHeft].max==1&&
-              Definitions[PropHeft].step==1&&HelpText(PropHeft)[0]!=0&&PropHeft<ChangeMask::Bits&&PropHeft==Count-1,
+              Definitions[PropHeft].step==1&&HelpText(PropHeft)[0]!=0&&PropHeft<ChangeMask::Bits&&PropHeft+1==ControllerMenuSize&&ControllerMenuSize+1==AllyHealthBars&&AllyHealthBars==Count-1,
               "Props have weight: On by default, [interactions] prop_heft Off / On, explained, its own change bit, appended last");
         const auto* row=content::RowOf(PropHeft);const auto* props=content::RowOf(PropPhysics);
         Check(row&&props&&!row->beside&&row->page==View::Physics&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Props have weight")==0&&
@@ -1128,6 +1128,29 @@ int main(int argc,char** argv){
         Check(m.Get()[SummonRangeMultiplier]==1.25f,"presets preserve summon range");
         Check(Normalize(SummonRangeMultiplier,NAN)==1&&Normalize(SummonRangeMultiplier,0)==1&&Normalize(SummonRangeMultiplier,6)==5,
               "shared multiplier normalizes invalid and out-of-range choices");
+    }
+    {
+        const int index=content::KeyOfId("interactions.controller_menu_size");
+        Check(index>=0&&index<Count,"controller-menu size is a saved setting");
+        const auto key=Key(index);const auto* row=content::RowOf(key);
+        Check(row&&row->page==View::Menus&&row->kind==content::RowKind::Slider,"controller-menu size has a Menus slider");
+        Check(Defaults()[key]==100&&Normalize(key,0)==50&&Normalize(key,999)==200&&Normalize(key,NAN)==100,
+              "controller-menu size defaults unchanged and bounds invalid input");
+        Snapshot state;state.ready=true;state.values=Defaults();Model m;m.Open(state);
+        layout::Press(m,{Kind::Set,key,0,150},0);
+        const auto saved=m.Click({Kind::Apply});
+        Check(saved.values[key]==150&&saved.changed==(ChangeMask{1}<<key),"controller-menu size saves only its own setting");
+        Check(layout::CountRows(View::Menus,Defaults(),{})<=layout::MaxViewRows,"new slider fits the Menus page");
+        for(float percent:{50.f,100.f,150.f,200.f}) {
+            const float size=ControllerMenuWidth(percent);
+            Check(std::fabs(size-.45f*percent/100)<1e-6f,"menu physical width follows its saved percentage");
+            framevr::math::PanelHit hit;
+            Check(framevr::math::IntersectPanel({size*.4f,0,1},{0,0,-1},{0,0,0},{0,0,0,1},size,size,hit)&&
+                  std::fabs(hit.u-.9f)<1e-5f,"same visible button remains clickable at every menu size");
+            Check(!framevr::math::IntersectPanel({size*.6f,0,1},{0,0,-1},{0,0,0},{0,0,0,1},size,size,hit),"outside the scaled menu is not clickable");
+        }
+        Check(std::fabs(ControllerMenuWidth(NAN)-.45f)<1e-6f,"invalid menu size uses original width");
+
     }
     PrintReport();
     std::puts("VR settings draft, persistence requests, conflicts, row rules and input-gating tests passed");

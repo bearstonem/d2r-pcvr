@@ -158,12 +158,17 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "target_lock.h"
 #include "bow.h"
 #include "loot_beam_scan.h"
-#include "client_combat.h"
-#include "upper_body_wire.h"
-#include "upper_body_skin.h"
+#include "../steamvr/client_attack_timing.h"
+
 #include "monster_immunity.h"
 #include "monster_position_signatures.h"
 #include "../steamvr/monster_position.h"
+
+#include "party_health_reports.h"
+#include "client_combat.h"
+#include "upper_body_wire.h"
+#include "upper_body_skin.h"
+
 #include "wall_cells.h"
 #include "prop_scan.h"
 #include "spell_impacts.h"
@@ -204,7 +209,6 @@ const PluginContext* g_ctx = nullptr;
 uintptr_t g_base = 0;
 HMODULE g_self = nullptr;
 
-
 #pragma optimize("", off)
 bool SafeRead(void* d, const void* s, size_t n) noexcept { __try { memcpy(d, s, n); return true; } __except (EXCEPTION_EXECUTE_HANDLER) { return false; } }
 bool SafeWriteMem(void* d, const void* s, size_t n) noexcept { __try { memcpy(d, s, n); return true; } __except (EXCEPTION_EXECUTE_HANDLER) { return false; } }
@@ -215,7 +219,6 @@ bool SafeWriteMem(void* d, const void* s, size_t n) noexcept { __try { memcpy(d,
 bool Matches(uint64_t rva, const uint8_t* sig, size_t n) {
     return g_ctx != nullptr && d2rsig::Check(rva, sig, (uint32_t)n);
 }
-
 
 void Log(const char* text) {
 #ifdef D2RVR_NATIVE_OPENXR
@@ -1007,7 +1010,6 @@ int SkyPaletteFor(const std::string& biome, bool always) {
     return kDefaultPalette;
 }
 
-
 // The game's own interface size ("Safe Screen Percent" in Saved Games\Diablo II
 // Resurrected\Settings.json, 50..100), as a fraction: the toolbar's size and
 // place follow it (hud.cpp). 1 when it cannot be read.
@@ -1462,6 +1464,7 @@ void LoadSettings() {
         patches.shadowsOnce = IniB(L"game_patches", L"shadows_once", true);
         patches.cullOnce = IniB(L"game_patches", L"cull_once", true);
         patches.presentOnce = IniB(L"game_patches", L"present_once", false);   // off: to be measured (PERFORMANCE.md "One present a pair")
+        patches.effectListenerGuard = IniB(L"game_patches", L"effect_listener_guard", true);   // a crash guard, not a render change (game_patches.h)
         gamepatches::Configure(patches);
     }
     g_set.gameHeightFog.store(IniB(L"render", L"game_height_fog", false));
@@ -1995,7 +1998,6 @@ struct StickFrame { float camR[3], camF[3], scrR[3], scrU[3], mirX, mirY; float 
 SRWLOCK g_stickLock = SRWLOCK_INIT;
 StickFrame g_stickFrame{};
 
-
 // F12 goes round: off, first person, third person, off. Third person is the
 // same head-driven camera moved back ([third] distance), with the hero whole:
 // his head shown, his body and arms the game's own animation.
@@ -2111,6 +2113,10 @@ constexpr float kRiseFrom = 0.3f;              // world units of matrix rise tak
 std::atomic<float> g_unitRise{0.0f};           // the hero's model matrix above the look-at at the last pose
 std::atomic<ULONGLONG> g_unitRiseAt{0};
 std::atomic<float> g_viewRise{0.0f};           // the rise the last view rebuild lifted the camera by
+// Room follows you holds still while the game carries the hero (transport HeroCarried, room_steps.h Pause::Carried):
+// from a Leap's cast through its take-off crouch (~0.2 s; a Leap that never takes off lapses too), then for a moment
+// past each pose with his model in the air (2026-11-12: only rises in this session's log were Leaps).
+constexpr uint32_t kCarriedTakeOffMs = 600, kCarriedAirMs = 150;
 float FollowedRise(float rise) {
     if (ThirdPerson() || Overhead() || !g_set.followJump.load() || !(rise > kRiseFrom)) return 0.0f;   // the board stays put
     const float t = std::clamp((rise - kRiseFrom) / kRiseFrom, 0.0f, 1.0f);
@@ -2501,7 +2507,6 @@ void Tick(bool want) {
     } else fflush(f);
 }
 }  // namespace flog
-
 
 // Alternate-frame stereo: the eye flips once a game frame, and the FlatVR addon
 // (same process) is told which, so it files each presented frame into its half
@@ -4940,7 +4945,10 @@ bool HandOffUnit(const aimtargets::Cast& c) {
 bool NativeSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast) {
     g_note={};
     const auto c=aimtargets::Now();
-    if(c.skill==132||c.skill==143)leapglide::g_cast.store(GetTickCount64());   // Leap, Leap Attack: the view glides through the take-off
+    if(c.skill==132||c.skill==143) {   // Leap, Leap Attack: the view glides through the take-off; the room's follow holds
+        leapglide::g_cast.store(GetTickCount64());
+        framevr::HeroCarried(kCarriedTakeOffMs);
+    }
     // Teleport on its shown landing or a thrown trap first; then the aim rules
     // only with this kind of cast's Aim option On; Off, as before them - except
     // Guided Arrow and Charge, handed the aimed monster whatever the option (aimrules::AlwaysHomes).
@@ -6712,6 +6720,12 @@ void SequenceSkillPad(XINPUT_STATE* state,bool active) {
         state->Gamepad.bLeftTrigger>=128,state->dwPacketNumber,GetTickCount64());
     else g_skillPad.Reset();
     ReleaseSRWLockExclusive(&g_skillPadLock);
+#ifdef D2RVR_DEVELOPER
+    const auto now=GetTickCount64();
+    if(active&&framevr::clienttiming::diagnostic.Submit(state->Gamepad.wButtons,state->Gamepad.bLeftTrigger>=128,now))
+        LogF("Frame client timing: native pad after bank sequencing tick=%llu buttons=%04x alternate=%d",
+            (unsigned long long)now,state->Gamepad.wButtons,int(state->Gamepad.bLeftTrigger>=128));
+#endif
 }
 #endif
 template <int I> DWORD WINAPI XDetour(DWORD idx, XINPUT_STATE* s) {
@@ -8151,7 +8165,6 @@ void ApplyPools() {
     else if (!toldWaiting && GetTickCount64() - since > 120000) { toldWaiting = true; LogF("vrcam: %s (still waiting)", line); }
 }
 
-
 void GameCodeTick(bool iniChanged) {
     static int answered = -1;
     static uint32_t written = ~0u;
@@ -8972,6 +8985,9 @@ void HeroMatrixNow(uintptr_t at, float* m) {
     if (off < 2.0f) {
         const float rise = m[13] - look[1];
         g_unitRise.store(std::isfinite(rise) ? rise : 0.0f); g_unitRiseAt.store(GetTickCount64());
+#ifdef D2RVR_NATIVE_OPENXR
+        if (rise > kRiseFrom) framevr::HeroCarried(kCarriedAirMs);   // in the air: Leap's flight
+#endif
         m[12] = look[0]; m[13] = look[1] + FollowedRise(rise); m[14] = look[2];
     }
 }
@@ -11661,9 +11677,6 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
     }
     {   // camera and eye projection setup for depth fog and dynamic lighting
 
-
-
-
             const float scale = g_set.ceilScale.load();
             // The hero's place wrapped on a whole number of tiles: the world's own
             // coordinates in a float would round the pattern into steps far from the
@@ -12545,15 +12558,19 @@ DWORD WINAPI UpdateThread(void*) {
         const ULONGLONG nowMs = GetTickCount64();
 #ifdef D2RVR_NATIVE_OPENXR
 
-        // Target reporting stays active on desktop hosts too.
+        // Health has its own lifecycle, independent of VR pose publication.
         // Keep this before any desktop-mode early continue when branches combine.
         {uint32_t unit=0;combat::LocalPlayerId(unit);
-         targetlock::TickNetwork(gamestate::LocalPlayer(),unit);}
+         partyhealthreports::Tick(gamestate::LocalPlayer()!=0,unit,gamestate::LocalPlayer());
+         targetlock::TickNetwork(gamestate::LocalPlayer(),unit);
+         lootscan::TickNetwork(gamestate::LocalPlayer(),unit);}
+        melee::TickNetwork();
 
         if(pcvrdesktop::Enabled()){
             if(nowMs>=nextState){nextState=nowMs+40;DesktopTick();}
             continue; // no VR hotkeys, input injection, HUD movement or rendering setup
         }
+
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
         framevr::hookmetrics::Scope inputMeasured(framevr::hookmetrics::InputTick,15);
@@ -12956,6 +12973,8 @@ static bool OtherVrPluginBeside(HMODULE self) {
     return false;
 }
 
+D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept;
+
 #ifdef D2RVR_NATIVE_OPENXR
 namespace {
 void DesktopTick(){
@@ -12964,7 +12983,7 @@ void DesktopTick(){
     if(now>=nextRead){nextRead=now+200;gamestate::Tick();}
     if(now>=nextHooks){
         nextHooks=now+500;d2rsig::Resolve(g_ctx);
-        melee::InstallTargetReader();combat::InstallFeedbackObserver();
+                melee::InstallRemoteHost();combat::InstallFeedbackObserver();
         // Camera observer stays disabled: it supplies native player position only.
         if(!g_h.camera)g_h.camera=d2rcam::Install(g_ctx);
         if(!g_h.skeleton)g_h.skeleton=d2rsig::Hook(RVA_COMPUTE_SELF_WORLD_POSE,kSigComputeSelfWorldPose,sizeof kSigComputeSelfWorldPose,skel::Detour(),skel::OrigSlot());
@@ -12987,7 +13006,7 @@ bool StartDesktop(const PluginContext*ctx){
     d2rsig::Resolve(ctx);
     skel::SetGameBase(g_base);skel::TrackHero(true);skel::Set(skel::Input{});
     gamestate::Init(ctx);
-    melee::InstallTargetReader();combat::InstallFeedbackObserver();
+    melee::InstallRemoteHost();combat::InstallFeedbackObserver();
     upperbody::Init(ctx,&Log);upperbodyskin::Init(ctx);
     HANDLE h=CreateThread(nullptr,0,UpdateThread,nullptr,0,&g_updateThreadId);
     if(!h){Log("PCVR desktop: update thread failed");return false;}
@@ -12995,7 +13014,6 @@ bool StartDesktop(const PluginContext*ctx){
 }
 } // namespace
 #endif
-D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept;
 
 D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     if (ctx == nullptr) return true;
@@ -13023,7 +13041,14 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     g_iniPath[n] = 0;
     wcscat_s(g_iniPath, D2RPCVR_SETTINGS_FILE_W);
 #ifdef D2RVR_NATIVE_OPENXR
+
+    partyhealthreports::Init(ctx,&Log);
+    lootscan::InitNetwork(ctx);
+    melee::Init(ctx);
     if(pcvrdesktop::Enabled())return StartDesktop(ctx);
+#endif
+#ifdef D2RVR_NATIVE_OPENXR
+
     vrsettings::Poll(g_iniPath);
 #endif
     ReloadIfChanged();
@@ -13072,7 +13097,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     enemysight::Init(ctx);
     companionai::Init(ctx);
     if(!summonrange::Init(ctx)){D2RLoaderUnloadPlugin();g_standDown=true;return false;}
-    melee::Init(ctx);
+
     melee::InstallTargetReader();combat::InstallFeedbackObserver();
     bowvr::Init(ctx);
     clientcombat::Init(ctx);
@@ -13097,11 +13122,15 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
 D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
     if (g_standDown) return;   // nothing was started
 #ifdef D2RVR_NATIVE_OPENXR
+
     upperbody::Shutdown();
     skel::SetRemoteUpperBodies(nullptr,0);
     upperbodyskin::Shutdown();
 
+    partyhealthreports::Stop();
     targetlock::Stop();
+    melee::StopNetwork();
+    lootscan::Stop();
 
     enemysight::Shutdown();
     companionai::Shutdown();

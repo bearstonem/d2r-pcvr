@@ -23,6 +23,16 @@ int main(){
         Check(vrsettings::Read().values[HapticShortMelee]==enabled&&Int(path,L"haptics",L"short_melee")==enabled&&
             Int(path,L"custom",L"keep")==12345,"its on/off round trips and preserves unrelated keys");
     }
+    Check(before.values[ControllerMenuSize]==100,"missing menu size preserves original size");
+    {
+        const auto current=vrsettings::Read();auto values=current.values;values[ControllerMenuSize]=150;
+        const Request request{current.values,values,Changed(current.values,values),current.sequence+1};
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save controller-menu size");
+        Check(vrsettings::Read().values[ControllerMenuSize]==150&&Int(path,L"interactions",L"controller_menu_size")==150,
+              "controller-menu size round trips through INI");
+        Check(Int(path,L"custom",L"keep")==12345&&Changed(current.values,vrsettings::Read().values)==(ChangeMask{1}<<ControllerMenuSize),
+              "controller-menu size preserves other preferences");
+    }
     Check(before.values[MapTopDown]==0&&before.values[MapRotate]==0,"missing map preferences retain the existing view");
     Check(WritePrivateProfileStringW(L"interactions",L"map_top_down",L"1",name)&&
           WritePrivateProfileStringW(L"interactions",L"map_rotate",L"1",name),"write existing wrist-map choices");

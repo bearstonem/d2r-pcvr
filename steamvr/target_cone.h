@@ -19,7 +19,7 @@ constexpr int MaxTargets=64;
 // within TunnelDeg of the head's heading and keep it while within KeepDeg; the
 // hands pick only monsters within KeepDeg of it (Jeff's headset tests, 2026-10-22).
 constexpr float TunnelDeg=17.f,KeepDeg=30.f;
-struct Target {uint32_t id;float x,y;bool clear;};
+struct Target {uint32_t id;float x,y;bool clear;uint8_t bodyWidth=0,bodyHeight=0;};
 
 // Keeping the nearest max of a stream: where a candidate at distance d goes in
 // a list of n (distances), or -1. Below max it is appended (n); full, it

@@ -20,6 +20,16 @@ struct Sim {
     void Swing(int h=0){in.hand[h].p.x+=.08f;Step();}
 };
 int main(){
+    {Sim s;s.c.physicalContacts=true;s.Step(3);s.Swing();
+     Check(s.out.skill<0&&!s.out.attack&&s.out.meleeContact,"PCVR physical route retains detector input without a button pulse");}
+    {Sim s;s.Swing();s.c.physicalContacts=true;s.Step();
+     Check(s.out.skill<0&&!s.router.MeleePulse(),"switch to physical route cancels pending synthetic swing");}
+
+    // A fresh physical swing must reach native game input even when no local
+    // render-body contact was available. Native combat decides whether it hits.
+    {Sim s;s.Swing();
+     Check(s.out.skill==1,"regression: valid client swing must not depend on render-body contact");}
+
     {Sim s;s.c.basic={};s.Nock();s.in.trigger=0;s.Step();Check(!s.out.attack&&s.out.skill<0,"gesture must not synthesize raw A: A may be Interact or another spell");}
     {Sim s;s.Nock();s.in.trigger=0;s.Step();Check(s.out.skill==1&&!s.out.attack&&!s.out.bowRelease,"client bow uses bound native Attack");
      Check(s.hand==1&&s.out.rayDirection.z<-.99f,"bow release aim retained");Check(!s.router.MeleePulse(),"bow cannot arm melee feedback");s.Step(12);Check(!s.out.attack&&s.out.skill<0,"bow pulse expires");}

@@ -7,6 +7,7 @@ namespace framevr::nativeclient {
 struct Binding {int slot=-1,id=-1,owner=-1;};
 struct Context {
     bool native=false;
+    bool physicalContacts=false; // existing PCVR detector owns melee; never synthesize its attack
     bool actionOwned=false; // glyph drawing/casting owns native input outside skill slots
     uint64_t session=0;
     Binding basic{},bow{},throwing{},melee[2]{},shield{};
@@ -33,7 +34,8 @@ public:
         const bool arrow=out.bowRelease,thrown=out.javelinRelease,left=out.leftRelease;
         const bool contact=out.meleeContact,shield=out.shieldContact;
         out.bowRelease=out.javelinRelease=out.leftRelease=false;
-        out.meleeContact=out.shieldContact=false;
+        if(!c.physicalContacts)out.meleeContact=out.shieldContact=false;
+        if(c.physicalContacts&&meleePulse){until=0;meleePulse=false;}
         if(c.actionOwned){Reset();return -1;}
         const double dt=in.time-at;
         if(!c.session||!in.active||out.block||!out.rayValid||in.palette||in.cancel||
@@ -70,7 +72,7 @@ public:
         if(left&&c.throwing.slot>=0)start(c.throwing,1,out.leftOrigin,out.leftDirection);
         for(int h=0;h<2;++h){
             const bool bash=h==1&&shield&&c.shield.slot>=0;
-            const bool eligible=bash||(contact&&(h==0||c.offhand));
+            const bool eligible=!c.physicalContacts&&(bash||(contact&&(h==0||c.offhand)));
             const float threshold=std::max(.2f,bash?c.shieldSpeed:c.swingSpeed);
             if(!eligible){armed[h]=false;continue;}
             if(speed[h]<threshold*.4f)armed[h]=true;

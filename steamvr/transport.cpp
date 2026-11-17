@@ -42,14 +42,17 @@
 #include "window_focus.h"
 #include "panel_input_mode.h"
 #include "gameplay.h"
-#include "native_client_input.h"
-#include "../vr/client_combat.h"
 #include "walk_direction.h"
 #include "room_scale.h"
 #include "room_steps.h"
+
+#include "native_client_input.h"
 #include "client_hit_feedback.h"
+#include "client_attack_timing.h"
 #include "../vr/target_reports.h"
+#include "../vr/client_combat.h"
 #include "../vr/combat.h"
+
 #include "strike_skills.h"
 #include "bow_laser.h"
 #include "hand_controls.h"
@@ -58,6 +61,9 @@
 #include "sewer_prompt_art.h"
 #include "hand_text.h"
 #include "notice_card_art.h"
+#include "ally_health_art.h"
+#include "ally_health_position.h"
+#include "../vr/ally_health_state.h"
 #include "arcane_decay.h"
 #include "glyph_cast.h"
 #include "glyph_trail.h"
@@ -502,6 +508,14 @@ HeartStream fireStream;fireaudio::Synth fireSynth;
 std::atomic<bool> fireOn{false};std::atomic<float> fireAmbient{.5f},fireBurstGain{1.f};std::atomic<uint32_t> fireBursts{0};uint32_t fireBurstsSeen=0;
 XrSwapchain interactionChain=XR_NULL_HANDLE;
 XrSwapchain companionChain=XR_NULL_HANDLE;
+XrSwapchain allyChain=XR_NULL_HANDLE;
+bool allyAtlasPending=false,allyPaintValid=false;
+uint64_t allyPaintRequest=0,allyPaintAt=0;
+allyhealth::List allyPainted{},allyRequested{},allyCurrent{};
+struct AllyPainted {allyhealth::List source;std::vector<uint8_t> pixels;};
+LatestWorker<allyhealth::List,AllyPainted> allyPainter([](const allyhealth::List& list){
+    AllyPainted result;result.source=list;if(!allyhealth::Paint(list,result.pixels))result.pixels.clear();return result;
+});
 bool companionAtlasPending=false,companionPaintValid=false;
 interaction::PaintContext companionPaintContext{};
 XrSwapchain compassChain=XR_NULL_HANDLE;
@@ -819,7 +833,8 @@ XrSwapchain gameplayChain=XR_NULL_HANDLE;
 std::mutex sewerPromptMutex;
 sewerprompt::Target sewerPrompt;
 XrPosef palettePose{};
-constexpr float paletteWidth=.45f,paletteHeight=.45f;
+// Latched together by MotionPointer: the visible menu, hit box and map inset share the same size.
+float paletteWidth=.45f,paletteHeight=.45f;
 ULONGLONG motionAt=0;
 // Loot pick's pointing hand (LootHandRay): why the motion layer is off (lootaim::Gate bits), the skill wheel, the aim poses' age.
 uint32_t lootGate=0;bool lootWheel=false;ULONGLONG handAimAt=0;
@@ -883,8 +898,12 @@ math::Quat turnBase{0,0,0,1};bool turnBaseKnown=false;double roomSaidAt=0;
 roomsteps::Chase roomChase;
 roomsteps::Output roomOut;
 math::Vec roomHero{};bool roomHeroKnown=false;double roomHeroAt=0;
-struct RoomStepStats {double from=0,pauseSaid=0;float walked=0,followed=0;unsigned pushed=0,jumps=0;bool on=false,walking=false;
+// walked: the hero's moves while followed; followed: what the origin took of them (Follow); away: the rest, the game
+// carrying him elsewhere (Leap, Whirlwind, Charge), which the camera went along with.
+struct RoomStepStats {double from=0,pauseSaid=0;float walked=0,followed=0,away=0;unsigned pushed=0,jumps=0;bool on=false,walking=false;
                       roomsteps::Pause pause=roomsteps::Pause::Off;} roomStats;
+// HeroCarried (vrcam): until when, GetTickCount64 ms, the game carries the hero itself (Leap's take-off and flight).
+std::atomic<uint64_t> heroCarriedUntil{0};
 GripStickButton leftMenuButton;
 stickgestures::Gestures rightStickGestures;   // right stick up: run / walk (the Stick toggle); down: loot labels
 MenuTriggerGate menuTriggerGate;
@@ -2158,6 +2177,7 @@ leather::Art LoadLeather(std::vector<uint8_t>& rgba,std::wstring& from) {
 // (panelatlas): false if it could not be made. The compass or the gameplay art
 // alone may be missing; their chains then stay none.
 bool SetupStatic(DXGI_FORMAT eyeFormat) {
+    if(!allyPainter.Start())Say("Frame allies: background painter unavailable");
     if(!interactionPainter.Start())Say("Frame UI: background painter unavailable; interaction artwork cannot refresh");
     if(!bloodPainter.Start())Say("Frame blood visor: background painter unavailable; blood stays hidden");
     if(!arcanePainter.Start())Say("Frame arcane decay: background painter unavailable; arcane warning stays hidden");
@@ -2758,6 +2778,8 @@ void MotionPointer() {
     motionInput.hover=-1;
     if(!motionInput.active||handControls.Wheel()<0||!motionInput.tracked[handControls.Wheel()]||!handAimTracked[1-handControls.Wheel()])return;
     const int hand=handControls.Wheel(),pointer=1-hand;
+    const auto menuSettings=vrsettings::Read();
+    paletteWidth=paletteHeight=settings::ControllerMenuWidth(menuSettings.values[settings::ControllerMenuSize]);
     auto pose=motionInput.hand[hand];
     const auto normal=math::Normalized(motionInput.head.p-pose.p);
     auto right=math::Normalized(math::Cross({0,1,0},normal));
@@ -4219,7 +4241,7 @@ void Input() {
     }
     handAimAt=GetTickCount64();
     const auto bindingSnapshot=interactionstate::Read();
-    const bool nativeClient=clientcombat::NativeOnly(gamestate::LocalPlayer());
+
     {   // Floating map: before the right stick's gestures, the map zoom and the hands' skills read the grips and the stick
         floatMapWant=floatMapPointed=false;
         const bool gameplay=motionInput.active&&!interactionOutput.wheel&&!interactionOutput.settings&&
@@ -4240,6 +4262,9 @@ void Input() {
             +[](int h,float s){MotionPulse(UiRole(h,handrole::System::WristHud),haptics::Category::Interaction,s,25000000);},&Say};
         floatmap::StepFrame(f);
     }
+
+    const bool nativeClient=clientcombat::NativeOnly(gamestate::LocalPlayer());
+
     uint64_t bindingContext=bindingSnapshot.session^(uint64_t(bindingSnapshot.bindingBank+1)<<48)^(meleeEpoch<<16)^motionInput.equipment;
     uint64_t bindingLayout=0;
     for(const auto& skill:bindingSnapshot.skills)bindingLayout=(bindingLayout^uint32_t(skill.id+2)^uint32_t(skill.owner)^
@@ -4247,6 +4272,7 @@ void Input() {
     bindingContext^=uint64_t(nativeClient)<<63; // a route change requires fresh input
     skills::HandInput handInput;handInput.time=motionInput.time;handInput.context=bindingContext;
     handInput.layout=bindingLayout;
+
     // A crossbow in the hands: the right trigger fires it as Attack, whatever skill its slot holds
     // (gameplay::CrossbowAttack). Only this frame's routing changes, never the saved binding.
     const auto& triggerSkill=bindingSnapshot.skills[skills::TriggerSlot(0)];
@@ -4266,6 +4292,7 @@ void Input() {
         }
     }
     if(!nativeClient&&bowvr::SpellReady()&&interaction::Fresh(bindingSnapshot,gamestate::LocalPlayer(),GetTickCount64()))
+
         for(int i=0;i<skills::Count;++i)if(bindingSnapshot.skills[i].physical&&bindingSnapshot.skills[i].available)
             handInput.independentSlots|=1u<<i;
     // Glyph casting: each hand's Draw glyph button ([glyphs] draw_slot and second_draw_slot, one a hand,
@@ -5650,7 +5677,7 @@ void Input() {
         static clienthit::Gate clientHit;
         if(!nativeClient){router.Reset();clientHit.Clear();}
         else {
-        nativeclient::Context c;c.native=nativeClient;c.session=quickFresh?gamestate::LocalPlayer():0;
+        nativeclient::Context c;c.native=nativeClient;c.physicalContacts=true;c.session=quickFresh?gamestate::LocalPlayer():0;
         // Motions own both hands before a cast starts, including the release
         // frame. Cancel pending client melee pulses, not just active glyph casts.
         c.actionOwned=motionWatch||glyphStroke.Drawing()||glyphCast.Busy()||glyphPressRt;
@@ -5687,12 +5714,23 @@ void Input() {
         }
         const int hand=router.Step(motionInput,motionOutput,c);
         const auto hitNow=GetTickCount64();
+#ifdef D2RVR_DEVELOPER
+        if(clienttiming::diagnostic.Pulse(c.session,hand>=0&&router.MeleePulse(),hand,motionOutput.skill,hitNow)){
+            char line[160];std::snprintf(line,sizeof line,"Frame client timing: swing input tick=%llu hand=%d slot=%d",(unsigned long long)hitNow,hand,motionOutput.skill);Say(line);
+        }
+#endif
         if(!c.session||!motionInput.active||!motionInput.tracked[0]||!motionInput.tracked[1]||c.actionOwned||motionInput.palette||motionInput.cancel||motionInput.quickCast||(hand<0&&(motionOutput.skill>=0||motionOutput.attack)))
             clientHit.Clear();
         else if(hand>=0&&router.MeleePulse())clientHit.Arm(c.session,hand,hitNow);
         uint32_t hitUnit=0;::combat::LocalPlayerId(hitUnit);
         if(targetreports::TakeMeleeHit(c.session,hitUnit,hitNow)){
             const int hitHand=clientHit.Confirm(c.session,hitNow);
+#ifdef D2RVR_DEVELOPER
+            const auto timing=clienttiming::diagnostic.Confirm(c.session,hitNow);
+            if(timing.valid){char line[256];std::snprintf(line,sizeof line,
+                "Frame client timing: confirmed feedback tick=%llu hand=%d latest-input-age=%llu ms pad-known=%d input-to-pad=%llu ms pending-pulses=%u (not an attack-ID correlation)",
+                (unsigned long long)hitNow,hitHand,(unsigned long long)timing.toFeedback,int(timing.padKnown),(unsigned long long)timing.toPad,timing.pulses);Say(line);}
+#endif
             if(hitHand>=0){ImpactSurface(hitHand,0,0);MeleeImpact(hitHand);}
         }
         if(hand>=0)castHand=hand;
@@ -5884,6 +5922,7 @@ void Input() {
             elementalLightAt[h].store(lit?now:0);
         }
     }
+
     {   // Skill cooldowns: the icons between the orbs (skill_cooldowns.h), only skills the player casts in VR - a hand slot,
         // a glyph of either hand or a motion that is on (the skill its card casts now).
         const auto now=GetTickCount64();
@@ -5906,6 +5945,24 @@ void Input() {
                 [&](int skill){return std::find(reach.begin(),reach.begin()+n,skill)!=reach.begin()+n;});
             interactionOutput.cooldowns=cooldownTracker.Shown(now);
         } else {cooldownTracker.Reset();interactionOutput.cooldowns={};}
+    }
+    {
+        const auto now=GetTickCount64();
+        const int mode=int(vrsettings::Read().values[settings::AllyHealthBars]);
+        allyCurrent=mode?allyhealthstate::Current(interactionInput.session,now):allyhealth::List{};
+        if(allyCurrent.Current(interactionInput.session,now)&&allyCurrent.count) {
+            AllyPainted painted;
+            if(allyPaintRequest&&!allyAtlasPending&&atlasUploads.size()<2&&allyPainter.Take(allyPaintRequest,painted)) {
+                allyPaintRequest=0;
+                if(painted.source.SameImage(allyCurrent)&&!painted.pixels.empty()) {
+                    allyPaintValid=UploadAtlas(allyChain,atlasFormat,allyhealth::Width,allyhealth::Height,painted.pixels,true,&allyAtlasPending);
+                    if(allyPaintValid)allyPainted=painted.source;
+                }
+            }
+            if(now>=allyPaintAt&&!allyPaintRequest&&(!allyPaintValid||!allyPainted.SameImage(allyCurrent))) {
+                allyRequested=allyCurrent;allyPaintRequest=allyPainter.Submit(allyCurrent);allyPaintAt=now+100;
+            }
+        } else {allyPaintValid=false;allyPaintRequest=0;}
     }
     if(interactionInput.active||leatherHudVitals) {   // the HUD held with the menu repaints its vitals too
         const bool snapshotFresh=interaction::Fresh(interactionInput.snapshot,interactionInput.session,interactionInput.at);
@@ -6182,8 +6239,15 @@ void Input() {
         in.trigger=motionInput.trigger>.3f||motionInput.leftTrigger>.3f;
         in.bow=motionOutput.bowDrawing;
         in.cast=NativeSkillCasting();
+        in.carried=GetTickCount64()<heroCarriedUntil.load();
         roomOut=roomChase.Step(in);
         auto& st=roomStats;
+        if(roomOut.recentre) {   // the watchdog (room_steps.h FarMetres): the chase moved its anchor; the origin goes with it
+            origin=origin+roomOut.shift;
+            char line[240];std::snprintf(line,sizeof line,"Frame room steps: the view had come off the hero - you stood %.2f m from his spot for %.1f s (%s); the room is put back under you",
+                roomOut.apart,roomOut.heldFor,roomOut.blocked?"blocked: he could not come closer":roomsteps::PauseName(roomOut.pause));
+            Say(line);
+        }
         if(in.on!=st.on){st.on=in.on;Say(in.on?"Frame room steps: on - the hero's spot follows you in your room":"Frame room steps: off");}
         if(roomOut.push!=st.walking) {
             st.walking=roomOut.push;char line[200];
@@ -6200,12 +6264,12 @@ void Input() {
         if(roomOut.push)++st.pushed;
         if(st.from<=0)st.from=in.time;
         if(in.time-st.from>=1) {
-            if(st.pushed||st.followed>0||st.jumps) {
-                char line[240];std::snprintf(line,sizeof line,"Frame room steps: last %.1f s: pushed %u frames, the hero walked %.2f m, the origin followed %.2f m, jumps %u; now %.2f m from the hero, pause %s",
-                    in.time-st.from,st.pushed,st.walked,st.followed,st.jumps,roomOut.offset,roomsteps::PauseName(roomOut.pause));
+            if(st.pushed||st.followed>0||st.away>0||st.jumps) {
+                char line[300];std::snprintf(line,sizeof line,"Frame room steps: last %.1f s: pushed %u frames, the hero walked %.2f m, the origin followed %.2f m (%.2f m he moved away from you not followed), jumps %u; now %.2f m from the hero, pause %s",
+                    in.time-st.from,st.pushed,st.walked,st.followed,st.away,st.jumps,roomOut.offset,roomsteps::PauseName(roomOut.pause));
                 Say(line);
             }
-            st.from=in.time;st.pushed=st.jumps=0;st.walked=st.followed=0;
+            st.from=in.time;st.pushed=st.jumps=0;st.walked=st.followed=st.away=0;
         }
     }
     ++s.counter;
@@ -6386,7 +6450,7 @@ bool Begin(bool pair=false) {
     bowRenderTime=GetTickCount64();
     const bool loaded=inWorld&&inWorld();
     if(loaded&&!worldWasLoaded)worldCalibrationPending=true;
-    if(!loaded)worldCalibrationPending=worldRecenter=false;
+    if(!loaded){worldCalibrationPending=worldRecenter=false;heroCarriedUntil=0;}   // no Leap is carried out of a game
     worldWasLoaded=loaded;
     // A cinematic: the world is not drawn (cinema_screen.h) - its frame on the cinema screen, never the spatial menus.
     const bool cinema=gamestate::CinemaPlaying();
@@ -7553,6 +7617,10 @@ void EndPair() {
         XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
         companionPaintValid=Check(pReleaseSwapchainImage(companionChain,&release),"release companion atlas")&&companionPaintValid;companionAtlasPending=false;
     }
+    if(allyAtlasPending) {
+        XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+        allyPaintValid=Check(pReleaseSwapchainImage(allyChain,&release),"release ally atlas")&&allyPaintValid;allyAtlasPending=false;
+    }
     // Tabbed, trade and waypoint menus use the same black background in both eyes.
     // Submit just their shared opaque quad: no different cached world per eye.
     // [interactions] leather_world=0: the leather against the same black (a test fallback).
@@ -7598,7 +7666,10 @@ void EndPair() {
     XrCompositionLayerQuad wrist{XR_TYPE_COMPOSITION_LAYER_QUAD},wristMap{XR_TYPE_COMPOSITION_LAYER_QUAD};
     XrCompositionLayerQuad wristCompass{XR_TYPE_COMPOSITION_LAYER_QUAD},compassMarker{XR_TYPE_COMPOSITION_LAYER_QUAD};
     XrCompositionLayerQuad navigationInfo{XR_TYPE_COMPOSITION_LAYER_QUAD};
-    XrCompositionLayerQuad companionRow{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    XrCompositionLayerQuad companionRow{XR_TYPE_COMPOSITION_LAYER_QUAD},allyWrist{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    std::array<XrCompositionLayerQuad,allyhealth::Capacity> allyOverhead{};
+    const int allyMode=int(vrsettings::Read().values[settings::AllyHealthBars]);
+    const bool alliesReady=allyChain&&allyPaintValid&&allyCurrent.Current(interactionInput.session,GetTickCount64())&&allyCurrent.SameImage(allyPainted);
     if(interactionVisible) {
         if(!potionModels.Ready()&&interactionOutput.bottle>=0&&interactionOutput.bottleHand>=0) {
             auto pose=motionInput.hand[interactionOutput.bottleHand];pose.q=potions::HeldRotation(pose.q);
@@ -7637,7 +7708,10 @@ void EndPair() {
                 companionChain&&count+navigationLayers+uint32_t(locationReady)+1<=contentLimit&&
                 interaction::CompanionImageCurrent(companionPaintContext,interactionInput.snapshot);
             const int companionRows=companionsReady?wriststatus::Rows(interactionInput.snapshot.companions,interactionInput.snapshot.effects):0;
-            const float footer=interaction::CompanionSpace(companionRows);
+            const bool showAllyWrist=alliesReady&&(allyMode&1)&&allyCurrent.count;
+            const float allySpace=showAllyWrist?allyhealth::WristHeight(allyCurrent.count)+.006f:0;
+            const float companionSpace=interaction::CompanionSpace(companionRows);
+            const float footer=companionSpace+allySpace;
             if(mapEye.copied){
                 const auto mapPanel=interaction::NavigationMapPanel(interactionInput.Wrist(),interactionInput.head,palm,withVitals,footer);
                 wristMapShown=true;wristMapCenter=mapPanel.p;floatMapWrist=mapPanel;floatMapWristMs=GetTickCount64();
@@ -7655,9 +7729,21 @@ void EndPair() {
             if(locationReady)motionQuad(navigationInfo,interactionPose(interaction::NavigationInfoPanel(
                 interactionInput.Wrist(),interactionInput.head,palm,withVitals,footer)),interaction::NavigationInfoWidth,interaction::NavigationInfoHeight,
                 {{navigation::AtlasX,navigation::AtlasY},{navigation::Width,navigation::Height}},interactionChain);
-            if(companionRows)motionQuad(companionRow,interactionPose(interaction::NavigationCompanionsPanel(
-                interactionInput.Wrist(),interactionInput.head,palm,withVitals,companionRows)),interaction::WristMapSize,interaction::CompanionHeight(companionRows),
-                {{0,0},{companions::Width,wriststatus::UsedHeight(interactionInput.snapshot.companions,interactionInput.snapshot.effects)}},companionChain);
+
+            if(companionRows){
+                auto row=interaction::NavigationCompanionsPanel(interactionInput.Wrist(),interactionInput.head,palm,withVitals,companionRows);
+                if(withVitals)row.p=row.p+math::Rotate(row.q,{0,allySpace,0});
+                motionQuad(companionRow,interactionPose(row),interaction::WristMapSize,interaction::CompanionHeight(companionRows),
+                    {{0,0},{companions::Width,wriststatus::UsedHeight(interactionInput.snapshot.companions,interactionInput.snapshot.effects)}},companionChain);
+            }
+            if(alliesReady&&(allyMode&1)&&allyCurrent.count) {
+                auto at=interaction::NavigationMapPanel(interactionInput.Wrist(),interactionInput.head,palm,withVitals,footer);
+                constexpr float width=allyhealth::WristWidth;
+                const float height=allyhealth::WristHeight(allyCurrent.count);
+                at.p=at.p+math::Rotate(at.q,allyhealth::WristOffset(interaction::WristMapSize,companionSpace,allyCurrent.count));
+                motionQuad(allyWrist,interactionPose(at),width,height,{{0,0},{allyhealth::Width,int(allyCurrent.count)*allyhealth::RowHeight}},allyChain);
+            }
+
         }
     }
     // Floating map: the copy belongs here in the draw order (over the wrist panels, under everything below); this layer
@@ -7898,6 +7984,20 @@ void EndPair() {
     // Head-locked blood: VIEW space, with a bounded angular size so large render
     // frusta cannot push the rim out of sight. It goes directly above
     // the world and below every HUD quad, and only into a spare layer slot.
+    // Optional ally markers consume only spare layers, after primary controls.
+    const auto allyNow=GetTickCount64();
+    if(alliesReady&&(allyMode&2)&&layer&&!panelMode&&!blackMenu&&!settingsModel.open&&!bodyCalibration.Active()&&
+       stageWorld.valid&&allyNow>=stageWorld.at&&allyNow-stageWorld.at<=250) {
+        for(unsigned i=0;i<allyCurrent.count&&count<contentLimit;++i){
+            math::Vec at;
+            if(!allyhealth::Overhead(allyCurrent.entries[i],stageWorld.origin,stageWorld.hero,stageWorld.base,
+                stageWorld.upm,stageWorld.eyeHeight,V(head.position),at))continue;
+            allyOverhead[i]={XR_TYPE_COMPOSITION_LAYER_QUAD};
+            const float width=allyhealth::OverheadWidth(at,V(head.position));
+            motionQuad(allyOverhead[i],XrPose({at,Q(head.orientation)}),width,width*allyhealth::RowHeight/allyhealth::Width,
+                {{0,int(i)*allyhealth::RowHeight},{allyhealth::Width,allyhealth::RowHeight}},allyChain);
+        }
+    }
     XrCompositionLayerQuad bloodQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(bloodImageReady&&bloodShown&&bloodOutput.visible&&layer&&!panelMode&&!blackMenu&&!settingsModel.open&&
        !bodyCalibration.Active()&&headSpace&&count<contentLimit) {
@@ -8198,6 +8298,10 @@ bool CrossbowAiming() {
     const int slot=motionOutput.skill;
     if(slot<0||slot>=skills::Count||!interaction::Fresh(interactionInput.snapshot,gamestate::LocalPlayer(),GetTickCount64()))return false;
     const auto& skill=interactionInput.snapshot.skills[slot];return skill.known&&skill.available&&skill.id==0;
+}
+void HeroCarried(uint32_t milliseconds) {
+    const uint64_t until=GetTickCount64()+milliseconds;
+    for(uint64_t was=heroCarriedUntil.load();was<until&&!heroCarriedUntil.compare_exchange_weak(was,until);){}
 }
 bool NativeSkillCasting() {
     std::lock_guard lock(mutex);
@@ -8601,19 +8705,25 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
         }
     }
     if(eye<0) {   // Room follows you (room_steps.h): while the hero walks after your step, the origin follows him,
-                  // so the camera stays at the real head. A jump (teleport, waypoint, Leap) is not followed.
+                  // so the camera stays at the real head. A jump (teleport, waypoint, another area) is not followed,
+                  // and the game carrying him elsewhere (Leap's flight, Whirlwind) only as far as it pays your step off
+                  // (Follow): followed whole, the origin flew off with him and the camera stayed behind until a reload.
         const math::Vec now{hero[0],hero[1],hero[2]};const double at=Milliseconds()/1000.0;
-        if(roomHeroKnown&&roomOut.follow&&at>roomHeroAt&&at-roomHeroAt<.25) {
+        if(roomHeroKnown&&at>roomHeroAt&&at-roomHeroAt<.25) {
             const math::Vec moved{now.x-roomHero.x,0,now.z-roomHero.z};
             const float metres=std::sqrt(moved.x*moved.x+moved.z*moved.z)/upm;
             if(metres>roomsteps::MaxHeroStep) {
-                ++roomStats.jumps;
-                char line[200];std::snprintf(line,sizeof line,"Frame room steps: the hero moved %.2f m in %.0f ms (a teleport, waypoint or leap): the origin stays",metres,(at-roomHeroAt)*1000);
-                Say(line);
-            } else if(metres>0) {
-                const auto shift=roomsteps::Shift(moved,base,upm);
-                origin=origin+shift;roomChase.Shifted(shift);
-                roomStats.walked+=metres;roomStats.followed+=std::sqrt(shift.x*shift.x+shift.z*shift.z);
+                roomChase.Jumped();
+                if(roomOut.follow) {
+                    ++roomStats.jumps;
+                    char line[200];std::snprintf(line,sizeof line,"Frame room steps: the hero moved %.2f m in %.0f ms (a teleport, waypoint or another area): the origin stays",metres,(at-roomHeroAt)*1000);
+                    Say(line);
+                }
+            } else if(roomOut.follow&&metres>0) {
+                const auto shift=roomChase.Follow(roomsteps::Shift(moved,base,upm));
+                origin=origin+shift;roomChase.Shifted(shift,metres);
+                const float followed=std::sqrt(shift.x*shift.x+shift.z*shift.z);
+                roomStats.walked+=metres;roomStats.followed+=followed;roomStats.away+=std::max(0.f,metres-followed);
             }
         }
         roomHero=now;roomHeroKnown=true;roomHeroAt=at;
@@ -8708,7 +8818,9 @@ void Shutdown(bool preserveResolution) {
     if(!preserveResolution)hud::NativeSession(false);
     if(!preserveResolution)resolution::Restore();
     windowFocus.Cancel();
-    EndPair();ClearInput();interactionPainter.Stop();bloodPainter.Stop();arcanePainter.Stop();glyphPainter.Stop();strainPainter.Stop();noticePainter.Stop();settingsPainter.Stop();turnCompiler.Stop();bodyStepper.Stop();bodyNow={};interaction::icons::Shutdown();
+
+    EndPair();ClearInput();allyPainter.Stop();interactionPainter.Stop();bloodPainter.Stop();arcanePainter.Stop();glyphPainter.Stop();strainPainter.Stop();noticePainter.Stop();settingsPainter.Stop();turnCompiler.Stop();bodyStepper.Stop();bodyNow={};interaction::icons::Shutdown();
+
     // Completion is mandatory before destroying our commands/resources, even
     // when ordinary frame submission uses queue ordering without a CPU wait.
     if(fence&&!WaitGpu())failed=true;
@@ -8723,6 +8835,8 @@ void Shutdown(bool preserveResolution) {
     atlasUploads.clear();atlasStagingFree.clear();atlasChains.clear();interactionPaintKey=~0ull;interactionPrefetchSession=0;interactionPrefetchRevision=~0u;interactions.Reset();interactionstate::Cancel();
     interactionPaintRequest=0;interactionRequestedKey=~0ull;interactionPaintValid=false;interactionPaintContext={};interactionRequestedContext={};interactionPaintAt=0;
     if(interactionChain&&pDestroySwapchain)pDestroySwapchain(interactionChain);interactionChain=XR_NULL_HANDLE;
+    if(allyChain&&pDestroySwapchain)pDestroySwapchain(allyChain);allyChain=XR_NULL_HANDLE;
+    allyAtlasPending=allyPaintValid=false;allyPaintRequest=allyPaintAt=0;allyPainted={};allyRequested={};
     if(companionChain&&pDestroySwapchain)pDestroySwapchain(companionChain);companionChain=XR_NULL_HANDLE;
     companionAtlasPending=companionPaintValid=false;companionPaintContext={};
     compassChain=XR_NULL_HANDLE;wristHeading.Reset();compassFrame=compassAtlasReady=false;   // staticChain, below

@@ -7,9 +7,13 @@ class ClientTargetWiring(unittest.TestCase):
     def test_desktop_observes_server_without_enabling_vr_combat(self):
         text = (ROOT / 'vr/vrcam.cpp').read_text()
         desktop = text[text.index('bool StartDesktop('):text.index('} // namespace', text.index('bool StartDesktop('))]
-        self.assertIn('melee::InstallTargetReader();', desktop)
+        self.assertIn('melee::InstallRemoteHost();', desktop)
+        melee = (ROOT / 'vr/melee.cpp').read_text()
+        install = melee[melee.index('void InstallRemoteHost()'):melee.index('void TickNetwork()')]
+        self.assertIn('InstallTargetReader();', install)
+        self.assertNotIn('combat::Install();', desktop)
         self.assertNotIn('melee::Install();', desktop)
-        tick = text[text.index('// Target reporting stays active'):text.index('if(pcvrdesktop::Enabled()){')]
+        tick = text[text.index('// Health has its own lifecycle'):text.index('if(pcvrdesktop::Enabled()){')]
         self.assertIn('targetlock::TickNetwork(', tick)
         self.assertIn('targetlock::Stop();', text)
 

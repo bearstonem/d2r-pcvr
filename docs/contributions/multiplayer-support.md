@@ -1,44 +1,51 @@
-# D2RLoader multiplayer: remote VR animations and desktop/VR support
+# D2RLoader multiplayer on PCVR 0.3.35
 
-## Features
+## What is fixed
 
-- VR-to-VR and desktop/VR multiplayer through D2RLoader TCP/IP.
-- Remote VR head, arm, hand and weapon poses, including solved two-handed grips. Native lower-body animation is retained with a facing correction.
-- Desktop launcher mode and remote-player rendering without starting a headset or enabling VR combat controls for the desktop host.
-- Joining-client gestures routed through native skill inputs; the host remains responsible for damage and native validation.
-- Host-assisted enemy snapshots for client target selection and outlines. Enemy relation and line of sight use the requesting character, not the host hero.
-- Confirmed client melee feedback: the host observes actual native life loss and sends a bounded notification; the client uses its recent physical melee hand for vibration and the existing body-strike response.
-- Session/disconnect resets, expiry, bounded chunks, request matching and duplicate protection.
+**Joining VR clients now use physical swing detection with instant, consistent hit registration instead of simulated attack-button presses.** Contacts are forwarded to the host and resolved through the existing PCVR combat path for the joining character. The host remains responsible for damage.
 
-This is separate from the co-op setup tools in #180. **Controller-menu sizing, ally/mercenary health bars and experimental map zoom are excluded.**
+I installed and tested the complete **PCVR 0.3.35 multiplayer package with a flatscreen host and a VR client**. It works well: physical swings register immediately and consistently. The remaining issue observed in this test is intermittent controller vibration.
 
-## Changes since the original PR
+## Included features
 
-The multiplayer branch is now ported to official PCVR 0.3.33, with joining-client target/outline reporting and confirmed melee feedback from our latest candidate. Hit confirmation checks the actual native life write, not a potentially recomputed damage-record total.
+- D2RLoader TCP/IP multiplayer, with desktop/VR and VR/VR support.
+- Remote VR head, arm, hand and weapon poses, including solved two-handed grips, while retaining native lower-body animation.
+- Desktop launcher mode and remote-player rendering without requiring a headset on the desktop host.
+- Host-assisted client targeting and outlines, using the requesting player's enemy relation and line of sight.
+- Physical joining-client swing forwarding through the existing PCVR detector/resolver, with per-player combat state rather than a replacement combat system.
+- Wrist/controller menus and adjustable controller-menu sizing.
+- Ally/mercenary health bars, with wrist and overhead display options.
+- Client loot beams through host-provided, bounded loot reports.
+- Local contact feedback using host-supplied target dimensions; vibration consistency still needs work.
 
-**Both host and client need matching builds:** the target/feedback channel version changed.
+This update brings the previously separated menu-sizing and health features into the combined multiplayer PR. Physical swing forwarding is automatic; no additional multiplayer settings were introduced for this update. This remains separate from the co-op setup tools in #180.
 
-## Working and tested
+## Upstream and verification
 
-A friend and I have tested VR-to-VR and desktop/VR gameplay, including remote VR hand/arm movements. In our latest combined candidate, **targeting and outlines work for both host and client**. Client hit vibration now triggers correctly, but is noticeably delayed.
+- Integrated with **PCVR 0.3.35**, upstream commit `1217d771a3d3eebf7fd693c89c6f63c6af1c4e57` (`v0.3.35-windows-preview`).
+- Clean upstream build: **238/238 automated tests passed**.
+- Combined multiplayer build: **267/267 automated tests passed**.
+- The complete package passed the upstream setup's check-only verification before the gameplay test.
+- **Live-tested configuration for this update: flatscreen host + VR client, using the complete 0.3.35 installation.** Earlier versions were also tested in VR/VR, but that configuration has not yet been revalidated on this exact integration.
+- The working swing code was preserved during the upstream port. Source and tests in this update match the tested integration; contribution documentation has been refreshed separately.
 
-Latest gameplay setup: **D2R 3.4.95032 / D2RLoader 1.3.1beta / PCVR 0.3.33**, using the multiplayer launcher. Those gameplay observations came from the combined candidate; the newly separated multiplayer-only branch still needs another headset test.
+Build:
 
-The standalone multiplayer-only build passes **243/243 tests**. Its diff against official 0.3.33 was checked to exclude the separate health, menu-sizing and experimental-zoom features.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File steamvr/build_windows.ps1 -Test
+```
 
-Build: `powershell -NoProfile -ExecutionPolicy Bypass -File steamvr/build_windows.ps1 -Test`.
+**Both host and client need matching multiplayer builds.** Keep the matching 0.3.35 base files; a DLL-only update does not upgrade older external assets.
 
-## Known issues
+## Remaining limitations
 
-1. **Movement pauses on client swings**, including swings that hit nothing. Walking briefly stops for the native attack; we do not see this when hosting.
-2. **Client hit vibration is delayed.** Confirmation works, but native attack timing and the polling/response delay need investigation.
-3. **Apparent automatic movement toward the next target.** The joining character seems to approach another enemy automatically; the cause is not yet established.
-4. **Simultaneous two-hand attacks/casts differ from the host**, with a delay before some subsequent actions. Native input is not full host physical-combat parity.
-5. **Very-close player overlap remains unresolved.** Desktop/VR testing showed what looked like brief control/pose crossover when players stood very close together. Whether this is visual identity association or actual control is not established; it was not seen in VR/VR testing.
-6. **Native hit sounds and visual effects are not confirmed fixed.** The new code drives vibration and body-strike response, not a native sound repair. It uses the generic flesh pattern and can coalesce rapid hits.
-
-This remains a draft based on official 0.3.33. Remaining conflicts with newer main need integration and testing; this is not a claim of current-main compatibility.
+- **Haptics are intermittent:** attacks still register consistently, but some contacts do not produce vibration. This is deferred and is not presented as fixed.
+- VR-host testing and exhaustive class/form, dual-hand, shield and motion-skill coverage remain to be completed on this exact build.
+- Earlier reports involving close-player overlap, movement/target approach, two-hand timing, and native hit sound/VFX have not been individually revalidated in this latest test; this update does not claim separate fixes for them.
+- Allow the initial connection handshake to complete before testing swings. Rapid reconnect state remains a validation gap; restart both games between test sessions.
 
 ## Implementation boundaries
 
-Target/feedback reports use cooperative claimed character IDs checked against live server units. SDK peer handles remain opaque, never native pointers; the claimed character association is not independently authenticated. These reports are read-only, not authorization for damage or other native mutations. Server reads stay on the authoritative game thread and transport sends copied values. Desktop damage/life-write hooks are pass-through observers; full VR combat rules are separately gated.
+Authoritative combat resolution and server reads run on the host game thread; network messages carry copied values. SDK peer handles remain opaque and are never cast to native pointers. Peer-to-character association still uses cooperative claimed character IDs checked against live server state, not independently authenticated character ownership; this is not a hardened protocol for untrusted clients.
+
+Target, health and loot reports remain separate from combat requests. Desktop native behavior is preserved outside the scoped remote combat operation. Local contact prediction drives feedback only, not damage authorization. Existing upstream licensing and maintainer contributions are retained.

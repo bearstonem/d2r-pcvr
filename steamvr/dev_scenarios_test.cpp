@@ -324,6 +324,34 @@ int main(){
         const auto beforeStale=commands.size();++local;Run(travelTask);--local;
         assert(commands.size()==beforeStale&&devscenarios::Status().result==Result::Refused);
     }
+    // The Frozen Tundra crash repro (2026-11-12): both levels on ACT IV-V, and a step that goes to the ice
+    // cave and then the Tundra by turns, a press a step; a refused or stale press is no step.
+    assert(PageFor(GlacialTrailChoice)==4&&PageFor(FrozenTundraChoice)==4&&PageFor(TundraReproChoice)==4);
+    assert(SlotFor(GlacialTrailChoice)==8&&SlotFor(FrozenTundraChoice)==9&&SlotFor(TundraReproChoice)==10);
+    assert(Choices[GlacialTrailChoice].command==std::string_view("goto 115")&&Choices[FrozenTundraChoice].command==std::string_view("goto 117"));
+    assert(!Choices[TundraReproChoice].command&&!IsKit(TundraReproChoice)&&ValidChoice(TundraReproChoice));
+    for(unsigned press=0;press<3*TundraReproSteps;++press) {
+        const auto step=TundraReproStep(press);
+        assert(step.step==int(press%TundraReproSteps)+1&&step.step<=TundraReproSteps);
+        assert(std::string_view(step.command)==(step.step%2?"goto 115":"goto 117"));
+        assert(std::string_view(step.place)==(step.step%2?"Glacial Trail":"Frozen Tundra"));
+    }
+    assert(TundraReproSteps%2==0);   // round again at the ice cave
+    {
+        const auto before=commands.size();
+        for(int i=0;i<3;++i) {
+            devscenarios::Request(Make(TundraReproChoice));assert(!tasks.back().game);Run(tasks.size()-1);
+            assert(devscenarios::Status().result==Result::Dispatched);
+        }
+        assert(commands.size()==before+3&&commands[before]=="goto 115"&&commands[before+1]=="goto 117"&&commands[before+2]=="goto 115");
+        failCommand=true;devscenarios::Request(Make(TundraReproChoice));Run(tasks.size()-1);failCommand=false;
+        assert(devscenarios::Status().result==Result::Refused&&commands.size()==before+4&&commands.back()=="goto 117");
+        devscenarios::Request(Make(TundraReproChoice));Run(tasks.size()-1);
+        assert(devscenarios::Status().result==Result::Dispatched&&commands.size()==before+5&&commands.back()=="goto 117");
+        devscenarios::Request(Make(TundraReproChoice));const auto stale=tasks.size()-1;++local;Run(stale);--local;
+        assert(devscenarios::Status().result==Result::Refused&&commands.size()==before+5);
+        devscenarios::Request(Make(TundraReproChoice));Run(tasks.size()-1);assert(commands.back()=="goto 115");
+    }
     // Debug draws are a session toggle, with no console/item operations. A
     // cancelled or stale queued action cannot unexpectedly enable the overlay.
     const auto debugCommands=commands.size();const auto debugItems=itemCalls;
@@ -395,5 +423,5 @@ int main(){
     devscenarios::execute=Execute;
     inlineQueue=true;devscenarios::Request(Make(3,100));
     assert(devscenarios::Status().sequence==100&&devscenarios::Status().result==Result::Dispatched);
-    std::puts("Development backend: isolation, queue routing, cancellation, stale sessions, kit transactions and dispatch results passed");
+    std::puts("Development backend: isolation, queue routing, cancellation, stale sessions, kit transactions, dispatch results and the Tundra repro steps passed");
 }

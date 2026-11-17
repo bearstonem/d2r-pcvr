@@ -17,6 +17,10 @@
 #include "spells.h"
 #include "interactionstate.h"
 #include "melee.h"
+#include "melee_dispatch.h"
+#include "client_combat.h"
+#include "target_reports.h"
+#include "../steamvr/client_swing_feedback.h"
 #include "../steamvr/server_target_scan.h"
 #include <D2RLPlugin/reimplementation_exports.h>
 #include "melee_weapon.h"
@@ -67,6 +71,15 @@ using RangeFn=int(*)(uintptr_t,uintptr_t,int,void*);
 using FlagsFn=uint16_t(*)(uintptr_t,uintptr_t,uintptr_t,int,bool,int);
 TargetFn originalTarget=nullptr;LookupFn originalLookup=nullptr;RangeFn originalRange=nullptr;FlagsFn originalFlags=nullptr;
 const D2RL::PluginContext* context=nullptr;const D2RL::ThreadService* threads=nullptr;
+struct RemoteInput {
+    framevr::melee::dispatch::Contact value{};
+    uintptr_t game=0,player=0;
+    uint64_t due=0,hostSession=0,receivedAt=0;
+};
+thread_local RemoteInput* remoteInput=nullptr;
+uint64_t CombatSession(){return remoteInput?remoteInput->value.session:gamestate::LocalPlayer();}
+int CombatShape(uint64_t session,uint64_t now){return remoteInput?remoteInput->value.shape:interactionstate::ShapeForm(session,now);}
+std::atomic<bool> remoteInstaller{false};
 std::atomic<bool> ready{false};bool targetIn=false,lookupIn=false,rangeIn=false,flagsIn=false;
 struct Server {uintptr_t game=0;uint64_t session=0;uint32_t player=0;};
 std::mutex serverMutex;Server server;
@@ -91,22 +104,22 @@ std::atomic<uint64_t> cycleSession{0};std::atomic<uint32_t> cycleMs{0},offCycleM
 std::atomic<uint64_t> dualSpeed{0},dualSpeedSession{0};
 std::atomic<unsigned> dualCycleRead{0},dualCycleUnknown{0},strikePrimary{0},strikePrimaryMissing{0};
 std::atomic<unsigned> tooSoon{0},extraTargets{0},missed{0},buttonAttacks{0};
-framevr::attackspeed::Cadence cadence; // Classic shares one native attack cycle across hands/buttons.
+PlayerCombat localCombat; // Existing local execution; remote dispatch must own another instance.
 std::atomic<bool> swingRecovery{false};std::atomic<float> recoveryCurve{2},recoveryGrace{1};
 std::atomic<float> cleaveStep{0},cleaveFloor{.25f};
 // Unleashed trigger/button melee (ButtonHit): the latest trigger hit, on the game
 // thread that owns the swing clocks (ObserveServer records it); swings are measured from it too.
-struct TriggerLanded {uint64_t session=0,at=0;} triggerLanded;
+// Trigger stamps live in PlayerCombat alongside the swing clocks.
 // The latest full-cycle trigger hit or melee skill hit (combat_rules.h FixedCycle): swings
 // count their next breakpoint from it too; in-between trigger hits never stamp it.
-TriggerLanded triggerFull;
+// Full-cycle trigger history is player-owned too.
 std::atomic<DWORD> gameThread{0};
 std::atomic<unsigned> triggerPenalised{0},triggerOtherThread{0};
 thread_local int smiteDepth=0;   // inside the native Smite (the Smite hook)
 // Unleashed on-hit gate, per resolved contact (developer builds report it).
 enum OnHitReason {OnHitAllowed,OnHitUnknownCycle,OnHitRiposte,OnHitNotFull,OnHitCleave,OnHitReasons};
 std::array<std::atomic<unsigned>,OnHitReasons> onHitWhy{};
-std::array<HandCombat,2> hands;
+// Per-hand history lives in PlayerCombat.
 std::mutex queueMutex;std::array<Engine,3> engines;HitSet shieldHits;
 using Request=breakables::Strike;
 std::array<Request,24> requests;size_t count=0;
@@ -217,6 +230,7 @@ void ProbeFlinch(uintptr_t unit,int mode,uintptr_t caller) {
 }
 #endif
 void ObserveServer(uintptr_t game,uintptr_t unit) {
+    if(remoteInput)return; // A peer attack must not replace the host identity cache.
     uint32_t id=0,header[3]{};uintptr_t back=0;
     if(!game||!combat::LocalPlayerId(id)||!Read(unit,header)||header[0]!=0||header[2]!=id||!Read(unit+0xd8,back)||back!=game)return;
     const auto session=gamestate::LocalPlayer();
@@ -229,9 +243,10 @@ uintptr_t Lookup(uintptr_t game,int type,uint32_t id) {
     return unit;
 }
 uintptr_t Target(uintptr_t game,uintptr_t unit) {
+    if(remoteInstaller.load()&&!remoteInput)return originalTarget(game,unit);
     const auto caller=reinterpret_cast<uintptr_t>(_ReturnAddress());
     if(contact.game==game&&contact.attacker==unit&&
-       (contact.smite||contact.skill||caller==d2rsig::Addr(0x42ffaa)||caller==d2rsig::Addr(0x43010a)))return contact.defender;
+       (remoteInput||contact.smite||contact.skill||caller==d2rsig::Addr(0x42ffaa)||caller==d2rsig::Addr(0x43010a)))return contact.defender;
     uintptr_t tactical=0;if(companionai::TryOverrideCombatTarget(game,unit,tactical))return tactical;
     const auto result=companionai::FilterNativeCombatTarget(game,unit,originalTarget(game,unit));
     // Observe server state and return filtered combat target
@@ -264,6 +279,7 @@ bool Position(uintptr_t unit,Vec& out) {
 enum StaleReason {StaleInactive,StaleEpoch,StaleEquipment,StaleSkill,StaleAge,StaleMenu,StaleHands,StaleReasons};
 std::array<std::atomic<unsigned>,StaleReasons> staleWhy{};std::atomic<unsigned> staleOldestMs{0};
 bool Allowed(const Request& r) {
+    if(remoteInput)return r.session==remoteInput->value.session&&r.sample.active&&GetTickCount64()-r.at<=250;
     std::lock_guard lock(queueMutex);
     const auto& now=current[Lane(r.sample)];
     const auto age=GetTickCount64()-r.at;
@@ -281,6 +297,8 @@ bool Allowed(const Request& r) {
 }
 
 int Smite(uintptr_t game,uintptr_t player,int skill,int level) {
+    if(remoteInput&&contact.smite&&contact.game==game&&contact.attacker==player)
+        return originalSmite(game,player,skill,level);
     uint32_t target=0,id=0,header[3]{};uintptr_t back=0;
     if(skill!=framevr::weaponskills::Smite||!combat::LocalPlayerId(id)||!Read(player,header)||
        header[0]!=0||header[2]!=id||!Read(player+0xd8,back)||back!=game)return originalSmite(game,player,skill,level);
@@ -745,16 +763,17 @@ bool DualSecondHit(uintptr_t game,uintptr_t player,int skill,int owner,uintptr_t
     return true;
 }
 StrikeOutcome CastStrike(uintptr_t game,uintptr_t player,uint64_t session,int skill,int owner,int* hits=nullptr,int* pace=nullptr,uintptr_t target=0) {
-    if(!strikeReady.load()||!StrikeSkillVerified(skill))return StrikeOutcome::Basic;
+    const bool remoteSmite=remoteInput&&skill==framevr::weaponskills::Smite&&smiteReady.load();
+    if(!strikeReady.load()||(!remoteSmite&&!StrikeSkillVerified(skill)))return StrikeOutcome::Basic;
     using namespace spellvr::native;
     const auto node=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(nativeui::abi::SkillRva))(player,skill,owner);
     uintptr_t row=0;int16_t id=-1,start=-1,action=-1,sound=0;
     if(!node||!Read(node,row)||!Read(row,id)||id!=skill||!Read(row+0x4c,start)||!Read(row+0x4e,action)||
-       !framevr::strikeskills::Matches(skill,start,action)){++strikeRefused[size_t(Refusal::Other)];return StrikeOutcome::Basic;}
+       (!remoteSmite&&!framevr::strikeskills::Matches(skill,start,action))){++strikeRefused[size_t(Refusal::Other)];return StrikeOutcome::Basic;}
     const auto refusal=framevr::strikeskills::FromUseState(reinterpret_cast<int(*)(uintptr_t,uintptr_t)>(d2rsig::Addr(UseStateRva))(player,node));
     if(refusal!=Refusal::None) {
         ++strikeRefused[size_t(refusal)];
-        if(uint32_t id=0;framevr::strikeskills::Voice(refusal)&&Read(player+8,id))spellvr::WarnMana(session,id);
+        if(uint32_t id=0;!remoteInput&&framevr::strikeskills::Voice(refusal)&&Read(player+8,id))spellvr::WarnMana(session,id);
         return StrikeOutcome::Basic;
     }
     const int level=reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(SkillLevelRva))(player,node,1,0);
@@ -779,7 +798,7 @@ StrikeOutcome CastStrike(uintptr_t game,uintptr_t player,uint64_t session,int sk
     if(!started||(framevr::strikeskills::MultiHit(skill)&&hitCount<=0)||(framevr::strikeskills::DualStrike(skill)&&!target)){++strikeStartRefused;return StrikeOutcome::StartRefused;}
     ++strikeCast;
     // No client cast event runs: play the skill's own cast sound (stsound) at the hero, as hand spells do.
-    if(Read(row+0x152,sound)&&sound>0)QueueHeroSound(sound);
+    if(!remoteInput&&Read(row+0x152,sound)&&sound>0)QueueHeroSound(sound);
     return StrikeOutcome::Cast;
 }
 // A later hit of the cast (strike_skills.h Sequence) on `target`: game thread,
@@ -830,10 +849,10 @@ uint64_t tracedStroke[2][2]{};   // last stroke logged per refusal kind (game th
 void TraceRefusal(int kind,const Request& r,uint32_t target) {
     if(!trace.load()||tracedStroke[r.sample.handIndex][kind]==r.sweep.stroke)return;
     tracedStroke[r.sample.handIndex][kind]=r.sweep.stroke;
-    const auto since=cadence.Since(r.session,r.at);
+    const auto since=localCombat.cadence.Since(r.session,r.at);
     char line[240];snprintf(line,sizeof line,"Frame melee trace: hand=%s stroke=%llu target=%u REFUSED (%s) since_last_landed=%lld ms remaining=%llu ms cycle=%u ms",
         r.sample.handIndex?"left":"right",(unsigned long long)r.sweep.stroke,target,kind?"one creature per stroke":"too soon",since==UINT64_MAX?-1LL:(long long)since,
-        (unsigned long long)cadence.Remaining(r.session,r.at),cycleMs.load());
+        (unsigned long long)localCombat.cadence.Remaining(r.session,r.at),(remoteInput?remoteInput->value.cycle[0]:cycleMs.load()));
     framevr::logging::Write(line);
 }
 // sinceFull/full: the fixed cycle (combat_rules.h FixedCycle): ms since the latest full-cycle
@@ -868,18 +887,20 @@ framevr::bowbash::Board bashBoard;HitSet bashJudged;
 // 2026-11-03: 320 ms casts and 360 ms basic beats right after one). For DoubleSwingStatMs after a
 // cast of ours each arm keeps its attack rate from before it, so that bonus never times a swing.
 constexpr uint64_t DoubleSwingStatMs=1200;
+struct CleanRate {uint64_t session=0;int attackRate=0;};
+CleanRate cleanRates[2];
 uint64_t doubleSwingStatUntil=0;   // game thread
 uint32_t ArmCycle(uintptr_t player,uintptr_t weapon,int body,uint64_t session,uint32_t* cast=nullptr,int castSkill=-1) {
-    const uint64_t packed=dualSpeed.load();
+    const uint64_t packed=(remoteInput?remoteInput->value.dualSpeed:dualSpeed.load());
     static const bool statOk=d2rsig::Check(nativeui::abi::StatRva,nativeui::abi::StatSig,sizeof nativeui::abi::StatSig);
-    if(!weapon||!packed||dualSpeedSession.load()!=session||!statOk||body<0||body>1)return 0;
+    if(!weapon||!packed||(remoteInput?remoteInput->value.session:dualSpeedSession.load())!=session||!statOk||body<0||body>1)return 0;
     const int classId=int(packed&0xff)-1;
     const int weaponClass[2]={int((packed>>8)&0xff),int((packed>>16)&0xff)};
     const int wsm[2]={int((packed>>24)&0xff)-128,int((packed>>32)&0xff)-128};
     const auto stat=reinterpret_cast<int(*)(uintptr_t,int,int)>(d2rsig::Addr(nativeui::abi::StatRva));
     int ias=0,attackRate=0;
     {meleeweapon::Scope swinging(player,weapon);ias=stat(player,93,0);attackRate=stat(player,68,0);}
-    static struct {uint64_t session=0;int attackRate=0;} clean[2];
+    auto& clean=cleanRates;
     if(GetTickCount64()<doubleSwingStatUntil&&clean[body].session==session)attackRate=clean[body].attackRate;
     else clean[body]={session,attackRate};
     if(attackRate<10||attackRate>400||weaponClass[body]>=int(framevr::attackspeed::Weapon::Count))return 0;
@@ -905,6 +926,33 @@ uint32_t ArmCycle(uintptr_t player,uintptr_t weapon,int body,uint64_t session,ui
 // right-arm (primary) weapon as natively (Cal's Baal measurement, 2026-11-03). 0: none armed.
 struct DualMemo {uint64_t session=0,stroke=0;int hand=-1,skill=-1;uint32_t cycle=0,cast=0;};
 DualMemo dualMemo;
+// All original PCVR state below is game-thread owned. Swap only during one
+// remote invocation, then restore the host; no native pointer crosses the wire.
+struct RemoteState {
+    uint64_t peer=0;
+    RemoteInput input{};
+    PlayerCombat combat{};
+    framevr::strikeskills::Sequence sequence{};
+    framevr::strikeskills::DualCast dualCast{};
+    framevr::hitreact::Board reactions{};
+    framevr::bowbash::Board bash{};
+    HitSet shield{},bashJudged{};
+    DualMemo dual{};
+    CleanRate clean[2];uint64_t doubleSwingUntil=0;
+};
+std::array<RemoteState,8> remoteStates;
+struct RemoteScope {
+    RemoteState& s;RemoteInput* previous;uintptr_t previousCombat;
+    explicit RemoteScope(RemoteState& value):s(value),previous(remoteInput),previousCombat(combat::RemotePlayer(value.input.player)) {
+        remoteInput=&s.input;Swap();
+    }
+    void Swap(){using std::swap;swap(localCombat,s.combat);swap(sequence,s.sequence);swap(dualCast,s.dualCast);
+        swap(reactBoard,s.reactions);swap(bashBoard,s.bash);swap(shieldHits,s.shield);swap(bashJudged,s.bashJudged);swap(dualMemo,s.dual);swap(cleanRates,s.clean);swap(doubleSwingStatUntil,s.doubleSwingUntil);}
+    ~RemoteScope(){Swap();remoteInput=previous;combat::RemotePlayer(previousCombat);}
+};
+void SetSequenceDue(uint64_t at){if(remoteInput)remoteInput->due=at;else sequenceDueAt=at;}
+bool ApplyRemoteContact(uint64_t peer,const framevr::melee::dispatch::Contact& value);
+void __cdecl RemoteSequenceTick(const D2RL::PluginContext*,void*) noexcept;
 uint32_t DualCycle(uintptr_t player,const framevr::dualwield::Equipment& weapons,int hand,uint64_t session,uint64_t stroke,int castSkill=-1,uint32_t* cast=nullptr) {
     if(dualMemo.hand==hand&&dualMemo.skill==castSkill&&dualMemo.session==session&&dualMemo.stroke==stroke){if(cast)*cast=dualMemo.cast;return dualMemo.cycle;}
     uint32_t arm[2]{},seq[2]{};   // by rendered hand
@@ -942,7 +990,8 @@ void FeelSurface(int hand,uint32_t target) {
     framevr::ImpactSurface(hand,int(framevr::haptics::MonsterSurface(flags)),flags);
 }
 void Feel(const Request& r,uint32_t target) {
-    if(hands[r.sample.handIndex].felt.Insert(r.session,r.sweep.stroke,target)){FeelSurface(r.sample.handIndex,target);framevr::MeleeImpact(r.sample.handIndex);}
+    if(remoteInput)return; // The joining headset owns contact feedback, not the host's controllers.
+    if(localCombat.hands[r.sample.handIndex].felt.Insert(r.session,r.sweep.stroke,target)){FeelSurface(r.sample.handIndex,target);framevr::MeleeImpact(r.sample.handIndex);}
 }
 // Bow bash (bow_bash.h, #443): a stroke of the bow, its string not drawn, touched this hostile monster
 // with nothing in between. Once per stroke and monster: a tap in the bow hand, then the stagger - the
@@ -975,22 +1024,7 @@ void BowBash(const Request& r,uintptr_t game,uintptr_t unit,uint32_t classId,uin
             framevr::bowbash::Reason(verdict),verdict==Verdict::Refused&&!parryReady.load()?" (native hit recovery not verified)":"",left);
     framevr::logging::Write(line);
 }
-void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
-    std::array<Request,24> batch;size_t n=0;
-    {std::lock_guard lock(queueMutex);
-     if(!callback.Claim(reinterpret_cast<uintptr_t>(token)))return;
-     n=count;std::copy_n(requests.begin(),n,batch.begin());count=0;}
-    if(!n||!ready.load())return;
-    ++applied;gameThread=GetCurrentThreadId();   // the swing clocks' thread (ButtonHit), also seen by ObserveServer
-    // Trigger/button melee shares the attack cycle: its latest native melee
-    // hit check starts the cycle, so alternating it with swings is no faster.
-    if(uint64_t s=0,at=0;attackSpeed.load()&&combat::TakeButtonMelee(s,at)&&s==batch[0].session) {
-        cadence.Landed(s,at,cycleSession.load()==s?cycleMs.load():0);++buttonAttacks;
-    }
-    Server local;{std::lock_guard lock(serverMutex);local=server;}
-    uint32_t id=0;
-    if(!combat::LocalPlayerId(id)||!local.game||local.session!=batch[0].session||local.player!=id) {++noServer;return;}
-    const auto player=originalLookup(local.game,0,id);
+void ResolveContacts(const Request* batch,size_t n,const Server& local,uintptr_t player,PlayerCombat& localCombat) {
     uint32_t playerMode=0;Vec playerPos{};
     if(!player||!Read(player+0xc,playerMode)||playerMode==0||playerMode==17||playerMode==5||playerMode==6||!Position(player,playerPos)){++playerMissing;return;}
     // A bounded server-side hash walk, only during energetic swings. Native
@@ -1036,13 +1070,19 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         if(r.sample.bowBash){BowBash(r,local.game,unit,header[1],header[2]);continue;}
                         if(r.sample.shield) {
                             if(!smiteReady.load()||shieldHits.Contains(r.session,r.sweep.stroke,UINT32_MAX))continue;
-                            if(framevr::RequestShieldSkill(r.sample,header[2],pos*.5f)) {
+                            bool shieldCast=false;
+                            if(remoteInput&&originalSmite) {
+                                const auto saved=contact;contact={local.game,player,unit,false,true};
+                                shieldCast=CastStrike(local.game,player,r.session,framevr::weaponskills::Smite,r.sample.skillOwner)==StrikeOutcome::Cast;
+                                contact=saved;
+                            } else shieldCast=framevr::RequestShieldSkill(r.sample,header[2],pos*.5f);
+                            if(shieldCast) {
                                 shieldHits.Insert(r.session,r.sweep.stroke,UINT32_MAX);++contacts;++shieldRequests;
                             }
                             break;
                         }
                         const int hand=r.sample.handIndex;
-                        auto& state=hands[hand];
+                        auto& state=localCombat.hands[hand];
                         auto& hits=state.hits;auto& landed=state.landed;
                         // A shapeshift form's two claws: each its own strokes, hits and cleave, one
                         // shared recovery (Cal, 2026-10-21) and the native form attack with the
@@ -1055,9 +1095,9 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         // must not earn two full-cycle hits per cycle. Each stroke's cycle is still its
                         // own weapon's (handCycle); hits, strokes and cleave stay per blade.
                         const bool sharedClock=claws||dual;
-                        auto& recoveryState=sharedClock?hands[0].recovery:state.recovery;
-                        auto& fullState=sharedClock?hands[0].full:state.full;   // the fixed cycle's last full-cycle stroke
-                        auto& recoveryClock=attackSpeed.load()?cadence:recoveryState;
+                        auto& recoveryState=sharedClock?localCombat.hands[0].recovery:state.recovery;
+                        auto& fullState=sharedClock?localCombat.hands[0].full:state.full;   // the fixed cycle's last full-cycle stroke
+                        auto& recoveryClock=attackSpeed.load()?localCombat.cadence:recoveryState;
                         const uintptr_t weapon=dual?meleeweapon::Select(player,hand,r.sample.weapons):0;
                         const int speedHand=dual?r.sample.weapons.BodyHand(hand):0;
                         if((dual&&(!weapon||speedHand<0))||(hand==1&&!dual&&!claws)){++dualRefused;continue;}
@@ -1065,13 +1105,13 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         if(dual&&(!Read(weapon+8,selectedId)||selectedId!=r.sample.weapons.displayed[hand])){++dualRefused;continue;}
                         Feel(r,header[2]);
                         if(hits.Contains(r.session,r.sweep.stroke,header[2]))continue;
-                        uint32_t handCycle=cycleSession.load()==r.session?(speedHand?offCycleMs.load():cycleMs.load()):0;
+                        uint32_t handCycle=(remoteInput?remoteInput->value.session:cycleSession.load())==r.session?(speedHand?(remoteInput?remoteInput->value.cycle[1]:offCycleMs.load()):(remoteInput?remoteInput->value.cycle[0]:cycleMs.load())):0;
                         // Dual wield: the shared beat is the two blades' native cycles on average (each at the
                         // averaged WSM with its own IAS), whichever blade lands it. An unreadable arm falls back
                         // to the UI thread's per-arm cycles, averaged the same way.
                         uint32_t castBeat=0;
                         if(dual) {
-                            if(cycleSession.load()==r.session)handCycle=framevr::attackspeed::DualBeatMs(cycleMs.load(),offCycleMs.load());
+                            if((remoteInput?remoteInput->value.session:cycleSession.load())==r.session)handCycle=framevr::attackspeed::DualBeatMs((remoteInput?remoteInput->value.cycle[0]:cycleMs.load()),(remoteInput?remoteInput->value.cycle[1]:offCycleMs.load()));
                             const int castSkill=framevr::strikeskills::DualStrike(r.sample.strikeSkill)?r.sample.strikeSkill:-1;
                             if(const uint32_t beat=DualCycle(player,r.sample.weapons,hand,r.session,r.sweep.stroke,castSkill,&castBeat))handCycle=beat;
                         }
@@ -1079,7 +1119,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         // swings, timed on the right-arm weapon), not one basic swing; unread, the basic beat stands.
                         if(dual&&framevr::strikeskills::DualStrike(r.sample.strikeSkill)&&castBeat)handCycle=castBeat;
                         if(dualCast.Forfeit(r.session,r.at))++dualForfeited;   // the last cast's beat ended without hit 2
-                        const int shape=claws?interactionstate::ShapeForm(r.session,GetTickCount64()):0;
+                        const int shape=claws?CombatShape(r.session,GetTickCount64()):0;
                         // Attack speed: a basic attack strikes one creature, and
                         // no sooner than its native attack cycle (IAS, WSM, class)
                         // after the last attack. A rolled miss spends the cycle
@@ -1089,7 +1129,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                             if(landed.Contains(r.session,r.sweep.stroke,0)){
                                 ++extraTargets;TraceRefusal(1,r,header[2]);if(dual||claws)continue;break;
                             }
-                            if(!cadence.Ready(r.session,r.at)){
+                            if(!localCombat.cadence.Ready(r.session,r.at)){
                                 ++tooSoon;TraceRefusal(0,r,header[2]);if(dual||claws)continue;break;
                             }
                             cycle=handCycle;
@@ -1098,9 +1138,9 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         // since: from the previous stroke of any kind; sinceFull: from the latest
                         // full-cycle one, which alone sets the next breakpoint (FixedCycle, 2026-10-30).
                         const auto since=attackSpeed.load()?recoveryClock.Since(r.session,r.at):
-                            combat::SwingSince(recoveryClock.Since(r.session,r.at),triggerLanded.session==r.session?triggerLanded.at:0,r.at);
+                            combat::SwingSince(recoveryClock.Since(r.session,r.at),localCombat.triggerLanded.session==r.session?localCombat.triggerLanded.at:0,r.at);
                         const auto sinceFull=attackSpeed.load()?since:
-                            combat::SwingSince(fullState.Since(r.session,r.at),triggerFull.session==r.session?triggerFull.at:0,r.at);
+                            combat::SwingSince(fullState.Since(r.session,r.at),localCombat.triggerFull.session==r.session?localCombat.triggerFull.at:0,r.at);
                         // Unleashed: the stroke's first landed contact decides whether it is a
                         // full-cycle stroke and how recovered an in-between one is; every creature
                         // that stroke reaches shares it. Kept with swing_recovery_damage off too:
@@ -1203,7 +1243,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                                     }
                                     if(strike==StrikeOutcome::Cast&&framevr::strikeskills::MultiHit(strikeSkill)) {
                                         sequence.Begin(r.session,strikeSkill,r.sample.skillOwner,shape,castHits,handCycle,GetTickCount64(),header[2]);
-                                        sequenceDueAt=sequence.DueAt();++sequenceCasts;
+                                        SetSequenceDue(sequence.DueAt());++sequenceCasts;
                                         if(strikeSkill==framevr::strikeskills::Zeal)ZealStruck(unit,header[2]);
                                     }
                                 } else ++strikeBasic;
@@ -1218,7 +1258,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         if(strike!=StrikeOutcome::Basic&&!contact.resolved){
                             contact.resolved=true;contact.accepted=strike==StrikeOutcome::Cast;
                         }
-                        if(contact.resolved)projectiles::CombatWalk(2);   // combat walk: a strike that fired
+                        if(contact.resolved&&!remoteInput)projectiles::CombatWalk(2);   // combat walk: a strike that fired
                         // A form's attack voice (growl, or Rabies/Hunger's bite) on each stroke that
                         // natively is one attack (strike_skills.h FormVoice); the animation that plays it is skipped.
                         // A cast's later hits (Sequence) are the same native attack: silent.
@@ -1254,7 +1294,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         if(contact.accepted)++accepted;else if(contact.resolved)++missed;else ++rejected;
                         if(dual&&contact.accepted)++dualLanded[hand];
                         if(claws&&contact.accepted)++clawLanded[hand];
-                        if(contact.resolved&&attackSpeed.load()){cadence.Landed(r.session,r.at,cycle);landed.Insert(r.session,r.sweep.stroke,0);}
+                        if(contact.resolved&&attackSpeed.load()){localCombat.cadence.Landed(r.session,r.at,cycle);landed.Insert(r.session,r.sweep.stroke,0);}
                         if(contact.resolved&&strokeStart){
                             recoveryState.Landed(r.session,r.at,cycle);
                             if(strokeFull)fullState.Landed(r.session,r.at,cycle);   // only a full-cycle stroke moves the breakpoint
@@ -1280,15 +1320,60 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
             unit=next;
         }
     }
-    breakables::Apply(local.game,player,{batch.data(),n},&Allowed);
+    breakables::Apply(local.game,player,{batch,n},&Allowed);
+}
+bool ApplyRemoteContact(uint64_t peer,const framevr::melee::dispatch::Contact& value) {
+    if(!ready.load()||!originalLookup)return false;
+    Server host;{std::lock_guard lock(serverMutex);host=server;}
+    if(!host.game||host.session!=gamestate::LocalPlayer())return false;
+    const uintptr_t player=originalLookup(host.game,0,value.hero);
+    uint32_t header[3]{};uintptr_t back=0;
+    if(!player||!Read(player,header)||header[0]!=0||header[2]!=value.hero||!Read(player+0xd8,back)||back!=host.game)return false;
+    RemoteState* state=nullptr;
+    for(auto& x:remoteStates) {
+        if(x.peer&&(!meleedispatch::Alive(x.peer,x.input.value.session)||x.input.hostSession!=host.session))x={};
+        if(x.peer==peer)state=&x;
+    }
+    if(!state)for(auto& x:remoteStates)if(!x.peer){state=&x;break;}
+    if(!state)return false;
+    if(state->input.value.session!=value.session)*state={};
+    state->peer=peer;state->input.value=value;state->input.game=host.game;state->input.player=player;
+    state->input.hostSession=host.session;state->input.receivedAt=GetTickCount64();
+    RemoteScope scope(*state);
+    Request request{value.sweep,value.sample,value.session,GetTickCount64()};
+    const auto before=contacts.load();
+    ResolveContacts(&request,1,Server{host.game,value.session,value.hero},player,localCombat);
+    static uint64_t nextLog=0;const auto now=GetTickCount64();
+    if(now>=nextLog){nextLog=now+1000;char text[180];snprintf(text,sizeof text,"Frame remote PCVR swing: hero=%u hand=%d skill=%d contacts=%u",value.hero,value.sample.handIndex,value.sample.strikeSkill,contacts.load()-before);framevr::logging::Write(text);}
+    return true;
+}
+void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
+    std::array<Request,24> batch;size_t n=0;
+    {std::lock_guard lock(queueMutex);
+     if(!callback.Claim(reinterpret_cast<uintptr_t>(token)))return;
+     n=count;std::copy_n(requests.begin(),n,batch.begin());count=0;}
+    if(!n||!ready.load())return;
+    ++applied;gameThread=GetCurrentThreadId();   // the swing clocks' thread (ButtonHit), also seen by ObserveServer
+    // Trigger/button melee shares the attack cycle: its latest native melee
+    // hit check starts the cycle, so alternating it with swings is no faster.
+    if(uint64_t s=0,at=0;attackSpeed.load()&&combat::TakeButtonMelee(s,at)&&s==batch[0].session) {
+        localCombat.cadence.Landed(s,at,(remoteInput?remoteInput->value.session:cycleSession.load())==s?(remoteInput?remoteInput->value.cycle[0]:cycleMs.load()):0);++buttonAttacks;
+    }
+    Server local;{std::lock_guard lock(serverMutex);local=server;}
+    uint32_t id=0;
+    if(!combat::LocalPlayerId(id)||!local.game||local.session!=batch[0].session||local.player!=id) {++noServer;return;}
+    const auto player=originalLookup(local.game,0,id);
+    ResolveContacts(batch.data(),n,local,player,localCombat);
 }
 }
 void Init(const D2RL::PluginContext* ctx) {
     context=ctx;
     if(ctx->QueryService(&threads)!=D2RL::ServiceQueryResult::Success)threads=nullptr;
+    meleedispatch::Init(ctx,&ApplyRemoteContact);
 }
 void QueueAttackParry(uint32_t monster);
 int SetMode(uintptr_t unit,int mode) {
+    if(remoteInstaller.load()&&!remoteInput)return originalSetMode(unit,mode);
     // The local hero's flinch (player modes GetHit 4, Block 9; Knockback 19 counted).
     if(mode==4||mode==9||mode==19) {
         uint32_t header[3]{},id=0;
@@ -1436,6 +1521,7 @@ bool QueueParry(uint32_t monster,int before) {
     return threads->runOnGameThread(context,&Parry,reinterpret_cast<void*>(token))==D2RL::Threads::Result::Success;
 }
 bool LocalServer(uintptr_t& game,uintptr_t& player) {
+    if(remoteInput){game=remoteInput->game;player=remoteInput->player;return game&&player;}
     Server local;{std::lock_guard lock(serverMutex);local=server;}
     uint32_t id=0;
     if(!ready.load()||!combat::LocalPlayerId(id)||!local.game||local.player!=id||
@@ -1630,15 +1716,17 @@ uint32_t SequenceTarget(uintptr_t game,uintptr_t self,uint32_t last,float& neare
 // SequenceTarget's creature; ends the cast when none is in reach, the game or
 // the form changed, or the hero is dead.
 void __cdecl SequenceHit(const D2RL::PluginContext*,void*) noexcept {
-    sequencePosted=false;
-    const auto now=GetTickCount64();const auto session=gamestate::LocalPlayer();
-    const auto finish=[&]{sequenceDueAt=sequence.DueAt();};
-    const int shape=interactionstate::ShapeForm(session,now);
+    if(!remoteInput)sequencePosted=false;
+    const auto now=GetTickCount64();const auto session=CombatSession();
+    const auto finish=[&]{SetSequenceDue(sequence.DueAt());};
+    const int shape=CombatShape(session,now);
     if(sequence.Lapse(session,shape)){++sequenceLapsed;finish();return;}   // another game or form
     if(!sequence.Due(session,now)){finish();return;}
     Server local;{std::lock_guard lock(serverMutex);local=server;}
     uint32_t id=0,mode=0;
-    const uintptr_t player=combat::LocalPlayerId(id)&&local.game&&local.session==session&&local.player==id?originalLookup(local.game,0,id):0;
+    if(remoteInput)local={remoteInput->game,session,remoteInput->value.hero};
+    const uintptr_t player=remoteInput?remoteInput->player:
+        (combat::LocalPlayerId(id)&&local.game&&local.session==session&&local.player==id?originalLookup(local.game,0,id):0);
     if(!player||!Read(player+0xc,mode)||mode==0||mode==17){sequence.End();++sequenceLapsed;finish();return;}   // gone or dead
     float nearest=-1;
     const uint32_t target=SequenceTarget(local.game,player,sequence.Last(),nearest);
@@ -1653,7 +1741,7 @@ void __cdecl SequenceHit(const D2RL::PluginContext*,void*) noexcept {
     const auto since=now-(sequence.DueAt()-sequence.Gap());
     if(!SequenceStrike(local.game,player,sequence.Skill(),sequence.Owner(),target)){sequence.End();++sequenceRefused;finish();return;}
     const int ordinal=sequence.Hit(now,target);++sequenceHits;
-    projectiles::CombatWalk(2);   // combat walk: Fury / Zeal's later hits
+    if(!remoteInput)projectiles::CombatWalk(2);   // movement belongs to the attacking headset
     if(trace.load()) {
         char line[200];snprintf(line,sizeof line,"Frame melee trace: sequence skill=%d hit %d/%d target=%u after %llu ms (pace %llu ms)%s",
             sequence.Skill(),ordinal,sequence.Total(),target,(unsigned long long)since,(unsigned long long)sequence.Gap(),
@@ -1746,6 +1834,22 @@ void InstallTargetReader() {
         reinterpret_cast<void*>(&Lookup),reinterpret_cast<void**>(&originalLookup));
     if(lookupIn){targetReaderReady=true;framevr::logging::Write("PCVR targets: read-only host lookup observer ready");}
 }
+// Read-only host context for visual reports, including desktop hosts where
+// full VR melee hooks are deliberately off. Never used to authorize damage.
+bool ReadOnlyPlayer(uint32_t playerId,uintptr_t& game,uintptr_t& player) {
+    game=player=0;
+    if(!playerId||!targetReaderReady.load()||!originalLookup||gameThread.load()!=GetCurrentThreadId())return false;
+    Server local;{std::lock_guard lock(serverMutex);local=server;}
+    uint32_t own=0,header[4]{};uintptr_t back=0;
+    if(!local.game||!local.session||local.session!=gamestate::LocalPlayer()||
+       !combat::LocalPlayerId(own)||own!=local.player)return false;
+    const auto self=originalLookup(local.game,0,own);
+    if(!self||!Read(self,header)||header[0]!=0||header[2]!=own||!Read(self+0xd8,back)||back!=local.game)return false;
+    const auto requested=originalLookup(local.game,0,playerId);
+    if(!requested||!Read(requested,header)||header[0]!=0||header[2]!=playerId||header[3]==0||header[3]==17||
+       !Read(requested+0xd8,back)||back!=local.game)return false;
+    game=local.game;player=requested;return true;
+}
 bool PlayerTargets(uint32_t playerId,targetlock::Snapshot& out) {
     out={};
     if(!targetReaderReady.load()||!originalLookup||!targetLevel||!playerId)return false;
@@ -1763,6 +1867,14 @@ bool PlayerTargets(uint32_t playerId,targetlock::Snapshot& out) {
         [](uintptr_t viewer,uintptr_t monster,int mask){return reinterpret_cast<int(*)(uintptr_t,uintptr_t,int)>(d2rsig::Addr(LineRva))(viewer,monster,mask);},
         [](uintptr_t unit){return targetLevel(reinterpret_cast<const void*>(unit));});
     if(out.count<0){out={};return false;}
+    // Feedback-only metadata: use the same native dimensions as BodyFor.
+    // This does not gate, submit or change any physical attack.
+    if(d2rsig::Check(StatsRva,StatsSig,sizeof StatsSig))for(int i=0;i<out.count;++i){
+        auto& target=out.targets[i];
+        framevr::servertarget::ReadBody(originalLookup(local.game,1,target.id),target,
+            [](uintptr_t a,void* b,size_t n){return framevr::ReadMemory(b,reinterpret_cast<const void*>(a),n);},
+            [](uint8_t bank,int cls){return reinterpret_cast<uintptr_t(*)(uint8_t,int)>(d2rsig::Addr(StatsRva))(bank,cls);});
+    }
     out.at=GetTickCount64();return true;
 }
 
@@ -1855,7 +1967,7 @@ ButtonStroke ButtonHit(uint32_t monster) {
     ButtonStroke out;out.smite=smiteDepth>0;
     // The swing clocks belong to the game thread (Apply); anywhere else nothing is read or stamped.
     if(GetCurrentThreadId()!=gameThread.load(std::memory_order_relaxed)){++triggerOtherThread;return out;}
-    const auto session=gamestate::LocalPlayer(),now=GetTickCount64();
+    const auto session=CombatSession(),now=GetTickCount64();
     // Melee skills deliver natively (Cal, 2026-10-26: "Melee SKILLS that are cast whether
     // from a button or swinging the weapon ... should behave, in terms of damage delivery
     // and timing, the way they would in normal unmodified D2R"; rev5): a skill's hit outside
@@ -1866,21 +1978,21 @@ ButtonStroke ButtonHit(uint32_t monster) {
     if(sequenceScope||UsingSkill()) {
         ++(sequenceScope?sequenceWhole:skillWhole);
         ZealButtonHit(monster);
-        triggerLanded={session,now};triggerFull={session,now};++buttonAttacks;   // a skill hit is a full attack
+        localCombat.triggerLanded={session,now};localCombat.triggerFull={session,now};++buttonAttacks;   // a skill hit is a full attack
         if(trace.load()&&!sequenceScope) {
             char line[160];snprintf(line,sizeof line,"Frame melee trace: trigger target=%u%s skill hit: whole (recovery 1, on-hit effects)",monster,out.smite?" smite":"");
             framevr::logging::Write(line);
         }
         return out;
     }
-    const uint32_t cycle=cycleSession.load()==session?cycleMs.load():0;
-    const uint64_t sinceSwing=std::min(hands[0].recovery.Since(session,now),hands[1].recovery.Since(session,now));
-    const uint64_t sinceFullSwing=std::min(hands[0].full.Since(session,now),hands[1].full.Since(session,now));
+    const uint32_t cycle=(remoteInput?remoteInput->value.session:cycleSession.load())==session?(remoteInput?remoteInput->value.cycle[0]:cycleMs.load()):0;
+    const uint64_t sinceSwing=std::min(localCombat.hands[0].recovery.Since(session,now),localCombat.hands[1].recovery.Since(session,now));
+    const uint64_t sinceFullSwing=std::min(localCombat.hands[0].full.Since(session,now),localCombat.hands[1].full.Since(session,now));
     const auto v=combat::TriggerRecovery(sinceFullSwing,sinceSwing,cycle,swingRecovery.load(std::memory_order_relaxed),
                                          recoveryCurve.load(std::memory_order_relaxed),recoveryGrace.load(std::memory_order_relaxed));
     out.recovery=v.recovery;out.onHit=v.onHit==combat::OnHit::Allowed;
-    triggerLanded={session,now};++buttonAttacks;
-    if(out.onHit)triggerFull={session,now};   // a full-cycle trigger hit starts the next cycle
+    localCombat.triggerLanded={session,now};++buttonAttacks;
+    if(out.onHit)localCombat.triggerFull={session,now};   // a full-cycle trigger hit starts the next cycle
     if(out.recovery<1||!out.onHit)++triggerPenalised;
     if(trace.load()) {
         char line[260];snprintf(line,sizeof line,"Frame melee trace: trigger target=%u%s since_last_swing=%lld ms since_full_swing=%lld ms cycle=%u ms recovery=%.2f onhit=%d",
@@ -1915,6 +2027,25 @@ void Submit(const Sample& sample) {
         if(!session||!ready.load()||!sample.active){current[Lane(sample)].active=false;engine.Reset();return;}
         if(engine.Step(sample,sweep)) {
             if(count==requests.size()){count=0;engine.Reset();return;} // never replay a backlog
+            if(clientcombat::NativeOnly(session)) {
+                uint32_t hero=0;static uint64_t sequence=0;
+                if(combat::LocalPlayerId(hero)) {
+                    framevr::melee::dispatch::Contact value{};value.hero=hero;value.session=session;value.sequence=++sequence;
+                    value.sample=sample;value.sweep=sweep;value.cycle[0]=cycleMs.load();value.cycle[1]=offCycleMs.load();
+                    value.shape=interactionstate::ShapeForm(session,GetTickCount64());value.dualSpeed=dualSpeed.load();
+                    const bool sent=meleedispatch::Send(value);
+                    static uint64_t nextLog=0;const auto now=GetTickCount64();
+                    if(now>=nextLog){nextLog=now+1000;char text[160];snprintf(text,sizeof text,"Frame client PCVR swing: hand=%d stroke=%llu queued=%d",sample.handIndex,(unsigned long long)sweep.stroke,int(sent));framevr::logging::Write(text);}
+                    static HitSet felt[3];
+                    const auto targets=targetreports::Get(session,hero,GetTickCount64());
+                    if(sent)if(const auto target=framevr::clientcontact::Touched(sample,sweep,targets,GetTickCount64());target&&felt[Lane(sample)].Insert(session,sweep.stroke,target)) {
+                        framevr::ImpactSurface(sample.handIndex,int(framevr::haptics::Surface::Flesh),0);
+                        framevr::MeleeImpact(sample.handIndex);
+                        projectiles::CombatWalk(2);
+                    }
+                }
+                return;
+            }
             requests[count++]={sweep,sample,session,GetTickCount64()};++samples;
             if(sample.shield)++shieldSweeps;
         }
@@ -1924,12 +2055,43 @@ void Submit(const Sample& sample) {
         std::lock_guard lock(queueMutex);if(callback.Claim(token))count=0;
     }
 }
+namespace {
+std::atomic<bool> remoteTickPosted{false};
+void __cdecl RemoteSequenceTick(const D2RL::PluginContext*,void*) noexcept {
+    remoteTickPosted=false;
+    Server host;{std::lock_guard lock(serverMutex);host=server;}
+    for(auto& state:remoteStates) {
+        if(!state.peer)continue;
+        if(!host.game||host.session!=gamestate::LocalPlayer()||host.session!=state.input.hostSession||
+           !meleedispatch::Alive(state.peer,state.input.value.session)){state={};continue;}
+        if(!state.input.due||GetTickCount64()+framevr::strikeskills::SequenceEarlyMs<state.input.due)continue;
+        // Re-resolve the authoritative unit each tick; never reuse a pointer after travel.
+        state.input.player=originalLookup(host.game,0,state.input.value.hero);state.input.game=host.game;
+        uintptr_t back=0;
+        if(!state.input.player||!Read(state.input.player+0xd8,back)||back!=host.game){state={};continue;}
+        RemoteScope scope(state);SequenceHit(context,nullptr);
+    }
+}
+}
+void InstallRemoteHost() {
+    remoteInstaller=true;
+    InstallTargetReader();
+    Install();Install(); // second pass enables the original skill hooks after contact hooks are ready
+    combat::InstallRemote();
+}
+void TickNetwork() {
+    meleedispatch::Tick(gamestate::LocalPlayer());
+    static uint64_t nextSequence=0;const auto now=GetTickCount64();if(now<nextSequence)return;nextSequence=now+20;
+    if(ready.load()&&!clientcombat::NativeOnly(gamestate::LocalPlayer())&&context&&threads&&threads->runOnGameThread&&!remoteTickPosted.exchange(true)&&
+       threads->runOnGameThread(context,&RemoteSequenceTick,nullptr)!=D2RL::Threads::Result::Success)remoteTickPosted=false;
+}
+void StopNetwork(){meleedispatch::Stop();}
 void Report() {
     breakables::Report();
     wallcells::Report();
     propscan::Report();
     if(const auto right=clawLanded[0].exchange(0),left=clawLanded[1].exchange(0);right||left) {
-        char line[160];snprintf(line,sizeof line,"Frame claws: right landed=%u left landed=%u (one shared recovery, cycle %u ms)",right,left,cycleMs.load());
+        char line[160];snprintf(line,sizeof line,"Frame claws: right landed=%u left landed=%u (one shared recovery, cycle %u ms)",right,left,(remoteInput?remoteInput->value.cycle[0]:cycleMs.load()));
         framevr::logging::Write(line);
     }
     const auto right=dualLanded[0].exchange(0),left=dualLanded[1].exchange(0),invalid=dualRefused.exchange(0);
@@ -2048,7 +2210,7 @@ void Report() {
     const auto early=tooSoon.exchange(0),extra=extraTargets.exchange(0),m=missed.exchange(0),button=buttonAttacks.exchange(0);
     if(!s&&!c&&!g&&!d.discontinuities&&!d.recovering&&!retries&&!early&&!extra&&!m&&!button)return;
     char line[760];snprintf(line,sizeof line,"Frame melee: sweep samples=%u physical contacts=%u native accepted=%u missed=%u rejected=%u missing server=%u intersections=%u stale=%u walls=%u pose resets=%u recovering=%u callbacks=%u abandoned=%u pending_ms=%llu missing_player=%u position_mismatch=%u nearby=%u missing_body=%u attack_speed=%d cycle_ms=%u too_soon=%u extra_targets=%u button_cycles=%u",s,c,a,m,r,g,i,x,w,d.discontinuities,d.recovering,callbacks,retries,(unsigned long long)age,missing,mismatch,monsters,bodies,
-        int(attackSpeed.load()),cycleMs.load(),early,extra,button);
+        int(attackSpeed.load()),(remoteInput?remoteInput->value.cycle[0]:cycleMs.load()),early,extra,button);
     framevr::logging::Write(line);
 }
 }

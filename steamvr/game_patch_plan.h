@@ -205,4 +205,24 @@ inline bool ShimTable(const uintptr_t* copied, size_t before, size_t slots, size
     return true;
 }
 
+// effect_listener_guard (vr/game_patch_signatures.h): the game's effect-ended listener is called for a handle
+// only when the handle could be read and holds an effect; with none it would take a lock at address 0x20.
+enum class Ended : uint8_t { Call, Skip };
+inline Ended EndedCall(bool handleRead, uint64_t heldEffect) noexcept { return handleRead && heldEffect ? Ended::Call : Ended::Skip; }
+// For the log only: a handle called for an effect it does not hold (it is called all the same, as the game does).
+inline bool EndedOther(uint64_t heldEffect, uint64_t endingEffect) noexcept { return heldEffect && endingEffect && heldEffect != endingEffect; }
+// lea r9,[rip+d32] (4C 8D 0D d32) at `at` of a fingerprint whose first byte is a function's: true when the
+// instruction's address is that first byte - the function names itself there.
+inline bool LeaSelf(const uint16_t* sig, size_t size, size_t at) noexcept {
+    if (!sig || at + 7 > size || sig[at] != 0x4C || sig[at + 1] != 0x8D || sig[at + 2] != 0x0D) return false;
+    uint8_t d[4];
+    for (size_t i = 0; i < 4; ++i) {
+        if (sig[at + 3 + i] > 0xFF) return false;
+        d[i] = uint8_t(sig[at + 3 + i]);
+    }
+    int32_t disp = 0;
+    std::memcpy(&disp, d, 4);
+    return int64_t(at) + 7 + disp == 0;
+}
+
 }  // namespace gamepatch

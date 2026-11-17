@@ -997,9 +997,11 @@ uint64_t ApplyDamage(uintptr_t game,uintptr_t attacker,uintptr_t defender,int fl
 }
 // Set only by melee.cpp around ONE physical swing's native basic attack
 // (synchronous, game thread). Missiles and button attacks never set it.
+thread_local uintptr_t remotePlayer=0;
 thread_local bool nativeRolls=false;
 bool Qualifies(uintptr_t attacker,uintptr_t defender) {
-    if(nativeRolls||!enabled.load(std::memory_order_relaxed)||!ready.load(std::memory_order_relaxed))return false;
+    if(nativeRolls||(!remotePlayer&&!enabled.load(std::memory_order_relaxed))||!ready.load(std::memory_order_relaxed))return false;
+    if(remotePlayer){uint32_t a[3]{},d=~0u;return attacker==remotePlayer&&Read(attacker,a)&&Read(defender,d)&&PlayerContact(a[2],a[0],a[2],d);}
     const uint64_t identity=localIdentity.load();
     const auto session=localSession.load();
     if(!identity||!session||session!=gamestate::LocalPlayer()||uint32_t(GetTickCount())-uint32_t(identity>>32)>1500)return false;
@@ -1016,7 +1018,7 @@ uint64_t ObservedDamage(uintptr_t game,uintptr_t attacker,uintptr_t defender,int
  struct RestoreLife{framevr::clienthit::LifeLoss*previous;~RestoreLife(){observedLife=previous;}} restore{previous};
  return framevr::clienthit::Observe(attacker,defender,flag,damage,
   [](uintptr_t address,void*out,size_t n){return framevr::ReadMemory(out,reinterpret_cast<const void*>(address),n);},
-  [&]{return fullDamageRules.load()?ApplyDamage(game,attacker,defender,flag,damage):originalApplyDamage(game,attacker,defender,flag,damage);},
+  [&]{return (fullDamageRules.load()||remotePlayer)?ApplyDamage(game,attacker,defender,flag,damage):originalApplyDamage(game,attacker,defender,flag,damage);},
   [&]{return life.lost;},
   [](uint32_t player,uint32_t target){if(const auto fn=clientHitObserver.load())fn(player,target);});
 }
@@ -1544,10 +1546,13 @@ bool UnitStat(uintptr_t unit,int stat,int& value) {
     value=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva))(unit,stat,0);return true;
 }
 bool LocalPlayerId(uint32_t& id) {
+    if(remotePlayer){uint32_t h[3]{};if(!Read(remotePlayer,h)||h[0]!=0)return false;id=h[2];return true;}
     const auto identity=localIdentity.load();const auto session=localSession.load();
     if(!identity||!session||session!=gamestate::LocalPlayer()||uint32_t(GetTickCount())-uint32_t(identity>>32)>1500)return false;
     id=uint32_t(identity);return true;
 }
+uintptr_t RemotePlayer(uintptr_t player){const auto before=remotePlayer;remotePlayer=player;return before;}
+void InstallRemote(){const bool prior=enabled.exchange(true);Install();enabled=prior;if(!prior)fullDamageRules=false;}
 void Configure(bool on) {enabled=on;}
 bool NativeRolls(bool on) {const bool was=nativeRolls;nativeRolls=on;return was;}
 void ConfigureMeleeRolls(bool native) {meleeRolls=native;}

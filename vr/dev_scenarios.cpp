@@ -35,6 +35,7 @@ framevr::interaction::Request queued;
 Reply reply;
 bool scheduled=false;
 uintptr_t ticket=0;
+unsigned tundraPresses=0;   // the Tundra repro steps dispatched this session (TundraReproStep)
 
 bool Metadata(const PluginContext* ctx) {
     if(!ctx||!ctx->activeMod||!ctx->modDirectory)return false;
@@ -211,6 +212,15 @@ void __cdecl Commands(const PluginContext*,void* token) noexcept {
             if(!(accepted=send(command)))break;
         }
         if(accepted)accepted=send("heal");
+    } else if(r.index==framevr::dev::TundraReproChoice) {
+        unsigned press;
+        {std::lock_guard lock(mutex);if(claim!=ticket)return;press=tundraPresses;}
+        const auto step=framevr::dev::TundraReproStep(press);
+        char line[192];std::snprintf(line,sizeof line,"Frame development: tundra repro step %d of %d - %s (%s); %s",step.step,framevr::dev::TundraReproSteps,
+            step.place,step.command,step.step%2?"walk to the exit into the Frozen Tundra or press again":"fight here, then press again");
+        framevr::logging::Write(line);
+        accepted=execute(step.command);
+        if(accepted){std::lock_guard lock(mutex);if(claim==ticket)tundraPresses=press+1;}
     } else {
         const auto* command=framevr::dev::Choices[r.index].command;
         if(!Current(claim))return;

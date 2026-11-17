@@ -46,5 +46,15 @@ int main(){
  // Valid empty roster clears, rather than retaining the previous targets.
  buckets.fill(0);m.put(game+0x4c6*8,buckets);assert(scan()==0);
  auto unknown=[](uintptr_t){return 0;};assert(servertarget::Scan(game,77,out,64,30,hx,hy,read,lookup,relation,line,unknown)==-1);
+ // Contact dimensions must come from the same native stats as host melee.
+ unit(first,1,501,1,40002,20);m.put(first+0x1bd,uint8_t(0));
+ const uintptr_t bodyRow=0x900000;uint8_t fields[16]{};fields[8]=2;fields[9]=3;fields[13]=80;m.put(bodyRow,fields);
+ auto stats=[&](uint8_t bank,int cls){assert(bank==0&&cls==100);return bodyRow;};
+ targetcone::Target body{501,0,0,true};
+ assert(servertarget::ReadBody(first,body,read,stats)&&body.bodyWidth==3&&body.bodyHeight==80);
+ fields[13]=0;m.put(bodyRow,fields);assert(servertarget::ReadBody(first,body,read,stats)&&body.bodyHeight==72);
+ fields[8]=9;m.put(bodyRow,fields);assert(!servertarget::ReadBody(first,body,read,stats)&&!body.bodyWidth&&!body.bodyHeight);
+ fields[8]=2;m.put(bodyRow,fields);body.id=999;assert(!servertarget::ReadBody(first,body,read,stats));body.id=501;
+ m.put(first+0x1bd,uint8_t(4));assert(!servertarget::ReadBody(first,body,read,stats));
  std::puts("server target scan: remote viewer, unsigned coordinates, relation, LOS, level, NPC/pet/dead filtering and fail-closed reads passed");
 }

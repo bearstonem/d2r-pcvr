@@ -117,6 +117,10 @@ bool LeftHandAiming();
 bool CrossbowAiming();
 bool NativeAimOwnership(); // hand casting or wheel: preserve locomotion, suppress legacy aim modes
 bool NativeSkillCasting(); // any active trigger/quick cast; retain native locomotion input
+// Any thread, lock-free (vrcam): the game carries the hero itself for the next `milliseconds` - a Leap's cast and
+// take-off, then each pose his model is in the air. Room follows you pauses meanwhile (room_steps.h Pause::Carried);
+// it lapses on its own however the Leap ends (landed, cut short, never taken off, a death, another area).
+void HeroCarried(uint32_t milliseconds);
 bool DirectedSpellActive(); // fresh native assignment, actually casting (wheel or quick shortcut)
 bool SpellGripsArmed();   // both grips cast a learned motion spell (spell_motion.h): the left grip takes the staff only alone
 // Both grips held for the motions now, or let go under 0.4 s ago (a motion's cast still pressing): vrcam's Loot

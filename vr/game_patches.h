@@ -6,6 +6,8 @@
 // in the same way (PERFORMANCE.md "Once per pair"): selection_walk is a patch like
 // the others; shadows_once and cull_once are hooks that act in the second eye pass of a pair (EyePass below).
 // present_once (off unless written by hand; PERFORMANCE.md "One present a pair") holds back the first pass's desktop Present.
+// effect_listener_guard is no render change but a guard against a crash in the game's own effect code: a hook that
+// does not call the game's effect-ended listener for a handle that holds no effect (game_patch_signatures.h).
 //
 // A patch goes in, and comes out, only in BetweenFrames: on the thread that draws, before a frame's first eye
 // pass, when the game's render tasks of the frame before have all ended and no thread is in the code that
@@ -23,6 +25,8 @@ struct Wanted {
     bool cullOnce = true;            // [game_patches] cull_once
     // Off unless the key is written by hand: not measured and not seen in a headset yet (PERFORMANCE.md "One present a pair").
     bool presentOnce = false;        // [game_patches] present_once
+    // On for every install: two Frozen Tundra crash reports (2026-11-08, 11-11) ended in the listener it guards.
+    bool effectListenerGuard = true;  // [game_patches] effect_listener_guard
 };
 
 // From the settings, on any thread, as often as they are read. The first call says what is wanted in the log.

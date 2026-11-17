@@ -482,6 +482,38 @@ show `Shadow Directional Draw Call Collect` and `Directional Shadows` near
 0 ms in the right eye and unchanged in the left; with `cull_once`,
 `0xD9C9B0` should leave the right eye's column.
 
+## effect_listener_guard: a crash guard, November 12
+
+**Not a performance change**, but it goes in and out like the patches below
+and has their key: `[game_patches] effect_listener_guard=0` written by hand
+takes it out. On for every install.
+
+Two crash reports from one player in the Frozen Tundra (2026-11-08 and 11-11,
+D2R 3.4.95041) stop at the same place: an access violation writing address
+`0x20` at `D2R.exe+0xA4696A`, with the same return addresses. When a PopcornFX
+effect ends, the game tells each listener on the effect's list. The game's
+own effect handles listen with `0xF6A030`, which reads the effect the handle
+holds (handle + `0x10`) with no check and takes that effect's list lock (+
+`0x20`). A handle that holds no effect but is still on an ending effect's
+list makes it write to `0x20`. The game's other listener beside it
+(`0xF6A020`) checks the same pointer first. Nothing in the mod makes, owns or
+listens to these effects; the game ceiling's unit has no particles.
+
+The guard is a hook on `0xF6A030` that does what `0xF6A020` does: a handle
+that holds no effect is not called. Every other call is the game's own. Left
+undone for a skipped call: the handle's entry stays on the ending effect's
+list (the game has already marked it as told for that round), and nothing is
+let go, because the handle holds nothing. Four stretches of the game's code
+are proven first (`vr/game_patch_signatures.h`). The function's page may not
+be decrypted until an effect has ended once, so it is looked for up to 2000
+times, every 16th frame.
+
+The log: `effect_listener_guard applied: ...` once, and a line every ten
+seconds only when something happened: `effect_listener_guard 10 s: N
+effect-ended calls skipped for a handle that holds no effect ...; M calls for a
+handle that holds another effect ...`. N above 0 is a crash the game would
+have had. Not yet seen in a session or tested in the game.
+
 ## Render task patches, November 10
 
 **On for every install since the headset run below.** There is no setting for
