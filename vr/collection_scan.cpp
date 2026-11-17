@@ -16,6 +16,11 @@ namespace {
 const D2RL::PluginContext*    g_ctx       = nullptr;
 const D2RL::InventoryService* g_inventory = nullptr;
 const D2RL::ThreadService*    g_threads   = nullptr;
+const D2RL::LifecycleService* g_lifecycle = nullptr;
+
+// The report runs by itself once per game session, so the owner only has to
+// load a character. The console command stays as a manual re-run.
+uint64_t g_scannedSession = 0;
 
 constexpr uint32_t kContainerSlots = 16;   // ItemContainer values are small
 
@@ -194,6 +199,16 @@ void RunScan() {
 
 void __cdecl ScanOnUiThread(const D2RL::PluginContext*, void*) noexcept { RunScan(); }
 
+// Gameplay listeners already run on the UI thread, which is where the
+// inventory reads belong, so the report runs straight from the event.
+void __cdecl OnGameplay(const D2RL::PluginContext*, const D2RL::Lifecycle::GameplayEvent* event, void*) noexcept {
+    if (event == nullptr || event->kind != D2RL::Lifecycle::GameplayEventKind::LocalPlayerReady) return;
+    if (g_scannedSession == event->sessionGeneration) return;
+    g_scannedSession = event->sessionGeneration;
+    LogLine("collection: local player ready - reporting the catalog progress for this character");
+    RunScan();
+}
+
 void QueueScan() {
     if (g_threads != nullptr && g_threads->runOnUiThread != nullptr
         && g_threads->runOnUiThread(g_ctx, &ScanOnUiThread, nullptr) == D2RL::Threads::Result::Success) {
@@ -237,18 +252,34 @@ void Init(const D2RL::PluginContext* ctx) {
         || !D2RL::HasThreadServiceField(g_threads, D2RL::ThreadServiceRequiredSize)) {
         g_threads = nullptr;
     }
+    if (ctx->QueryService(&g_lifecycle) != D2RL::ServiceQueryResult::Success
+        || !D2RL::HasLifecycleServiceField(g_lifecycle, D2RL::LifecycleServiceRequiredSize)) {
+        g_lifecycle = nullptr;
+    }
+
+    if (g_lifecycle != nullptr && g_lifecycle->registerGameplayEventListener != nullptr) {
+        D2RL::Lifecycle::GameplayEventListener listener {};
+        listener.structSize = D2RL::Lifecycle::GameplayEventListenerSize;
+        listener.kind       = D2RL::Lifecycle::GameplayEventKind::LocalPlayerReady;
+        listener.callback   = &OnGameplay;
+        D2RL::Lifecycle::ListenerHandle handle = D2RL::Lifecycle::InvalidHandle;
+        if (g_lifecycle->registerGameplayEventListener(ctx, &listener, &handle) != D2RL::Lifecycle::Result::Success)
+            ctx->LogWarn("collection: the local-player listener did not register; run `collection` from the console instead");
+    }
 
     if (!ctx->RegisterConsoleCommand("collection", &CmdCollection,
                                      "collection - the unique/set/runeword catalog: scan (report what this character carries)"))
         ctx->LogError("collection: the console command did not register");
     else
-        ctx->LogInfo("collection: spike ready - `collection scan` reports the catalog progress for the loaded character");
+        ctx->LogInfo("collection: spike ready - the report runs when a character loads, and `collection scan` repeats it");
 }
 
 void Shutdown() {
-    g_ctx       = nullptr;
-    g_inventory = nullptr;
-    g_threads   = nullptr;
+    g_ctx            = nullptr;
+    g_inventory      = nullptr;
+    g_threads        = nullptr;
+    g_lifecycle      = nullptr;
+    g_scannedSession = 0;
 }
 
 }   // namespace framevr::collection
