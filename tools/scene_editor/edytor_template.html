@@ -85,7 +85,7 @@
       <button class="main" id="saveBtn">Zapisz plik zmian</button>
       <button id="copyBtn">Kopiuj</button>
     </div>
-    <div class="muted" style="margin-top:6px">Plik <b>akt2_zmiany.json</b> trafi do Pobranych. Napisz mi, że jest – resztę zrobię sam. Zmiany pamiętane też w tej przeglądarce.</div>
+    <div class="muted" style="margin-top:6px">Zapisz jako <b>frontend_edits_act2.json</b> w folderze <b>D:\Github\d2r-pcvr-v0332\steamvr</b> (okno zapisu zapamięta folder) i zbuduj scenę. Zmiany pamiętane też w tej przeglądarce.</div>
     <textarea id="out" readonly></textarea>
     <div class="btns" style="margin-top:6px"><button id="loadBtn">Wczytaj plik zmian…</button><button id="resetAll">Wyczyść wszystkie zmiany</button></div>
     <input id="loadFile" type="file" accept=".json" style="display:none">
@@ -94,7 +94,14 @@
 <script>
 const DATA = /*DATA*/null;
 const KEY = 'd2r_vr_scene_editor_act2_' + DATA.version;
-const COL = {'posągi i ruiny':'#ffd84a','budowle':'#e8c07a','miasto (karty)':'#c890ff','skały':'#ff8c3a','palmy':'#3fbf5f','rośliny i piasek':'#8fa046','kamienie bruku':'#f0f0f0','rzeczy':'#b98d5e','teren':'#6b6250','podłoga':'#c9b48a','pomosty':'#d98a3a','dodane':'#ff5fa0'};
+const COL = {'posągi i ruiny':'#ffd84a','budowle':'#e8c07a','miasto (karty)':'#c890ff','skały':'#ff8c3a','palmy':'#3fbf5f','rośliny i piasek':'#8fa046','kamienie bruku':'#f0f0f0','rzeczy':'#b98d5e','teren':'#6b6250','podłoga':'#c9b48a','pomosty':'#d98a3a','dodane':'#ff5fa0',
+             // Act 5 (2026-11-15 21:44: its categories had no colour, so no "show" switch - every tree, cliff, snow pile
+             // and stake in them was left off the map, the act's own and the ones added alike)
+             'drzewa':'#2fae5a','rośliny':'#9cb04a','klify i ściany':'#a9b3c6','śnieg i lód':'#d6f1ff','doły i zasieki':'#d0783a'};
+// any other category the page carries gets a colour too (never hidden for want of one)
+(() => { const extra = ['#e07ad0','#7ad0e0','#d0d07a','#7a9ae0','#e0a07a','#a07ae0'];
+  const all = new Set([...Object.values(DATA.cats || {}), ...DATA.items.map(i => i.cat)]);
+  let k = 0; all.forEach(c => { if (c && !(c in COL)) COL[c] = extra[k++ % extra.length]; }); })();
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 let view = {cx:0, cy:-60, s:2.2};            // world (right, ahead) at the canvas middle; pixels per unit
 let items = [], road = [], half = DATA.half, sel = null, drag = null, undo = [];
@@ -141,7 +148,12 @@ function bounds(i) {
 function box(i) { return bounds(i).slice(0, 4); }
 function area(i) { const b = box(i); return (b[1]-b[0]) * (b[3]-b[2]); }
 function corners(i) {
-  const [ax, az] = axes(i.yaw), b = box(i);
+  const [ax, az] = axes(i.yaw), g = geoOf(i.model);
+  // a model's true outline seen from above (its most detailed mesh's convex hull) - a ground is no box: Act 5's lies
+  // turned and its light LOD was only a piece of it (2026-11-15 21:44)
+  if (g && g.hull && g.hull.length > 2 && !i.tx && !i.tz)
+    return g.hull.map(([u, v]) => [i.right + (ax[0]*u + az[0]*v) * i.scale, i.ahead + (ax[1]*u + az[1]*v) * i.scale]);
+  const b = box(i);
   return [[b[0],b[2]],[b[1],b[2]],[b[1],b[3]],[b[0],b[3]]].map(([u,v]) => [i.right + ax[0]*u + az[0]*v, i.ahead + ax[1]*u + az[1]*v]);
 }
 function topOf(i) { return geoOf(i.model) ? +(i.y + bounds(i)[5]).toFixed(1) : null; }
@@ -280,7 +292,13 @@ Object.keys(COL).forEach(c => {
 const addList = document.getElementById('addList'), openGrp = {};
 let addPick = null;
 // the models to add, in groups that fold (click a group's name); click a model: preview, double click: add it
-function actOf(m) { const r = /act([1-5])/.exec(m.split('/model/').pop()); return r ? 'Akt ' + r[1] : 'ogólne'; }
+// the act a model belongs to (Lord of Destruction's folders are 'expansion' - Act 5's, 2026-11-15 21:44: they fell into
+// 'ogólne'); a menu ground ui_groundplane/terrain_actN by its number
+function actOf(m) {
+  const p = m.toLowerCase(), tail = p.split('/model/').pop();
+  if (/expansion|snowprops|ui_act5|act5_/.test(p)) return 'Akt 5';
+  const r = /act([1-5])/.exec(tail); return r ? 'Akt ' + r[1] : 'ogólne';
+}
 function fillAdd(q) {
   addList.innerHTML = ''; const tree = {};
   DATA.models.filter(m => !q || m.toLowerCase().includes(q)).forEach(m => {
@@ -353,9 +371,22 @@ function changes() {
   return {count, data:{act:DATA.act, base:DATA.version, moved, deleted, added, road: roadChanged ? road.map(p => [+p[0].toFixed(1), +p[1].toFixed(1)]) : null, road_half: half !== DATA.half ? half : null}};
 }
 function out() { document.getElementById('out').value = JSON.stringify(changes().data, null, 1); }
-document.getElementById('saveBtn').onclick = () => {
-  const blob = new Blob([JSON.stringify(changes().data, null, 1)], {type:'application/json'});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'akt2_zmiany.json'; a.click();
+// Save straight as the scene script's own file (owner 2026-11-15: "propose the name frontend_edits_act5.json"):
+// a save dialog with that name, opening where the last one was saved (the steamvr folder, once chosen); a browser
+// without the dialog downloads the file under the same name.
+document.getElementById('saveBtn').onclick = async () => {
+  const text = JSON.stringify(changes().data, null, 1);
+  const name = 'frontend_edits_act2.json';
+  if (window.showSaveFilePicker) {
+    try {
+      const h = await window.showSaveFilePicker({id: 'scene_editor_save', suggestedName: name,
+        types: [{description: 'Zmiany sceny (JSON)', accept: {'application/json': ['.json']}}]});
+      const w = await h.createWritable(); await w.write(text); await w.close();
+      return;
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  const blob = new Blob([text], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
 };
 document.getElementById('copyBtn').onclick = () => { const t = document.getElementById('out'); t.select(); try { navigator.clipboard.writeText(t.value); } catch (e) { document.execCommand('copy'); } };
 document.getElementById('resetAll').onclick = () => { if (confirm('Wyczyścić wszystkie zmiany?')) { remember(); fresh(); sel = null; persist(); panel(); draw(); } };

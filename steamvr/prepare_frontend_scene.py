@@ -40,7 +40,7 @@ CAMERAS = {
     4: (30.0, 4.0, -789.0),
     5: (34.0, 4.0, -1258.5),
 }
-ACTS = (1, 2, 3, 4)              # the acts filled round (one by one, as each is tuned)
+ACTS = (1, 2, 3, 4, 5)            # the acts filled round (one by one, as each is tuned)
 REACH = 700.0                    # an act's own pieces: within this of its camera
 LANE = 180.0                     # ... and within this of its camera's z (the vignettes lie along z)
 TURNS = (90.0, 180.0, 270.0)     # degrees about the camera's vertical
@@ -53,10 +53,20 @@ SINK_UNDER = {2: 2.5}
 
 GROUND = ('ui_groundplane/terrain_act', 'ui_act2_vignette/ui_act2_vignette_terrain')
 NOT = ('terrain_act1_path', '_sky.', 'campfire', 'bonfire', 'wall', 'top_cap', 'fence', 'stoneware')
+# ... but these of an act's own do come round (Act 4, 2026-11-15 09:23, "the heap still hangs in the air": the gate's
+# pillar, its skull and the rubble on top stand on the ruined wall ui_wall_destroyed01 - 'wall', so it stayed behind)
+NOT_OK = {4: ('ui_wall_destroyed01',)}
+# Pieces of an act's own not copied round, by entity name (Act 4, 2026-11-15 10:12, a screenshot: "a heap of small round
+# things at my eye height, a little left, on the land past the guardian's island" - the skull pile that lies 7.2 up,
+# on the menu's own high ground, which does not come round with it)
+NOT_COPY = {4: ('lava_skull_pile_large03_04',)}
 # The painted cards (ui_imposter), mountains and the depth fade are not copied round: every card has the
 # Countess's tower on it and at the sides they showed for the pictures they are (owner 2026-11-13).
 KEEP = GROUND + ('grass', 'weeds', 'bush', 'fern', 'tree', 'ivy', 'branch', 'boulder', 'stone', 'pebbles', 'grunge')
 FAR_KINDS = ()
+# Per act, kinds pulled in to a radius of their own (Act 5: the far mountains, 250-380 ahead, turned to the left
+# would lie in Act 4 - pulled in to 190, the same size to the eye). {act: (radius, kinds)}
+FAR_ACT = {5: (190.0, ('act5_vignette_mountain',))}
 # Each act's own: what of its pieces is copied round (Act 2, Lut Gholein's outskirts, owner 2026-11-14: "Pelne 3D
 # dla scen: Akt 2" - the desert's own plants, palms, sand mounds and rocks; its walls, gate and camp stay its own).
 KEEP_ACT = {2: GROUND + ('grass', 'bush', 'palm', 'mound', 'sand_pile', 'rock_'),
@@ -65,13 +75,23 @@ KEEP_ACT = {2: GROUND + ('grass', 'bush', 'palm', 'mound', 'sand_pile', 'rock_')
             4: GROUND + ('ui_act4_vignette/rocks/', 'act4_lava_islands/', 'act4_lava_skull_piles/', 'act4_mesa_skeleton_piles/',
                          'act4_mesa_rubbles_props/', 'act4_lava_crystals/', 'act4_diab_rubble/', 'act4_mesa_props/',
                          'act4_mesa_pillars/', 'act4_mesa_rubble/', 'act4_lava_lava_kits/', 'ui_act4_vignette/architecture/',
-                         'act4_diab_cliffs/', 'act4_lava_floor_tiles/', 'act4_lava_props/', 'act4_mesa_gates/')}
-LANE_ACT = {2: 120.0, 4: 150.0}  # Act 2's own scene lies within about 120 of its camera's z
+                         'act4_diab_cliffs/', 'act4_lava_floor_tiles/', 'act4_lava_props/', 'act4_mesa_gates/'),
+            # Act 5, the frozen highlands (owner 2026-11-15, "Pelne 3D dla scen: Akt 5": "Mrozne wyzyny", the level's
+            # own sky, no falling snow yet): the menu's own snowy hills, rocks, snow piles, moorland grass, shrubs,
+            # bristlecones and dead trees, and its far mountains - round you; the siege (walls, pikes, weapons) stays ahead
+            5: GROUND + ('expansion_grass', 'expansion_shrub', 'expansion_flower', 'expansion_tree_', 'expansion_bush_',
+                         'rocks_snowy', 'slush_pile', 'snow_pile', 'snow_grunge',
+                         'ui_pebbles', 'rock_pile', 'act5_vignette_mountain')}
+            # (2026-11-15 10:12: the raised ground with its steps - siege_hills slope_*, ui_ridge_bridge - not round you:
+            # "the copy behind me, right/down... I don't want it there"; the highlands' own cliffs come from the editor)
+LANE_ACT = {2: 120.0, 4: 150.0, 5: 150.0}  # Act 2's own scene lies within about 120 of its camera's z
 # Copies only between these (right of the camera, -left .. right): Act 1's forest begins about 137 to Act 2's
 # left (its cut_right 285 shows Act 1 to 88 to Act 2's left), Act 3's scene about 300 to its right.
 # Act 4 (2026-11-15): Act 3 shows to 237 right of itself (its cut), i.e. to 239 left of Act 4 (476 apart); Act 5 is
 # 469.5 to the right (the cuts meet at 234). The copies' places kept well inside, their models reach out further.
-SIDES = {2: (-85.0, 200.0), 4: (-190.0, 190.0)}
+SIDES = {2: (-85.0, 200.0), 4: (-190.0, 190.0),
+         # Act 5 (2026-11-15): Act 4 to the left (the cuts meet 234 left of us), nothing to the right
+         5: (-190.0, 450.0)}
 # Pieces with a sound of their own (Act 2's palms: wind in the leaves) are copied without it.
 SOUND_OK = {2}
 # Pieces that see-through-when-behind (WallTransparencyComponent: the gate's pillars, chains and skull arch) are copied
@@ -414,7 +434,9 @@ def fill_round(preset, act, ids):
                     'WallTransparencyComponent'}):
             continue
         base = m.rsplit('/', 1)[-1]
-        if any(n in base for n in NOT) or not any(k in m if '/' in k else k in base for k in KEEP_ACT.get(act, KEEP)):
+        if e.get('name') in NOT_COPY.get(act, ()):
+            continue
+        if (any(n in base for n in NOT) and not any(k in base for k in NOT_OK.get(act, ()))) or not any(k in m if '/' in k else k in base for k in KEEP_ACT.get(act, KEEP)):
             continue
         p = t['position']
         dx, dz = float(p['x']) - cx, float(p['z']) - cz
@@ -440,7 +462,8 @@ def fill_round(preset, act, ids):
             lo, hi = SIDES.get(act, (-1e9, 1e9))
             if not ground and not lo <= -nz <= hi:   # right of the camera is -z
                 continue
-            k = FAR / r if (r > FAR and any(f in m for f in FAR_KINDS)) else 1.0
+            far, kinds = FAR_ACT.get(act, (FAR, FAR_KINDS))
+            k = far / r if (r > far and any(f in m for f in kinds)) else 1.0
             x = copy.deepcopy(e)
             x['components'] = [c for c in x['components'] if c.get('type') not in ('AudioEmitterComponent',
                                                                                    'WallTransparencyComponent')]
@@ -1406,7 +1429,11 @@ TOWN_REPORT = {}
 # The sides are hard edges (Act 3's chat, 2026-11-15 01:57: "Act 4's lava in Act 3" - the 200 tiles reached ~380 to the
 # left, into Act 3 by its temple): a tile across one is narrowed to end on it, as Act 3's water (TOWN_RIGHT_MAX).
 # Left: Act 3's right edge, 239 to our left; right: halfway to Act 5 (234).
-LAVA = {4: ('expansion_lavae2_01', 420.0, (-239.0, 234.0))}
+# (2026-11-15 09:23, owner: "I still see the river of lava in Act 3, and in Act 5 too": a neighbour's cut fades its
+# view into our sky over 25 units past the cut (D2R_FogWorld.fxh SkyCutAt), and the lava ended 1.5 past both cuts - in
+# that fade. Now clear of it: Act 3 sees to 237 + 25 right of itself (214 left of us), Act 5 to 234 + 25 left of itself
+# (210.5 right of us) - the lava to -205 / 200.)
+LAVA = {4: ('expansion_lavae2_01', 420.0, (-205.0, 200.0))}
 LAVA_EXTENT = {}   # model -> (min x, min z, max x, max z), measured from the game (--game); else LAVA_GUESS
 LAVA_GUESS = (0.0, 0.0, 200.0, 200.0)
 # A lava fall to try (owner 2026-11-15: "a river of lava turned 90 degrees, standing upright by a rock?"): the same lava
@@ -1562,7 +1589,7 @@ def hide(preset):
 
 # The owner's own edits from the scene editor (tools/scene_editor, 2026-11-14): per act, a file of moves, turns,
 # sizes, heights, removals, additions and the road's points, applied over what this script lays.
-EDITS_FILES = {a: Path(__file__).resolve().parent / f'frontend_edits_act{a}.json' for a in (2, 3, 4)}
+EDITS_FILES = {a: Path(__file__).resolve().parent / f'frontend_edits_act{a}.json' for a in (2, 3, 4, 5)}
 
 
 def load_edits(act, override=None):

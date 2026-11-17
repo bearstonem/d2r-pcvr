@@ -53,8 +53,38 @@ ADD_FOLDERS = ('data/hd/env/model/act2/ruin/act2_ruin_statues/', 'data/hd/env/mo
 ADD_FOLDERS_ACT = {3: ('data/hd/env/model/act3/docktown/', 'data/hd/env/model/global/prop/act3/docktown/',
                        'data/hd/env/model/global/prop/act3/jungle/', 'data/hd/env/model/act3/jungle/act3_jungle_riverbanks/',
                        'data/hd/env/foliage/act3/model/', 'data/hd/env/foliage/global/model/act3_',
-                       'data/hd/env/model/ui/ui_act3_vignette/', 'data/hd/env/model/ui/ui_groundplane/')}
-CUTS = {2: [-115, 211], 3: [-220, 220]}
+                       'data/hd/env/model/ui/ui_act3_vignette/', 'data/hd/env/model/ui/ui_groundplane/'),
+                   # Act 5, the frozen highlands (2026-11-15): trees, shrubs, grass; the highlands' cliffs (snowy and
+                   # icy), hills, ridges, craters, rocks and stones; snow piles, ice chunks; the menu's own act 5 pieces
+                   5: ('data/hd/env/foliage/expansion/model/', 'data/hd/env/foliage/global/model/expansion_',
+                       'data/hd/env/model/expansion/siege/expansion_siege_cliffs/',
+                       'data/hd/env/model/expansion/siege/expansion_siege_cliffs_ice/',
+                       'data/hd/env/model/expansion/siege/expansion_siege_hills/',
+                       'data/hd/env/model/expansion/siege/expansion_siege_hills_staged/',
+                       'data/hd/env/model/expansion/siege/expansion_siege_ridges/',
+                       'data/hd/env/model/expansion/siege/expansion_siege_ridges_staged/',
+                       'data/hd/env/model/expansion/siege/expansion_siege_craters/',
+                       'data/hd/env/model/expansion/siege/expansion_siege_rocks/',
+                       'data/hd/env/model/expansion/siege/expansion_siege_lake/',
+                       'data/hd/env/model/expansion/snowprops/',
+                       'data/hd/env/model/global/prop/expansion/snowprops/',
+                       'data/hd/env/model/global/prop/expansion/siege/expansion_siege_stones/',
+                       'data/hd/env/model/global/prop/expansion/siege/expansion_siege_ice_chunks/',
+                       'data/hd/env/model/global/prop/expansion/siege/expansion_siege_debris_snowy/',
+                       'data/hd/env/model/global/prop/expansion/siege/siege_natural_rubble/',
+                       'data/hd/env/model/global/prop/expansion/mountaintop/expansion_mountaintop_snow_piles/',
+                       'data/hd/env/model/global/prop/expansion/mountaintop/expansion_mountaintop_ice_buildup/',
+                       'data/hd/env/model/ui/ui_act5_frontend/', 'data/hd/env/model/ui/ui_vista/',
+                       # the Bloody Foothills' stake pits and stake barricades (owner 2026-11-15 10:12)
+                       'data/hd/env/model/expansion/siege/expansion_siege_pits/',
+                       'data/hd/env/model/expansion/siege/expansion_siege_wallpikes/',
+                       'data/hd/env/model/expansion/siege/expansion_siege_fences/',
+                       'data/hd/env/model/global/prop/expansion/siege/expansion_siege_posts/',
+                       'data/hd/env/model/global/prop/expansion/siege/expansion_siege_wood_props/',
+                       'data/hd/env/model/expansion/town/expansion_town_borders/')}
+CUTS = {2: [-115, 211], 3: [-220, 220], 5: [-234, 400]}
+# How far to the left an act's pieces are its own (more: the act before's); Act 5's neighbour is 469.5 to its left
+LEFT_OWN = {5: 234.0}
 UI_GROUNDS = 'data/hd/env/model/ui/'   # + every act's vignette ground (ui_actN_vignette*/...terrain...)
 ADD_STATUES = ('act2_statue0', )   # data/hd/env/model/global/prop/objects/statues/act2_statue0N
 PREVIEW_VERTS, PREVIEW_TEX = 6000, 128
@@ -78,6 +108,23 @@ def cat(m):
     if m.lower() in FLOORS:
         return 'podłoga'
     s = m.rsplit('/', 1)[-1]
+    if 'expansion' in m or 'snowprops' in m or 'act5' in m:   # Act 5, the highlands
+        # the highlands' cliff walls first (wall_stone_*, wall_ice_*, cliff_*: by name they fell among the rocks and the
+        # ice - owner 2026-11-15 10:30: "where are they?")
+        if any(k in m for k in ('siege_cliffs', 'siege_ridges', 'siege_hills')):
+            return 'klify i ściany'
+        if any(k in s for k in ('tree', 'pine', 'spruce', 'juniper', 'bristle', 'sapling', 'seedling')):
+            return 'drzewa'
+        if any(k in s for k in ('shrub', 'grass', 'weed', 'bush', 'flower', 'tussock', 'moorland', 'dogwood', 'corn')):
+            return 'rośliny'
+        if any(k in s for k in ('snow', 'slush', 'ice', 'icicle')):
+            return 'śnieg i lód'
+        if any(k in s for k in ('cliff', 'ridge', 'slope', 'hill', 'crater', 'mountain')) or 'siege_hills' in m:
+            return 'klify i ściany'
+        if any(k in s for k in ('rock', 'stone', 'boulder', 'rubble', 'pebble')):
+            return 'skały'
+        if any(k in m for k in ('siege_pits', 'wallpikes', 'siege_fences', 'siege_posts')) or any(k in s for k in ('pike', 'spear', 'stake')):
+            return 'doły i zasieki'
     if 'water' in s and ('ui_act3_vignette' in m or 'scum' in m):
         return 'teren'
     if any(k in m for k in ('docktown_docks/', 'dock_pieces/', 'meshif_dock', 'ui_act3_vignette/dock', 'ui_act3_vignette/broken_dock',
@@ -152,15 +199,15 @@ def main():
             continue
         x, z = float(t['position']['x']), float(t['position']['z'])
         r, ah = cz - z, cx - x
-        if not (-300 <= r <= 300 and -420 <= ah <= 260) or abs(z - cz) > 125 + 300 and False:
+        if not (-300 <= r <= (420 if a.act == 5 else 300) and -420 <= ah <= 260) or abs(z - cz) > 125 + 300 and False:
             continue
-        if z > cz + 125 or n.startswith('pcvr_tile_'):
-            continue   # (another act's; the road's curbs: laid by the script along the road)
+        if z > cz + LEFT_OWN.get(a.act, 125.0) or (a.act == 2 and n.startswith('pcvr_tile_')):
+            continue   # (another act's; Act 2's road curbs: laid by the script along the road)
         s = m.rsplit('/', 1)[-1].replace('.model', '')
-        if s in ('terrain', 'act5_frontend_terrain', 'terrain_act1_path01', 'blocker_disk01'):
-            continue
+        # every piece of the act is on the map (owner 2026-11-15 21:44: "all of them, even the ones that can't be
+        # moved") - the grounds, paths and blockers too, as 'teren' (locked until unlocked)
         q = t.get('orientation') or {}
-        c = cat(m)
+        c = 'teren' if s in ('terrain', 'act5_frontend_terrain', 'terrain_act1_path01', 'blocker_disk01') else cat(m)
         w, d = FOOT.get(s, DEFAULT.get(c, (2, 2)))
         items.append(dict(name=n, model=m, short=s, cat=c, right=round(r, 2), ahead=round(ah, 2),
                           y=round(float(t['position']['y']), 2),

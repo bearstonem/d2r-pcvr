@@ -212,12 +212,32 @@ def pick_texture(mat, cands, albs, model):
     return None
 
 
+def convex_hull(pts):
+    """The outline of points (x, z) seen from above, anticlockwise, [[x, z], ...] (Andrew's monotone chain)."""
+    p = sorted(pts)
+    if len(p) < 3:
+        return [list(q) for q in p]
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    lower, upper = [], []
+    for q in p:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], q) <= 0:
+            lower.pop()
+        lower.append(q)
+    for q in reversed(p):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], q) <= 0:
+            upper.pop()
+        upper.append(q)
+    return [list(q) for q in lower[:-1] + upper[:-1]]
+
+
 def extract(assets, names, albs, models, report, max_verts=MAX_VERTS, tex_size=TEX_SIZE, log=print):
     """Siatki i tekstury modeli -> ({model: {parts, lo, hi, ...}}, [obrazki data:]). Uzywa tez make_editor.py."""
     out_models, textures, tex_index = {}, [], {}
     for k, m in enumerate(sorted(models), 1):
         stem = m[:-len('.model')]
-        chosen = None
+        chosen = full = None
         for lod in ('_lod0', '_lod1', '_lod2', '', '_lod3', '_lod4'):
             f = stem + lod + '.model'
             if f not in names:
@@ -229,13 +249,34 @@ def extract(assets, names, albs, models, report, max_verts=MAX_VERTS, tex_size=T
                 continue
             if not meshes:
                 continue
-            chosen = (f, meshes)
+            if full is None:
+                full = (f, meshes)   # the most detailed that reads: the model's true size and outline
             if sum(len(d) for _, _, d in meshes) <= max_verts:
+                chosen = (f, meshes)
                 break
+        # (2026-11-15 21:44: when no LOD was light enough the LAST one read was kept - for a menu ground a small piece
+        # of it (terrain_act5_lod4: 74 x 31, flat; the ground is ~240 across and rises to 6); now the lightest that fits,
+        # else the most detailed - and the bounds always from the most detailed)
+        if chosen is None:
+            chosen = full
+        if chosen and full and chosen is not full:
+            def ext(ms):
+                xs = [v[0] for _, _, d in ms for v in d]; zs = [v[2] for _, _, d in ms for v in d]
+                return (max(xs) - min(xs)) * (max(zs) - min(zs))
+            if ext(chosen[1]) < 0.6 * ext(full[1]):   # a light LOD that is only a piece: show the whole
+                chosen = full
         if not chosen:
             report.append(f'  {m}: brak siatki')
             continue
         f, meshes = chosen
+        flo, fhi = [1e30] * 3, [-1e30] * 3
+        pts = set()
+        for _, _, d in full[1]:
+            for v in d:
+                for a in range(3):
+                    flo[a], fhi[a] = min(flo[a], v[a]), max(fhi[a], v[a])
+                pts.add((round(v[0], 1), round(v[2], 1)))
+        hull = convex_hull(pts)
         cands = texture_candidates(m, albs)
         used = []
         parts, lo, hi = [], [1e30] * 3, [-1e30] * 3
@@ -262,9 +303,11 @@ def extract(assets, names, albs, models, report, max_verts=MAX_VERTS, tex_size=T
                               't': tex, 'mesh': mname, 'mat': mat})
                 vbytes = None   # ten sam bufor dla kolejnych grup tej siatki
         used = sorted(set(used))
-        out_models[m] = {'parts': parts, 'lo': lo, 'hi': hi, 'lod': f.rsplit('/', 1)[-1],
+        lo, hi = flo, fhi
+        out_models[m] = {'parts': parts, 'lo': lo, 'hi': hi, 'hull': hull, 'lod': f.rsplit('/', 1)[-1],
                          'from': sorted(models[m]) if isinstance(models, dict) else [], 'tex': used}
-        report.append(f'  {m} | {f.rsplit("/", 1)[-1]} | {sum(len(d) for _, _, d in meshes)} wierzch. | '
+        report.append(f'  {m} | {f.rsplit("/", 1)[-1]} (rozmiar z {full[0].rsplit("/", 1)[-1]}, obrys {len(hull)} pkt) | '
+                      f'{sum(len(d) for _, _, d in meshes)} wierzch. | '
                       f'rozmiar {hi[0]-lo[0]:.1f} x {hi[1]-lo[1]:.1f} x {hi[2]-lo[2]:.1f} '
                       f'(od {lo[0]:.1f} {lo[1]:.1f} {lo[2]:.1f}) | materialy '
                       f'{[g[0] for _, gs, _ in meshes for g in gs]} | tekstury {used}')

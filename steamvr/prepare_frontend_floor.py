@@ -38,14 +38,14 @@ LODS = 5
 # Plates cut to the land under them: {name: (half, cells a picture, rows of '#' kept / '.' left out)}; a row is the
 # plate's z (from -half), a column its x (from -half). Act 3's stone lies at right -15, ahead -70, yaw 80 in the menu
 # (prepare_frontend_scene.TOWN_PLATES): a cross, as the town's ground lies (two bars in the plate's x / z: x -17..15 by
-# z -30..42, x -55..30 by z -22..12), its corners between the arms water, the arm nearest you short of the pier.
+# z -30..42, x -55..30 by z -22..12), its corners between the arms water, the arm nearest you to the pier (2026-11-15 10:12, owner: "its side nearer me still does not reach the pier" - 4 rows more, z -50).
 SHAPES = {'act3_stone': (60.0, 8, (
     '........................',
     '........................',
-    '........................',
-    '........................',
-    '........................',
-    '........................',
+    '.........######.........',
+    '.........######.........',
+    '.........######.........',
+    '.........######.........',
     '.........######.........',
     '.........######.........',
     '.#################......',

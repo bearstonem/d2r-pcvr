@@ -102,7 +102,7 @@ uniform bool SkyPano < hidden = true; > = false;
 uniform float SkyPanoYaw < hidden = true; > = 0.0;
 uniform float SkyPanoLow < hidden = true; > = -10.0;
 uniform float SkyPanoHigh < hidden = true; > = 40.0;
-// 0: the campfire's picture (D2R_SKY_PANO); 1: the main menu's act scene's own ([frontend] pano_N, D2R_SKY_PANO2)
+// 0: the campfire's picture (D2R_SKY_PANO); 1..5: the main menu's act N scene's own ([frontend] pano_N, D2R_SKY_FRONT_N)
 uniform float SkyPanoSlot < hidden = true; > = 0.0;
 uniform float Timer < source = "timer"; >;
 
@@ -247,11 +247,69 @@ sampler2D SkyCap5Smp { Texture = SkyCap5Tex; AddressU = WRAP; AddressV = WRAP; }
 #endif
 texture2D SkyPanoTex < source = D2R_SKY_PANO; > { Width = 8192; Height = 4096; Format = RGBA8; MipLevels = 14; };
 sampler2D SkyPanoSmp { Texture = SkyPanoTex; AddressU = WRAP; AddressV = CLAMP; };
-#ifndef D2R_SKY_PANO2
- #define D2R_SKY_PANO2 "D2R_Sky_ours/D2R_Sky_act1.png"
+// The main menu's act scenes' own skies ([frontend] pano_N): one texture each, all loaded once, so changing acts in the
+// menu only changes SkyPanoSlot (2026-11-15: one shared slot, renamed per act, recompiled the effect at every change -
+// a half-second to a second's hitch). D2R_SKY_FRONT_ON_N 0: that act has none - a tiny stand-in, no memory spent.
+#ifndef D2R_SKY_FRONT_1
+ #define D2R_SKY_FRONT_1 "D2R_Sky_ours/D2R_Sky_act1.png"
 #endif
-texture2D SkyPano2Tex < source = D2R_SKY_PANO2; > { Width = 4096; Height = 2048; Format = RGBA8; MipLevels = 13; };
-sampler2D SkyPano2Smp { Texture = SkyPano2Tex; AddressU = WRAP; AddressV = CLAMP; };
+#ifndef D2R_SKY_FRONT_ON_1
+ #define D2R_SKY_FRONT_ON_1 0
+#endif
+#if D2R_SKY_FRONT_ON_1
+texture2D SkyFront1Tex < source = D2R_SKY_FRONT_1; > { Width = 4096; Height = 2048; Format = RGBA8; MipLevels = 13; };
+#else
+texture2D SkyFront1Tex < source = D2R_SKY_FRONT_1; > { Width = 16; Height = 8; Format = RGBA8; };
+#endif
+sampler2D SkyFront1Smp { Texture = SkyFront1Tex; AddressU = WRAP; AddressV = CLAMP; };
+#ifndef D2R_SKY_FRONT_2
+ #define D2R_SKY_FRONT_2 "D2R_Sky_ours/D2R_Sky_act1.png"
+#endif
+#ifndef D2R_SKY_FRONT_ON_2
+ #define D2R_SKY_FRONT_ON_2 0
+#endif
+#if D2R_SKY_FRONT_ON_2
+texture2D SkyFront2Tex < source = D2R_SKY_FRONT_2; > { Width = 4096; Height = 2048; Format = RGBA8; MipLevels = 13; };
+#else
+texture2D SkyFront2Tex < source = D2R_SKY_FRONT_2; > { Width = 16; Height = 8; Format = RGBA8; };
+#endif
+sampler2D SkyFront2Smp { Texture = SkyFront2Tex; AddressU = WRAP; AddressV = CLAMP; };
+#ifndef D2R_SKY_FRONT_3
+ #define D2R_SKY_FRONT_3 "D2R_Sky_ours/D2R_Sky_act1.png"
+#endif
+#ifndef D2R_SKY_FRONT_ON_3
+ #define D2R_SKY_FRONT_ON_3 0
+#endif
+#if D2R_SKY_FRONT_ON_3
+texture2D SkyFront3Tex < source = D2R_SKY_FRONT_3; > { Width = 4096; Height = 2048; Format = RGBA8; MipLevels = 13; };
+#else
+texture2D SkyFront3Tex < source = D2R_SKY_FRONT_3; > { Width = 16; Height = 8; Format = RGBA8; };
+#endif
+sampler2D SkyFront3Smp { Texture = SkyFront3Tex; AddressU = WRAP; AddressV = CLAMP; };
+#ifndef D2R_SKY_FRONT_4
+ #define D2R_SKY_FRONT_4 "D2R_Sky_ours/D2R_Sky_act1.png"
+#endif
+#ifndef D2R_SKY_FRONT_ON_4
+ #define D2R_SKY_FRONT_ON_4 0
+#endif
+#if D2R_SKY_FRONT_ON_4
+texture2D SkyFront4Tex < source = D2R_SKY_FRONT_4; > { Width = 4096; Height = 2048; Format = RGBA8; MipLevels = 13; };
+#else
+texture2D SkyFront4Tex < source = D2R_SKY_FRONT_4; > { Width = 16; Height = 8; Format = RGBA8; };
+#endif
+sampler2D SkyFront4Smp { Texture = SkyFront4Tex; AddressU = WRAP; AddressV = CLAMP; };
+#ifndef D2R_SKY_FRONT_5
+ #define D2R_SKY_FRONT_5 "D2R_Sky_ours/D2R_Sky_act1.png"
+#endif
+#ifndef D2R_SKY_FRONT_ON_5
+ #define D2R_SKY_FRONT_ON_5 0
+#endif
+#if D2R_SKY_FRONT_ON_5
+texture2D SkyFront5Tex < source = D2R_SKY_FRONT_5; > { Width = 4096; Height = 2048; Format = RGBA8; MipLevels = 13; };
+#else
+texture2D SkyFront5Tex < source = D2R_SKY_FRONT_5; > { Width = 16; Height = 8; Format = RGBA8; };
+#endif
+sampler2D SkyFront5Smp { Texture = SkyFront5Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyBand6Tex < source = D2R_SKY_SNOW; > { Width = 3072; Height = 1024; Format = RGBA8; };
 sampler2D SkyBand6Smp { Texture = SkyBand6Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyCap6Tex < source = D2R_SKYCAP_SNOW; > { Width = 1024; Height = 1024; Format = RGBA8; };
@@ -299,21 +357,31 @@ float3 CapAt(int slot, float4 t, bool night)
     return tex2Dlod(SkyCap6Smp, t).rgb;
 }
 
+float3 PanoAt(int slot, float4 t)
+{
+    if (slot == 1) return tex2Dlod(SkyFront1Smp, t).rgb;
+    if (slot == 2) return tex2Dlod(SkyFront2Smp, t).rgb;
+    if (slot == 3) return tex2Dlod(SkyFront3Smp, t).rgb;
+    if (slot == 4) return tex2Dlod(SkyFront4Smp, t).rgb;
+    if (slot == 5) return tex2Dlod(SkyFront5Smp, t).rgb;
+    return tex2Dlod(SkyPanoSmp, t).rgb;
+}
+
 // The campfire's panorama ([campfire] panorama): PaintedSky hands over to it while SkyPano is set.
 float3 PanoSky(float3 dir)
 {
     const float pel = degrees(asin(clamp(dir.y, -1.0, 1.0)));
     const float pu = (atan2(dir.x, dir.z) / 6.2831853 + SkyPanoYaw / 360.0) * D2R_PANO_WRAPS;
     const float pv = (SkyPanoHigh - pel) / max(SkyPanoHigh - SkyPanoLow, 1.0);
-    const bool two = SkyPanoSlot > 0.5;
+    const int slot = (int)round(SkyPanoSlot);
     const float4 at = float4(pu, saturate(pv), 0, 0);
-    const float3 pc = two ? tex2Dlod(SkyPano2Smp, at).rgb : tex2Dlod(SkyPanoSmp, at).rgb;
+    const float3 pc = PanoAt(slot, at);
     // over the picture's top: one colour, its top row's average all round (not a per-direction
     // colour, which pinched into a cone overhead)
     float3 top = 0.0;
     [unroll] for (int k = 0; k < 8; ++k) {
         const float4 tt = float4((k + 0.5) / 8.0, 0.04, 0, 6);
-        top += two ? tex2Dlod(SkyPano2Smp, tt).rgb : tex2Dlod(SkyPanoSmp, tt).rgb;
+        top += PanoAt(slot, tt);
     }
     top /= 8.0;
     // near the zenith (or the picture's top, if lower) into that one colour: a picture's pole pinches

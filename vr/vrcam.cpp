@@ -432,7 +432,7 @@ struct Settings {
     // [frontend] pano_N / pano_file_N / pano_brightness_N / pano_saturation_N / pano_yaw_N / pano_low_N / pano_high_N:
     // an act scene's own sky, one picture round it (as the campfire's), in place of our act sky. Act 2's: a burning
     // yellow desert noon, not the starry night (owner 2026-11-14) - D2R_Sky_ours/D2R_Front_act2.png (tools: gen_front_act2_sky.py).
-    // One picture slot (D2R_SKY_PANO2): the first act that has its picture on and installed.
+    // Each act its own texture (D2R_SKY_FRONT_N), all loaded once; the act on show picks its own (SkyPanoSlot).
     std::atomic<bool>  frontendPano[6]{};
     std::atomic<float> frontendPanoBright[6]{}, frontendPanoSat[6]{}, frontendPanoYaw[6]{}, frontendPanoLow[6]{}, frontendPanoHigh[6]{};
     std::atomic<bool>  skyHidePanels{true}; // no sky while a side panel shifts the picture
@@ -836,10 +836,9 @@ struct SkyAct { float bright; std::string band, cap; bool bandOk, capOk; float f
                 std::string nightBand, nightCap; bool nightOk; };   // [sky] night_<act> / night_cap_<act>: the night picture (gen_night_sky.py)
 SRWLOCK g_skyCfgLock = SRWLOCK_INIT;
 std::string g_campfirePanoFile = "D2R_Sky_ours/D2R_Campfire_Pano.png";   // [campfire] pano_file (under g_skyCfgLock)
-std::string g_frontPanoFile;   // [frontend] pano_file_N of the act that has the picture slot (under g_skyCfgLock), "" none
-int g_frontPanoAct = 0;        // ... and that act (under g_skyCfgLock)
-// [frontend] each act's own picture, "" none (under g_skyCfgLock): the one slot follows the act on show (2026-11-14:
-// Act 3 has its own too - changing acts in the menu reloads the effect once)
+// [frontend] each act's own picture, "" none (under g_skyCfgLock): each in a texture of its own in the shader
+// (D2R_SKY_FRONT_N), all loaded once; the act on show only picks one (SkyPanoSlot). (2026-11-15: before, one slot
+// followed the act on show - every change of act renamed it and recompiled the effect, a hitch of up to a second.)
 std::string g_frontPanoFiles[6];
 extern std::atomic<int> g_frontAct;   // (below: the act on show)
 SkyAct g_skyAct[7];
@@ -1712,13 +1711,12 @@ void LoadSettings() {
             g_set.frontendCutFarRight.store(std::clamp(IniF(L"frontend", L"cut_far_right", 200.0f), 0.0f, 100000.0f));
             g_set.frontendCutFarAhead.store(std::clamp(IniF(L"frontend", L"cut_far_ahead", 190.0f), 0.0f, 100000.0f));
             g_set.frontendWispShadowDark.store(std::clamp(IniF(L"frontend", L"wisp_shadow_dark", 0.85f), 0.0f, 1.0f));
-            {   // [frontend] pano_N: each act's own sky picture; the first act with it on and installed gets the slot
-                std::string file;
-                int owner = 0;
+            {   // [frontend] pano_N: each act's own sky picture, each in its own texture
+                bool changed = false;
                 for (int n = 1; n <= 5; ++n) {
                     wchar_t key[32], def[96], buf[MAX_PATH];
                     swprintf_s(key, L"pano_%d", n);
-                    const bool on = IniB(L"frontend", key, n >= 2 && n <= 4);   // Acts 3 (2026-11-14) and 4 (2026-11-15) too
+                    const bool on = IniB(L"frontend", key, n >= 2 && n <= 5);   // Acts 3 (2026-11-14), 4 and 5 (2026-11-15) too
                     swprintf_s(key, L"pano_file_%d", n);
                     swprintf_s(def, L"D2R_Sky_ours/D2R_Front_act%d.png", n);
                     GetPrivateProfileStringW(L"frontend", key, def, buf, MAX_PATH, g_iniPath);
@@ -1727,10 +1725,15 @@ void LoadSettings() {
                     while (!f.empty() && (f.front() == L' ' || f.front() == L'"')) f.erase(0, 1);
                     const bool ok = on && !f.empty() && SkyFileExists(f);
                     for (wchar_t& c : f) if (c == L'\\') c = L'/';
-                    if (ok && !owner) { owner = n; file = Utf8(f.c_str()); }
                     {
                         const std::string mine = ok ? Utf8(f.c_str()) : std::string();
-                        AcquireSRWLockExclusive(&g_skyCfgLock); g_frontPanoFiles[n] = mine; ReleaseSRWLockExclusive(&g_skyCfgLock);
+                        AcquireSRWLockExclusive(&g_skyCfgLock);
+                        if (g_frontPanoFiles[n] != mine) {
+                            changed = true;
+                            LogF("vrcam: [frontend] act %d's sky picture: %s", n, mine.empty() ? "none" : mine.c_str());
+                        }
+                        g_frontPanoFiles[n] = mine;
+                        ReleaseSRWLockExclusive(&g_skyCfgLock);
                     }
                     g_set.frontendPano[n].store(ok);
                     swprintf_s(key, L"pano_brightness_%d", n);
@@ -1744,16 +1747,7 @@ void LoadSettings() {
                     swprintf_s(key, L"pano_high_%d", n);
                     g_set.frontendPanoHigh[n].store(std::clamp(IniF(L"frontend", key, 90.0f), -89.0f, 90.0f));
                 }
-                {   // the act on show, if it has its own
-                    const int now = std::clamp(g_frontAct.load(), 0, 5);
-                    AcquireSRWLockShared(&g_skyCfgLock); const std::string mine = now ? g_frontPanoFiles[now] : std::string(); ReleaseSRWLockShared(&g_skyCfgLock);
-                    if (!mine.empty()) { owner = now; file = mine; }
-                }
-                AcquireSRWLockExclusive(&g_skyCfgLock);
-                const bool changed = file != g_frontPanoFile;
-                g_frontPanoFile = file; g_frontPanoAct = owner;
-                ReleaseSRWLockExclusive(&g_skyCfgLock);
-                if (changed) { LogF("vrcam: [frontend] act %d's sky picture: %s", owner, file.empty() ? "none" : file.c_str()); g_skyCfgGen.fetch_add(1); }
+                if (changed) g_skyCfgGen.fetch_add(1);   // only when a picture is turned on/off or renamed in the ini
             }
             {
                 static const float kRight[6] = {0.0f, 0.0f, 211.0f, 237.0f, 234.0f, 0.0f};
@@ -11419,14 +11413,26 @@ bool ApplySkyPictures(reshade::api::effect_runtime* rt) {
             set = true;
         }
     }
-    {   // the main menu's act scene's own sky ([frontend] pano_N), the second panorama slot; none: a sky always installed
-        AcquireSRWLockShared(&g_skyCfgLock); const std::string file = g_frontPanoFile.empty() ? "D2R_Sky_ours/D2R_Sky_act1.png" : g_frontPanoFile; ReleaseSRWLockShared(&g_skyCfgLock);
-        const std::string want = "\"" + file + "\"";
+    for (int n = 1; n <= 5; ++n) {   // the main menu's act scenes' own skies ([frontend] pano_N): a texture each, all
+        // loaded at once (the act on show picks one by SkyPanoSlot, no recompile); none: a tiny stand-in from a sky
+        // that is always installed
+        AcquireSRWLockShared(&g_skyCfgLock); const std::string mine = g_frontPanoFiles[n]; ReleaseSRWLockShared(&g_skyCfgLock);
+        char name[32], onName[32];
+        snprintf(name, sizeof name, "D2R_SKY_FRONT_%d", n);
+        snprintf(onName, sizeof onName, "D2R_SKY_FRONT_ON_%d", n);
+        const std::string want = "\"" + (mine.empty() ? std::string("D2R_Sky_ours/D2R_Sky_act1.png") : mine) + "\"";
+        const char* wantOn = mine.empty() ? "0" : "1";
         char have[1024] = {};
         size_t size = sizeof have;
-        if (!(rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_SKY_PANO2", have, &size) && want == have)) {
-            rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_SKY_PANO2", want.c_str());
-            LogF("vrcam: menu act panorama D2R_SKY_PANO2 = %s", want.c_str());
+        if (!(rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", name, have, &size) && want == have)) {
+            rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", name, want.c_str());
+            LogF("vrcam: menu act %d's panorama %s = %s", n, name, want.c_str());
+            set = true;
+        }
+        char haveOn[16] = {};
+        size = sizeof haveOn;
+        if (!(rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", onName, haveOn, &size) && !strcmp(haveOn, wantOn))) {
+            rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", onName, wantOn);
             set = true;
         }
     }
@@ -12750,19 +12756,11 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
     // The campfire's panorama ([campfire] panorama): one picture round the scene, sky and mountains, in its own slot.
     const bool pano = CampfireSky() && !g_frontend3d.load() && g_set.campfirePano.load();
     // [frontend] pano_N: the act scene's own sky picture, if this act has the slot
-    const int frontPanoAct = FrontendActReady() ? g_frontAct.load() : 0;
-    AcquireSRWLockShared(&g_skyCfgLock); int slotAct = g_frontPanoAct; ReleaseSRWLockShared(&g_skyCfgLock);
-    if (frontPanoAct >= 1 && frontPanoAct != slotAct && g_set.frontendPano[frontPanoAct].load()) {   // the slot to this act
-        AcquireSRWLockExclusive(&g_skyCfgLock);
-        const std::string file = g_frontPanoFiles[frontPanoAct];
-        if (!file.empty()) { g_frontPanoFile = file; g_frontPanoAct = slotAct = frontPanoAct; }
-        ReleaseSRWLockExclusive(&g_skyCfgLock);
-        if (!file.empty()) { LogF("vrcam: [frontend] act %d's sky picture: %s", frontPanoAct, file.c_str()); g_skyCfgGen.fetch_add(1); }
-    }
-    const bool frontPano = CampfireSky() && g_frontend3d.load() && frontPanoAct >= 1 && frontPanoAct == slotAct &&
+    const int frontPanoAct = FrontendActReady() ? std::clamp(g_frontAct.load(), 0, 5) : 0;
+    const bool frontPano = CampfireSky() && g_frontend3d.load() && frontPanoAct >= 1 &&
                            g_set.frontendPano[frontPanoAct].load();
     SetBool(rt, "SkyPano", pano || frontPano);
-    SetFloat(rt, "SkyPanoSlot", frontPano ? 1.0f : 0.0f);
+    SetFloat(rt, "SkyPanoSlot", frontPano ? static_cast<float>(frontPanoAct) : 0.0f);   // its own texture (D2R_SKY_FRONT_N)
     if (frontPano) {
         SetFloat(rt, "SkyTex", 5.0f);   // painted (PaintedSky hands over to the panorama)
         SetFloat(rt, "SkyBrightness", g_set.frontendPanoBright[frontPanoAct].load());
