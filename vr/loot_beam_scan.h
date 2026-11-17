@@ -9,7 +9,8 @@ namespace D2RL {struct PluginContext;}
 // times a second the game thread walks the local game's item units and keeps the
 // beam-worthy ones near the hero; vrcam's effect setup reads the latest list and
 // D2R_DepthFog.fx draws the beams. Local games only (offline and hosted): a
-// joined game has no server units here, so it shows none.
+// joined game requests read-only, same-level item reports around its own player.
+// The host scans on its game thread; only bounded copied values reach the client.
 namespace lootscan {
 struct Shown {
     std::array<framevr::lootbeams::Lying,framevr::lootbeams::MaxBeams> items{};
@@ -21,6 +22,10 @@ struct Shown {
 // rarities (VR Settings > Interface > Labels > Loot beams: [loot] beams_unique, beams_set,
 // beams_rare, beams_runes) is read live on each scan.
 void Init(const D2RL::PluginContext* ctx,bool on,const framevr::lootbeams::Wanted& wanted);
+// Independent networking lifecycle, before desktop early exits.
+void InitNetwork(const D2RL::PluginContext* ctx);
+void TickNetwork(uint64_t session,uint32_t unit);
+void Stop();
 // vrcam's update thread: posts the scan to the game thread at most every 250 ms.
 void Tick(uint64_t now);
 // The latest list, if no older than maxAgeMs (else empty).
