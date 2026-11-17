@@ -24,12 +24,23 @@ using math::Quat;
 // game thread around a point. Bit x of rows[z] is cell (x0+x, z0+z): a wall,
 // closed door or unloaded room, by the same missile-barrier mask as arrows.
 inline constexpr int PatchCells=32;
+// The collision bits a cell carries (vr/wall_cells.cpp reads them all): 0x4 a wall, 0x800 a closed door - the
+// barrier arrows and bottles stop at - and 0x400 an object's footprint (a barrel, an urn, a chest), which has no
+// height of its own. Walls seen in logs: 0x5, 0x7, 0x15 (2026-11-09..12 flight barrier lines).
+inline constexpr uint16_t BarrierBits=0x804,ObjectBit=0x400,DoorBit=0x800;
 struct Patch {
     uint64_t session=0,serial=0;
+    uint64_t at=0;   // GetTickCount64 when sampled
     int x0=0,z0=0;
     std::array<uint32_t,PatchCells> rows{};
+    // Of the cells in rows, by the same bits: an object's footprint (ObjectBit, not a closed door), a closed door, and
+    // no room loaded there or off the map (a doorway into the next area). Held items stop only at the walls among
+    // them (Wall, held_world.h); bottles at every one.
+    std::array<uint32_t,PatchCells> objects{},doors{},unknown{};
     bool Covers(int x,int z) const {return x>=x0&&z>=z0&&x<x0+PatchCells&&z<z0+PatchCells;}
     bool Blocked(int x,int z) const {return Covers(x,z)&&((rows[z-z0]>>(x-x0))&1u);}
+    bool Bit(const std::array<uint32_t,PatchCells>& of,int x,int z) const {return Covers(x,z)&&((of[z-z0]>>(x-x0))&1u);}
+    bool Wall(int x,int z) const {return Blocked(x,z)&&!Bit(objects,x,z)&&!Bit(unknown,x,z);}
 };
 // Cells lie on the unsheared grid plane. As for arrows, only the floor's
 // shear is removed: walls stand vertically in rendered space above that floor.
@@ -98,11 +109,14 @@ inline float Radius(float modelRadius) {
 struct Shown {Vec p{};Quat q{0,0,0,1};uint32_t code=0;};
 // A held weapon, shield or fist that pushes bottles: a capsule from base to
 // tip in world metres, the same posed capsule physical melee tests creatures
-// with. Slots: right hand, left hand, shield.
+// with. Slots: right hand, left hand, shield. With props' weight on
+// (prop_heft.h), it strikes with its mass and pushes on with its strength;
+// 0 for either is a fist's.
 struct Collider {
     bool active=false;
     Vec base{},tip{};
     float radius=0;
+    float mass=0,strength=0; // kg, N
 };
 inline constexpr int Colliders=3;
 inline constexpr float MinColliderRadius=.02f,MaxColliderRadius=.08f; // a shield's fat creature capsule pushes from too far
@@ -124,6 +138,7 @@ struct Prop {
     props::Box bounds{};
     props::Support support{};
     float unitsPerMetre=0; // the scale it was given in: its matrix goes back with the same
+    float mass=0;          // kg (prop_heft.h Mass, by its kind); 0: by its material and size
 };
 struct PropScan {
     uint64_t session=0,serial=0;
@@ -153,7 +168,11 @@ struct Moved {
     bool resting=false;
 };
 // A prop a weapon or a moving body set going, for the log and the hand.
-struct Knock {uint32_t entity=0;uint16_t kind=0;int slot=-1;float speed=0;};
+struct Knock {uint32_t entity=0;uint16_t kind=0;int slot=-1;float speed=0,mass=0;};
+// The hardest a weapon struck a bottle or a prop since it was last asked:
+// the weapon's speed (m/s), the mass of what it struck and its own (kg; 0
+// with weight off), for the hand's tick or thud (prop_heft.h Thud).
+struct Strike {float speed=0,mass=0,weapon=0;};
 inline constexpr int SpellSlot=-2; // Knock::slot of a prop a spell missile set going (World::Push)
 inline constexpr double PropMoveLimit=12;  // seconds a prop may move before it is frozen where it is
 inline constexpr float PropRestSpeed=.03f; // m/s, and turning under 0.3 rad/s ...
@@ -209,8 +228,17 @@ public:
     // the steps it takes, pushing and waking the bottles in its way; a slot
     // without a valid collider is removed. Only while bottles lie in the world.
     void Weapons(const std::array<Collider,Colliders>&);
-    // The fastest a weapon struck a bottle since the last call (m/s), cleared.
-    float Struck(int slot);
+    // Props' weight (prop_heft.h; [interactions] prop_heft, on by default).
+    // On: each prop weighs what its kind and size say, and a weapon is a
+    // body of its striking mass held to the hand by a joint of its strength,
+    // left behind (and slipping through) by what it cannot move. Off: a
+    // weapon pushes everything aside at its own speed, as it always did.
+    void Heft(bool);
+    bool Heft() const;
+    // The hardest strike by a weapon since the last call, cleared.
+    Strike Struck(int slot);
+    unsigned Slips();      // weapons left behind that slipped through, since the last call
+    float Mass(uint32_t entity) const; // kg of that prop's body; 0 when it is not here
     // A spell missile's step or burst (spell_impacts.h), in world metres,
     // before the next Advance. Frozen props in its way are set going, the
     // nearest first, while fewer than the limit move (a spell never freezes

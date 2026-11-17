@@ -28,7 +28,7 @@ enum class View : uint8_t { Presets, Combat, Targeting, Shield, Monsters, Physic
 constexpr int MaxRailGroups=8;
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
-           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, MotionsWarlockOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, MeleeReach, WalkDirection, RoomSteps, LightRadiusBoost, WeaponHeft, BowBash, AimWithEyes, MercPotionAssist, ClickToDrink, SkillCooldowns, SummonRangeMultiplier, TCrossCalibrate, LookAtYou, ReverbEcho, HitStagger, HitKnockback, HapticSurfaces, HapticHeartbeat, LeftHanded, LeftHandedSticks, Count };
+           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, MotionsWarlockOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, MeleeReach, WalkDirection, RoomSteps, LightRadiusBoost, WeaponHeft, BowBash, AimWithEyes, MercPotionAssist, ClickToDrink, SkillCooldowns, SummonRangeMultiplier, TCrossCalibrate, LookAtYou, ReverbEcho, HitStagger, HitKnockback, HapticSurfaces, HapticHeartbeat, LeftHanded, HeldCollisions, HeldWorldCollisions, LeftHandedSticks, PropHeft, Count };
 // One bit per setting, 256 wide: four words, since MSVC has no wider integer.
 // (128 until 2026-11-08, when 126 were in use and more rows were coming.)
 struct ChangeMask {
@@ -296,11 +296,24 @@ inline constexpr std::array<Definition,Count> Definitions{{
     // shield on the right arm, the triggers, grips, face buttons and sticks swapped, the skills following the hand's
     // role. Its own switch (experimental, off by default). VR Settings > Controls > Hands.
     {"Left-handed (experimental)", "Weapon in the left hand, shield on the right; buttons, menus and motions mirrored", L"interactions",L"left_handed",0,0,1,1},
+    // Weapons collide (held_collision.h; owner 2026-11-11: "Let's add shield and weapon collisions, so they can collide
+    // each other"): the weapon stops at your own shield and slides along it, two weapons stop at each other; the drawn
+    // hand gives way, up to 12 cm. VR Settings > Combat, beside Melee reach. On by default.
+    {"Weapons collide", "Your weapon stops at your own shield, and two weapons stop at each other", L"gameplay",L"held_collisions",1,0,1,1},
+    // Weapons hit walls (held_world.h; owner 2026-11-12: "make it so the weapons and shields can collide with other geometry
+    // like world geometry the same way they can collide with each other"): a held weapon or shield stops at the level's
+    // walls, closed doors and the floor; the drawn hand gives way up to held::Cap. VR Settings > Physics > Props. On by default.
+    {"Weapons hit walls", "Your weapons and shield stop at walls, closed doors and the floor", L"gameplay",L"held_world_collisions",1,0,1,1},
     // Sticks stay right-handed (hand_role.h Sticks; left-handed players, 2026-11-11: "keep the game controls, like
     // movement and rotation, on the actual controllers as if they were right-handed"): with Left-handed on, the left
     // stick still walks and the right one turns; everything else stays mirrored. Off by default; shown only with
     // Left-handed on (RowShown), below it on Controls > Hands.
     {"Sticks stay right-handed", "Left-handed only: the left stick walks and the right stick turns, as right-handed", L"interactions",L"left_handed_sticks_right",0,0,1,1},
+    // Props have weight (prop_heft.h; owner 2026-11-12: "add weight and heft to the 3D objects that physically can be
+    // moved"): each knockable prop weighs what its kind and size say, and a weapon strikes with its own mass, so a
+    // barrel shrugs off a tap a cup flies from. On by default; Off pushes everything aside at the weapon's speed, as
+    // before. VR Settings > Gameplay > Physics > Props, under Knock over small props.
+    {"Props have weight", "A barrel takes a full swing to move; a cup flies off a tap", L"interactions",L"prop_heft",1,0,1,1},
 }};
 using Values=std::array<float,Count>;
 // The setting holding the skill on glyph shape i (glyph_recognizer.h order): the right hand's (0), or the left's (1).
@@ -574,6 +587,7 @@ inline bool RowShown(Key key,const Values& v,const Context& c){
         case CeilingTorches:return v[Ceiling]>.5f;   // beside Dungeon ceilings while they are on (a greyed half has no room for its lock)
         case RoomSteps:return v[Seated]<.5f;   // beside Seated play while it is off (sitting, there are no steps)
         case LeftHandedSticks:return v[LeftHanded]>.5f;   // under Left-handed while it is on (right-handed the sticks are already there)
+        case PropHeft:return v[PropPhysics]>.5f;   // under Knock over small props while props are knocked about
         // NVIDIA's rows follow the NVIDIA mode alone: By turns grays them with Frame generation (RowEnabled).
         case FrameGenPreset:case FrameGenScale:return framegen::Read(v[FrameGeneration],0,0).mode==framegen::Mode::Nvidia;
         default:return true;

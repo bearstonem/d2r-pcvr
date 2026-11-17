@@ -104,6 +104,8 @@ struct Output {
     // A trap or bomb thrown to place: in the hand while armed; released this
     // step from tossOrigin at tossVelocity (room metres, m/s).
     bool tossHeld=false,tossRelease=false;
+    // A thrown weapon's throw armed in either hand (its trigger held; held items stop colliding meanwhile).
+    bool throwHeld=false;
     Vec tossOrigin{},tossVelocity{};
     // The off trigger's toss (Input::offToss), the same way; offPress: this step's skill is its native press.
     bool offTossHeld=false,offTossRelease=false,offPress=false;
@@ -346,6 +348,7 @@ public:
                 }
             } else leftThrowing={};
             out.meleeContact=!trigger&&!out.javelinRelease;
+            out.throwHeld=throwing.armed||leftThrowing.armed;
             offToss(false);
             return out; // only the release spends ammunition; never hold A
         }

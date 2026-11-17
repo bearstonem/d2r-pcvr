@@ -76,11 +76,13 @@
 #include "haptic_frequency.h"
 #include "controller_profiles.h"
 #include "haptic_impact.h"
+#include "held_collision.h"
 #include "haptic_heartbeat.h"
 #include "xinput_rumble.h"
 #include "interaction_icons.h"
 #include "potion_models.h"
 #include "dropped_bottles.h"
+#include "prop_heft.h"
 #include "limb_board.h"
 #include "limb_physics.h"
 #include "limb_worker.h"
@@ -805,6 +807,10 @@ std::atomic<ULONGLONG> meleeImpactAt[2]{},shieldImpactAt{0},parryMissAt{0};
 // What the pending impact struck (haptics::Surface): the weapon hands' next MeleeImpact, and the shield's block or parry.
 std::atomic<int> meleeImpactSurface[2]{},shieldImpactSurface{int(haptics::Surface::Block)};
 std::atomic<uint32_t> meleeImpactFlags[2]{};   // the struck monster's MonStats flags, for the log
+// Held items collide (held_collision.h): a clank waiting for both controllers, and what of each input frame keeps
+// the hands' items from colliding (held::Reason bits), for the game side.
+std::atomic<ULONGLONG> heldClankAt{0},heldBlocksAt{0};std::atomic<float> heldClankStrength{0};std::atomic<uint32_t> heldBlocks{0};
+std::atomic<unsigned> heldClankArms{3};   // the controllers it is felt in: bit 0 the right, bit 1 the left (physical)
 XrSwapchain gameplayChain=XR_NULL_HANDLE;
 std::mutex sewerPromptMutex;
 sewerprompt::Target sewerPrompt;
@@ -873,8 +879,12 @@ math::Quat turnBase{0,0,0,1};bool turnBaseKnown=false;double roomSaidAt=0;
 roomsteps::Chase roomChase;
 roomsteps::Output roomOut;
 math::Vec roomHero{};bool roomHeroKnown=false;double roomHeroAt=0;
-struct RoomStepStats {double from=0,pauseSaid=0;float walked=0,followed=0;unsigned pushed=0,jumps=0;bool on=false,walking=false;
+// walked: the hero's moves while followed; followed: what the origin took of them (Follow); away: the rest, the game
+// carrying him elsewhere (Leap, Whirlwind, Charge), which the camera went along with.
+struct RoomStepStats {double from=0,pauseSaid=0;float walked=0,followed=0,away=0;unsigned pushed=0,jumps=0;bool on=false,walking=false;
                       roomsteps::Pause pause=roomsteps::Pause::Off;} roomStats;
+// HeroCarried (vrcam): until when, GetTickCount64 ms, the game carries the hero itself (Leap's take-off and flight).
+std::atomic<uint64_t> heroCarriedUntil{0};
 GripStickButton leftMenuButton;
 stickgestures::Gestures rightStickGestures;   // right stick up: run / walk (the Stick toggle); down: loot labels
 MenuTriggerGate menuTriggerGate;
@@ -1037,6 +1047,11 @@ uint64_t droppedSession=0;
 interaction::Carry playerCarry; // the player's world velocity, for throws and let-go bottles
 // The level's small props share that world ([interactions] prop_physics).
 std::atomic<bool> propPhysics{true};
+// Props' weight (prop_heft.h; [interactions] prop_heft), and each hand's weapon heft (weapon_heft.h
+// Weight, 0..1) as the melee samples last had it: its striking mass and strength.
+std::atomic<bool> propHeft{true};
+std::array<float,2> propWeaponWeight{};
+unsigned propSlips=0;ULONGLONG propSlipsAt=0;
 bool propsWanted=false;
 uint64_t propPoseSerial=0;
 // The weapons that push them, posed on the vrcam update thread.
@@ -1374,7 +1389,7 @@ void ClearInput() {
     spellHaptics.Clear();
     lootlabels::display.Clear();
     rightStickGestures.Reset();
-    meleeImpactAt[0]=meleeImpactAt[1]=shieldImpactAt=parryMissAt=0;
+    meleeImpactAt[0]=meleeImpactAt[1]=shieldImpactAt=parryMissAt=heldClankAt=0;
     wristHeading.Reset();compassFrame=false;mapZoom.Reset();wristMapLooked=wristMapLookedOnly=false;floatMapWant=floatMapPointed=false;
     panelinput::WorldInput(false);
     gamestate::MenuMap(false);
@@ -3231,6 +3246,9 @@ bottles::Prop Metres(const props::Seen& s,float upm) {
     p.p=at.p*(1/upm);p.q=at.q;p.scale=at.scale;
     const auto scaled=[&](math::Vec v){return math::Vec{v.x*at.scale.x/upm,v.y*at.scale.y/upm,v.z*at.scale.z/upm};};
     p.bounds={scaled(s.local.lo),scaled(s.local.hi)};
+    // Its weight by its kind and size (prop_heft.h): a cup 0.2 kg, a chair 10, a barrel 50.
+    const math::Vec size=p.bounds.hi-p.bounds.lo;
+    p.mass=propheft::Mass(propscan::KindName(s.kind),s.material,s.shape,{std::fabs(size.x),std::fabs(size.y),std::fabs(size.z)});
     p.support=s.support;
     p.support.y/=upm;p.support.x0/=upm;p.support.z0/=upm;p.support.x1/=upm;p.support.z1/=upm;
     p.unitsPerMetre=upm;
@@ -3607,13 +3625,19 @@ std::array<bottles::Collider,bottles::Colliders> HeldColliders() {
             if(w.valid&&now>=w.at&&now-w.at<=100)weapons[i]={true,w.blade.base,w.blade.tip,w.blade.radius};
         }
     }
+    // Their weight (prop_heft.h): each hand's weapon by its heft, the shield braced on the forearm.
+    for(int h=0;h<2;++h)if(weapons[size_t(h)].active) {
+        weapons[size_t(h)].mass=propheft::StrikingMass(propWeaponWeight[size_t(h)]);
+        weapons[size_t(h)].strength=propheft::PushStrength(propWeaponWeight[size_t(h)]);
+    }
+    if(weapons[2].active){weapons[2].mass=propheft::ShieldMass;weapons[2].strength=propheft::ShieldPush;}
     // A hand without a weapon capsule (empty, or the off hand without dual
     // wielding or a shield) still pushes, as a fist at the controller.
     for(int h=0;h<2&&motionControls.load();++h) {
         if(weapons[size_t(h)].active||!in.tracked[h]||out.bottleHand==h)continue;
         const auto p=in.stage.World(in.hand[h].p);
         const auto forward=math::Rotate(in.stage.base,math::Rotate(in.hand[h].q,{0,0,-1}));
-        weapons[size_t(h)]={true,p-forward*.03f,p+forward*.08f,.045f};
+        weapons[size_t(h)]={true,p-forward*.03f,p+forward*.08f,.045f,propheft::StrikingMass(0),propheft::PushStrength(0)};
     }
     return weapons;
 }
@@ -3710,6 +3734,7 @@ void StepDroppedBottles() {
     if(droppedBottles&&wallcells::Latest(patch))droppedBottles->Walls(patch);
     PushSpells(droppedBottles&&world&&!droppedBottles->Idle()?droppedBottles.get():nullptr,in.time,floor,upm);
     if(!droppedBottles||droppedBottles->Idle()||!in.stage.known)return; // menus and loading hold them still
+    droppedBottles->Heft(propHeft.load());
     droppedBottles->Weapons(HeldColliders());
     droppedBottles->Advance(in.time,in.stage.anchor);
     // Draw a thrown potion where this frame's steps left it.
@@ -3732,14 +3757,21 @@ void StepDroppedBottles() {
             potionFlight={};
         }
     }
-    // A light tick in the hand whose weapon struck a bottle or a prop.
+    // The hand whose weapon struck a bottle or a prop feels it (prop_heft.h Thud): a light thing a
+    // tick, a heavy one a knock and a low thud, as hard as the share of the swing it took. With
+    // weight off, the light tick for everything, as before.
     for(int slot=0;slot<bottles::Colliders;++slot) {
-        const float speed=droppedBottles->Struck(slot);const int hand=slot?1:0;const auto now=GetTickCount64();
-        if(speed>1&&now-bottleStruckAt[hand]>=80) {
+        const auto strike=droppedBottles->Struck(slot);const int hand=slot?1:0;const auto now=GetTickCount64();
+        if(strike.speed>1&&now-bottleStruckAt[hand]>=80) {
             bottleStruckAt[hand]=now;
-            MotionPulse(hand,haptics::Category::Melee,std::clamp(.12f+speed*.02f,.12f,.35f),15000000);
+            const bool shortTaps=vrsettings::Read().values[settings::HapticShortMelee]>.5f;
+            const auto thud=propheft::Thud(strike.speed,strike.mass,strike.weapon,shortTaps);
+            if(thud.count==1)MotionPulse(hand,haptics::Category::Melee,thud.steps[0].sample.amplitude,
+                XrDuration(thud.steps[0].sample.milliseconds)*1000000,thud.steps[0].sample.frequency>0?thud.steps[0].sample.frequency:XR_FREQUENCY_UNSPECIFIED);
+            else if(thud.count>1){hapticSequences.Play(hand,thud,now);PumpHapticSequences();}
         }
     }
+    propSlips+=droppedBottles->Slips();
     // Moving props: their matrices for the renderer's next transform pass.
     std::array<bottles::Moved,props::MaxMoving> moved{};
     if(const unsigned n=droppedBottles->Moving(moved)) {
@@ -3758,10 +3790,15 @@ void StepDroppedBottles() {
         if(knocks[i].slot==bottles::SpellSlot)continue;   // a spell's: PushSpells logged it
         if(knocks[i].slot<0){++chained;continue;}
         char line[160];++struck;
-        std::snprintf(line,sizeof line,"Frame props: knocked a %s (%s, %.1f m/s)",propscan::KindName(knocks[i].kind),by[knocks[i].slot%3],knocks[i].speed);
+        std::snprintf(line,sizeof line,"Frame props: knocked a %s (%s, %.1f m/s, %.1f kg)",propscan::KindName(knocks[i].kind),by[knocks[i].slot%3],knocks[i].speed,knocks[i].mass);
         Say(line);
     }
     if(struck||chained)propscan::CountKnocks(struck,chained);
+    // Weapons left behind by something too heavy to move, and slipped through it: every ten seconds that had some.
+    if(propSlips&&GetTickCount64()-propSlipsAt>=10000) {
+        char line[120];std::snprintf(line,sizeof line,"Frame props: ten seconds: %u weapon slips through heavy props",propSlips);
+        Say(line);propSlips=0;propSlipsAt=GetTickCount64();
+    }
     bottles::WallRequest want;
     if(droppedBottles->WallsWanted(want))wallcells::Want(want,in.at);
 }
@@ -5041,6 +5078,17 @@ void Input() {
         potionRouteSaid=potionRoute;potionHandsSaid=potionHands;
     }
     motionOutput=motion.Step(motionInput);motionAt=GetTickCount64();
+    {   // Held items collide: no collisions while the hands are pointers (a menu, the inventory, VR Settings), a wheel or
+        // the leather menu is up, or a hand throws: a potion in it, a trap or bomb held to toss, a thrown weapon armed.
+        // Motion combat Off leaves them colliding: the arms still follow the controllers.
+        uint32_t blocks=0;
+        if(panelMode||spatialMode||settingsOwned||settingsChord||inventoryPressed||menuPressed||interactionOutput.inventory)blocks|=held::Menu;
+        if(!motionHeadTracked)blocks|=held::Untracked;
+        if(interactionOutput.wheel||interactionOutput.settings)blocks|=held::Wheel;
+        if(leatherMode)blocks|=held::Leather;
+        if(interactionOutput.bottleHand>=0||motionOutput.tossHeld||motionOutput.offTossHeld||motionOutput.throwHeld)blocks|=held::Throwing;
+        heldBlocks=blocks;heldBlocksAt=GetTickCount64();
+    }
     if(motionOutput.offPress)castHand=1;   // the off trigger's own press aims from the off hand
     // A potion that is the hero's only weapon is never swung: the game would throw it.
     for(int h=0;h<2;++h)if(potionRoute.trigger[h]>=0&&!weaponskills::Armed(potionHeld[1-h]))motionOutput.meleeContact=false;
@@ -5914,6 +5962,7 @@ void Input() {
         sample.reactions=uint8_t((gestureSettings[settings::HitStagger]>.5f?hitreact::Stagger:0)|
                                  (gestureSettings[settings::HitKnockback]>.5f?hitreact::Knockback:0));
         sample.weight=heftNeed(0,true);
+        propWeaponWeight[0]=sample.weight;   // the props' world: this hand's striking mass (prop_heft.h)
         // Melee-skill contact adapter: each hand's strikes carry its own trigger
         // skill when that is a confirmed strike skill (strike_skills.h). The
         // assignment identity rides the sample, so a rebind drops a queued stroke.
@@ -5932,6 +5981,7 @@ void Input() {
         sample.active=((sample.active&&(dual||claws))||bowBash)&&controls.lt<51&&controls.rt<51;
         sample.heft=bowBash?0.f:heftNeed(1);
         sample.weight=bowBash?0.f:heftNeed(1,true);
+        propWeaponWeight[1]=sample.weight;
         strike(1);
         if(bowBash)sample.strikeSkill=-1;   // a bow's swing never casts
         offhandPoses.Push(s.sampleStamp,sample);
@@ -6022,6 +6072,13 @@ void Input() {
     }
     if(const auto at=shieldImpactAt.exchange(0);at&&motionInput.active&&GetTickCount64()-at<150)
         surfacePulse(1,shieldImpactSurface.exchange(int(haptics::Surface::Block))==int(haptics::Surface::Parry)?haptics::Surface::Parry:haptics::Surface::Block,0);
+    // Held items collide: the weapon struck the shield or the other weapon - a metal clank in both hands, by how fast.
+    if(const auto at=heldClankAt.exchange(0);at&&motionInput.active&&GetTickCount64()-at<150) {
+        // Both hands when the two items met; the one whose item struck a wall or the floor (held_world.h). The arms are
+        // the physical controllers; the sequences play by role.
+        const auto clank=held::Clank(heldClankStrength.load());const unsigned arms=heldClankArms.load();
+        for(int physical=0;physical<2;++physical)if(arms&(1u<<physical))hapticSequences.Play(handRoles.map.Role(physical),clank,GetTickCount64());
+    }
     PumpHapticSequences();
     // A parry swing that missed: a soft, dull buzz on the shield hand, unlike a
     // block's sharp tap. Scaled by the Melee haptic strength setting.
@@ -6085,8 +6142,15 @@ void Input() {
         in.trigger=motionInput.trigger>.3f||motionInput.leftTrigger>.3f;
         in.bow=motionOutput.bowDrawing;
         in.cast=NativeSkillCasting();
+        in.carried=GetTickCount64()<heroCarriedUntil.load();
         roomOut=roomChase.Step(in);
         auto& st=roomStats;
+        if(roomOut.recentre) {   // the watchdog (room_steps.h FarMetres): the chase moved its anchor; the origin goes with it
+            origin=origin+roomOut.shift;
+            char line[240];std::snprintf(line,sizeof line,"Frame room steps: the view had come off the hero - you stood %.2f m from his spot for %.1f s (%s); the room is put back under you",
+                roomOut.apart,roomOut.heldFor,roomOut.blocked?"blocked: he could not come closer":roomsteps::PauseName(roomOut.pause));
+            Say(line);
+        }
         if(in.on!=st.on){st.on=in.on;Say(in.on?"Frame room steps: on - the hero's spot follows you in your room":"Frame room steps: off");}
         if(roomOut.push!=st.walking) {
             st.walking=roomOut.push;char line[200];
@@ -6103,12 +6167,12 @@ void Input() {
         if(roomOut.push)++st.pushed;
         if(st.from<=0)st.from=in.time;
         if(in.time-st.from>=1) {
-            if(st.pushed||st.followed>0||st.jumps) {
-                char line[240];std::snprintf(line,sizeof line,"Frame room steps: last %.1f s: pushed %u frames, the hero walked %.2f m, the origin followed %.2f m, jumps %u; now %.2f m from the hero, pause %s",
-                    in.time-st.from,st.pushed,st.walked,st.followed,st.jumps,roomOut.offset,roomsteps::PauseName(roomOut.pause));
+            if(st.pushed||st.followed>0||st.away>0||st.jumps) {
+                char line[300];std::snprintf(line,sizeof line,"Frame room steps: last %.1f s: pushed %u frames, the hero walked %.2f m, the origin followed %.2f m (%.2f m he moved away from you not followed), jumps %u; now %.2f m from the hero, pause %s",
+                    in.time-st.from,st.pushed,st.walked,st.followed,st.away,st.jumps,roomOut.offset,roomsteps::PauseName(roomOut.pause));
                 Say(line);
             }
-            st.from=in.time;st.pushed=st.jumps=0;st.walked=st.followed=0;
+            st.from=in.time;st.pushed=st.jumps=0;st.walked=st.followed=st.away=0;
         }
     }
     ++s.counter;
@@ -6289,7 +6353,7 @@ bool Begin(bool pair=false) {
     bowRenderTime=GetTickCount64();
     const bool loaded=inWorld&&inWorld();
     if(loaded&&!worldWasLoaded)worldCalibrationPending=true;
-    if(!loaded)worldCalibrationPending=worldRecenter=false;
+    if(!loaded){worldCalibrationPending=worldRecenter=false;heroCarriedUntil=0;}   // no Leap is carried out of a game
     worldWasLoaded=loaded;
     // A cinematic: the world is not drawn (cinema_screen.h) - its frame on the cinema screen, never the spatial menus.
     const bool cinema=gamestate::CinemaPlaying();
@@ -8049,6 +8113,7 @@ void ConfigureLeatherMenu(bool on,float menuWidth,float tilt,bool world,bool bac
 }
 bool LeatherMenuWorld(){return leatherShown.load();}
 void ConfigurePropPhysics(bool on){propPhysics=on;propscan::Configure(on);}
+void ConfigurePropHeft(bool on){propHeft=on;}
 void ConfigureBodyPhysics(bool on){bodyPhysics=on;}
 bool BodyPhysics(){return bodyPhysics.load()&&motionControls.load();}
 void BottleWeapon(int slot,const melee::Blade* blade) {
@@ -8100,6 +8165,10 @@ bool CrossbowAiming() {
     const int slot=motionOutput.skill;
     if(slot<0||slot>=skills::Count||!interaction::Fresh(interactionInput.snapshot,gamestate::LocalPlayer(),GetTickCount64()))return false;
     const auto& skill=interactionInput.snapshot.skills[slot];return skill.known&&skill.available&&skill.id==0;
+}
+void HeroCarried(uint32_t milliseconds) {
+    const uint64_t until=GetTickCount64()+milliseconds;
+    for(uint64_t was=heroCarriedUntil.load();was<until&&!heroCarriedUntil.compare_exchange_weak(was,until);){}
 }
 bool NativeSkillCasting() {
     std::lock_guard lock(mutex);
@@ -8308,6 +8377,13 @@ void FinishShieldSkill(bool accepted) {
     if(accepted){shieldImpactSurface=int(haptics::Surface::Block);shieldImpactAt=shieldFeedbackAt;}
 }
 void MeleeImpact(int hand) {if(hand>=0&&hand<2)meleeImpactAt[hand]=bodyStrikeAt[hand]=GetTickCount64();}
+void HeldClank(float strength,unsigned arms) {
+    heldClankStrength=std::isfinite(strength)?std::clamp(strength,0.f,1.f):0.f;heldClankArms=arms&3u?arms&3u:3u;heldClankAt=GetTickCount64();
+}
+uint32_t HeldCollisionBlocks() {
+    const auto at=heldBlocksAt.load(),now=GetTickCount64();
+    return at&&now>=at&&now-at<200?heldBlocks.load():uint32_t(held::Menu);   // no recent input frame: no gameplay hands
+}
 void ImpactSurface(int hand,int surface,uint32_t flags) {if(hand>=0&&hand<2){meleeImpactSurface[hand]=surface;meleeImpactFlags[hand]=flags;}}
 void ShieldGuardImpact(bool parry,float weight) {
     shieldImpactSurface=int(parry?haptics::Surface::Parry:haptics::Surface::Block);
@@ -8496,19 +8572,25 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
         }
     }
     if(eye<0) {   // Room follows you (room_steps.h): while the hero walks after your step, the origin follows him,
-                  // so the camera stays at the real head. A jump (teleport, waypoint, Leap) is not followed.
+                  // so the camera stays at the real head. A jump (teleport, waypoint, another area) is not followed,
+                  // and the game carrying him elsewhere (Leap's flight, Whirlwind) only as far as it pays your step off
+                  // (Follow): followed whole, the origin flew off with him and the camera stayed behind until a reload.
         const math::Vec now{hero[0],hero[1],hero[2]};const double at=Milliseconds()/1000.0;
-        if(roomHeroKnown&&roomOut.follow&&at>roomHeroAt&&at-roomHeroAt<.25) {
+        if(roomHeroKnown&&at>roomHeroAt&&at-roomHeroAt<.25) {
             const math::Vec moved{now.x-roomHero.x,0,now.z-roomHero.z};
             const float metres=std::sqrt(moved.x*moved.x+moved.z*moved.z)/upm;
             if(metres>roomsteps::MaxHeroStep) {
-                ++roomStats.jumps;
-                char line[200];std::snprintf(line,sizeof line,"Frame room steps: the hero moved %.2f m in %.0f ms (a teleport, waypoint or leap): the origin stays",metres,(at-roomHeroAt)*1000);
-                Say(line);
-            } else if(metres>0) {
-                const auto shift=roomsteps::Shift(moved,base,upm);
-                origin=origin+shift;roomChase.Shifted(shift);
-                roomStats.walked+=metres;roomStats.followed+=std::sqrt(shift.x*shift.x+shift.z*shift.z);
+                roomChase.Jumped();
+                if(roomOut.follow) {
+                    ++roomStats.jumps;
+                    char line[200];std::snprintf(line,sizeof line,"Frame room steps: the hero moved %.2f m in %.0f ms (a teleport, waypoint or another area): the origin stays",metres,(at-roomHeroAt)*1000);
+                    Say(line);
+                }
+            } else if(roomOut.follow&&metres>0) {
+                const auto shift=roomChase.Follow(roomsteps::Shift(moved,base,upm));
+                origin=origin+shift;roomChase.Shifted(shift,metres);
+                const float followed=std::sqrt(shift.x*shift.x+shift.z*shift.z);
+                roomStats.walked+=metres;roomStats.followed+=followed;roomStats.away+=std::max(0.f,metres-followed);
             }
         }
         roomHero=now;roomHeroKnown=true;roomHeroAt=at;

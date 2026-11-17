@@ -456,6 +456,11 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.melee_reach_cm",.page=View::Combat,.section="Melee",.kind=RowKind::Slider,.label="Melee reach",
      .help="A weapon or fist that passes this close beside a monster still hits it. Raise it if near misses don't count. Walls still block.",
      .format={.unit="cm"}},
+    // Weapons collide (held_collision.h; owner 2026-11-11): [gameplay] held_collisions, On by default. The Combat page has
+    // no free row (8 at most): it is Melee reach's right half, the other setting about where a weapon meets things.
+    {.id="gameplay.held_collisions",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Weapons collide",
+     .help="Your weapon stops at your own shield and slides along it, and two weapons stop at each other. Your hand gives way up to 60 cm.",
+     .beside=true,.besideLabel="Collide"},
     // Weapon heft and Bow bash (#443; Discord #ideas, 2026-11-04): one row, the page's last free one (8 at most).
     // [gameplay] weapon_heft and bow_bash, both Off by default.
     {.id="gameplay.weapon_heft",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Weapon heft",
@@ -547,8 +552,15 @@ inline constexpr Override Overrides[]={
      .help="Empty bottles drop and roll. Potions thrown at your mercenary break where they hit; thrown traps and gas or oil potions stop at walls."},
     {.id="interactions.prop_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Knock over small props",
      .help="Cups, vases, books and stools tumble when your weapon, hand or shield hits them. Just for looks."},
+    // [interactions] prop_heft (prop_heft.h), On by default; shown while Knock over small props is on (RowShown).
+    {.id="interactions.prop_heft",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Props have weight",
+     .help="A cup flies off a tap; a barrel or sack takes a full swing and barely shifts, and your hand feels the thud. Off: all fly alike."},
     {.id="interactions.body_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Pushable bodies",
      .help="Your weapon, shield or fist pushes aside the limbs of monsters and townsfolk it meets, and they spring back. Just for looks. Motion combat in first person."},
+    // Weapons hit walls (held_world.h; owner 2026-11-12): [gameplay] held_world_collisions, On by default. On Physics with
+    // the other things your weapons meet (Combat, beside Weapons collide, has no free row).
+    {.id="gameplay.held_world_collisions",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Weapons hit walls",
+     .help="Your weapons and shield stop at walls, closed doors and the floor, and slide along them. Your hand gives way up to 60 cm."},
     // Physics: Monsters and townsfolk. Heads turn to you (look_at.h; owner, 2026-11-09), On by default. On this page
     // beside Pushable bodies, the other drawn-only change to their poses (Monsters already has its three sections).
     {.id="gameplay.look_at_you",.page=View::Physics,.section="Monsters and townsfolk",.kind=RowKind::Toggle,.label="Heads turn to you",

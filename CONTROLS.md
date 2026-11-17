@@ -250,6 +250,15 @@ about 40 cm of hand travel, a two-handed sword 32, a crystal sword 16 and a long
 sword 12; faster weapons need less. Daggers, claws, wands, orbs, thrown weapons and
 fists hit fully with a flick. Turning the wrist or drifting the hand slowly does
 not count. Each hit is still one game attack, and the weapon never lags your hand.
+**Gameplay > Combat > Weapons collide** (On by default; the right half of Melee
+reach's row) keeps your own items from passing through each other: the weapon
+stops at the shield on your other arm and slides along its face, and two weapons,
+one in each hand, stop at each other. Your real hand cannot be stopped, so the
+hero's hand gives way instead, at most 60 cm, and eases back to your controller in
+about 0.1 s once they part; push further and they pass through. A strike clanks in
+both controllers (Melee hits strength), and a fast one plays the game's block
+clank. Bows, two-handed grips, throws, Druid forms and menus are left alone; an
+Assassin's crossed claws rest against each other and still block.
 **Gameplay > Physics > Struck monsters** (both On by default) makes monsters answer
 your strokes. **Monsters stagger:** a long, committed stroke that lands on the beat
 makes the monster flinch, whatever the damage. **Heavy hits knock back:** a full
