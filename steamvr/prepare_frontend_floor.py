@@ -188,15 +188,27 @@ def used_test_models(assets, folder=TESTS):
     return used
 
 
+def prepare(game, casclib=None, mod='D2R-PCVR'):
+    """For the installer: the floors' model files as a payload {'<mod>.mpq/<path>': bytes} (the installer writes them);
+    frontend_floors.json beside this script is written, as prepare_frontend_scene.py reads it."""
+    return build(Path(game), casclib, mod, write=False)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('game', type=Path)
     ap.add_argument('--casclib', type=Path, default=None)
     ap.add_argument('--mod', default='D2R-PCVR')
     a = ap.parse_args()
+    build(a.game, a.casclib, a.mod, write=True)
+    return 0
+
+
+def build(game, casclib, mod, write):
     registry = json.loads(REGISTRY.read_text(encoding='utf-8')) if REGISTRY.exists() else {}
-    root = a.game / 'mods' / a.mod / f'{a.mod}.mpq'
-    with open_assets(a.game, a.casclib) as assets:
+    root = game / 'mods' / mod / f'{mod}.mpq'
+    payload = {}
+    with open_assets(game, casclib) as assets:
         names = {n.lower(): n for n in assets.files}
         if ceiling.SOURCE.lower() not in names:
             raise SystemExit("act 1's cave rock model is not in this game")
@@ -242,9 +254,12 @@ def main():
             for lod in range(LODS):
                 f = granny_write.File(rock)
                 granny_write.remesh(f, mesh, renames, lod)
-                out = root / f'{base}_lod{lod}.model'
-                out.parent.mkdir(parents=True, exist_ok=True)
-                out.write_bytes(granny_write.write(f))
+                data = granny_write.write(f)
+                payload[f'{mod}.mpq/{base}_lod{lod}.model'] = data
+                if write:
+                    out = root / f'{base}_lod{lod}.model'
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    out.write_bytes(data)
             print(f'{name}: {maps.rsplit("/", 1)[-1]} -> {base}.model ({shape})')
         # floors no longer made (and earlier tries): their files out of the mod folder, out of the registry
         made = {n for n, _ in FLOORS}
@@ -253,13 +268,13 @@ def main():
             gone = 0
             for lod in range(LODS):
                 old = root / f'{base}_lod{lod}.model'
-                if old.is_file():
+                if write and old.is_file():
                     old.unlink()
                     gone += 1
             print(f'{name}: no longer made - {gone} files of {base.rsplit("/", 1)[-1]} taken out of the mod folder')
     REGISTRY.write_text(json.dumps(registry, indent=1) + '\n', encoding='utf-8')
     print(f'gotowe - {REGISTRY.name}')
-    return 0
+    return payload
 
 
 if __name__ == '__main__':

@@ -1121,7 +1121,7 @@ void FrontendPresetSwitch() {
     if (dir.empty()) return;
     const std::wstring mod = dir.substr(dir.find_last_of(L'\\') + 1);   // ...\mods\<mod>
     const std::wstring on = dir + L"\\" + mod + L".mpq\\data\\hd\\env\\preset\\ui\\frontendact2.json", off = on + L".pcvr-off";
-    const bool want = IniB(L"frontend", L"enabled", false);
+    const bool want = IniB(L"frontend", L"scene", true);   // (was `enabled`, off by default - an old ini's enabled=0 no longer counts)
     const bool hasOn = GetFileAttributesW(on.c_str()) != INVALID_FILE_ATTRIBUTES;
     const bool hasOff = GetFileAttributesW(off.c_str()) != INVALID_FILE_ATTRIBUTES;
     if (!want && hasOn) {
@@ -1685,38 +1685,38 @@ void LoadSettings() {
         g_set.campfireMenuDrop.store(std::clamp(IniF(L"campfire", L"menu_drop", 0.9f), -0.5f, 1.5f));
         g_set.campfireMenuTop.store(std::clamp(IniF(L"campfire", L"menu_top", 0.78f), 0.0f, 0.98f));
         {   // [frontend]
-            const bool front = IniB(L"frontend", L"enabled", false);
+            const bool front = IniB(L"frontend", L"scene", true);   // the menu in 3D: on by default (2026-11-17)
             static int toldFront = -1;
             if (int(front) != toldFront) { toldFront = int(front); LogF("vrcam: [frontend] enabled=%d", int(front)); }
             g_set.frontendOn.store(front);
             g_set.frontendEye.store(std::clamp(IniF(L"frontend", L"eye", 6.0f), 1.0f, 40.0f));
-            g_set.frontendUp.store(std::clamp(IniF(L"frontend", L"up", 0.0f), -200.0f, 200.0f));
+            g_set.frontendUp.store(std::clamp(IniF(L"frontend", L"up", 2.3f), -200.0f, 200.0f));
             g_set.frontendForward.store(std::clamp(IniF(L"frontend", L"forward", 0.0f), -400.0f, 400.0f));
             g_set.frontendMenuTop.store(std::clamp(IniF(L"frontend", L"menu_top", 0.0f), 0.0f, 0.98f));
             g_set.frontendSky.store(IniB(L"frontend", L"sky", true));
             g_set.frontendMenuWidth.store(std::clamp(IniF(L"frontend", L"menu_width", 1.65f), 0.3f, 4.0f));
             g_set.frontendMenuDistance.store(std::clamp(IniF(L"frontend", L"menu_distance", 1.0f), 0.4f, 3.0f));
             g_set.frontendMenuDrop.store(std::clamp(IniF(L"frontend", L"menu_drop", 0.65f), -0.5f, 1.5f));
-            g_set.frontendSkyBright.store(std::clamp(IniF(L"frontend", L"sky_bright", 3.5f), 0.1f, 20.0f));
+            g_set.frontendSkyBright.store(std::clamp(IniF(L"frontend", L"sky_bright", 4.5f), 0.1f, 20.0f));
             g_set.frontendSkySat.store(std::clamp(IniF(L"frontend", L"sky_saturation", 0.35f), 0.0f, 2.0f));
-            g_set.frontendSkyBlend.store(std::clamp(IniF(L"frontend", L"sky_blend", 1.0f), 0.0f, 1.0f));
+            g_set.frontendSkyBlend.store(std::clamp(IniF(L"frontend", L"sky_blend", 0.0f), 0.0f, 1.0f));
             g_set.frontendSkyBlendFar.store(std::clamp(IniF(L"frontend", L"sky_blend_far", 300.0f), 1.0f, 100000.0f));
             g_set.frontendSkyBlendLo.store(std::clamp(IniF(L"frontend", L"sky_blend_lo", 0.03f), 0.0f, 1.0f));
-            g_set.frontendSkyBlendHi.store(std::clamp(IniF(L"frontend", L"sky_blend_hi", 0.22f), 0.001f, 1.0f));
+            g_set.frontendSkyBlendHi.store(std::clamp(IniF(L"frontend", L"sky_blend_hi", 0.7f), 0.001f, 1.0f));
             g_set.frontendWisps.store(std::clamp((int)IniF(L"frontend", L"wisps", 12.0f), 0, 12));
             g_set.frontendWispStrength.store(std::clamp(IniF(L"frontend", L"wisp_strength", 3.0f), 0.0f, 100.0f));
-            g_set.frontendWispRadius.store(std::clamp(IniF(L"frontend", L"wisp_radius", 40.0f), 1.0f, 500.0f));
-            g_set.frontendWispGlow.store(std::clamp(IniF(L"frontend", L"wisp_glow", 1.0f), 0.0f, 20.0f));
+            g_set.frontendWispRadius.store(std::clamp(IniF(L"frontend", L"wisp_radius", 10.0f), 1.0f, 500.0f));
+            g_set.frontendWispGlow.store(std::clamp(IniF(L"frontend", L"wisp_glow", 0.5f), 0.0f, 20.0f));
             g_set.frontendWispSpeed.store(std::clamp(IniF(L"frontend", L"wisp_speed", 1.0f), 0.0f, 20.0f));
             g_set.frontendWispLow.store(std::clamp(IniF(L"frontend", L"wisp_low", 2.0f), -10.0f, 200.0f));
             g_set.frontendWispHigh.store(std::clamp(IniF(L"frontend", L"wisp_high", 16.0f), -10.0f, 200.0f));
             g_set.frontendWispShadow.store(IniB(L"frontend", L"wisp_shadow", true));
             g_set.frontendSkyEdges.store(IniB(L"frontend", L"sky_edges", true));
-            g_set.frontendCutRight.store(std::clamp(IniF(L"frontend", L"cut_right", 285.0f), 0.0f, 100000.0f));
+            g_set.frontendCutRight.store(std::clamp(IniF(L"frontend", L"cut_right", 232.0f), 0.0f, 100000.0f));
             g_set.frontendCutLeft.store(std::clamp(IniF(L"frontend", L"cut_left", 0.0f), 0.0f, 100000.0f));
             g_set.frontendCutVoid.store(std::clamp(IniF(L"frontend", L"cut_void", 0.42f), 0.0f, 2.0f));
-            g_set.frontendCutFarRight.store(std::clamp(IniF(L"frontend", L"cut_far_right", 200.0f), 0.0f, 100000.0f));
-            g_set.frontendCutFarAhead.store(std::clamp(IniF(L"frontend", L"cut_far_ahead", 190.0f), 0.0f, 100000.0f));
+            g_set.frontendCutFarRight.store(std::clamp(IniF(L"frontend", L"cut_far_right", 140.0f), 0.0f, 100000.0f));
+            g_set.frontendCutFarAhead.store(std::clamp(IniF(L"frontend", L"cut_far_ahead", 170.0f), 0.0f, 100000.0f));
             g_set.frontendWispShadowDark.store(std::clamp(IniF(L"frontend", L"wisp_shadow_dark", 0.85f), 0.0f, 1.0f));
             {   // [frontend] pano_N: each act's own sky picture, each in its own texture
                 bool changed = false;
@@ -1758,7 +1758,7 @@ void LoadSettings() {
             }
             {
                 static const float kRight[6] = {0.0f, 0.0f, 211.0f, 237.0f, 234.0f, 0.0f};
-                static const float kLeft[6] = {0.0f, 0.0f, 130.0f, 211.0f, 237.0f, 234.0f};
+                static const float kLeft[6] = {0.0f, 0.0f, 115.0f, 175.0f, 237.0f, 234.0f};
                 for (int n = 2; n <= 5; ++n) {
                     wchar_t r[16], l[16];
                     swprintf_s(r, L"cut_right_%d", n);
@@ -1766,13 +1766,14 @@ void LoadSettings() {
                     g_set.frontendCutRightN[n].store(std::clamp(IniF(L"frontend", r, kRight[n]), 0.0f, 100000.0f));
                     g_set.frontendCutLeftN[n].store(std::clamp(IniF(L"frontend", l, kLeft[n]), 0.0f, 100000.0f));
                 }
-                static const float kSide[6] = {0.0f, 0.0f, 0.0f, -4.0f, 0.0f, 0.0f};
+                static const float kSide[6] = {0.0f, 0.0f, 0.0f, -2.0f, 0.0f, 0.0f};
+                static const float kUp[6] = {0.0f, 0.0f, 0.0f, 0.75f, 0.0f, 0.0f};
                 for (int n = 1; n <= 5; ++n) {
                     wchar_t k[16];
                     swprintf_s(k, L"right_%d", n);
                     g_set.frontendRightN[n].store(std::clamp(IniF(L"frontend", k, kSide[n]), -200.0f, 200.0f));
                     swprintf_s(k, L"up_%d", n);
-                    g_set.frontendUpN[n].store(std::clamp(IniF(L"frontend", k, 0.0f), -200.0f, 200.0f));
+                    g_set.frontendUpN[n].store(std::clamp(IniF(L"frontend", k, kUp[n]), -200.0f, 200.0f));
                     swprintf_s(k, L"forward_%d", n);
                     g_set.frontendForwardN[n].store(std::clamp(IniF(L"frontend", k, 0.0f), -400.0f, 400.0f));
                 }

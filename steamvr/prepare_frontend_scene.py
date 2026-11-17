@@ -1447,6 +1447,7 @@ LAVA_FALLS = {}
 # come round with it - each copy of these this much lower, onto the lava. {act: (entity names, drop)}
 DROP_COPIES = {4: (('hell_brazier02_01', 'ui_wall_destroyed02_01', 'rubble_pile02_04', 'lava04_off_02',
                     'ui_pillar01_blank_topless_01', 'pillar05_05', 'gate_chain_single01_03', 'gate_chain_single01_04'), 10.5)}
+DROP_OUT = {4: (270,)}   # ... the turns whose copies of them are left out altogether
 # The guardians (owner 2026-11-15 02:12: "the statues of armoured knights by the River of Flame's forge, that turn their
 # heads after you - one on each of the three small bone islands round me, facing me"): the Hellforge's statue01 (its
 # body, and its head as the game sets it, apart), at the middle of each turned copy of the hero's own island (its bones
@@ -1569,6 +1570,10 @@ def lava(preset, act, ids):
         have = {str(d.get('path', '')).lower() for d in tex if isinstance(d, dict)}
         tex.extend({'path': t} for t in STATUE_TEXTURES if t not in have)
     names, drop = DROP_COPIES.get(act, ((), 0.0))
+    # ... but the copy turned to the right floats even brought down (nothing of the high rock under it there - owner
+    # 2026-11-17, a screenshot: "a piece of island with a turret, behind the guardian on my right"): out
+    gone = {f'{n}{COPY}{r}' for n in names for r in DROP_OUT.get(act, ())}
+    preset['entities'] = [e for e in preset['entities'] if e.get('name') not in gone]
     dropped = 0
     for e in preset['entities']:
         nm = str(e.get('name', ''))
@@ -1709,6 +1714,21 @@ def prepare(preset_bytes, acts=ACTS, sources=None, edits_files=None, assets=None
 def source_presets():
     """The game's presets the scene is built from besides the menu's own (TILES, TOWN)."""
     return sorted({t[0] for t in TILES.values()} | {t[0] for t in TOWN.values()})
+
+
+def prepare_install(game, casclib=None, mod='D2R-PCVR'):
+    """For the installer: the menu's 3D scenes as a payload {'<mod>.mpq/<preset>': bytes}, built from the player's own
+    archives with the scene editors' files beside this script (frontend_edits_actN.json) - nothing to run by hand."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from game_assets import open_assets
+    sources = {}
+    with open_assets(Path(game), casclib) as assets:
+        raw = assets.read(PRESET)
+        for w in source_presets():
+            sources[w] = assets.read(w)
+        data, report = prepare(raw, sources=sources, assets=assets)
+    print('\n'.join(report))
+    return {f'{mod}.mpq/{PRESET}': data}
 
 
 def main():
