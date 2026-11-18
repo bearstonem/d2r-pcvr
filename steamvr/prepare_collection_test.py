@@ -101,10 +101,18 @@ class TestPrepareCollection(unittest.TestCase):
         out = Path(self.temporary.name) / 'out'
         summary = prepare(self.game, out)
         self.assertEqual(summary['uniques'], 3)
-        with io.open(out / 'collection.json', encoding='utf-8') as handle:
-            payload = json.load(handle)
-        self.assertEqual(payload['version'], 1)
-        self.assertEqual(len(payload['categories']['runewords']), 2)
+        text = (out / 'collection.tsv').read_text(encoding='utf-8').splitlines()
+        start = next(index for index, line in enumerate(text) if line.startswith('# category'))
+        header = text[start][2:].split('\t')
+        self.assertEqual(header, ['category', 'code', 'recordId', 'name', 'level', 'type', 'extra'])
+        rows = [dict(zip(header, line.split('\t'))) for line in text[start + 1:] if line.strip()]
+        self.assertEqual(len([row for row in rows if row['category'] == 'uniques']), 3)
+        self.assertEqual(len([row for row in rows if row['category'] == 'runewords']), 2)
+        # The slot is the entry's order inside its category: uniques start at slot 0.
+        self.assertEqual(rows[0]['category'], 'uniques')
+        # A set carries its set name in the extra column.
+        sets = [row for row in rows if row['category'] == 'sets']
+        self.assertEqual(sets[0]['extra'], "Civerb's Vestments")
 
 
 if __name__ == '__main__':

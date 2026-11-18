@@ -185,16 +185,33 @@ def build(read):
     return catalog
 
 
+def write_catalog(catalog, out_dir):
+    """Write collection.tsv: one line per entry, tab separated, no dependencies.
+
+    Columns: category, code, recordId, name, level, type, extra (a set's name,
+    or a runeword's rune count). The slot is the entry's line number inside its
+    category, so the order here is the order the panel draws.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    lines = ['# collection %d' % VERSION,
+             '# category\tcode\trecordId\tname\tlevel\ttype\textra']
+    for category in CATEGORIES:
+        for entry in catalog[category]:
+            extra = entry.get('setName', '') or (' '.join(entry.get('runes', [])) if entry.get('runes') else '')
+            lines.append('\t'.join((category, entry['code'].strip(), str(entry['recordId']), entry['name'],
+                                    str(entry['level']), entry['type'], extra)))
+    (out_dir / 'collection.tsv').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    return out_dir / 'collection.tsv'
+
+
 def prepare(game, out_dir, casclib=None):
-    """Write collection.json and return a summary of what it holds."""
+    """Write collection.tsv and return a summary of what it holds."""
     excel = find_excel(game)
     read = folder_reader(excel) if excel else archive_reader(game, casclib)
 
     catalog = build(read)
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    payload = {'version': VERSION, 'categories': catalog}
-    (out_dir / 'collection.json').write_text(json.dumps(payload, separators=(',', ':')) + '\n', encoding='utf-8')
+    write_catalog(catalog, out_dir)
 
     summary = {category: len(catalog[category]) for category in CATEGORIES}
     summary['source'] = str(excel) if excel else 'game archives'
