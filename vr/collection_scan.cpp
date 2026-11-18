@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "collection_model.h"
+#include "collection_tab.h"
 #include "logging.h"
 
 namespace framevr::collection {
@@ -72,10 +73,12 @@ D2RL::Inventory::IterationAction __cdecl CountItem(const D2RL::PluginContext*, c
     case D2RL::Items::Quality::Unique:
         ++tally.uniques;
         Note(tally.uniqueRows, record);
+        if (record != UINT32_MAX) TabMarkFound(Category::Uniques, record);
         break;
     case D2RL::Items::Quality::Set:
         ++tally.sets;
         Note(tally.setRows, record);
+        if (record != UINT32_MAX) TabMarkFound(Category::Sets, record);
         break;
     case D2RL::Items::Quality::Normal:
         // A completed runeword carries its name string id in prefixIds[0]
@@ -107,13 +110,6 @@ void ListRows(const char* what, const std::vector<uint32_t>& rows, uint32_t limi
     LogLine(line);
 }
 
-// Catalog sizes measured on D2R 3.4.0 (d2rloader/data/compiler/3.4.0): 439
-// uniques, 141 sets, 99 completed runewords. prepare_collection.py replaces
-// these numbers with the generated table; until then they size the report.
-constexpr uint32_t kUniqueCount    = 439;
-constexpr uint32_t kSetCount       = 141;
-constexpr uint32_t kRunewordCount  = 99;
-
 void Report(const ScanState& state) {
     Tally        totals;
     char         line[512];
@@ -144,16 +140,14 @@ void Report(const ScanState& state) {
                   static_cast<unsigned>(totals.items), static_cast<unsigned>(totals.uniques),
                   static_cast<unsigned>(totals.sets), static_cast<unsigned>(totals.runewordCandidates));
     LogLine(line);
-    std::snprintf(line, sizeof(line),
-                  "collection: distinct found - %u unique rows, %u set rows, %u runeword names; catalog on this game build: %u + %u + %u entries = %u + %u + %u pages of 16x16",
+    std::snprintf(line, sizeof(line), "collection: distinct found - %u unique rows, %u set rows, %u runeword names",
                   static_cast<unsigned>(totals.uniqueRows.size()), static_cast<unsigned>(totals.setRows.size()),
-                  static_cast<unsigned>(totals.runewordNames.size()), static_cast<unsigned>(kUniqueCount),
-                  static_cast<unsigned>(kSetCount), static_cast<unsigned>(kRunewordCount), static_cast<unsigned>(PagesFor(kUniqueCount)),
-                  static_cast<unsigned>(PagesFor(kSetCount)), static_cast<unsigned>(PagesFor(kRunewordCount)));
+                  static_cast<unsigned>(totals.runewordNames.size()));
     LogLine(line);
     ListRows("unique rows", totals.uniqueRows, 60);
     ListRows("set rows", totals.setRows, 40);
     ListRows("runeword names", totals.runewordNames, 40);
+    TabReport();
 }
 
 void RunScan() {
@@ -173,6 +167,7 @@ void RunScan() {
     }
 
     ScanState state;
+    TabClearFound();
     const D2RL::Items::ItemContainer containers[] = {
         D2RL::Items::ItemContainer::Inventory,     D2RL::Items::ItemContainer::Cube,
         D2RL::Items::ItemContainer::PersonalStash, D2RL::Items::ItemContainer::SharedStash,

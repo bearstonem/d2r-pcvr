@@ -101,7 +101,7 @@ target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/respec.cpp)   # Reset Skills & Stats
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_lock.cpp ${ROOT}/vr/summon_range.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/loot_beam_scan.cpp)   # loot beams: the items on the floor that get one
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/monster_immunity.cpp)
-target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/collection_scan.cpp ${ROOT}/vr/collection_pages.cpp)   # collection tabs: the catalog scan and the custom-page probe (collection_model.h)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/collection_scan.cpp ${ROOT}/vr/collection_tab.cpp)   # collection tabs: the catalog scan and the catalog itself (collection_model.h)
 add_executable(monster-immunity-test monster_immunity_test.cpp)
 target_compile_options(monster-immunity-test PRIVATE -UNDEBUG)
 add_executable(monster-immunity-runtime-test monster_immunity_runtime_test.cpp)

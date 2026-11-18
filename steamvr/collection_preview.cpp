@@ -42,6 +42,9 @@ bool SavePng(const char* path, const std::vector<uint8_t>& rgba, int width, int 
     IWICBitmapFrameEncode*    frame   = nullptr;
     WICPixelFormatGUID        format  = GUID_WICPixelFormat32bppBGRA;
     const std::wstring        name    = Widen(path);
+    // WIC takes BGRA; the painter hands over straight RGBA.
+    std::vector<uint8_t> bgra = rgba;
+    for (size_t at = 0; at + 2 < bgra.size(); at += 4) std::swap(bgra[at], bgra[at + 2]);
     const bool ok =
         SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic))) &&
         SUCCEEDED(wic->CreateStream(&stream)) &&
@@ -51,8 +54,8 @@ bool SavePng(const char* path, const std::vector<uint8_t>& rgba, int width, int 
         SUCCEEDED(encoder->CreateNewFrame(&frame, nullptr)) && SUCCEEDED(frame->Initialize(nullptr)) &&
         SUCCEEDED(frame->SetSize(UINT(width), UINT(height))) && SUCCEEDED(frame->SetPixelFormat(&format)) &&
         format == GUID_WICPixelFormat32bppBGRA &&
-        SUCCEEDED(frame->WritePixels(UINT(height), UINT(width) * 4, UINT(rgba.size()),
-                                     const_cast<BYTE*>(rgba.data()))) &&
+        SUCCEEDED(frame->WritePixels(UINT(height), UINT(width) * 4, UINT(bgra.size()),
+                                     const_cast<BYTE*>(bgra.data()))) &&
         SUCCEEDED(frame->Commit()) && SUCCEEDED(encoder->Commit());
     for (IUnknown* part : {static_cast<IUnknown*>(frame), static_cast<IUnknown*>(encoder), static_cast<IUnknown*>(stream), static_cast<IUnknown*>(wic)})
         if (part) part->Release();
