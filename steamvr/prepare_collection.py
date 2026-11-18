@@ -20,7 +20,7 @@ from pathlib import Path
 
 VERSION = 1
 
-CATEGORIES = ('uniques', 'sets', 'runewords')
+CATEGORIES = ('uniques', 'sets', 'runewords', 'materials')
 
 UNIQUE_TABLE = 'uniqueitems.txt'
 SET_TABLE = 'setitems.txt'
@@ -178,6 +178,27 @@ def build(read):
             'runes': [cell(row, 'Rune%d' % n) for n in range(1, 7) if cell(row, 'Rune%d' % n)],
         })
     catalog['runewords'] = sort_entries(entries)
+
+    # Gems and runes: base items, so their own record id is zero and the storage
+    # layer matches them by their code. They are stackable, so the tab shows one
+    # slot per kind rather than one per copy.
+    _, misc = read('misc.txt')
+    entries = []
+    for row in misc:
+        kind = cell(row, 'type')
+        if not (kind.startswith('gem') or kind == 'rune'):
+            continue
+        code = cell(row, 'code')
+        if not code:
+            continue
+        entries.append({
+            'code': code[:4].ljust(4),
+            'recordId': 0,
+            'name': cell(row, 'name'),
+            'level': number(row, 'level'),
+            'type': kind,
+        })
+    catalog['materials'] = sort_entries(entries)
 
     for category in CATEGORIES:
         for slot, entry in enumerate(catalog[category]):

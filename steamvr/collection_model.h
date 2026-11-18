@@ -22,7 +22,8 @@ enum class Category : uint32_t {
     Uniques   = 0,
     Sets      = 1,
     Runewords = 2,
-    Count     = 3,
+    Materials = 3,   // gems and runes: stackable, so one slot per kind
+    Count     = 4,
 };
 
 inline constexpr std::size_t CategoryCount = static_cast<std::size_t>(Category::Count);
@@ -33,6 +34,7 @@ inline constexpr const char* CategoryName(Category category) {
     case Category::Uniques:   return "Uniques";
     case Category::Sets:      return "Sets";
     case Category::Runewords: return "Runewords";
+    case Category::Materials: return "Materials";
     default:                  return "?";
     }
 }
@@ -44,6 +46,7 @@ inline constexpr const char* CategoryTag(Category category) {
     case Category::Uniques:   return "uniques";
     case Category::Sets:      return "sets";
     case Category::Runewords: return "runewords";
+    case Category::Materials: return "materials";
     default:                  return "";
     }
 }

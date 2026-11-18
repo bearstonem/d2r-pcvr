@@ -8,7 +8,7 @@
 using namespace framevr::collection;
 
 int main() {
-    static_assert(CategoryCount == 3);
+    static_assert(CategoryCount == 4);
     static_assert(StashTabCells == 100);
     static_assert(StoresNamedQuality(Category::Uniques));
     static_assert(StoresNamedQuality(Category::Sets));

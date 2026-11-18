@@ -83,7 +83,7 @@ inline constexpr int MaxTabs       = 4;   // uniques, sets, runewords, room for 
 inline constexpr int MaxPageButtons = 8;  // more pages than this and the number buttons go away
 
 inline constexpr float Margin     = 24.0f;
-inline constexpr float TabWidth   = 176.0f;
+inline constexpr float TabWidth   = 210.0f;
 inline constexpr float TabHeight  = 52.0f;
 inline constexpr float TabGap     = 8.0f;
 inline constexpr float PageSize   = 40.0f;
@@ -224,10 +224,17 @@ inline Hit Pick(const Layout& layout, float x, float y) {
 
 // The icon cache key for a catalog entry: the mod already extracts exactly
 // these (interaction_icons.h ItemKey). A runeword has no item of its own until
-// it is made, so it has no icon key.
-inline std::string IconKey(Category category, uint32_t recordId) {
+// it is made, so it has no icon key; a gem or rune is a base item, keyed by its
+// four-character code.
+inline std::string IconKey(Category category, uint32_t recordId, uint32_t code) {
     if (category == Category::Uniques) return "u" + std::to_string(recordId);
     if (category == Category::Sets) return "t" + std::to_string(recordId);
+    if (category == Category::Materials) {
+        constexpr char hex[] = "0123456789abcdef";
+        std::string    key   = "i00000000";
+        for (int i = 0; i < 8; ++i) key[8 - i] = hex[(code >> (i * 4)) & 15];
+        return key;
+    }
     return {};
 }
 

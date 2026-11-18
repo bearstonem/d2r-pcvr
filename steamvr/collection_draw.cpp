@@ -86,7 +86,7 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
         if (found) {
             painter.Fill(box, style.fill, 0.96f);
             painter.Outline(box, style.edge, slot == view.hovered ? 4.f : 3.f);
-            const IconPixels* pixels = icons ? icons(panel::IconKey(view.category, entry->recordId)) : nullptr;
+            const IconPixels* pixels = icons ? icons(panel::IconKey(view.category, entry->recordId, entry->code)) : nullptr;
             if (pixels != nullptr && pixels->rgba != nullptr) {
                 painter.Image(inner, pixels->rgba, pixels->width, pixels->height);
             } else {

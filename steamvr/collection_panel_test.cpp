@@ -130,9 +130,12 @@ int main() {
     assert(Build(0, 1, 0).tabCount == 0);
 
     // Icon keys match the cache the mod already extracts.
-    assert(IconKey(Category::Uniques, 122) == "u122");
-    assert(IconKey(Category::Sets, 0) == "t0");
-    assert(IconKey(Category::Runewords, 7).empty());
+    assert(IconKey(Category::Uniques, 122, 0) == "u122");
+    assert(IconKey(Category::Sets, 0, 0) == "t0");
+    assert(IconKey(Category::Runewords, 7, 0).empty());
+    // A gem's key is its code: "gcv" packs as 'g' | 'c'<<8 | 'v'<<16 | ' '<<24.
+    const uint32_t gem = uint32_t('g') | (uint32_t('c') << 8) | (uint32_t('v') << 16) | (uint32_t(' ') << 24);
+    assert(IconKey(Category::Materials, 0, gem) == "i20766367");
 
     std::puts("Collection panel: sizes, tabs, grid, footer, Size control, hit testing and icon keys passed");
 }
