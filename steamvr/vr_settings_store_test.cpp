@@ -14,6 +14,22 @@ int main(){
     Check(WritePrivateProfileStringW(L"custom",L"keep",L"12345",name),"write unrelated key");
     Check(WritePrivateProfileStringW(L"render",L"rings",L"6",name),"write existing setting");
     vrsettings::Poll(name);auto before=vrsettings::Read();
+    Check(before.values[IceArmorVisual]==2&&before.values[CycloneArmorVisual]==1&&before.values[BoneArmorVisual]==1,"armor visual defaults");
+    WritePrivateProfileStringW(L"render",L"frozen_armor_graft",L"0",name);
+    WritePrivateProfileStringW(L"render",L"bone_armor_graft",L"0",name);
+    vrsettings::Poll(name);
+    Check(vrsettings::Read().values[IceArmorVisual]==1&&vrsettings::Read().values[BoneArmorVisual]==0,"legacy armor keys migrate without losing native ice");
+    Check(before.values[PlayerAuraVisual]==1&&before.values[SummonAuraVisual]==1,"missing aura preferences retain visible effects");
+    Check(before.values[PlayerShoutVisual]==1&&before.values[SummonShoutVisual]==1,"missing shout preferences retain visible effects");
+    for(auto key:{IceArmorVisual,CycloneArmorVisual,BoneArmorVisual,PlayerAuraVisual,SummonAuraVisual,PlayerShoutVisual,SummonShoutVisual}) {
+        for(int choice=0;choice<=int(Definitions[key].max);++choice) {
+            Model visual;visual.Open(vrsettings::Read());visual.Set(key,float(choice));
+            const auto request=visual.Click({Kind::Apply});
+            if(request.changed)Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"visual mode saves through normal Apply transaction");
+            Check(vrsettings::Read().values[key]==choice&&Int(path,L"custom",L"keep")==12345,"visual mode round trips without touching unrelated keys");
+        }
+    }
+    Check(vrsettings::Read().values[IceArmorVisual]==2,"explicit new ice mode takes precedence over legacy disabled graft");
     Check(before.values[HapticShortMelee]==0,"a missing toggle takes its default (Off)");
     for(int enabled:{1,0}) {
         Model effects;effects.Open(vrsettings::Read());effects.Click({Kind::Change,HapticShortMelee,1});

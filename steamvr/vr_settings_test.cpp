@@ -1098,8 +1098,8 @@ int main(int argc,char** argv){
     {   // Map grab hint (grab_hint.h): On by default, a switch on Interface > Wrist > Map under Buffs and companions, every class, saved alone
         Check(Defaults()[MapGrabHint]==1&&std::wstring(Definitions[MapGrabHint].section)==L"interactions"&&
               std::wstring(Definitions[MapGrabHint].key)==L"map_grab_hint"&&Definitions[MapGrabHint].min==0&&Definitions[MapGrabHint].max==1&&
-              Definitions[MapGrabHint].step==1&&HelpText(MapGrabHint)[0]!=0&&MapGrabHint<ChangeMask::Bits&&MapGrabHint==Count-1,
-              "Map grab hint: On by default, [interactions] map_grab_hint Off / On, explained, its own change bit, appended last");
+              Definitions[MapGrabHint].step==1&&HelpText(MapGrabHint)[0]!=0&&MapGrabHint<ChangeMask::Bits&&MapGrabHint+1==PlayerAuraVisual,
+              "Map grab hint: On by default, [interactions] map_grab_hint Off / On, explained, its own change bit, appended (the Effects settings after it)");
         const auto* row=content::RowOf(MapGrabHint);const auto* companions=content::RowOf(FloatingMapBackground);
         Check(row&&companions&&row->beside&&row->page==View::Wrist&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Map grab hint")==0&&
               row->section==companions->section&&row->classes==content::AllClasses&&std::strlen(row->help)<=160,
@@ -1168,6 +1168,16 @@ int main(int argc,char** argv){
         Check(m.Get()[SummonRangeMultiplier]==1.25f,"presets preserve summon range");
         Check(Normalize(SummonRangeMultiplier,NAN)==1&&Normalize(SummonRangeMultiplier,0)==1&&Normalize(SummonRangeMultiplier,6)==5,
               "shared multiplier normalizes invalid and out-of-range choices");
+    }
+    {
+        const auto defaults=Defaults();
+        Check(defaults[IceArmorVisual]==2&&defaults[CycloneArmorVisual]==1&&defaults[BoneArmorVisual]==1,"effect defaults retain ice, wind and bones");
+        for(int mode:{0,1,2})Check(Normalize(IceArmorVisual,float(mode))==mode,"three ice visual modes remain distinct");
+        for(auto key:{PlayerAuraVisual,SummonAuraVisual,PlayerShoutVisual,SummonShoutVisual}) {
+            Check(RowEnabled(defaults,key)&&Normalize(key,0)==0&&defaults[key]==1,"aura controls default visible and allow explicit Off");
+        }
+        int rows=0;for(const auto& row:content::Menu().rows)if(row.page==View::Effects)++rows;
+        Check(rows==7,"Effects contains three armor, two aura and two shout controls");
     }
     PrintReport();
     std::puts("VR settings draft, persistence requests, conflicts, row rules and input-gating tests passed");

@@ -35,6 +35,8 @@ Values Load(const wchar_t* path){
         const float fallback=i==NavigationLocation?(v[WristMap]>.5f||v[WristCompass]>.5f?0.f:3.f):
                              i==StrainVignette?(std::lround(Value(path,L"gameplay",L"guard_strain_dark",0))==2?0.f:1.f):
                              HighlightKey(Key(i))?LegacyHighlight(Key(i),Value(path,L"gameplay",L"target_outline_by_range",-1),Value(path,L"gameplay",L"target_outline_hue",-1)):
+                             i==IceArmorVisual?(Value(path,L"render",L"frozen_armor_graft",1)!=0?2.f:1.f):
+                             i==BoneArmorVisual?(Value(path,L"render",L"bone_armor_graft",1)!=0?1.f:0.f):
                              d.defaultValue;
         raw[i]=Value(path,d.section,d.key,fallback);v[i]=Normalize(Key(i),raw[i]);
         if(HighlightKey(Key(i))&&fallback!=d.defaultValue&&Value(path,d.section,d.key,-1)<0)legacy=true;   // no own key: the old color counted

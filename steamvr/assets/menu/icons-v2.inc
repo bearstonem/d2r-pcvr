@@ -3,6 +3,13 @@
 // H solid with even-odd holes, B band (stroke of width w over an ink stroke w+2),
 // D carved detail line (ink 55%, 1.5 px), F carved area (ink 45%).
 // Transform 1 / 2: rotate +45 / -45 degrees and scale 1.1 about the center.
+// Arcane glint and orbit, matching the set's solid silhouettes and carved ink.
+static const IconLayer Icon_effects[]={
+    {'B',2.8f,0,"M12 10C5 15 4 26 9 33C14 40 25 43 33 37 M36 32C41 26 41 18 36 13"},
+    {'S',0,0,"M23 3L27.5 17.5L41 22L27.5 26.5L23 41L18.5 26.5L5 22L18.5 17.5Z"},
+    {'D',0,0,"M23 12V32 M13 22H33"},
+    {'S',0,0,"M39 2L41 7L46 9L41 11L39 16L37 11L32 9L37 7Z"},
+};
 static const IconLayer Icon_body[]={
     {'S',0,0,"M14 3.5h15.5l-1 17.5c0 2.2 1 3.7 3.2 4.6l8.6 3.7c2.8 1.3 4.2 3.4 4.2 6.2V39H8.5l-.3-2.4c-.4-4.4 1.6-9.4 3.3-13.3z"},
     {'S',0,0,"M8 41.5h36.5V45H8z"},
@@ -227,4 +234,5 @@ static const IconDef IconDefs[]={
     {"starOutline",Icon_starOutline,1},
     {"plus",Icon_plus,1},
     {"minus",Icon_minus,1},
+    {"effects",Icon_effects,4},
 };

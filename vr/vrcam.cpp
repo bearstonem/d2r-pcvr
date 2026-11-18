@@ -174,6 +174,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "stereo_replay.h"
 #include "dlss_depth.h"
 #include "billboards.h"
+#include "aura_filter.h"
 #include "engine_units.h"
 #include "../shared/game_ceiling.h"
 #include "../shared/ceiling_measures.h"
@@ -1307,8 +1308,16 @@ void LoadSettings() {
     framevr::ConfigureGuardStrainRecover(IniF(L"gameplay",L"guard_strain_recover_ms",1500)/1000.f);
     // Bone Armor grafted onto both forearms (steamvr/bone_graft.h); missing keys: the defaults.
     // On, the hero's own spinning orbit is never shown (any view, menus too).
-    billboards::ConfigureBoneArmorHidden(IniB(L"render",L"bone_armor_graft",true));
-    framevr::ConfigureBoneGraft(IniB(L"render",L"bone_armor_graft",true),IniF(L"render",L"bone_armor_graft_size",1.f),
+    const bool bonesVisual=IniB(L"render",L"bone_armor_visual",IniB(L"render",L"bone_armor_graft",true));
+    const int iceVisual=int(framevr::settings::Normalize(framevr::settings::IceArmorVisual,
+        IniF(L"render",L"ice_armor_visual",IniB(L"render",L"frozen_armor_graft",true)?2.f:1.f)));
+    billboards::ConfigureBoneArmorHidden(true); // both Off and Bones hide the local native orbit
+    // Native Sorceress armor states carry authored icicles on both forearms.
+    framevr::ConfigureFrozenArmorGraft(iceVisual==2);
+    billboards::ConfigureArmorVisuals(iceVisual,IniB(L"render",L"cyclone_armor_visual",true));
+    aurafilter::Configure(IniB(L"render",L"player_aura_visual",true),IniB(L"render",L"summon_aura_visual",true),
+        IniB(L"render",L"player_shout_visual",true),IniB(L"render",L"summon_shout_visual",true));
+    framevr::ConfigureBoneGraft(bonesVisual,IniF(L"render",L"bone_armor_graft_size",1.f),
         IniF(L"render",L"bone_armor_graft_out",.05f),IniF(L"render",L"bone_armor_graft_spread",40.f),IniF(L"render",L"bone_armor_graft_along",.5f),
         IniF(L"render",L"bone_armor_graft_width",.5f));
     {   // Low-life heartbeat (start: VR Settings > Interface > Warnings, [gameplay] low_life_heart_start): % on top of
@@ -11899,7 +11908,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         const bool campfireNight=g_campfire.load()&&!g_frontend3d.load()&&!g_set.campfireEffects.load()&&g_set.campfireNight.load()&&FogWanted();
         const bool ownDepth=g_enabled.load()&&g_inWorld.load()&&(framevr::Active()||campfireNight||CampfireSky())&&
             (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted()||BeamWanted()||ImmunityWanted());
-        const bool turnDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&framevr::TurnDepthWanted();
+        const bool turnDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&(framevr::TurnDepthWanted()||framevr::IceArmorDepthWanted());
         framevr::scenedepth::Bind(rt,cl,ownDepth,turnDepth,stereoreplay::RightEffects(),s);
         SetBool(rt,"OwnDepth",ownDepth);
 #else

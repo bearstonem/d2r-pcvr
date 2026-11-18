@@ -57,6 +57,7 @@ def main():
               'steamvr/prepare_frontend_floor.py', 'steamvr/prepare_frontend_scene.py', 'steamvr/podglad_modeli.py']
     # the scene editors' changes the menu's 3D scenes are built with at install
     paths += sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / 'steamvr').glob('frontend_edits_act[0-9].json'))
+    paths += ['steamvr/assets/ice-armor/' + name for name in ('ic1.pvr', 'ic2.pvr', 'ic3.pvr', 'README.md')]
     files = {path: ROOT / path for path in paths}
     # every shader file: D2R_DepthFog.fx and each D2R_*.fxh it includes, by pattern, so a new header is never left out
     for folder, pattern in [('reshade', 'D2R_*.fx'), ('reshade', 'D2R_*.fxh'), ('reshade/sky', '*.png'), ('steamvr/licenses', '*.txt')]:
