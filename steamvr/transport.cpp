@@ -143,6 +143,7 @@
 #include "hit_reactions.h"
 
 namespace gamestate {bool CinemaPlaying();}
+namespace gamestate {bool FrontSettingsOpen();bool FrontOverlayOpen();bool CloseFrontSettings();}
 namespace gamestate {bool MenuOpen();uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();int AttackWsm(int hand);}
 namespace gamecmd {void RequestPotion(int slot);void CancelPotion();}
 namespace gamestate {void MenuMap(bool wanted);uint32_t QuestNotices();bool NoticePanelOpen();bool NoticeText(int kind,char* out,uint32_t size);}
@@ -4104,6 +4105,24 @@ void Input() {
     if(!settingsOwned&&(menuPressed||inventoryPressed)&&!focused)focused=FocusGameForUi();
     if(heldKeyScan&&(!focused||GetTickCount64()>=keyReleaseAt))ReleaseUiKey();
     if(!settingsOwned&&!nativeUi&&focused&&menuPressed)PulseUiKey(VK_ESCAPE);
+    {   // The campfire's and the main menu's board (campfirePointer): Right B is Back - Escape to the game, which
+        // closes what is open over the menu (the options behind the cog under Play could not be closed, owner
+        // 2026-11-13). Not while the name keyboard is up nor with VR Settings open; on the press, once.
+        static bool boardBackWas=false;
+        const bool down=(controls.buttons&menus::B)!=0;
+        // The cog's panel is D2RLoader's: Escape left it open and the game asked whether to quit (owner
+        // 2026-11-14) - it is closed by name. With nothing over the menu, nothing: Escape there is Quit.
+        if(campfirePointer.load()&&down&&!boardBackWas&&!settingsOwned&&!settingsChord&&!gamestate::KeyboardShown()) {
+            if(gamestate::FrontSettingsOpen()) {
+                Say(gamestate::CloseFrontSettings()?"Frame campfire: Right B - closing the cog's panel (D2RLoaderSettingsPanel)":
+                                                     "Frame campfire: Right B - the cog's panel could not be asked to close");
+            } else if(gamestate::FrontOverlayOpen()) {
+                const bool f=focused||FocusGameForUi();
+                if(f){PulseUiKey(VK_ESCAPE);Say("Frame campfire: Right B - Escape (Back) to the game");}
+            } else Say("Frame campfire: Right B - nothing open over the menu; no Escape (it would ask to quit)");
+        }
+        boardBackWas=down;
+    }
     if(!settingsOwned&&(!nativeUi||gripMenuPressed)&&inventoryPressed&&inWorld&&inWorld()) {
         // Keyboard shortcuts can be gated after switching input layouts or
         // panels. Queue the game's own panel actions on its UI thread instead.

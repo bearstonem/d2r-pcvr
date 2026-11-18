@@ -388,6 +388,57 @@ struct Settings {
     std::atomic<float> campfirePanoYaw{0.0f}, campfirePanoLow{-90.0f}, campfirePanoHigh{90.0f}, campfirePanoBright{1.0f};   // [campfire] pano_yaw/low/high/brightness
     std::atomic<float> campfireMenuTop{0.78f};  // [campfire] menu_top: where the strip begins, a share of the game's menu band from its top
     std::atomic<float> campfirePickDist{22.0f};// [campfire] pick_distance: how far along the hand's ray the pointer is put, world units
+    // [frontend] enabled: the main menu's act scenes (character select, biome act*_frontend_biome; one preset,
+    // data/hd/env/preset/ui/frontendact2.json, the five acts' vignettes side by side) in stereo, round you, as
+    // the campfire: the head where the game's camera stands, the menu on a board. No campfire extras there
+    // (its fire, sparks, snow, Act 5 sky, night, pick in the scene). eye / up / forward as [campfire]'s;
+    // menu_top: the share of the menu band from its top where the board begins (0: the whole menu).
+    std::atomic<bool>  frontendOn{false};
+    std::atomic<float> frontendEye{6.0f}, frontendUp{0.0f}, frontendForward{0.0f}, frontendMenuTop{0.0f};
+    // [frontend] right_N / up_N / forward_N (N = 1..5): one act's head moved from the game's camera besides eye / up /
+    // forward (world units). Act 3: 4 to the left, over the middle of its pier - the Kurast Docks pier behind
+    // (prepare_frontend_scene.py TOWN_ALIGN) lies along the menu's own, whose middle passes 4 left of the camera
+    // (owner 2026-11-14: "I stand with one foot in the air").
+    std::atomic<float> frontendRightN[6]{0.0f, 0.0f, 0.0f, -4.0f, 0.0f, 0.0f};
+    std::atomic<float> frontendUpN[6]{}, frontendForwardN[6]{};
+    // [frontend] menu_width / menu_distance / menu_drop: the main menu's board, as [campfire]'s (metres): half as
+    // big again as the campfire's and a little higher (owner 2026-11-13)
+    std::atomic<float> frontendMenuWidth{1.65f}, frontendMenuDistance{1.0f}, frontendMenuDrop{0.65f};
+    std::atomic<bool>  frontendSky{true};   // [frontend] sky: our sky (Act 1's stormy night) in the void round the scene
+    std::atomic<float> frontendSkyBright{3.5f};   // [frontend] sky_bright: that sky this much brighter (to the scene's painted sky)
+    std::atomic<float> frontendSkySat{0.35f};     // [frontend] sky_saturation: and this much of its colour kept (greyer, as the painting)
+    // [frontend] sky_blend / sky_blend_far / sky_blend_lo / sky_blend_hi: the scene's painted sky ends in a dark band
+    // that met our sky in a hard line - what is drawn farther than _far and darker than _lo.._hi fades into our sky.
+    std::atomic<float> frontendSkyBlend{1.0f}, frontendSkyBlendFar{300.0f}, frontendSkyBlendLo{0.03f}, frontendSkyBlendHi{0.22f};
+    // [frontend] wisps: will-o'-the-wisps behind you in the main menu's act scene (owner 2026-11-13): warm as the
+    // campfire, wandering slowly and irregularly from the ground to half the trees' height, lighting what is
+    // round them (D2R_Lights.fxh WispLight / WispGlow). wisps = how many (0 off, up to 12); wisp_strength,
+    // wisp_radius (world units where the light is down to its edge's half), wisp_glow (the orb itself),
+    // wisp_speed (1 = as made), wisp_low / wisp_high (their heights over the ground).
+    std::atomic<int>   frontendWisps{12};
+    std::atomic<float> frontendWispStrength{3.0f}, frontendWispRadius{40.0f}, frontendWispGlow{1.0f}, frontendWispSpeed{1.0f};
+    std::atomic<float> frontendWispLow{2.0f}, frontendWispHigh{16.0f};
+    std::atomic<bool>  frontendWispShadow{true};      // [frontend] wisp_shadow: what stands between casts a shadow
+    std::atomic<bool>  frontendSkyEdges{true};        // [frontend] sky_edges: edges against the void laid over our sky by coverage
+    // [frontend] cut_right / cut_left: the other acts' scenes stand beside each act's in the same preset (Act 2's
+    // at Act 1's right). In the headset only, what lies farther than this to the camera's right / left (world
+    // units, sideways) is our sky instead (the shader, SkyCut*): the scene and the 2D menu are left as they are.
+    // Act 1's: right 285 (its forest ends at 260, Act 2's scene begins at about 306). 0 = no cut.
+    std::atomic<float> frontendCutRight{285.0f}, frontendCutLeft{0.0f};
+    std::atomic<float> frontendCutVoid{0.42f};
+    std::atomic<float> frontendCutFarRight{200.0f}, frontendCutFarAhead{190.0f};   // [frontend] cut_far_right / cut_far_ahead   // [frontend] cut_void: and what has no depth, beyond this (dot with the side)
+    std::atomic<float> frontendWispShadowDark{0.85f}; // [frontend] wisp_shadow_dark: how much light the shadow takes
+    // [frontend] cut_right_N / cut_left_N (N = 2..5): the other acts' walls, as Act 1's cut_right / cut_left. By
+    // default halfway to the next act's camera on each side, none past the ends; Act 2's left 130 (owner 2026-11-14:
+    // Act 1's forest begins about 137 to Act 2's left, its scene round you ends at 85). 0 = no cut.
+    std::atomic<float> frontendCutRightN[6]{0.0f, 0.0f, 211.0f, 237.0f, 234.0f, 0.0f};
+    std::atomic<float> frontendCutLeftN[6]{0.0f, 0.0f, 130.0f, 211.0f, 237.0f, 234.0f};
+    // [frontend] pano_N / pano_file_N / pano_brightness_N / pano_saturation_N / pano_yaw_N / pano_low_N / pano_high_N:
+    // an act scene's own sky, one picture round it (as the campfire's), in place of our act sky. Act 2's: a burning
+    // yellow desert noon, not the starry night (owner 2026-11-14) - D2R_Sky_ours/D2R_Front_act2.png (tools: gen_front_act2_sky.py).
+    // Each act its own texture (D2R_SKY_FRONT_N), all loaded once; the act on show picks its own (SkyPanoSlot).
+    std::atomic<bool>  frontendPano[6]{};
+    std::atomic<float> frontendPanoBright[6]{}, frontendPanoSat[6]{}, frontendPanoYaw[6]{}, frontendPanoLow[6]{}, frontendPanoHigh[6]{};
     std::atomic<bool>  skyHidePanels{true}; // no sky while a side panel shifts the picture
     std::atomic<bool>  skyRims{true};       // [sky] cover_rims: the sky over the dark rim round things against it (SkyOverRims)
     std::atomic<bool>  fogCaves{false};     // [fog] caves: opt-in added indoor fog; native lighting/effects remain
@@ -566,6 +617,7 @@ struct Settings {
 stereoreplay::Settings g_replaySettings;
 
 wchar_t g_iniPath[MAX_PATH];
+std::atomic<bool> g_shotWanted{false};   // [debug] shot / Ctrl+F11: a picture at the next present (shot::Take)
 float g_campfireAvoid[4] = {0, 0, 0, 0};   // [campfire] pick_avoid (CampfirePointer)
 FILETIME g_iniTime{};
 
@@ -788,6 +840,11 @@ struct SkyAct { float bright; std::string band, cap; bool bandOk, capOk; float f
                 std::string nightBand, nightCap; bool nightOk; };   // [sky] night_<act> / night_cap_<act>: the night picture (gen_night_sky.py)
 SRWLOCK g_skyCfgLock = SRWLOCK_INIT;
 std::string g_campfirePanoFile = "D2R_Sky_ours/D2R_Campfire_Pano.png";   // [campfire] pano_file (under g_skyCfgLock)
+// [frontend] each act's own picture, "" none (under g_skyCfgLock): each in a texture of its own in the shader
+// (D2R_SKY_FRONT_N), all loaded once; the act on show only picks one (SkyPanoSlot). (2026-11-15: before, one slot
+// followed the act on show - every change of act renamed it and recompiled the effect, a hitch of up to a second.)
+std::string g_frontPanoFiles[6];
+extern std::atomic<int> g_frontAct;   // (below: the act on show)
 SkyAct g_skyAct[7];
 // [fog] color_caves: one colour for every area off the outdoor list - caves,
 // dungeons, crypts, towers. Empty = the act's own colour, as before.
@@ -1008,6 +1065,73 @@ int SkyPaletteFor(const std::string& biome, bool always) {
 // The game's own interface size ("Safe Screen Percent" in Saved Games\Diablo II
 // Resurrected\Settings.json, 50..100), as a fraction: the toolbar's size and
 // place follow it (hud.cpp). 1 when it cannot be read.
+// [frontend] sort_characters (owner 2026-11-13): the character list - the game lists the offline heroes by
+// when each was last played, its save's (.d2s) time - the sort_recent last played first, as they are, and the
+// rest after them by name. Only the files' times are set (their content is never opened); the saves are the
+// game's own (the mod's savepath "../": Saved Games\Diablo II Resurrected). At the plugin's load and each
+// time the main menu comes up; nothing is set when the order is already so.
+void SortCharacters() {
+    if (!IniB(L"frontend", L"sort_characters", true)) return;
+    const int keep = std::clamp((int)IniF(L"frontend", L"sort_recent", 5.0f), 0, 100);
+    PWSTR base = nullptr;
+    std::wstring dir;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_SavedGames, 0, nullptr, &base))) dir = std::wstring(base) + L"\\Diablo II Resurrected\\";
+    if (base) CoTaskMemFree(base);
+    if (dir.empty()) return;
+    struct Save { std::wstring name; ULONGLONG time; };
+    std::vector<Save> saves;
+    WIN32_FIND_DATAW fd;
+    const HANDLE h = FindFirstFileW((dir + L"*.d2s").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        saves.push_back({fd.cFileName, ((ULONGLONG)fd.ftLastWriteTime.dwHighDateTime << 32) | fd.ftLastWriteTime.dwLowDateTime});
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    if ((int)saves.size() <= keep + 1) return;
+    std::sort(saves.begin(), saves.end(), [](const Save& a, const Save& b) { return a.time > b.time; });   // newest first
+    std::sort(saves.begin() + keep, saves.end(), [](const Save& a, const Save& b) { return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0; });
+    // The rest one minute apart, the first by name a minute older than the last of the recent ones.
+    const ULONGLONG minute = 600000000ull;
+    ULONGLONG t = (keep > 0 ? saves[keep - 1].time : saves[0].time + minute) - minute;
+    bool sorted = true;
+    for (size_t i = keep + 1; i < saves.size(); ++i) if (!(saves[i].time < saves[i - 1].time)) sorted = false;
+    if (keep > 0 && !(saves[keep].time < saves[keep - 1].time)) sorted = false;
+    if (sorted) return;
+    int set = 0;
+    for (size_t i = keep; i < saves.size(); ++i, t -= minute) {
+        const HANDLE f = CreateFileW((dir + saves[i].name).c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                     nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (f == INVALID_HANDLE_VALUE) continue;
+        FILETIME ft{(DWORD)(t & 0xffffffffu), (DWORD)(t >> 32)};
+        if (SetFileTime(f, nullptr, nullptr, &ft)) ++set;
+        CloseHandle(f);
+    }
+    LogF("vrcam: [frontend] characters sorted: %d last played first, %d set after them by name", keep, set);
+}
+
+// The main menu's scene made for the headset (prepare_frontend_scene.py: a forest round Act 1, its painted sky
+// out, the clouds out) is only for [frontend] enabled: without it the menu is the game's flat picture, which
+// wants the game's own scene. At the plugin's load - before the game reads it - the made one is put aside
+// (frontendact2.json -> .json.pcvr-off, beside it in the mod's data) when [frontend] is off and put back
+// when it is on again.
+void FrontendPresetSwitch() {
+    std::wstring dir(g_iniPath);   // ...\mods\<mod>\d2rloader\plugins\d2r_pcvr.ini
+    for (int up = 0; up < 3 && !dir.empty(); ++up) dir.resize(dir.find_last_of(L'\\') == std::wstring::npos ? 0 : dir.find_last_of(L'\\'));
+    if (dir.empty()) return;
+    const std::wstring mod = dir.substr(dir.find_last_of(L'\\') + 1);   // ...\mods\<mod>
+    const std::wstring on = dir + L"\\" + mod + L".mpq\\data\\hd\\env\\preset\\ui\\frontendact2.json", off = on + L".pcvr-off";
+    const bool want = IniB(L"frontend", L"scene", true);   // (was `enabled`, off by default - an old ini's enabled=0 no longer counts)
+    const bool hasOn = GetFileAttributesW(on.c_str()) != INVALID_FILE_ATTRIBUTES;
+    const bool hasOff = GetFileAttributesW(off.c_str()) != INVALID_FILE_ATTRIBUTES;
+    if (!want && hasOn) {
+        DeleteFileW(off.c_str());
+        LogF("vrcam: [frontend] off - the menu's headset scene put aside: %s", MoveFileW(on.c_str(), off.c_str()) ? "done" : "FAILED");
+    } else if (want && !hasOn && hasOff) {
+        LogF("vrcam: [frontend] on - the menu's headset scene put back: %s", MoveFileW(off.c_str(), on.c_str()) ? "done" : "FAILED");
+    }
+}
+
 float GameInterfaceScale() {
     PWSTR dir = nullptr;
     std::wstring path;
@@ -1560,6 +1684,108 @@ void LoadSettings() {
         g_set.campfireMenuDistance.store(std::clamp(IniF(L"campfire", L"menu_distance", 1.0f), 0.4f, 3.0f));
         g_set.campfireMenuDrop.store(std::clamp(IniF(L"campfire", L"menu_drop", 0.9f), -0.5f, 1.5f));
         g_set.campfireMenuTop.store(std::clamp(IniF(L"campfire", L"menu_top", 0.78f), 0.0f, 0.98f));
+        {   // [frontend]
+            const bool front = IniB(L"frontend", L"scene", true);   // the menu in 3D: on by default (2026-11-17)
+            static int toldFront = -1;
+            if (int(front) != toldFront) { toldFront = int(front); LogF("vrcam: [frontend] enabled=%d", int(front)); }
+            g_set.frontendOn.store(front);
+            g_set.frontendEye.store(std::clamp(IniF(L"frontend", L"eye", 6.0f), 1.0f, 40.0f));
+            g_set.frontendUp.store(std::clamp(IniF(L"frontend", L"up", 2.3f), -200.0f, 200.0f));
+            g_set.frontendForward.store(std::clamp(IniF(L"frontend", L"forward", 0.0f), -400.0f, 400.0f));
+            g_set.frontendMenuTop.store(std::clamp(IniF(L"frontend", L"menu_top", 0.0f), 0.0f, 0.98f));
+            g_set.frontendSky.store(IniB(L"frontend", L"sky", true));
+            g_set.frontendMenuWidth.store(std::clamp(IniF(L"frontend", L"menu_width", 1.65f), 0.3f, 4.0f));
+            g_set.frontendMenuDistance.store(std::clamp(IniF(L"frontend", L"menu_distance", 1.0f), 0.4f, 3.0f));
+            g_set.frontendMenuDrop.store(std::clamp(IniF(L"frontend", L"menu_drop", 0.65f), -0.5f, 1.5f));
+            g_set.frontendSkyBright.store(std::clamp(IniF(L"frontend", L"sky_bright", 4.5f), 0.1f, 20.0f));
+            g_set.frontendSkySat.store(std::clamp(IniF(L"frontend", L"sky_saturation", 0.35f), 0.0f, 2.0f));
+            g_set.frontendSkyBlend.store(std::clamp(IniF(L"frontend", L"sky_blend", 0.0f), 0.0f, 1.0f));
+            g_set.frontendSkyBlendFar.store(std::clamp(IniF(L"frontend", L"sky_blend_far", 300.0f), 1.0f, 100000.0f));
+            g_set.frontendSkyBlendLo.store(std::clamp(IniF(L"frontend", L"sky_blend_lo", 0.03f), 0.0f, 1.0f));
+            g_set.frontendSkyBlendHi.store(std::clamp(IniF(L"frontend", L"sky_blend_hi", 0.7f), 0.001f, 1.0f));
+            g_set.frontendWisps.store(std::clamp((int)IniF(L"frontend", L"wisps", 12.0f), 0, 12));
+            g_set.frontendWispStrength.store(std::clamp(IniF(L"frontend", L"wisp_strength", 3.0f), 0.0f, 100.0f));
+            g_set.frontendWispRadius.store(std::clamp(IniF(L"frontend", L"wisp_radius", 10.0f), 1.0f, 500.0f));
+            g_set.frontendWispGlow.store(std::clamp(IniF(L"frontend", L"wisp_glow", 0.5f), 0.0f, 20.0f));
+            g_set.frontendWispSpeed.store(std::clamp(IniF(L"frontend", L"wisp_speed", 1.0f), 0.0f, 20.0f));
+            g_set.frontendWispLow.store(std::clamp(IniF(L"frontend", L"wisp_low", 2.0f), -10.0f, 200.0f));
+            g_set.frontendWispHigh.store(std::clamp(IniF(L"frontend", L"wisp_high", 16.0f), -10.0f, 200.0f));
+            g_set.frontendWispShadow.store(IniB(L"frontend", L"wisp_shadow", true));
+            g_set.frontendSkyEdges.store(IniB(L"frontend", L"sky_edges", true));
+            g_set.frontendCutRight.store(std::clamp(IniF(L"frontend", L"cut_right", 232.0f), 0.0f, 100000.0f));
+            g_set.frontendCutLeft.store(std::clamp(IniF(L"frontend", L"cut_left", 0.0f), 0.0f, 100000.0f));
+            g_set.frontendCutVoid.store(std::clamp(IniF(L"frontend", L"cut_void", 0.42f), 0.0f, 2.0f));
+            g_set.frontendCutFarRight.store(std::clamp(IniF(L"frontend", L"cut_far_right", 140.0f), 0.0f, 100000.0f));
+            g_set.frontendCutFarAhead.store(std::clamp(IniF(L"frontend", L"cut_far_ahead", 170.0f), 0.0f, 100000.0f));
+            g_set.frontendWispShadowDark.store(std::clamp(IniF(L"frontend", L"wisp_shadow_dark", 0.85f), 0.0f, 1.0f));
+            {   // [frontend] pano_N: each act's own sky picture, each in its own texture
+                bool changed = false;
+                for (int n = 1; n <= 5; ++n) {
+                    wchar_t key[32], def[96], buf[MAX_PATH];
+                    swprintf_s(key, L"pano_%d", n);
+                    const bool on = IniB(L"frontend", key, n >= 2 && n <= 5);   // Acts 3 (2026-11-14), 4 and 5 (2026-11-15) too
+                    swprintf_s(key, L"pano_file_%d", n);
+                    swprintf_s(def, L"D2R_Sky_ours/D2R_Front_act%d.png", n);
+                    GetPrivateProfileStringW(L"frontend", key, def, buf, MAX_PATH, g_iniPath);
+                    std::wstring f = buf;
+                    while (!f.empty() && (f.back() == L' ' || f.back() == L'"')) f.pop_back();
+                    while (!f.empty() && (f.front() == L' ' || f.front() == L'"')) f.erase(0, 1);
+                    const bool ok = on && !f.empty() && SkyFileExists(f);
+                    for (wchar_t& c : f) if (c == L'\\') c = L'/';
+                    {
+                        const std::string mine = ok ? Utf8(f.c_str()) : std::string();
+                        AcquireSRWLockExclusive(&g_skyCfgLock);
+                        if (g_frontPanoFiles[n] != mine) {
+                            changed = true;
+                            LogF("vrcam: [frontend] act %d's sky picture: %s", n, mine.empty() ? "none" : mine.c_str());
+                        }
+                        g_frontPanoFiles[n] = mine;
+                        ReleaseSRWLockExclusive(&g_skyCfgLock);
+                    }
+                    g_set.frontendPano[n].store(ok);
+                    swprintf_s(key, L"pano_brightness_%d", n);
+                    g_set.frontendPanoBright[n].store(std::clamp(IniF(L"frontend", key, 1.0f), 0.0f, 8.0f));
+                    swprintf_s(key, L"pano_saturation_%d", n);
+                    g_set.frontendPanoSat[n].store(std::clamp(IniF(L"frontend", key, 1.0f), 0.0f, 2.0f));
+                    swprintf_s(key, L"pano_yaw_%d", n);
+                    g_set.frontendPanoYaw[n].store(std::clamp(IniF(L"frontend", key, 0.0f), -360.0f, 360.0f));
+                    swprintf_s(key, L"pano_low_%d", n);
+                    g_set.frontendPanoLow[n].store(std::clamp(IniF(L"frontend", key, -10.0f), -90.0f, 89.0f));
+                    swprintf_s(key, L"pano_high_%d", n);
+                    g_set.frontendPanoHigh[n].store(std::clamp(IniF(L"frontend", key, 90.0f), -89.0f, 90.0f));
+                }
+                if (changed) g_skyCfgGen.fetch_add(1);   // only when a picture is turned on/off or renamed in the ini
+            }
+            {
+                static const float kRight[6] = {0.0f, 0.0f, 211.0f, 237.0f, 234.0f, 0.0f};
+                static const float kLeft[6] = {0.0f, 0.0f, 115.0f, 175.0f, 237.0f, 234.0f};
+                for (int n = 2; n <= 5; ++n) {
+                    wchar_t r[16], l[16];
+                    swprintf_s(r, L"cut_right_%d", n);
+                    swprintf_s(l, L"cut_left_%d", n);
+                    g_set.frontendCutRightN[n].store(std::clamp(IniF(L"frontend", r, kRight[n]), 0.0f, 100000.0f));
+                    g_set.frontendCutLeftN[n].store(std::clamp(IniF(L"frontend", l, kLeft[n]), 0.0f, 100000.0f));
+                }
+                static const float kSide[6] = {0.0f, 0.0f, 0.0f, -2.0f, 0.0f, 0.0f};
+                static const float kUp[6] = {0.0f, 0.0f, 0.0f, 0.75f, 0.0f, 0.0f};
+                for (int n = 1; n <= 5; ++n) {
+                    wchar_t k[16];
+                    swprintf_s(k, L"right_%d", n);
+                    g_set.frontendRightN[n].store(std::clamp(IniF(L"frontend", k, kSide[n]), -200.0f, 200.0f));
+                    swprintf_s(k, L"up_%d", n);
+                    g_set.frontendUpN[n].store(std::clamp(IniF(L"frontend", k, kUp[n]), -200.0f, 200.0f));
+                    swprintf_s(k, L"forward_%d", n);
+                    g_set.frontendForwardN[n].store(std::clamp(IniF(L"frontend", k, 0.0f), -400.0f, 400.0f));
+                }
+            }
+        }
+        {   // [debug] shot: a picture of what the game shows (one eye) each time this number changes - while
+            // testing a scene in the headset, saved beside this DLL in pcvr_shots\ (shot::Take, at the present).
+            static float toldShot = NAN;
+            const float want = IniF(L"debug", L"shot", 0.0f);
+            if (!std::isnan(toldShot) && want != toldShot) g_shotWanted.store(true);
+            toldShot = want;
+        }
         g_set.campfireCaption.store(IniB(L"campfire", L"caption", true));
         g_set.campfirePano.store(IniB(L"campfire", L"panorama", false));
         g_set.campfireFireSound.store(IniB(L"campfire", L"fire_sound", true));
@@ -3054,6 +3280,26 @@ void Tick() {
 bool VrViewInner(const d2rcam::WorldView& in, float out[16]);
 extern std::atomic<bool> g_inWorld;
 extern std::atomic<bool> g_campfire;
+std::atomic<bool> g_frontend3d{false};       // [frontend] enabled and the main menu's act scene up (g_campfire is set too)
+std::atomic<float> g_frontCam[4]{};          // [frontend] the game's camera there (x, y, z) and its heading (atan2 of ahead's z, x)
+std::atomic<int> g_frontAct{0};              // [frontend] the act whose scene the game's camera is at (1..5; 0 none yet)
+// [frontend] acts: the acts whose scene is made for the headset (our sky, the cut, the edges), as digits
+// ("12345": all, owner 2026-11-14 - the others' painted sky cards glowed through Act 1's trees, so they are out of
+// the preset and every act stands under its own sky of ours, cut off from its neighbours); left out, an act is
+// shown in stereo as the game built it, nothing of ours.
+bool FrontendActReady() {
+    const int act = g_frontAct.load();
+    if (!g_frontend3d.load() || act < 1 || act > 5) return false;
+    wchar_t acts[16] = L"";
+    static wchar_t cached[16] = L"12345";
+    static ULONGLONG at = 0;
+    if (GetTickCount64() - at > 1000) {   // the ini is read live, but not every frame
+        at = GetTickCount64();
+        GetPrivateProfileStringW(L"frontend", L"acts", L"12345", acts, 16, g_iniPath);
+        wcscpy_s(cached, acts);
+    }
+    return wcschr(cached, L'0' + act) != nullptr;
+}
 std::atomic<bool> g_campfireArrived{false};   // set as the campfire scene begins: CampfireView faces the fire
 // The campfire's scene drawn round you (CampfireView faced the fire): only then the menu's board
 // is asked for - before it, the scene still loading, the menu's picture is not to be had.
@@ -3082,8 +3328,32 @@ bool CampfireView(const d2rcam::WorldView& in, float out[16]) {
     const float mapNorth = atan2f(-gameFwd.x, -gameFwd.z);
     const float flat = std::hypot(gameFwd.x, gameFwd.z);
     const V3 ahead = flat > 1e-5f ? V3{gameFwd.x/flat, 0.0f, gameFwd.z/flat} : V3{0.0f, 0.0f, -1.0f};
-    const float eyeH = g_set.campfireEye.load();
-    const V3 at = cam + ahead * g_set.campfireForward.load() + V3{0.0f, g_set.campfireUp.load(), 0.0f};
+    const bool front = g_frontend3d.load();
+    const float eyeH = front ? g_set.frontendEye.load() : g_set.campfireEye.load();
+    V3 at = cam + ahead * (front ? g_set.frontendForward.load() : g_set.campfireForward.load())
+          + V3{0.0f, front ? g_set.frontendUp.load() : g_set.campfireUp.load(), 0.0f};
+    if (front) {   // [frontend] right_N / up_N / forward_N: this act's own (its act as last told; the camera stays put)
+        const int n = std::clamp(g_frontAct.load(), 0, 5);
+        const V3 right = {-ahead.z, 0.0f, ahead.x};
+        at = at + ahead * g_set.frontendForwardN[n].load() + right * g_set.frontendRightN[n].load()
+                + V3{0.0f, g_set.frontendUpN[n].load(), 0.0f};
+    }
+    {   // [frontend]: where the game's camera stands (the act's vignette), told when it moves on
+        static float toldCam[3] = {1e9f, 1e9f, 1e9f};
+        if (front) {
+            g_frontCam[0].store(cam.x); g_frontCam[1].store(cam.y); g_frontCam[2].store(cam.z);
+            g_frontCam[3].store(std::atan2(gameFwd.z, gameFwd.x));
+            // which act's scene: the nearest of the game's cameras (2026-11-13's log) along the row
+            static const float kActZ[5] = {483.0f, 110.0f, -313.5f, -789.0f, -1258.5f};
+            int act = 1;
+            for (int i = 1; i < 5; ++i) if (std::fabs(cam.z - kActZ[i]) < std::fabs(cam.z - kActZ[act - 1])) act = i + 1;
+            g_frontAct.store(act);
+        }
+        if (front && std::fabs(cam.x - toldCam[0]) + std::fabs(cam.y - toldCam[1]) + std::fabs(cam.z - toldCam[2]) > 5.0f) {
+            toldCam[0] = cam.x; toldCam[1] = cam.y; toldCam[2] = cam.z;
+            LogF("vrcam: frontend - the game's camera at %.1f %.1f %.1f, facing %.2f %.2f %.2f", cam.x, cam.y, cam.z, gameFwd.x, gameFwd.y, gameFwd.z);
+        }
+    }
     const float ground[3] = {at.x, at.y - eyeH, at.z};   // "the hero": the point under the eyes
     // Facing the fire on arrival, whichever way the head was turned (a recentre or a turn
     // from the game no longer carried over: back from a game the scene began behind you).
@@ -4020,17 +4290,17 @@ void CampfirePick() {
     // Pointing is enough for the game to show which hero is under the pointer (its own hover).
     static bool toldPointer = false;
     POINT where{};
-    if (g_campfire.load() && !board && HandRay(o, d, false, 0) && CampfirePointer(o, d, &where)) {
+    if (g_campfire.load() && !g_frontend3d.load() && !board && HandRay(o, d, false, 0) && CampfirePointer(o, d, &where)) {
         SetCursorPos(where.x, where.y);
         if (!toldPointer) { toldPointer = true; LogF("vrcam: campfire pick - the pointer follows the right hand (%ld, %ld)", where.x, where.y); }
     }
     // The fire's own sound while the scene is up; a click on the fire (not a hero): sparks and a whoosh.
 #ifdef D2RVR_NATIVE_OPENXR
-    framevr::SetCampfireFire(g_campfire.load() && g_campfireShown.load() && g_set.campfireFireSound.load(),
+    framevr::SetCampfireFire(g_campfire.load() && !g_frontend3d.load() && g_campfireShown.load() && g_set.campfireFireSound.load(),
                              g_set.campfireFireVolume.load(), g_set.campfireFireBurst.load());
 #endif
     static bool fireDown = false;
-    if (held && !down && !fireDown && HandRay(o, d, false, 0) && CampfireFireHit(o, d)) {
+    if (held && !g_frontend3d.load() && !down && !fireDown && HandRay(o, d, false, 0) && CampfireFireHit(o, d)) {
         fireDown = true;
         g_sparkAt.store(GetTickCount64());
 #ifdef D2RVR_NATIVE_OPENXR
@@ -7528,10 +7798,13 @@ void CampfireTick() {
     // The menu (name, Create, Back, the checkboxes) on a board in the scene ([campfire] menu_board):
     // the game draws its menu in its 16:9 band at the top of each eye's picture, over the eyes and
     // turning with the head; the native-menu board takes that band's lower strip into the scene.
-    framevr::SetCampfireMenu(g_set.campfireMenuWidth.load(), g_set.campfireMenuDistance.load(), g_set.campfireMenuDrop.load());
+    if (g_frontend3d.load())   // the main menu's board: its own size and height ([frontend] menu_width / _distance / _drop)
+        framevr::SetCampfireMenu(g_set.frontendMenuWidth.load(), g_set.frontendMenuDistance.load(), g_set.frontendMenuDrop.load());
+    else
+        framevr::SetCampfireMenu(g_set.campfireMenuWidth.load(), g_set.campfireMenuDistance.load(), g_set.campfireMenuDrop.load());
     {   // the caption over the heroes ([campfire] caption...)
         const float rect[4] = { g_set.campfireCaptionRect[0].load(), g_set.campfireCaptionRect[1].load(), g_set.campfireCaptionRect[2].load(), g_set.campfireCaptionRect[3].load() };
-        framevr::SetCampfireCaption(g_campfire.load() && g_set.campfireMenuBoard.load() && g_set.campfireCaption.load(), rect,
+        framevr::SetCampfireCaption(g_campfire.load() && !g_frontend3d.load() && g_set.campfireMenuBoard.load() && g_set.campfireCaption.load(), rect,
             g_set.campfireCaptionWidth.load(), g_set.campfireCaptionDistance.load(), g_set.campfireCaptionRise.load());
     }
     {
@@ -7540,7 +7813,8 @@ void CampfireTick() {
         ReleaseSRWLockShared(&g_campfireGameLock);
         const float band = std::clamp(canvas * 9.0f / 16.0f, 0.1f, 1.0f);   // the band's height, a share of the eye's
         const bool board = g_campfire.load() && g_set.campfireMenuBoard.load();
-        hud::SetWorkspaceBand(board ? band * g_set.campfireMenuTop.load() : -1.0f, board ? band : 1.0f);
+        const float top = g_frontend3d.load() ? g_set.frontendMenuTop.load() : g_set.campfireMenuTop.load();
+        hud::SetWorkspaceBand(board ? band * top : -1.0f, board ? band : 1.0f);
         hud::SetBoardClear(g_set.campfireBoardClear.load());
     }
 #endif
@@ -10678,12 +10952,18 @@ bool MonsterPosition(uint32_t id,float out[3]) {
 
 // The campfire under our sky ([campfire] sky, [sky] enabled): its void - over the player, above the
 // scene's band of mountains - gets Act 5's sky, menus or not; fog and the rest stay off there.
+// [frontend] sky: the main menu's act scenes the same way, under Act 1's sky (no panorama there).
 bool CampfireSky() {
-    return g_campfire.load() && g_set.campfireSky.load() && g_set.skyOn.load() && g_enabled.load();
+    return g_campfire.load() && (g_frontend3d.load() ? g_set.frontendSky.load() && FrontendActReady() : g_set.campfireSky.load()) &&
+           g_set.skyOn.load() && g_enabled.load();
 }
-// Act 5's palette (Harrogath's): the campfire is its west gate.
+// Act 5's palette (Harrogath's): the campfire is its west gate. The main menu: Act 1's (its first act scene).
 int CampfireSkyPalette() {
-    for (int i = 0; i < (int)std::size(kPalettes); ++i) if (!strcmp(kPalettes[i].part, "expansion")) return i;
+    // the main menu: the sky of the act whose scene you stand in
+    static const char* const kFront[6] = {"act1", "act1", "act2", "act3", "act4", "act5"};
+    const int act = g_frontAct.load();
+    const char* part = g_frontend3d.load() ? kFront[act >= 1 && act <= 5 ? act : 0] : "expansion";
+    for (int i = 0; i < (int)std::size(kPalettes); ++i) if (!strcmp(kPalettes[i].part, part)) return i;
     return kDefaultPalette;
 }
 
@@ -10717,9 +10997,14 @@ void SkyTick() {
                            biome.rfind("ui_", 0) != 0;
         // [campfire] enabled: character creation's campfire scene taken for a world, for its
         // stereo and camera only (CampfireView); no act, fog, sky or ceiling of its own.
-        const bool campfire = g_set.campfireOn.load() && biome.rfind("ui_characterselect", 0) == 0;
-        if (campfire) LogF("vrcam: campfire - '%s' in stereo, round you", biome.c_str());
-        if (campfire && !g_campfire.load()) g_campfireArrived.store(true);
+        // [frontend] enabled: the main menu's act scenes the same way (FrontendView = CampfireView with [frontend]'s place).
+        const bool front = g_set.frontendOn.load() && biome.find("_frontend") != std::string::npos;
+        const bool campfire = (g_set.campfireOn.load() && biome.rfind("ui_characterselect", 0) == 0) || front;
+        if (front) LogF("vrcam: frontend - '%s' in stereo, round you", biome.c_str());
+        else if (campfire) LogF("vrcam: campfire - '%s' in stereo, round you", biome.c_str());
+        if (biome.find("_frontend") != std::string::npos) SortCharacters();   // the list read again on the way back
+        if (campfire && (!g_campfire.load() || front != g_frontend3d.load())) g_campfireArrived.store(true);
+        g_frontend3d.store(front);
         if (!campfire) g_campfireShown.store(false);
         g_campfire.store(campfire);
 #ifdef D2RVR_NATIVE_OPENXR
@@ -11196,6 +11481,36 @@ bool ApplySkyPictures(reshade::api::effect_runtime* rt) {
             set = true;
         }
     }
+    for (int n = 1; n <= 5; ++n) {   // the main menu's act scenes' own skies ([frontend] pano_N): a texture each, all
+        // loaded at once (the act on show picks one by SkyPanoSlot, no recompile); none: a tiny stand-in from a sky
+        // that is always installed
+        AcquireSRWLockShared(&g_skyCfgLock); const std::string mine = g_frontPanoFiles[n]; ReleaseSRWLockShared(&g_skyCfgLock);
+        char name[32], onName[32];
+        snprintf(name, sizeof name, "D2R_SKY_FRONT_%d", n);
+        snprintf(onName, sizeof onName, "D2R_SKY_FRONT_ON_%d", n);
+        const std::string want = "\"" + (mine.empty() ? std::string("D2R_Sky_ours/D2R_Sky_act1.png") : mine) + "\"";
+        const char* wantOn = mine.empty() ? "0" : "1";
+        // A name the preset does not have is the effect's own default (D2R_Sky.fxh: acts 2-5 their shipped pictures,
+        // on; act 1 none): equal to it, it is left unset. Set, ReShade rebuilds the effect on the render thread -
+        // 36 s frozen on the first menu after an update (2026-11-17), every name of these new to the player's preset.
+        const std::string def = n >= 2 ? "\"D2R_Sky_ours/D2R_Front_act" + std::to_string(n) + ".png\"" : std::string("\"D2R_Sky_ours/D2R_Sky_act1.png\"");
+        const char* defOn = n >= 2 ? "1" : "0";
+        char have[1024] = {};
+        size_t size = sizeof have;
+        const bool known = rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", name, have, &size);
+        if (known ? want != have : want != def) {
+            rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", name, want.c_str());
+            LogF("vrcam: menu act %d's panorama %s = %s", n, name, want.c_str());
+            set = true;
+        }
+        char haveOn[16] = {};
+        size = sizeof haveOn;
+        const bool knownOn = rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", onName, haveOn, &size);
+        if (knownOn ? strcmp(haveOn, wantOn) != 0 : strcmp(defOn, wantOn) != 0) {
+            rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", onName, wantOn);
+            set = true;
+        }
+    }
     {   // Empty slots use no source image; the existing procedural stone path
         // handles biomes without an installed texture. Do not request a missing
         // default file: ReShade treats that as a failed effect reload.
@@ -11238,7 +11553,7 @@ void OnFinishEffects(reshade::api::effect_runtime* rt, reshade::api::command_lis
     if (!g_tech[fxp::Full][0].handle) { hud::SetPictureReady(false); return; }
     // Off while a menu is open: the fog lies over the whole picture, the
     // inventory and trade panels included, and darkened them.
-    const bool campfireNight = g_campfire.load() && !g_set.campfireEffects.load() && g_set.campfireNight.load() && FogWanted();
+    const bool campfireNight = g_campfire.load() && !g_frontend3d.load() && !g_set.campfireEffects.load() && g_set.campfireNight.load() && FogWanted();
     const bool want = campfireNight || CampfireSky() || !(g_campfire.load() && !g_set.campfireEffects.load()) && (FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted() || HeroLightWanted() || ImmunityWanted() || TeleportArcWanted());
     // The toolbar and the map are taken out of the game's picture to be drawn
     // back at their own size only while this effect runs, and is new enough to.
@@ -11414,7 +11729,113 @@ void Publish() {
 }  // namespace depthcam
 
 // Right before the swap chain's real Present (after ReShade's effects and overlay): pairtime.
-void OnReshadePresent(reshade::api::effect_runtime*) {
+// [debug] shot / Ctrl+F11: the back buffer as ReShade has it, at a present, saved as a PNG off the render thread.
+namespace shot {
+
+// The PNG container's GUID, our own copy (GUID_ContainerFormatPng is not in every import library).
+constexpr GUID kPng = {0x1b7cfaf4, 0x713f, 0x473c, {0xbb, 0xcd, 0x61, 0x37, 0x42, 0x5f, 0xae, 0xaf}};
+
+// 24-bit BGR, the format every PNG encoder takes (2026-11-13: 32bpp PBGRA was refused: the files stayed empty).
+constexpr GUID kBgr24 = {0x6fddc324, 0x4e03, 0x4bfe, {0xb1, 0x85, 0x3d, 0x77, 0x76, 0x8d, 0xc9, 0x0c}};
+
+// A plain 24-bit BMP, needing nothing: when WIC would not write the PNG.
+bool SaveBmp(const std::vector<uint8_t>& bgr, uint32_t w, uint32_t h, const std::wstring& path) {
+    const uint32_t row = (w * 3 + 3) & ~3u, size = row * h;
+    FILE* f = _wfopen(path.c_str(), L"wb");
+    if (!f) return false;
+    uint8_t head[54] = {'B', 'M'};
+    auto put = [&](int at, uint32_t v) { for (int i = 0; i < 4; ++i) head[at + i] = (uint8_t)(v >> (8 * i)); };
+    put(2, 54 + size); put(10, 54); put(14, 40); put(18, w); put(22, h);
+    head[26] = 1; head[28] = 24; put(34, size);
+    bool ok = fwrite(head, 1, 54, f) == 54;
+    std::vector<uint8_t> line(row, 0);
+    for (uint32_t y = 0; ok && y < h; ++y) {   // bottom up
+        memcpy(line.data(), &bgr[(size_t)(h - 1 - y) * w * 3], (size_t)w * 3);
+        ok = fwrite(line.data(), 1, row, f) == row;
+    }
+    fclose(f);
+    return ok;
+}
+
+void Save(std::vector<uint8_t> rgba, uint32_t w, uint32_t h, std::wstring path) {
+    std::vector<uint8_t> bgr((size_t)w * h * 3);
+    for (size_t i = 0, j = 0; i + 3 < rgba.size(); i += 4, j += 3) { bgr[j] = rgba[i + 2]; bgr[j + 1] = rgba[i + 1]; bgr[j + 2] = rgba[i]; }
+    rgba.clear(); rgba.shrink_to_fit();
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const char* step = "factory";
+    IWICImagingFactory* wic = nullptr;
+    IWICStream* stream = nullptr;
+    IWICBitmapEncoder* enc = nullptr;
+    IWICBitmapFrameEncode* frame = nullptr;
+    WICPixelFormatGUID fmt = kBgr24;
+    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic));
+    if (SUCCEEDED(hr)) { step = "stream"; hr = wic->CreateStream(&stream); }
+    if (SUCCEEDED(hr)) { step = "file"; hr = stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE); }
+    if (SUCCEEDED(hr)) { step = "encoder"; hr = wic->CreateEncoder(kPng, nullptr, &enc); }
+    if (SUCCEEDED(hr)) { step = "encoder init"; hr = enc->Initialize(stream, WICBitmapEncoderNoCache); }
+    if (SUCCEEDED(hr)) { step = "frame"; hr = enc->CreateNewFrame(&frame, nullptr); }
+    if (SUCCEEDED(hr)) { step = "frame init"; hr = frame->Initialize(nullptr); }
+    if (SUCCEEDED(hr)) { step = "size"; hr = frame->SetSize(w, h); }
+    if (SUCCEEDED(hr)) { step = "format"; hr = frame->SetPixelFormat(&fmt); }
+    if (SUCCEEDED(hr) && fmt != kBgr24) { step = "format taken"; hr = E_FAIL; }
+    if (SUCCEEDED(hr)) { step = "pixels"; hr = frame->WritePixels(h, w * 3, (UINT)bgr.size(), bgr.data()); }
+    if (SUCCEEDED(hr)) { step = "frame commit"; hr = frame->Commit(); }
+    if (SUCCEEDED(hr)) { step = "commit"; hr = enc->Commit(); }
+    const bool png = SUCCEEDED(hr);
+    if (frame) frame->Release();
+    if (enc) enc->Release();
+    if (stream) stream->Release();
+    if (wic) wic->Release();
+    if (SUCCEEDED(co)) CoUninitialize();
+    bool ok = png;
+    std::wstring wrote = path;
+    if (!png) {   // the PNG's empty file out, the picture as a BMP
+        DeleteFileW(path.c_str());
+        wrote = path.substr(0, path.size() - 4) + L".bmp";
+        ok = SaveBmp(bgr, w, h, wrote);
+    }
+    char name[MAX_PATH * 2] = "";
+    WideCharToMultiByte(CP_UTF8, 0, wrote.c_str(), -1, name, sizeof name, nullptr, nullptr);
+    if (png) LogF("vrcam: [debug] shot %ux%u saved: %s", w, h, name);
+    else LogF("vrcam: [debug] shot %ux%u - PNG failed at %s (0x%08lx); %s %s", w, h, step, (unsigned long)hr,
+              ok ? "BMP saved:" : "BMP NOT saved:", name);
+}
+
+void Take(reshade::api::effect_runtime* rt) {
+    // Ctrl+F11 too (Ctrl+F10 stays the full frame trace, [debug] uitrace): one picture a press.
+    static bool held = false;
+    const bool down = (GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_F11) & 0x8000);
+    if (down && !held) g_shotWanted.store(true);
+    held = down;
+    if (!rt || !g_shotWanted.exchange(false)) return;
+    uint32_t w = 0, h = 0;
+    rt->get_screenshot_width_and_height(&w, &h);
+    if (!w || !h) { LogF("vrcam: [debug] shot - no picture to take"); return; }
+    std::vector<uint8_t> rgba((size_t)w * h * 4);
+    if (!rt->capture_screenshot(rgba.data())) { LogF("vrcam: [debug] shot - ReShade gave no picture"); return; }
+    std::wstring dir(g_iniPath);
+    dir.resize(dir.find_last_of(L'\\') + 1);
+    dir += L"pcvr_shots";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    wchar_t file[64];
+    swprintf_s(file, L"\\shot_%04u%02u%02u_%02u%02u%02u_%03u.png", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    struct Job { std::vector<uint8_t> rgba; uint32_t w, h; std::wstring path; };
+    Job* job = new Job{std::move(rgba), w, h, dir + file};
+    const HANDLE th = CreateThread(nullptr, 0, [](LPVOID p) -> DWORD {
+        Job* j = static_cast<Job*>(p);
+        Save(std::move(j->rgba), j->w, j->h, std::move(j->path));
+        delete j;
+        return 0;
+    }, job, 0, nullptr);
+    if (th) CloseHandle(th);
+    else { Save(std::move(job->rgba), job->w, job->h, std::move(job->path)); delete job; }
+}
+}  // namespace shot
+
+void OnReshadePresent(reshade::api::effect_runtime* rt) {
+    shot::Take(rt);
     const double t = pairtime::UsNow();
     pairtime::g_presentAt.store(t);
     // Any mode (mono, stereo, menus): the presents a second and the game's busiest
@@ -11474,7 +11895,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
 #ifdef D2RVR_NATIVE_OPENXR
         // The campfire's night: every present, not only those that find a headset frame open (there
         // the eyes go by turns, a frame each - every other picture had no depth, and no night).
-        const bool campfireNight=g_campfire.load()&&!g_set.campfireEffects.load()&&g_set.campfireNight.load()&&FogWanted();
+        const bool campfireNight=g_campfire.load()&&!g_frontend3d.load()&&!g_set.campfireEffects.load()&&g_set.campfireNight.load()&&FogWanted();
         const bool ownDepth=g_enabled.load()&&g_inWorld.load()&&(framevr::Active()||campfireNight||CampfireSky())&&
             (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted()||BeamWanted()||ImmunityWanted());
         const bool turnDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&framevr::TurnDepthWanted();
@@ -11616,7 +12037,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
     if (g_campfire.load() && !g_set.campfireEffects.load()) {   // the campfire's night: black fog, nothing else of the sky
         static const float kNight[3] = {0.0f, 0.0f, 0.0f};
         const float start = g_set.campfireNightStart.load();
-        SetBool(rt, "FogOn", g_set.campfireNight.load() && FogWanted());
+        SetBool(rt, "FogOn", g_set.campfireNight.load() && !g_frontend3d.load() && FogWanted());
         SetFloat(rt, "FogStart", start);
         SetFloat(rt, "FogEnd", std::max(start + 1.0f, g_set.campfireNightEnd.load()));
         SetFloat(rt, "FogStrength", 1.0f);
@@ -11827,6 +12248,59 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                          sv[0].hero[0], sv[0].hero[1], sv[0].hero[2], sv[0].eyeRel[0], sv[0].eyeRel[1], sv[0].eyeRel[2]);
                 }
             }
+        {   // [frontend] wisps: each on its own slow, irregular round behind you (sums of slow sines, unrelated
+            // rates), its place in the shader's frame (less the ground under the head; heights over the floor)
+            // (their ways are Act 1's fields: there only)
+            const int count = g_frontAct.load() == 1 && FrontendActReady() && sv[0].proj_ok && sv[0].axes_ok ? g_set.frontendWisps.load() : 0;
+            float wp[12 * 4] = {}, wc[4] = {1.0f, 0.55f, 0.2f, 0.0f};
+            if (count > 0) {
+                static const ULONGLONG t0 = GetTickCount64();
+                const double t = (GetTickCount64() - t0) / 1000.0 * g_set.frontendWispSpeed.load();
+                const float floorY = AreaFloor(sv[0].hero[1]);
+                const float low = g_set.frontendWispLow.load(), high = std::max(low, g_set.frontendWispHigh.load());
+                const float head = g_frontCam[3].load();   // ahead's angle (x, z)
+                const float fx = cosf(head), fz = sinf(head);   // ahead on the ground; right of it: (-fz, fx)
+                // Each one's way (owner 2026-11-13, 23:44): between the middles of two fields of the map
+                // (columns A.. = 0.., rows from 1; 40 units each, the camera in G7's middle), wandering to and
+                // fro along it and a little to its sides; the last keeps to half the height (near the ground).
+                struct Way { int c0, r0, c1, r1; float tall; };
+                static const Way kWays[12] = {{5, 6, 5, 7, 1.f}, {5, 7, 5, 8, 1.f}, {5, 8, 6, 8, 1.f}, {6, 8, 7, 8, 1.f},
+                                              {7, 8, 8, 7, 1.f}, {8, 7, 8, 6, 1.f}, {9, 6, 9, 8, 1.f}, {7, 8, 7, 9, 1.f},
+                                              {4, 6, 4, 9, 1.f}, {5, 9, 7, 9, 1.f}, {7, 9, 8, 9, 1.f}, {7, 6, 7, 7, 0.5f}};
+                auto mid = [](int c, int r, float& right, float& ahead) { right = -240.0f + 40.0f * c; ahead = 280.0f - 40.0f * r; };
+                for (int i = 0; i < count; ++i) {
+                    const double ph = i * 2.399963;   // the golden angle: each its own phase
+                    const Way& w = kWays[i];
+                    float r0, a0, r1, a1;
+                    mid(w.c0, w.r0, r0, a0);
+                    mid(w.c1, w.r1, r1, a1);
+                    // along the way 0..1 and across it (units): two slow sines each, unrelated rates
+                    const double along = 0.5 + 0.5 * (0.65 * sin(t * 0.047 * (1.0 + 0.13 * i) + ph) + 0.35 * sin(t * 0.113 + ph * 1.7));
+                    const double across = 7.0 * (0.6 * sin(t * 0.061 * (1.0 + 0.11 * i) + ph * 0.6) + 0.4 * sin(t * 0.137 + ph * 2.3));
+                    const double y01 = 0.5 + 0.35 * sin(t * 0.09 * (1.0 + 0.07 * i) + ph * 1.3) + 0.15 * sin(t * 0.23 + ph);
+                    const float dr = r1 - r0, da = a1 - a0, len = std::max(1.0f, std::sqrt(dr * dr + da * da));
+                    const float right = r0 + dr * (float)along - da / len * (float)across;
+                    const float ahead = a0 + da * (float)along + dr / len * (float)across;
+                    const float x = g_frontCam[0].load() + ahead * fx - right * fz;
+                    const float z = g_frontCam[2].load() + ahead * fz + right * fx;
+                    const float y = sv[0].hero[1] + low + (high - low) * w.tall * (float)std::clamp(y01, 0.0, 1.0);
+                    wp[i * 4 + 0] = x - sv[0].hero[0];
+                    wp[i * 4 + 1] = y - floorY;
+                    wp[i * 4 + 2] = z - sv[0].hero[2];
+                    wp[i * 4 + 3] = 0.85f + 0.15f * (float)sin(t * 1.7 + ph * 3.0);   // a slow breath
+                }
+                wc[3] = g_set.frontendWispStrength.load();
+            }
+            SetBool(rt, "WispOn", count > 0);
+            SetFloats(rt, "WispPos", wp, 12 * 4);
+            SetFloats(rt, "WispCol", wc, 4);
+            SetFloat(rt, "WispRadius", g_set.frontendWispRadius.load());
+            SetFloat(rt, "WispGlowStrength", g_set.frontendWispGlow.load());
+            SetBool(rt, "WispShadowOn", g_set.frontendWispShadow.load());
+            SetFloat(rt, "WispShadowDark", g_set.frontendWispShadowDark.load());
+            static int toldWisps = -1;
+            if (count != toldWisps) { toldWisps = count; LogF("vrcam: [frontend] wisps %d", count); }
+        }
         // [ceiling] game_ceiling: the game's from the area's first frame, laid or still loading - never the shader's
         // vault for a moment in between
         const int who = gameceiling::Drawer(sky, CeilWanted(), GameCeilingByGame(), engineunits::CeilingShown());
@@ -12207,7 +12681,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         const ULONGLONG at = g_sparkAt.load(), now = GetTickCount64();
         SkyView sv[2];
         AcquireSRWLockShared(&g_skyLock); sv[0] = g_skyView[0]; sv[1] = g_skyView[1]; ReleaseSRWLockShared(&g_skyLock);
-        const bool on = g_campfire.load() && g_set.campfireSparks.load() && at && now - at < 2500 && sv[0].proj_ok && sv[0].axes_ok;
+        const bool on = g_campfire.load() && !g_frontend3d.load() && g_set.campfireSparks.load() && at && now - at < 2500 && sv[0].proj_ok && sv[0].axes_ok;
         SetBool(rt, "SparkOn", on);
         if (on) {
             for (int e = 0; e < 2; ++e) {
@@ -12230,7 +12704,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         // seconds in the scene it turns once - begins if it was not falling, ends if it was - from the top either way.
         static bool was = false, snowing = false, turned = false;
         static ULONGLONG since = 0, turnAt = 0;
-        const bool scene = g_campfire.load();
+        const bool scene = g_campfire.load() && !g_frontend3d.load();
         const ULONGLONG nowSnow = GetTickCount64();
         if (scene && !was) {
             since = nowSnow; turned = false; turnAt = 0;
@@ -12325,10 +12799,52 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
     // brightness stays; without one the day picture is dimmed.
     SetFloat(rt, "SkyNightMix", act.nightOk && act.bandOk ? 1.0f - DayNightK() : 0.0f);
     SetFloat(rt, "SkyDrift", g_set.skyDrift.load() ? 1.0f : 0.0f);
-    SetFloat(rt, "SkyBrightness", act.nightOk && act.bandOk ? act.bright : act.bright * DayNightMul());
+    SetFloat(rt, "SkyBrightness", (act.nightOk && act.bandOk ? act.bright : act.bright * DayNightMul()) *
+                                  (g_frontend3d.load() ? g_set.frontendSkyBright.load() : 1.0f));
+    SetFloat(rt, "SkySaturation", g_frontend3d.load() ? g_set.frontendSkySat.load() : 1.0f);
+    SetFloat(rt, "SkyBlendDark", g_frontend3d.load() ? g_set.frontendSkyBlend.load() : 0.0f);
+    SetBool(rt, "SkyEdgeFix", FrontendActReady() && g_set.frontendSkyEdges.load());
+    {   // [frontend] the walls between the acts. Act 1's: cut_right / cut_left (its forest reaches past the middle
+        // towards Act 2). The others': halfway to the next act's camera on each side (the cameras along the row at
+        // z 483, 110, -313.5, -789, -1258.5 - each act's own scene within about 120 of its camera), none past the ends;
+        // [frontend] cut_right_N / cut_left_N.
+        const int actN = FrontendActReady() ? g_frontAct.load() : 0;
+        const bool act1 = actN == 1;
+        const float h = g_frontCam[3].load();
+        const float cr = act1 ? g_set.frontendCutRight.load() : g_set.frontendCutRightN[actN].load();
+        const float cl = act1 ? g_set.frontendCutLeft.load() : g_set.frontendCutLeftN[actN].load();
+        const float dir[2] = {-sinf(h), cosf(h)};   // the camera's right on the ground (x, z)
+        SetBool(rt, "SkyCutOn", actN >= 1 && (cr > 0.0f || cl > 0.0f));
+        SetFloats(rt, "SkyCutDir", dir, 2);
+        SetFloat(rt, "SkyCutRight", cr > 0.0f ? cr : 1e9f);
+        SetFloat(rt, "SkyCutLeft", cl > 0.0f ? cl : 1e9f);
+        // with no depth (a painted sky card), by its direction alone: more than about 25 degrees to that side
+        SetFloat(rt, "SkyCutVoidRight", cr > 0.0f ? g_set.frontendCutVoid.load() : 2.0f);
+        SetFloat(rt, "SkyCutVoidLeft", cl > 0.0f ? g_set.frontendCutVoid.load() : 2.0f);
+        const float fr = act1 ? g_set.frontendCutFarRight.load() : 0.0f;
+        SetFloat(rt, "SkyCutFarRight", fr > 0.0f ? fr : 1e9f);
+        SetFloat(rt, "SkyCutFarAhead", fr > 0.0f ? g_set.frontendCutFarAhead.load() : 1e9f);
+    }
+    SetFloat(rt, "SkyBlendFar", g_set.frontendSkyBlendFar.load());
+    SetFloat(rt, "SkyBlendLo", g_set.frontendSkyBlendLo.load());
+    SetFloat(rt, "SkyBlendHi", std::max(g_set.frontendSkyBlendHi.load(), g_set.frontendSkyBlendLo.load() + 0.001f));
     // The campfire's panorama ([campfire] panorama): one picture round the scene, sky and mountains, in its own slot.
-    const bool pano = CampfireSky() && g_set.campfirePano.load();
-    SetBool(rt, "SkyPano", pano);
+    const bool pano = CampfireSky() && !g_frontend3d.load() && g_set.campfirePano.load();
+    // [frontend] pano_N: the act scene's own sky picture, if this act has the slot
+    const int frontPanoAct = FrontendActReady() ? std::clamp(g_frontAct.load(), 0, 5) : 0;
+    const bool frontPano = CampfireSky() && g_frontend3d.load() && frontPanoAct >= 1 &&
+                           g_set.frontendPano[frontPanoAct].load();
+    SetBool(rt, "SkyPano", pano || frontPano);
+    SetFloat(rt, "SkyPanoSlot", frontPano ? static_cast<float>(frontPanoAct) : 0.0f);   // its own texture (D2R_SKY_FRONT_N)
+    if (frontPano) {
+        SetFloat(rt, "SkyTex", 5.0f);   // painted (PaintedSky hands over to the panorama)
+        SetFloat(rt, "SkyBrightness", g_set.frontendPanoBright[frontPanoAct].load());
+        SetFloat(rt, "SkySaturation", g_set.frontendPanoSat[frontPanoAct].load());
+        SetFloat(rt, "SkyBlendDark", 0.0f);
+        SetFloat(rt, "SkyPanoYaw", g_set.frontendPanoYaw[frontPanoAct].load());
+        SetFloat(rt, "SkyPanoLow", g_set.frontendPanoLow[frontPanoAct].load());
+        SetFloat(rt, "SkyPanoHigh", std::max(g_set.frontendPanoHigh[frontPanoAct].load(), g_set.frontendPanoLow[frontPanoAct].load() + 1.0f));
+    }
     if (pano) {
         SetFloat(rt, "SkyTex", 5.0f);   // painted (PaintedSky), whatever act 5's own pictures are
         SetFloat(rt, "SkyBrightness", g_set.campfirePanoBright.load());
@@ -12942,6 +13458,8 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     vrsettings::Poll(g_iniPath);
 #endif
     ReloadIfChanged();
+    SortCharacters();   // [frontend] sort_characters: before the game reads the list
+    FrontendPresetSwitch();   // [frontend] enabled: the menu's headset scene in or out, before the game reads it
     g_mouseLookOn.store(MouseLookForView());
     LogF("vrcam: " D2RPCVR_NAME " %s (plugin " D2RPCVR_PLUGIN_ID ", " D2RPCVR_PLUGIN_FILE "): game build %s (%s), "
          "made for D2R 3.3.93787 under D2RLoader 1.3.1", g_info_version,
