@@ -27,13 +27,13 @@ enum class Category : uint32_t {
 
 inline constexpr std::size_t CategoryCount = static_cast<std::size_t>(Category::Count);
 
-// Tab labels. The panel draws these; keep them short.
-inline constexpr const wchar_t* CategoryLabel(Category category) {
+// Tab labels, UTF-8 for the painter (the mod draws UTF-8 everywhere).
+inline constexpr const char* CategoryName(Category category) {
     switch (category) {
-    case Category::Uniques:   return L"Uniques";
-    case Category::Sets:      return L"Sets";
-    case Category::Runewords: return L"Runewords";
-    default:                  return L"?";
+    case Category::Uniques:   return "Uniques";
+    case Category::Sets:      return "Sets";
+    case Category::Runewords: return "Runewords";
+    default:                  return "?";
     }
 }
 

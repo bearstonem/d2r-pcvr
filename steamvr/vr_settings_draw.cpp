@@ -779,6 +779,24 @@ void Painter::Stone(RectF r,Color base,float textureOpacity){
     i.Shade(R(r),textureOpacity,0x5EEDu);
 }
 void Painter::Fill(RectF r,Color c,float alpha){auto& i=*impl;if(i.drawing)i.rt->FillRectangle(R(r),i.Token(c,alpha));}
+void Painter::Image(RectF r,const uint8_t* rgba,int width,int height,float alpha){
+    auto& i=*impl;
+    if(!i.drawing||rgba==nullptr||width<=0||height<=0||alpha<=0.f)return;
+    // Straight RGBA in, premultiplied BGRA out: Direct2D blends premultiplied
+    // pixels, and the icon cache hands over straight RGBA.
+    std::vector<uint8_t> bgra(size_t(width)*size_t(height)*4);
+    for(size_t at=0;at+3<bgra.size();at+=4){
+        const uint32_t a=rgba[at+3];
+        bgra[at+0]=uint8_t((uint32_t(rgba[at+2])*a+127)/255);
+        bgra[at+1]=uint8_t((uint32_t(rgba[at+1])*a+127)/255);
+        bgra[at+2]=uint8_t((uint32_t(rgba[at+0])*a+127)/255);
+        bgra[at+3]=uint8_t(a);
+    }
+    Com<ID2D1Bitmap> bitmap;
+    if(FAILED(i.rt->CreateBitmap(D2D1::SizeU(UINT(width),UINT(height)),bgra.data(),UINT(width)*4,
+        D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,D2D1_ALPHA_MODE_PREMULTIPLIED)),bitmap.Put())))return;
+    i.rt->DrawBitmap(bitmap.operator->(),R(r),alpha,D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+}
 void Painter::Line(float x0,float y0,float x1,float y1,Color c,float width){auto& i=*impl;if(i.drawing)i.rt->DrawLine({x0,y0},{x1,y1},i.Token(c),width);}
 void Painter::Outline(RectF r,Color c,float width,bool dashed){
     auto& i=*impl;if(!i.drawing)return;
