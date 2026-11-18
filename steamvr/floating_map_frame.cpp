@@ -90,6 +90,7 @@ void StepFrame(InputFrame& f) {
     if (o.ownStick) f.stickRx = f.stickRy = 0;
     f.want = o.want;
     f.pointed = o.pointed;
+    f.frame = o.frame;
     if (o.pulse >= 0) f.pulse(o.pulse, GrabBuzz);
     else if (o.awayEdge) f.pulse(0, AwayBuzz);   // held at the wrist: a let go puts it away
     else if (o.aimEdge) {   // Aim buzz: lighter than the grab's
