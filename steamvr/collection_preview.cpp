@@ -77,7 +77,7 @@ std::map<std::string, std::string> LoadManifest(const std::wstring& folder) {
     return files;
 }
 
-bool DecodeIcon(IWICImagingFactory* wic, const std::wstring& path, framevr::collection::draw::IconPixels& out) {
+bool DecodeIcon(IWICImagingFactory* wic, const std::wstring& path, int& outWidth, int& outHeight, std::vector<uint8_t>& outRgba) {
     IWICBitmapDecoder*      decoder   = nullptr;
     IWICBitmapFrameDecode*  frame     = nullptr;
     IWICBitmapScaler*       scaler    = nullptr;
@@ -88,13 +88,13 @@ bool DecodeIcon(IWICImagingFactory* wic, const std::wstring& path, framevr::coll
         SUCCEEDED(decoder->GetFrame(0, &frame)) && SUCCEEDED(frame->GetSize(&width, &height)) && width && height &&
         SUCCEEDED(wic->CreateBitmapScaler(&scaler))) {
         const float scale = width > height ? 128.f / width : 128.f / height;
-        out.width  = width  > 128 ? UINT(width * scale)  : width;
-        out.height = height > 128 ? UINT(height * scale) : height;
-        if (SUCCEEDED(scaler->Initialize(frame, out.width, out.height, WICBitmapInterpolationModeFant)) &&
+        outWidth  = int(width  > 128 ? UINT(width * scale)  : width);
+        outHeight = int(height > 128 ? UINT(height * scale) : height);
+        if (SUCCEEDED(scaler->Initialize(frame, UINT(outWidth), UINT(outHeight), WICBitmapInterpolationModeFant)) &&
             SUCCEEDED(wic->CreateFormatConverter(&converter)) &&
             SUCCEEDED(converter->Initialize(scaler, GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom))) {
-            out.rgba.resize(size_t(out.width) * out.height * 4);
-            ok = SUCCEEDED(converter->CopyPixels(nullptr, out.width * 4, UINT(out.rgba.size()), out.rgba.data()));
+            outRgba.resize(size_t(outWidth) * size_t(outHeight) * 4);
+            ok = SUCCEEDED(converter->CopyPixels(nullptr, UINT(outWidth) * 4, UINT(outRgba.size()), outRgba.data()));
         }
     }
     for (IUnknown* part : {static_cast<IUnknown*>(converter), static_cast<IUnknown*>(scaler), static_cast<IUnknown*>(frame), static_cast<IUnknown*>(decoder)})
@@ -178,16 +178,26 @@ int main(int argc, char** argv) {
     CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic));
     const std::wstring               icons = iconsPath ? Widen(iconsPath) : L"";
     const auto                       manifest = icons.empty() ? std::map<std::string, std::string>{} : LoadManifest(icons);
-    std::map<std::string, framevr::collection::draw::IconPixels> decoded;
+    std::map<std::string, std::vector<uint8_t>>                  owned;   // the pixels the views point into
+    std::map<std::string, framevr::collection::draw::IconPixels> views;
     const framevr::collection::draw::IconLookup lookup =
         [&](const std::string& key) -> const framevr::collection::draw::IconPixels* {
             if (manifest.empty()) return nullptr;
-            if (auto it = decoded.find(key); it != decoded.end()) return it->second.rgba.empty() ? nullptr : &it->second;
-            framevr::collection::draw::IconPixels pixels;
-            const auto file = manifest.find(key);
-            if (file != manifest.end()) DecodeIcon(wic, icons + L"\\" + Widen(file->second.c_str()), pixels);
-            auto placed = decoded.emplace(key, std::move(pixels)).first;
-            return placed->second.rgba.empty() ? nullptr : &placed->second;
+            if (auto it = views.find(key); it != views.end()) return it->second.rgba ? &it->second : nullptr;
+            std::vector<uint8_t> pixels;
+            int                  width = 0, height = 0;
+            const auto           file = manifest.find(key);
+            if (file != manifest.end()) DecodeIcon(wic, icons + L"\\" + Widen(file->second.c_str()), width, height, pixels);
+            auto& store = owned[key];
+            store       = std::move(pixels);
+            framevr::collection::draw::IconPixels view;
+            if (!store.empty()) {
+                view.rgba   = store.data();
+                view.width  = width;
+                view.height = height;
+            }
+            views[key] = view;
+            return view.rgba ? &views[key] : nullptr;
         };
 
     framevr::settings::draw::Painter painter;

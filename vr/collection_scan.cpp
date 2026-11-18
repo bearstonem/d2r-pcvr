@@ -223,6 +223,17 @@ D2RL::ConsoleCommandResult __cdecl CmdCollection(D2R::Game::Client*, const D2RL:
         QueueScan();
         return D2RL::ConsoleCommandResult::Handled;
     }
+    if (std::strncmp(args, "tab", 3) == 0) {
+        const char* what = args + 3;
+        while (*what == ' ' || *what == '\t') ++what;
+        if (std::strncmp(what, "on", 2) == 0) { TabSetWanted(true); return D2RL::ConsoleCommandResult::Handled; }
+        if (std::strncmp(what, "off", 3) == 0) { TabSetWanted(false); return D2RL::ConsoleCommandResult::Handled; }
+        if (std::strncmp(what, "next", 4) == 0) { TabStep(1); return D2RL::ConsoleCommandResult::Handled; }
+        if (std::strncmp(what, "prev", 4) == 0) { TabStep(-1); return D2RL::ConsoleCommandResult::Handled; }
+        if (std::strncmp(what, "uniques", 7) == 0) { TabSelectCategory(Category::Uniques); return D2RL::ConsoleCommandResult::Handled; }
+        if (std::strncmp(what, "sets", 4) == 0) { TabSelectCategory(Category::Sets); return D2RL::ConsoleCommandResult::Handled; }
+        if (std::strncmp(what, "runewords", 9) == 0) { TabSelectCategory(Category::Runewords); return D2RL::ConsoleCommandResult::Handled; }
+    }
     if (std::strncmp(args, "status", 6) == 0) {
         if (g_ctx != nullptr)
             g_ctx->WriteConsoleMessage(g_inventory != nullptr ? "collection: the inventory service is available; run `collection scan`"

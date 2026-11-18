@@ -30,6 +30,11 @@ const ViewState& TabView();
 void            TabSelectCategory(Category category);
 void            TabStep(int pages);
 
+// Whether the panel is open. The stash's Collection tab sets it; the transport
+// shows the panel while it is true.
+bool TabWanted();
+void TabSetWanted(bool wanted);
+
 // Called by the scan: the found flags start empty for the character's stash.
 void TabClearFound();
 void TabMarkFound(Category category, uint32_t recordId);

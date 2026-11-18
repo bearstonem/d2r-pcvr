@@ -18,12 +18,13 @@ class Painter;
 
 namespace framevr::collection::draw {
 
-// Decoded icon pixels, straight RGBA. The mod fills these from its own icon
-// cache (interaction_icons.h); the preview decodes the PNGs itself.
+// Decoded icon pixels, straight RGBA: a view, not an owner, so the caller keeps
+// the buffer alive for the paint. The mod points it at its icon cache
+// (interaction_icons.h); the preview at its own decoded copy.
 struct IconPixels {
-    int                  width  = 0;
-    int                  height = 0;
-    std::vector<uint8_t> rgba;
+    const uint8_t* rgba   = nullptr;
+    int            width  = 0;
+    int            height = 0;
 };
 
 // One icon by cache key ("u122" for a unique, "t0" for a set item). Null when

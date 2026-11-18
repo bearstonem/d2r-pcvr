@@ -70,7 +70,11 @@ constexpr Region Strain{Blood.x+Blood.w+Gap,Blood.y,strain::Size,strain::Size};
 constexpr Region Notice{Strain.x+Strain.w+Gap,Blood.y,notice::Width,notice::Height};
 constexpr Region BowLaser{Notice.x+Notice.w+Gap,Blood.y,bowlaser::AtlasWidth,bowlaser::AtlasHeight};
 constexpr Region ArcaneDecay{Strain.x,Strain.y+Strain.h+Gap,arcane::Size,arcane::Size};
-constexpr int SharedWidth=2048,SharedHeight=Blood.y+Blood.h;
+// The Collection panel (collection_draw.h): its own 1280 x 1024 canvas in the
+// shared atlas, under the strain light's column so no region the frame already
+// uses moves. The stash's own page, opened from the stash panel.
+constexpr Region Collection{0,ArcaneDecay.y+ArcaneDecay.h+Gap,settings::Width,settings::Height};
+constexpr int SharedWidth=2048,SharedHeight=Collection.y+Collection.h+Gap;
 
 constexpr bool Inside(Region r,int width,int height){return r.x>=0&&r.y>=0&&r.w>0&&r.h>0&&r.x+r.w<=width&&r.y+r.h<=height;}
 // Apart by at least Gap texels on one axis.

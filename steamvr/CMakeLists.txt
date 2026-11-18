@@ -102,6 +102,7 @@ target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_lock.cpp ${ROOT}/vr/summon_ra
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/loot_beam_scan.cpp)   # loot beams: the items on the floor that get one
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/monster_immunity.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/collection_scan.cpp ${ROOT}/vr/collection_tab.cpp)   # collection tabs: the catalog scan and the catalog itself (collection_model.h)
+target_sources(d2rl-pcvr PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/collection_draw.cpp)   # collection tabs: the panel's own painting (collection_draw.h)
 add_executable(monster-immunity-test monster_immunity_test.cpp)
 target_compile_options(monster-immunity-test PRIVATE -UNDEBUG)
 add_executable(monster-immunity-runtime-test monster_immunity_runtime_test.cpp)

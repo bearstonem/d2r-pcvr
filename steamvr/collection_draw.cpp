@@ -86,8 +86,8 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
             painter.Fill(box, style.fill, 0.96f);
             painter.Outline(box, style.edge, slot == view.hovered ? 4.f : 3.f);
             const IconPixels* pixels = icons ? icons(panel::IconKey(view.category, entry->recordId)) : nullptr;
-            if (pixels != nullptr && !pixels->rgba.empty()) {
-                painter.Image(inner, pixels->rgba.data(), pixels->width, pixels->height);
+            if (pixels != nullptr && pixels->rgba != nullptr) {
+                painter.Image(inner, pixels->rgba, pixels->width, pixels->height);
             } else {
                 // Still decoding: a gold dot stands for the icon for now.
                 painter.Fill({inner.x + inner.w * 0.33f, inner.y + inner.h * 0.33f, inner.w * 0.34f, inner.h * 0.34f}, style.edge, 0.9f);

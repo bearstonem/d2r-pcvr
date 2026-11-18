@@ -108,6 +108,8 @@
 #include "menu_drop.h"
 #include "respec_button.h"
 #include "stash_buttons.h"
+#include "collection_draw.h"
+#include "../vr/collection_tab.h"
 #include "vr_keyboard.h"
 #include "native_panels.h"
 #include "cinema_screen.h"
@@ -593,6 +595,37 @@ LatestWorker<SettingsPaintJob,SettingsPainted> settingsPainter([](const Settings
     auto picture=settings::PaintPage(job.model,job.input);   // Width x Height straight RGBA and the layout it drew
     return SettingsPainted{std::move(picture.pixels),std::move(picture.layout),double(hookmetrics::Nanos()-start)/1e6,std::move(picture.error)};
 });
+// The Collection panel (collection_draw.h): the same background-painter pattern
+// as VR Settings. It is the stash's own page, so it is opened from the stash and
+// painted while it is open.
+struct CollectionPaintJob {
+    collection::Library library;
+    collection::ViewState view;
+};
+struct CollectionPainted {
+    std::vector<uint8_t> pixels;
+    std::string          error;
+};
+// One icon of the mod's own cache by cache key ("u122", "t0"). The picture is a
+// view into the cache's buffer, which stays alive for the whole paint.
+const collection::draw::IconPixels* CollectionIcon(const std::string& key) {
+    static thread_local std::shared_ptr<const interaction::icons::Image> held;
+    static thread_local collection::draw::IconPixels                      view;
+    held = interaction::icons::Get(key);
+    if (!held || held->rgba.empty()) return nullptr;
+    view.rgba   = held->rgba.data();
+    view.width  = int(held->width);
+    view.height = int(held->height);
+    return &view;
+}
+LatestWorker<CollectionPaintJob,CollectionPainted> collectionPainter([](const CollectionPaintJob& job) {
+    thread_local std::unique_ptr<settings::draw::Painter> painter;
+    if(!painter)painter=std::make_unique<settings::draw::Painter>();
+    if(!painter->Ready())return CollectionPainted{{},painter->Error()};
+    if(!painter->Begin())return CollectionPainted{{},painter->Error()};
+    collection::draw::Paint(*painter,job.library,job.view,CollectionIcon);
+    return CollectionPainted{painter->End(),{}};
+});
 // What a picture shows. Everything that changes the look is compared as is
 // (hover, pressed, the card), and the clock only through buckets: the confirm
 // row's and Undo reset's guards arming, Undo reset ending, and its drain bar
@@ -618,6 +651,17 @@ uint64_t performanceSerial=0;ULONGLONG performanceAt=0;
 uint64_t settingsPaintRequest=0;
 XrPosef settingsPose{};
 constexpr float settingsWidth=.95f,settingsHeight=settingsWidth*settings::Height/settings::Width;
+// The Collection panel's own state: the open tab and page, the picture asked of
+// the painter and the pose it is shown at. collectionOpen follows the stash.
+collection::ViewState collectionView;
+uint64_t collectionPaintRequest=0;
+bool collectionAtlasPending=false;
+bool collectionOpen=false;
+bool collectionImageReady=false;
+collection::ViewState collectionPaintedView;   // the tab and page the picture shows
+uint64_t collectionIconRevision=~0ull;          // the icon cache's revision the picture shows
+XrPosef collectionPose{};
+constexpr float collectionWidth=.95f,collectionHeight=collectionWidth*settings::Height/settings::Width;
 DXGI_FORMAT atlasFormat=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
 uint32_t layerLimit=16;
 // What each place in the submitted layer list showed last (composition::StablePlaces).
@@ -2985,6 +3029,34 @@ int TakeSettingsPicture() {
             painted.paintMs,Milliseconds()-uploadStart);Say(message);reportAt=now+5000;
     }
     return uploaded?1:0;
+}
+// The Collection panel's picture, taken like the settings page's: the painter's
+// finished picture is uploaded into the shared atlas region once.
+int TakeCollectionPicture() {
+    CollectionPainted painted;
+    if(!collectionPaintRequest||collectionAtlasPending||atlasUploads.size()>=3||!collectionPainter.Take(collectionPaintRequest,painted))return 0;
+    collectionPaintRequest=0;
+    if(painted.pixels.empty()){
+        static ULONGLONG failedAt=0;const auto now=GetTickCount64();
+        if(now>=failedAt){Say(("Frame collection: the panel could not be painted: "+(painted.error.empty()?std::string("unknown error"):painted.error)).c_str());failedAt=now+5000;}
+        collectionImageReady=false;
+        collectionOpen=false;
+        return -1;
+    }
+    const bool uploaded=UploadShared(panelatlas::Collection,painted.pixels,&collectionAtlasPending);
+    if(uploaded)collectionImageReady=true;
+    return uploaded?1:0;
+}
+// Paints the panel again when nothing is outstanding and the picture would
+// change: another tab or page, or an icon that finished decoding since.
+void RequestCollectionPaint(bool force=false) {
+    if(collectionPaintRequest)return;
+    const uint64_t revision=interaction::icons::Revision();
+    if(!force&&collectionImageReady&&collectionPaintedView.category==collectionView.category&&
+       collectionPaintedView.page==collectionView.page&&collectionIconRevision==revision)return;
+    collectionPaintedView=collectionView;
+    collectionIconRevision=revision;
+    collectionPaintRequest=collectionPainter.Submit({collection::TabLibrary(),collection::TabView()});
 }
 // One frame of the T cross (body_calibration_gesture.h). Runs where the first-load prompt
 // opens, so the prompt owns this frame's input the same way. The hands are last frame's
@@ -7841,10 +7913,25 @@ void EndPair() {
             keyboardLitQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
         }
     }
+    // The Collection panel: open with the stash's Collection tab; painted again
+    // when its tab, page or an icon changed, its picture taken into the atlas.
+    // It hangs where the settings panel does, so the laser can reach it.
+    collectionOpen=collection::TabWanted();
+    if(collectionOpen){
+        const auto q=math::Yaw(math::Heading(Q(head.orientation)));
+        collectionPose=XrPose({V(head.position)+math::Rotate(q,{0,-.06f,-1.05f}),q});
+        RequestCollectionPaint();TakeCollectionPicture();
+    }
     XrCompositionLayerQuad settingsPanel{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(layer&&(settingsModel.open||bodyCalibration.Active())&&settingsImageReady){
         // The help card is inside the panel: its region is the panel, Width wide.
         motionQuad(settingsPanel,settingsPose,settingsWidth,settingsHeight,Rect(panelatlas::Settings),sharedChain);
+    }
+    // The Collection panel: the stash's own page (collection_draw.h), opened from
+    // the stash and shown where the stash panel is.
+    XrCompositionLayerQuad collectionPanel{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    if(layer&&collectionOpen&&collectionImageReady){
+        motionQuad(collectionPanel,collectionPose,collectionWidth,collectionHeight,Rect(panelatlas::Collection),sharedChain);
     }
     // Glyph casting's trail, in the plane it was drawn in, the stroke's start in the middle (glyph_trail.h).
     XrCompositionLayerQuad glyphQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};

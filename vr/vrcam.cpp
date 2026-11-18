@@ -13007,6 +13007,7 @@ DWORD WINAPI UpdateThread(void*) {
     Key f12{VK_F12}, f11{VK_F11}, f10{VK_F10}, f9{VK_F9};
 #ifdef D2RVR_NATIVE_OPENXR
     Key f8{VK_F8}, f13{VK_F13};
+    Key f7{VK_F7};   // the Collection panel (the stash's own page), opened and closed
 #endif
     Key fView[5] = {{VK_F1}, {VK_F2}, {VK_F3}, {VK_F4}, {VK_F5}};   // the views, as on the Home page
     ULONGLONG nextState = 0, nextSlow = 0;
@@ -13026,6 +13027,9 @@ DWORD WINAPI UpdateThread(void*) {
 #endif
         const bool focus = GameFocused();
         if (f12.Pressed(focus)) Toggle();
+#ifdef D2RVR_NATIVE_OPENXR
+        if (f7.Pressed(focus)) framevr::collection::TabSetWanted(!framevr::collection::TabWanted());   // the Collection panel
+#endif
         {   // the same from BodyWalk's mapping: the bridge's view actions, at the press
             static uint32_t was = 0;
             const uint32_t held = ActionsHeld(), pressed = held & ~was;

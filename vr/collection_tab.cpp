@@ -25,6 +25,7 @@ std::mutex  g_lock;
 Library     g_library;
 ViewState   g_view;
 bool        g_loaded = false;
+std::atomic<bool> g_wanted{false};   // the panel is open
 
 // The catalog sits beside the plugin DLL, like the icon cache.
 std::filesystem::path PluginFolder() {
@@ -97,6 +98,10 @@ void TabStep(int pages) {
     std::lock_guard lock(g_lock);
     g_view.Step(g_library, pages);
 }
+
+bool TabWanted() { return g_wanted.load(); }
+
+void TabSetWanted(bool wanted) { g_wanted.store(wanted); }
 
 void TabClearFound() {
     std::lock_guard lock(g_lock);
