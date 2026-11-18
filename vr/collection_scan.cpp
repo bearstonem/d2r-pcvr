@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "collection_model.h"
+#include "logging.h"
 
 namespace framevr::collection {
 namespace {
@@ -91,9 +92,9 @@ D2RL::Inventory::IterationAction __cdecl CountItem(const D2RL::PluginContext*, c
     return D2RL::Inventory::IterationAction::Continue;
 }
 
-void LogLine(const char* text) {
-    if (g_ctx != nullptr) g_ctx->LogInfo(text);
-}
+// The report belongs in the mod's own session log (d2r-vr-frame.log), the file
+// the team reads, not in the loader's startup log.
+void LogLine(const char* text) { framevr::logging::Write(text); }
 
 void ListRows(const char* what, const std::vector<uint32_t>& rows, uint32_t limit) {
     char        line[512];
@@ -270,8 +271,9 @@ void Init(const D2RL::PluginContext* ctx) {
     if (!ctx->RegisterConsoleCommand("collection", &CmdCollection,
                                      "collection - the unique/set/runeword catalog: scan (report what this character carries)"))
         ctx->LogError("collection: the console command did not register");
-    else
-        ctx->LogInfo("collection: spike ready - the report runs when a character loads, and `collection scan` repeats it");
+    // Also in the mod's own session log, so a session says at a glance whether
+    // the report is active.
+    LogLine("collection: spike ready - the report runs when a character loads, and `collection scan` repeats it");
 }
 
 void Shutdown() {

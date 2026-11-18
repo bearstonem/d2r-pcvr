@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "collection_model.h"
+#include "logging.h"
 
 namespace framevr::collection {
 namespace {
@@ -17,9 +18,8 @@ const D2RL::InventoryService* g_inventory = nullptr;
 D2RL::Inventory::PageRegistrationHandle g_pages[CategoryCount] {};
 bool                                    g_registered = false;
 
-void LogLine(const char* text) {
-    if (g_ctx != nullptr) g_ctx->LogInfo(text);
-}
+// The probe's results belong in the mod's own session log (d2r-vr-frame.log).
+void LogLine(const char* text) { framevr::logging::Write(text); }
 
 const char* StateName(D2RL::Inventory::PageRegistrationState state) {
     switch (state) {
@@ -201,7 +201,7 @@ D2RL::ConsoleCommandResult __cdecl CmdCollectionPages(D2R::Game::Client*, const 
 
 }   // namespace
 
-void InitPages(const D2RL::PluginContext* ctx) {
+void InitPages(const D2RL::PluginContext* ctx, bool probeAtLoad) {
     g_ctx = ctx;
     if (ctx == nullptr) return;
 
@@ -214,6 +214,11 @@ void InitPages(const D2RL::PluginContext* ctx) {
     if (!ctx->RegisterConsoleCommand("collectionpages", &CmdCollectionPages,
                                      "collectionpages - the custom-page probe: info / register / move / unregister"))
         ctx->LogError("collectionpages: the console command did not register");
+
+    if (probeAtLoad) {
+        LogLine("collectionpages: [collection] pages_probe=1 - registering the category pages now");
+        RegisterPages();
+    }
 }
 
 void ShutdownPages() {

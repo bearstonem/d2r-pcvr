@@ -12986,7 +12986,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     gamestate::Init(ctx);
     gamecmd::Init(ctx);
     framevr::collection::Init(ctx);        // collection tabs: the read-only catalog report (`collection scan`)
-    framevr::collection::InitPages(ctx);   // collection tabs: the custom-page probe (`collectionpages ...`)
+    framevr::collection::InitPages(ctx, IniB(L"collection", L"pages_probe", false));   // collection tabs: the custom-page probe (`collectionpages ...`)
 #ifdef D2RVR_NATIVE_OPENXR
     enemysight::Init(ctx);
     companionai::Init(ctx);
