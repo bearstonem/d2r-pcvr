@@ -747,7 +747,7 @@ desktop focus loss releases the injected mouse button; release the trigger
 before starting again. Pressing or releasing Left Grip during a drag will
 not convert it into a context-click.
 
-### VR keyboard (character names)
+### VR keyboard (character names and multiplayer)
 
 D2R shows no on-screen keyboard for the character name, so the mod adds one.
 When you pick a hero on the character creation screen, a keyboard appears
@@ -761,6 +761,16 @@ trigger to type it into the name box.
 | Back | Delete the last character |
 | Enter | Confirm, as the keyboard's Enter does |
 | Close | Hide the keyboard until you pick another hero or reopen character creation |
+
+D2RLoader's multiplayer panel (Host Game, Browse Games, Direct join, a game's
+password) gets the same keyboard with a digit row, `.`, `:` and a Space bar, so
+you can type a game's name, password and description, the list's filter, or
+an address and port. It shows for as long as the panel is open: click a box
+with the laser, then type. In the main menu's 3D scene it stands above the
+menu board, facing you; with the flat menu it sits under the menu. Shift on a
+digit types its symbol (`!` for `1`). Close hides it until you pick another
+view (Host Game, Browse Games, Direct join) or open the panel again. Right B
+closes the multiplayer panel itself.
 
 The keys follow your Windows keyboard layout, so a letter types the same
 character on any layout. A physical keyboard keeps working alongside it.

@@ -8,9 +8,9 @@ int main() {
     // Every region inside its image, each pair a gap apart.
     const Region statics[]={Gameplay,Pointer,Compass,Leather,Stats,StatsLit,
         Respec(0),Respec(1),Respec(2),Respec(3),Respec(4),Respec(5),Respec(6),Respec(7),Stash(0),Stash(1),Stash(2),Stash(3),
-        Keyboard,KeyboardLit,KeyboardCaps,KeyboardCapsLit,GrabHint};
+        Keyboard,KeyboardLit,KeyboardCaps,KeyboardCapsLit,TextKeyboard,TextKeyboardLit,TextKeyboardCaps,TextKeyboardCapsLit,GrabHint};
     constexpr int Statics=int(sizeof statics/sizeof statics[0]);
-    static_assert(Statics==15+RespecPictures,"every static picture checked");
+    static_assert(Statics==19+RespecPictures,"every static picture checked");
     const Region shared[]={Settings,Blood,Strain,Notice,BowLaser,ArcaneDecay,Glyph};
     constexpr int Shared=int(sizeof shared/sizeof shared[0]);
     for(const auto& r:statics)assert(Inside(r,StaticWidth,StaticHeight));
@@ -30,8 +30,15 @@ int main() {
     assert(Stats.w==StatsSize&&Stats.h==StatsSize&&StatsLit.w==StatsSize&&StatsLit.h==StatsSize);
     assert(Respec(0).w==RespecWidth&&Respec(0).h==RespecHeight&&RespecWidth==5*RespecHeight);
     assert(RespecLitReset<RespecPictures&&RespecLitConfirm<RespecPictures);
-    assert(Keyboard.w==framevr::keyboard::TexelWidth&&Keyboard.h==framevr::keyboard::TexelHeight&&KeyboardLit.w==Keyboard.w&&KeyboardLit.h==Keyboard.h&&
-           KeyboardCaps.w==Keyboard.w&&KeyboardCaps.h==Keyboard.h&&KeyboardCapsLit.w==Keyboard.w&&KeyboardCapsLit.h==Keyboard.h);
+    // Each keyboard's four pictures the size its layout paints (vr_keyboard.h PaintKeys), picked by KeyboardPicture.
+    using framevr::keyboard::TexelWidth,framevr::keyboard::TexelHeight;
+    for(bool text:{false,true})for(bool capitals:{false,true})for(bool lit:{false,true}) {
+        const Region r=KeyboardPicture(text,capitals,lit);
+        assert(r.w==TexelWidth&&r.h==TexelHeight(text?framevr::keyboard::Text:framevr::keyboard::Name));
+    }
+    assert(KeyboardPicture(false,false,false).y==Keyboard.y&&KeyboardPicture(false,true,true).x==KeyboardCapsLit.x&&
+           KeyboardPicture(true,false,true).y==TextKeyboardLit.y&&KeyboardPicture(true,true,false).y==TextKeyboardCaps.y);
+    assert(TextKeyboard.h>Keyboard.h);   // the digit row
     // Apart is strict: touching or closer than Gap is not apart; a gap of exactly Gap is.
     assert(!Apart({0,0,10,10},{10,0,10,10})&&!Apart({0,0,10,10},{17,0,10,10})&&Apart({0,0,10,10},{18,0,10,10}));
     assert(!Inside({0,0,10,10},9,10)&&!Inside({-1,0,1,1},10,10)&&Inside({0,0,10,10},10,10));

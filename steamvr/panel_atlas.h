@@ -49,14 +49,24 @@ constexpr Region Respec(int i){return {Stats.x+StatsSize+Gap,Leather.y+i*(Respec
 // Under the leather: the VR keyboard (vr_keyboard.h), every key plain, then
 // every key lit beside it; the lit quad crops the one key under the laser.
 // Under those the same with capitals, while Shift waits (its key lit).
-constexpr Region Keyboard{0,Leather.y+Leather.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight};
-constexpr Region KeyboardLit{Keyboard.x+Keyboard.w+Gap,Keyboard.y,keyboard::TexelWidth,keyboard::TexelHeight};
-constexpr Region KeyboardCaps{0,Keyboard.y+Keyboard.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight};
-constexpr Region KeyboardCapsLit{KeyboardLit.x,KeyboardCaps.y,keyboard::TexelWidth,keyboard::TexelHeight};
+constexpr Region Keyboard{0,Leather.y+Leather.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Name)};
+constexpr Region KeyboardLit{Keyboard.x+Keyboard.w+Gap,Keyboard.y,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Name)};
+constexpr Region KeyboardCaps{0,Keyboard.y+Keyboard.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Name)};
+constexpr Region KeyboardCapsLit{KeyboardLit.x,KeyboardCaps.y,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Name)};
+// Under those the multiplayer panel's keyboard (keyboard::Text, a digit row more), the same four.
+constexpr Region TextKeyboard{0,KeyboardCaps.y+KeyboardCaps.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Text)};
+constexpr Region TextKeyboardLit{KeyboardLit.x,TextKeyboard.y,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Text)};
+constexpr Region TextKeyboardCaps{0,TextKeyboard.y+TextKeyboard.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Text)};
+constexpr Region TextKeyboardCapsLit{KeyboardLit.x,TextKeyboardCaps.y,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Text)};
+// A keyboard's picture: the name's or the multiplayer panel's, small letters or capitals, plain or lit.
+constexpr Region KeyboardPicture(bool text,bool capitals,bool lit) {
+    return text?(capitals?(lit?TextKeyboardCapsLit:TextKeyboardCaps):(lit?TextKeyboardLit:TextKeyboard)):
+                (capitals?(lit?KeyboardCapsLit:KeyboardCaps):(lit?KeyboardLit:Keyboard));
+}
 // Stash navigation plaques (stash_buttons.h): right of the lit keyboard, from where the respec
 // faces' column ends down (that column is wider than the gap the keyboard leaves beside it).
 constexpr Region Stash(int i){return {KeyboardLit.x+KeyboardLit.w+Gap,Leather.y+RespecPictures*(RespecHeight+Gap)+i*(stashbuttons::Height+Gap),stashbuttons::Width,stashbuttons::Height};}
-constexpr int StaticWidth=1536,StaticHeight=KeyboardCaps.y+KeyboardCaps.h>Stash(3).y+Stash(3).h+Gap?KeyboardCaps.y+KeyboardCaps.h:Stash(3).y+Stash(3).h+Gap;
+constexpr int StaticWidth=1536,StaticHeight=TextKeyboardCaps.y+TextKeyboardCaps.h>Stash(3).y+Stash(3).h+Gap?TextKeyboardCaps.y+TextKeyboardCaps.h:Stash(3).y+Stash(3).h+Gap;
 // Right of the pointer, above the compass: the floating map's grab hint (grab_hint.h), its sign's frames, the glow
 // reaching out and the border's strips, so the hint needs no swapchain of its own.
 constexpr Region GrabHint{Pointer.x+Pointer.w+Gap,0,grabhint::AtlasWidth,grabhint::AtlasHeight};
