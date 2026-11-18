@@ -1,4 +1,4 @@
-#define XR_USE_PLATFORM_WIN32
+﻿#define XR_USE_PLATFORM_WIN32
 #define XR_USE_GRAPHICS_API_D3D12
 #define XR_NO_PROTOTYPES
 #include <windows.h>
@@ -109,6 +109,7 @@
 #include "respec_button.h"
 #include "stash_buttons.h"
 #include "collection_draw.h"
+#include "collection_pointer.h"
 #include "../vr/collection_tab.h"
 #include "vr_keyboard.h"
 #include "native_panels.h"
@@ -660,6 +661,11 @@ bool collectionOpen=false;
 bool collectionImageReady=false;
 collection::ViewState collectionPaintedView;   // the tab and page the picture shows
 uint64_t collectionIconRevision=~0ull;          // the icon cache's revision the picture shows
+collection::panel::Hit collectionHover{};                   // the slot or control the laser is over
+collection::panel::Hit collectionPaintedHover{};            // the hover the picture shows
+collection::pointer::Filter collectionPointer;              // the laser's rules (collection_pointer.h)
+bool collectionTriggerDown=false;
+bool collectionWasOpen=false;
 XrPosef collectionPose{};
 constexpr float collectionWidth=.95f,collectionHeight=collectionWidth*settings::Height/settings::Width;
 DXGI_FORMAT atlasFormat=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
@@ -1283,7 +1289,8 @@ float beamLength=0;
 // keeps its own free grab, relative to where you face when it opens.
 panels::Grab panelGrab;
 panels::Offset menuOffset,settingsOffset;
-panels::Placement uiBase{},menuBase{},settingsBase{},captionBase{};
+panels::Offset collectionOffset;   // the Collection panel's own place, moved by its grip
+panels::Placement uiBase{},menuBase{},settingsBase{},captionBase{},collectionBase{};
 
 math::Quat Q(XrQuaternionf q) { return {q.x,q.y,q.z,q.w}; }
 math::Vec V(XrVector3f p) { return {p.x,p.y,p.z}; }
@@ -3053,10 +3060,67 @@ void RequestCollectionPaint(bool force=false) {
     if(collectionPaintRequest)return;
     const uint64_t revision=interaction::icons::Revision();
     if(!force&&collectionImageReady&&collectionPaintedView.category==collectionView.category&&
-       collectionPaintedView.page==collectionView.page&&collectionIconRevision==revision)return;
+       collectionPaintedView.page==collectionView.page&&collectionPaintedView.size==collectionView.size&&
+       collectionIconRevision==revision&&collectionPaintedHover.kind==collectionHover.kind&&
+       collectionPaintedHover.index==collectionHover.index)return;
     collectionPaintedView=collectionView;
+    collectionPaintedHover=collectionHover;
     collectionIconRevision=revision;
     collectionPaintRequest=collectionPainter.Submit({collection::TabLibrary(),collection::TabView()});
+}
+// What a click on the panel does: another tab, another page, another slot size,
+// or a slot. The slot's entry is reported until deposit and withdraw land.
+void CollectionPress(const collection::panel::Hit& hit) {
+    using collection::panel::HitKind;
+    switch(hit.kind) {
+    case HitKind::Tab:      collection::TabSelectCategory(static_cast<collection::Category>(hit.index)); break;
+    case HitKind::Page:     collection::TabSetPage(hit.index); break;
+    case HitKind::Previous: collection::TabStep(-1); break;
+    case HitKind::Next:     collection::TabStep(1); break;
+    case HitKind::Size:     collection::TabSetSize(static_cast<collection::panel::Size>(hit.index)); break;
+    case HitKind::Slot: {
+        const auto& library=collection::TabLibrary();const auto& view=collection::TabView();
+        const collection::Entry* entry=collection::SlotEntry(library,view,hit.index);
+        if(entry==nullptr)break;
+        char message[224];
+        std::snprintf(message,sizeof message,"Frame collection: slot %d is %s (%s, id %u), %s",hit.index,
+            entry->name.c_str(),collection::CategoryName(view.category),entry->recordId,
+            collection::SlotFound(library,view,hit.index)?"in the stash":"still missing");
+        Say(message);
+        break;
+    }
+    default: break;
+    }
+}
+// The panel's own laser: the aim ray onto its quad, the pointer the headset
+// shows, and a click through collection_pointer.h. The shared pointer visuals
+// belong to VR Settings while that is open.
+void CollectionPointer(bool grip) {
+    if(!collectionOpen){collectionHover={};return;}
+    if(settingsModel.open||bodyCalibration.Active())return;
+    pointerVisible=pointerHit=false;
+    float canvasX=-1,canvasY=-1;
+    XrSpaceLocation aim{XR_TYPE_SPACE_LOCATION};
+    const auto needed=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT|
+                      XR_SPACE_LOCATION_POSITION_TRACKED_BIT|XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
+    if(motionHeadTracked&&XR_SUCCEEDED(pLocateSpace(UiAimSpace(),space,frameState.predictedDisplayTime,&aim))&&(aim.locationFlags&needed)==needed){
+        const auto ray=V(aim.pose.position),direction=math::Rotate(Q(aim.pose.orientation),{0,0,-1});math::PanelHit hit;
+        pointerHit=math::IntersectPanel(ray,direction,V(collectionPose.position),Q(collectionPose.orientation),collectionWidth,collectionHeight,hit);
+        beamLength=pointerHit?hit.distance:1.5f;const auto mid=ray+direction*(beamLength*.5f);
+        beamPose=XrPose({mid,math::BeamOrientation(direction,V(head.position)-mid)});pointerVisible=true;
+        if(pointerHit){canvasX=hit.u*collection::panel::CanvasWidth;canvasY=hit.v*collection::panel::CanvasHeight;dotPose=collectionPose;
+            const auto p=hit.point+math::Rotate(Q(collectionPose.orientation),{0,0,.004f});dotPose.position={p.x,p.y,p.z};}
+        const bool grabbing=GrabPanel(collectionPose,collectionBase,collectionOffset,grip&&pointerVisible,pointerHit,UiFloat(trigger,0)>.2f,aim.pose);
+        if(grabbing){collectionTriggerDown=UiFloat(trigger,0)>.2f;collectionHover={};return;}
+    }
+    const uint64_t ms=MenuMs();
+    collectionTriggerDown=UiFloat(trigger,0)>(collectionTriggerDown?.20f:.55f);
+    const collection::panel::Layout layout=collection::panel::Build(collectionView.page,
+        collection::panel::PagesFor(int(collection::TabLibrary().Size(collectionView.category)),collectionView.size),
+        int(collection::CategoryCount),collectionView.size);
+    const auto click=collectionPointer.Step(canvasX,canvasY,layout,collectionTriggerDown,ms);
+    collectionHover=collectionPointer.Hover();
+    if(click.kind!=collection::panel::HitKind::None)CollectionPress(click);
 }
 // One frame of the T cross (body_calibration_gesture.h). Runs where the first-load prompt
 // opens, so the prompt owns this frame's input the same way. The hands are last frame's
@@ -4247,6 +4311,7 @@ void Input() {
                         gamestate::PanelChanges(),GetTickCount64())&&gamestate::CloseLeatherMenu())
         Say("Frame leather: Right B left the menu open; asking the game to close it");
     SettingsPointer((laserPad(controls).buttons&menus::RightBumper)!=0);
+    CollectionPointer((laserPad(controls).buttons&menus::RightBumper)!=0);
     settingsOwned=settingsOwned||bodyCalibration.Active();
     auto& s=*tracking.data;s.version=D2RVR_SHARED_VERSION;s.headValid=1;
     const auto q=Q(head.orientation);
@@ -7914,15 +7979,22 @@ void EndPair() {
         }
     }
     // The Collection panel: open with the stash's Collection tab; painted again
-    // when its tab, page or an icon changed, its picture taken into the atlas.
-    // It hangs where the settings panel does, so the laser can reach it.
+    // when its tab, page, size, an icon or the pointed slot changed, its picture
+    // taken into the atlas. Opening places it, then the grip can move it.
     collectionOpen=collection::TabWanted();
     collectionView=collection::TabView();
     if(collectionOpen){
         const auto q=math::Yaw(math::Heading(Q(head.orientation)));
-        collectionPose=XrPose({V(head.position)+math::Rotate(q,{0,-.06f,-1.05f}),q});
+        if(!collectionWasOpen){
+            collectionBase={V(head.position)+math::Rotate(q,{0,-.06f,-1.05f}),q};
+            collectionOffset={};
+            collectionPointer.Reset(UiFloat(trigger,0)>.2f);
+            collectionHover={};
+        }
+        collectionPose=Placed(collectionBase,collectionOffset);
         RequestCollectionPaint();TakeCollectionPicture();
     }
+    collectionWasOpen=collectionOpen;
     XrCompositionLayerQuad settingsPanel{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(layer&&(settingsModel.open||bodyCalibration.Active())&&settingsImageReady){
         // The help card is inside the panel: its region is the panel, Width wide.
@@ -7943,7 +8015,7 @@ void EndPair() {
         motionQuad(glyphQuad,pose,glyphtrail::Side,glyphtrail::Side,Rect(panelatlas::Glyph),sharedChain);
     }
     XrCompositionLayerQuad laser{XR_TYPE_COMPOSITION_LAYER_QUAD},dot{XR_TYPE_COMPOSITION_LAYER_QUAD};
-    if(layer&&(settingsModel.open||panelMode||spatialMode||(interactionVisible&&interactionOutput.wheel))&&pointerChain&&pointerVisible&&
+    if(layer&&(settingsModel.open||panelMode||spatialMode||(interactionVisible&&interactionOutput.wheel)||collectionOpen)&&pointerChain&&pointerVisible&&
        (settingsModel.open||!campfirePointer.load()||pointerHit||keyboardPointer)) {   // the campfire: off the board the ember beam points at the heroes
         // The pointer needs the same finite-pose checks and normalization as
         // every other optional layer: one bad laser must not hide the menu.

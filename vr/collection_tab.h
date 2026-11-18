@@ -9,6 +9,7 @@
 // The catalog is the list; the stash only holds what was found, so a missing
 // entry costs no room.
 #include "collection_model.h"
+#include "collection_panel.h"
 
 namespace D2RL {
 struct PluginContext;
@@ -29,6 +30,8 @@ const Library& TabLibrary();
 const ViewState& TabView();
 void            TabSelectCategory(Category category);
 void            TabStep(int pages);
+void            TabSetPage(int page);
+void            TabSetSize(panel::Size size);
 
 // Whether the panel is open. The stash's Collection tab sets it; the transport
 // shows the panel while it is true.

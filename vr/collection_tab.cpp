@@ -99,6 +99,17 @@ void TabStep(int pages) {
     g_view.Step(g_library, pages);
 }
 
+void TabSetPage(int page) {
+    std::lock_guard lock(g_lock);
+    g_view.page = page;
+    g_view.Clamp(g_library);
+}
+
+void TabSetSize(panel::Size size) {
+    std::lock_guard lock(g_lock);
+    g_view.SelectSize(g_library, size);
+}
+
 bool TabWanted() { return g_wanted.load(); }
 
 void TabSetWanted(bool wanted) { g_wanted.store(wanted); }
