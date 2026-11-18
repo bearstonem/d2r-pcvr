@@ -3136,6 +3136,7 @@ void CollectionPointer(bool grip) {
         int(collection::CategoryCount),collectionView.size);
     const auto click=collectionPointer.Step(canvasX,canvasY,layout,collectionTriggerDown,ms);
     collectionHover=collectionPointer.Hover();
+    collection::TabSetHover(collectionHover);   // the picture lights what the laser is over
     if(click.kind!=collection::panel::HitKind::None)CollectionPress(click);
     {   // one line a second while the panel is open: a laser that never hits, or a
         // trigger that never rises, says so here

@@ -189,6 +189,11 @@ void TabSetShow(panel::Show show) {
     g_view.SelectShow(g_library, show);
 }
 
+void TabSetHover(panel::Hit hit) {
+    std::lock_guard lock(g_lock);
+    g_view.hover = hit;
+}
+
 void TabShowEntry(Category category, uint32_t recordId) {
     std::lock_guard lock(g_lock);
     if (!g_loaded) return;

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Collection view: the loaded catalog, what the scan found, and what the panel
 // is looking at. Pure data and text - collection_catalog.cpp opens the file and
 // the painter draws - so this all runs in the tests.
@@ -72,7 +72,7 @@ struct ViewState {
     panel::Size  size     = panel::Size::Small;
     panel::Show  show     = panel::Show::All;
     int          page     = 0;
-    int          hovered  = -1;   // slot on this page, -1 none
+    panel::Hit   hover {};   // what the laser is over: the slot or control to light
 
     // Entries the filter keeps. Walking the category is cheap (a few hundred)
     // and it is asked for once a frame, not once a slot.
@@ -89,12 +89,12 @@ struct ViewState {
     int  Pages(const Library& library) const { return panel::PagesFor(VisibleCount(library), size); }
     void Clamp(const Library& library) {
         page    = std::clamp(page, 0, std::max(0, Pages(library) - 1));
-        hovered = -1;
+        hover = {};
     }
     void SelectCategory(const Library& library, Category want) {
         category = want;
         page     = 0;
-        hovered  = -1;
+        hover = {};
         Clamp(library);
     }
     // A bigger slot shows fewer of them, and a filter shows fewer entries, so the
@@ -102,14 +102,14 @@ struct ViewState {
     void SelectSize(const Library& library, panel::Size want) {
         if (size == want) return;
         size    = want;
-        hovered = -1;
+        hover = {};
         Clamp(library);
     }
     void SelectShow(const Library& library, panel::Show want) {
         if (show == want) return;
         show    = want;
         page    = 0;
-        hovered = -1;
+        hover = {};
         Clamp(library);
     }
     void Step(const Library& library, int by) {

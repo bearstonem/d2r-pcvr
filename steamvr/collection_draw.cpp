@@ -62,12 +62,14 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
     // The category tabs, then the page numbers on the same row.
     for (int i = 0; i < layout.tabCount; ++i) {
         ControlState state;
-        state.chosen = static_cast<Category>(i) == view.category;
+        state.chosen  = static_cast<Category>(i) == view.category;
+        state.pointed = view.hover.kind == panel::HitKind::Tab && view.hover.index == i;
         painter.Tab(Box(layout.tabs[i]), Icon::None, CategoryName(static_cast<Category>(i)), state);
     }
     for (int i = 0; i < layout.pageButtonCount; ++i) {
         ControlState state;
-        state.chosen = i == view.page;
+        state.chosen  = i == view.page;
+        state.pointed = view.hover.kind == panel::HitKind::Page && view.hover.index == i;
         painter.Socket(Box(layout.pageButtons[i]), std::to_string(i + 1), state);
     }
 
@@ -80,12 +82,13 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
         const Entry* entry = SlotEntry(library, view, visible, slot);
         if (entry == nullptr) continue;
         const bool   found = SlotFound(library, view, visible, slot);
+        const bool   pointed = view.hover.kind == panel::HitKind::Slot && view.hover.index == slot;
         const RectF  box   = Box(layout.slots[slot]);
         const float  side  = layout.slots[slot].width;
         const RectF  inner = Inset(layout.slots[slot], side * 0.15f);
         if (found) {
             painter.Fill(box, style.fill, 0.96f);
-            painter.Outline(box, style.edge, slot == view.hovered ? 4.f : 3.f);
+            painter.Outline(box, style.edge, pointed ? 4.f : 3.f);
             const IconPixels* pixels = icons ? icons(panel::IconKey(view.category, entry->recordId, entry->code)) : nullptr;
             if (pixels != nullptr && pixels->rgba != nullptr) {
                 painter.Image(inner, pixels->rgba, pixels->width, pixels->height);
@@ -95,7 +98,7 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
             }
         } else {
             painter.Fill(box, Color::Socket, 0.9f);
-            painter.Outline(box, Color::EdgeOff, slot == view.hovered ? 2.f : 1.f, true);
+            painter.Outline(box, Color::EdgeOff, pointed ? 2.f : 1.f, true);
             painter.Outline(inner, Color::EdgeOff, 1.f, true);
         }
     }
@@ -104,21 +107,25 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
     // control (a bigger slot shows fewer of them, so there are more pages).
     ControlState back;
     back.disabled = view.page <= 0;
+    back.pointed  = view.hover.kind == panel::HitKind::Previous;
     painter.Button(Box(layout.previous), {}, Icon::ChevronLeft, back);
     ControlState forward;
     forward.disabled = view.page + 1 >= view.Pages(library);
+    forward.pointed  = view.hover.kind == panel::HitKind::Next;
     painter.Button(Box(layout.next), {}, Icon::Chevron, forward);
     painter.Text(CounterText(library, view), TextStyle::Value, Box(layout.counter), Color::Text, Align::Center);
     painter.Text("Size", TextStyle::Small, Box(layout.sizeLabel), Color::Quiet, Align::Trailing);
     for (int i = 0; i < int(panel::Size::Count); ++i) {
         ControlState step;
-        step.chosen = i == int(view.size);
+        step.chosen  = i == int(view.size);
+        step.pointed = view.hover.kind == panel::HitKind::Size && view.hover.index == i;
         painter.Socket(Box(layout.sizeSteps[i]), panel::SizeName(static_cast<panel::Size>(i)), step);
     }
     painter.Text("Show", TextStyle::Small, Box(layout.showLabel), Color::Quiet, Align::Trailing);
     for (int i = 0; i < int(panel::Show::Count); ++i) {
         ControlState step;
-        step.chosen = i == int(view.show);
+        step.chosen  = i == int(view.show);
+        step.pointed = view.hover.kind == panel::HitKind::Show && view.hover.index == i;
         painter.Socket(Box(layout.showSteps[i]), panel::ShowName(static_cast<panel::Show>(i)), step);
     }
 }

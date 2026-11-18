@@ -86,7 +86,7 @@ int main() {
     view.Step(library, -1);
     assert(view.page == 0);                    // never below the first page
     view.SelectCategory(library, Category::Runewords);
-    assert(view.category == Category::Runewords && view.page == 0 && view.hovered == -1);
+    assert(view.category == Category::Runewords && view.page == 0 && view.hover.kind == panel::HitKind::None);
     assert(view.Pages(library) == 1);
     view.Step(library, 1);
     assert(view.page == 0);                    // one page: nothing to step to

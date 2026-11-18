@@ -34,6 +34,9 @@ void            TabSetPage(int page);
 void            TabSetSize(panel::Size size);
 void            TabSetShow(panel::Show show);
 
+// What the laser is over: the slot or control the picture lights up.
+void            TabSetHover(panel::Hit hit);
+
 // Brings the entry with this record id into view: its category, then the page it
 // lands on under the current filter. Does nothing when it is not in the catalog.
 void            TabShowEntry(Category category, uint32_t recordId);
