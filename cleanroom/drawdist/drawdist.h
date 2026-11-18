@@ -14,6 +14,16 @@ namespace d2rcam::drawdist {
 // Installs the two room hooks; false until both are in (call again later).
 bool Install(const D2RL::PluginContext* ctx);
 bool Installed();
+// Retry optional bindings even after the room hooks have installed. Safe to
+// poll from the existing settings worker; attempts are limited to twice/second.
+void Refresh();
+struct RuntimeStatus {
+    bool hooks=false,tiler=false,append=false,modelRadius=false,recalculate=false;
+    int rings=1,expansion=0,furthestRoom=0,roomsAdded=0,roomsLoaded=0,tileAttempts=0;
+    float activeModelRadius=-1;
+    uint64_t lastExpansionMs=0;
+};
+RuntimeStatus ReadStatus();
 
 void SetRadius(int rooms);   // clamped to [1, 8]
 int  Radius();
