@@ -1080,7 +1080,7 @@ int main(int argc,char** argv){
               d.min==0&&d.max==100&&d.step==10&&HelpText(FloatingMapBackground)[0]!=0&&FloatingMapBackground<ChangeMask::Bits&&FloatingMapBackground+1==MapGrabHint,
               "Floating map background: 100% by default, [interactions] floating_map_background_pct 0 to 100 in 10s, explained, its own change bit, appended (Map grab hint after it)");
         const auto* row=content::RowOf(FloatingMapBackground);const auto* companions=content::RowOf(CompanionCounts);
-        Check(row&&companions&&!row->beside&&row->page==View::Wrist&&row->kind==content::RowKind::Slider&&std::strcmp(row->label,"Floating map background")==0&&
+        Check(row&&companions&&!row->beside&&row->page==View::Wrist&&row->kind==content::RowKind::Slider&&std::strcmp(row->label,"Map background")==0&&
               row->section==companions->section&&row->classes==content::AllClasses&&std::strlen(row->help)<=160,
               "a slider of its own on Interface > Wrist, in the Map section, every class");
         {
@@ -1101,9 +1101,9 @@ int main(int argc,char** argv){
               Definitions[MapGrabHint].step==1&&HelpText(MapGrabHint)[0]!=0&&MapGrabHint<ChangeMask::Bits&&MapGrabHint==Count-1,
               "Map grab hint: On by default, [interactions] map_grab_hint Off / On, explained, its own change bit, appended last");
         const auto* row=content::RowOf(MapGrabHint);const auto* companions=content::RowOf(FloatingMapBackground);
-        Check(row&&companions&&!row->beside&&row->page==View::Wrist&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Map grab hint")==0&&
+        Check(row&&companions&&row->beside&&row->page==View::Wrist&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Map grab hint")==0&&
               row->section==companions->section&&row->classes==content::AllClasses&&std::strlen(row->help)<=160,
-              "a switch of its own on Interface > Wrist, in the Map section, every class");
+              "a switch on the right half of Floating map background's row, Interface > Wrist > Map, every class");
         {
             const auto& rows=content::Menu().rows;size_t at=rows.size(),companionsAt=rows.size();
             for(size_t i=0;i<rows.size();++i){if(rows[i].key==MapGrabHint)at=i;if(rows[i].key==FloatingMapBackground)companionsAt=i;}

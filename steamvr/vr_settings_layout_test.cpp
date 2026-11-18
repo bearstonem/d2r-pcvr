@@ -104,7 +104,7 @@ static const GoldenRow Golden[]={
     {"interactions.map_top_down",View::Wrist,1,content::RowKind::Choice,"Map view",4,0},
     {"interactions.map_rotate",View::Wrist,1,content::RowKind::Toggle,"Turn map with you",0,0},
     {"interactions.companion_counts",View::Wrist,1,content::RowKind::Toggle,"Buffs and companions",0,0},
-    {"interactions.floating_map_background_pct",View::Wrist,1,content::RowKind::Slider,"Floating map background",0,2},   // the floating map's see-through backing (ui_blit.cpp)
+    {"interactions.floating_map_background_pct",View::Wrist,1,content::RowKind::Slider,"Map background",0,2},   // the floating map's see-through backing (ui_blit.cpp)
     {"interactions.map_grab_hint",View::Wrist,1,content::RowKind::Toggle,"Map grab hint",0,0},   // the floating map's grab hint (grab_hint.h)
     {"hud.menu_distance",View::Menus,0,content::RowKind::Choice,"Menu distance",3,0},
     {"interactions.leather_menu",View::Menus,0,content::RowKind::Stepper,"Hold menu",0,3},   // main's #360, drawn inside Menu distance's row; Off / On / Menu only (2026-10-29)
