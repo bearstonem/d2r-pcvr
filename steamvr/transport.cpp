@@ -2259,7 +2259,7 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
         return ok;
     }();
     bool stashPainted=true;
-    for(int i=0;i<4;++i) {
+    for(int i=0;i<stashbuttons::ButtonCount*2;++i) {
         const bool lit=(i%2)!=0;
         auto px=stashbuttons::PaintFace(stashbuttons::Width,stashbuttons::Height,lit);
         const auto label=RespecLabel(stashbuttons::Labels[i/2],stashbuttons::Width,stashbuttons::Height,stashbuttons::LabelHeight);
@@ -2639,9 +2639,12 @@ void MenuPointer(const menus::Pad& controls) {
     stashShown=stashArtReady&&spatialReady&&!journalMode&&gamestate::StashButtonsShown();
     stashHover=-1;
     if(stashShown&&focused&&aimTracked&&pointerHit&&!(mouseDown||rightMouseDown))
-        for(int i=0;i<2;++i)
+        for(int i=0;i<stashbuttons::ButtonCount;++i)
             if(respecbutton::Hit(stashbuttons::Place(surface.width,surface.height,i),surface.width,surface.height,hit.u,hit.v))stashHover=i;
-    stashPad=stashInput.Step(stashShown&&uiActive&&focused,stashHover,pressed,respecNow);
+    const auto stashAction=stashInput.Step(stashShown&&uiActive&&focused,stashHover,pressed,respecNow);
+    stashPad=stashAction==stashbuttons::Action::Previous?menus::LeftBumper:
+             stashAction==stashbuttons::Action::Next?menus::RightBumper:0;
+    if(stashAction==stashbuttons::Action::Collection)collection::TabSetWanted(!collection::TabWanted());
     // A pull on a VR keyboard key (the board under the menu, above).
     if(keyboardPress.Step(onKeyboard&&uiActive,pressed,GetTickCount64())&&keyboardLit>=0) {
         const auto typed=keyboardTypist.Press(keyboardLit);
@@ -7947,13 +7950,16 @@ void EndPair() {
         motionQuad(respecQuad,XrPose({p,q}),spot.width,spot.height,Rect(panelatlas::Respec(picture)),staticChain);
         respecQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;   // premultiplied (SetupStatic)
     }
-    XrCompositionLayerQuad stashQuads[2]={{XR_TYPE_COMPOSITION_LAYER_QUAD},{XR_TYPE_COMPOSITION_LAYER_QUAD}};
+    XrCompositionLayerQuad stashQuads[stashbuttons::ButtonCount]={};
+    for(auto& quad:stashQuads)quad.type=XR_TYPE_COMPOSITION_LAYER_QUAD;
     if(book.subImage.swapchain&&stashShown&&staticChain) {
         const auto size=UiSurfaceSize();const auto at=UiSurfacePose();const auto q=Q(at.orientation);
-        for(int i=0;i<2;++i) {
+        for(int i=0;i<stashbuttons::ButtonCount;++i) {
             const auto spot=stashbuttons::Place(size.width,size.height,i);
             const auto p=V(at.position)+math::Rotate(q,{spot.x,spot.y,.004f});
-            motionQuad(stashQuads[i],XrPose({p,q}),spot.width,spot.height,Rect(panelatlas::Stash(i*2+(stashHover==i))),staticChain);
+            // The Collection button stays lit while its panel is open.
+            const bool lit=stashHover==i||(i==2&&collection::TabWanted());
+            motionQuad(stashQuads[i],XrPose({p,q}),spot.width,spot.height,Rect(panelatlas::Stash(i*2+lit)),staticChain);
             stashQuads[i].layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
         }
     }

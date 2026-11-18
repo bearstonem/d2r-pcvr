@@ -54,8 +54,10 @@ constexpr Region KeyboardCaps{0,Keyboard.y+Keyboard.h+Gap,keyboard::TexelWidth,k
 constexpr Region KeyboardCapsLit{KeyboardLit.x,KeyboardCaps.y,keyboard::TexelWidth,keyboard::TexelHeight};
 // Stash navigation plaques (stash_buttons.h): right of the lit keyboard, from where the respec
 // faces' column ends down (that column is wider than the gap the keyboard leaves beside it).
+// One region per face: the two tab buttons and the Collection button, plain then lit.
 constexpr Region Stash(int i){return {KeyboardLit.x+KeyboardLit.w+Gap,Leather.y+RespecPictures*(RespecHeight+Gap)+i*(stashbuttons::Height+Gap),stashbuttons::Width,stashbuttons::Height};}
-constexpr int StaticWidth=1536,StaticHeight=KeyboardCaps.y+KeyboardCaps.h>Stash(3).y+Stash(3).h+Gap?KeyboardCaps.y+KeyboardCaps.h:Stash(3).y+Stash(3).h+Gap;
+constexpr int StashRegions=stashbuttons::ButtonCount*2;
+constexpr int StaticWidth=1536,StaticHeight=KeyboardCaps.y+KeyboardCaps.h>Stash(StashRegions-1).y+Stash(StashRegions-1).h+Gap?KeyboardCaps.y+KeyboardCaps.h:Stash(StashRegions-1).y+Stash(StashRegions-1).h+Gap;
 // Dynamic: VR Settings (its help card inside the panel) across the top, the
 // glyph trail beside it, the blood visor under them, then the strain light, the
 // quest card and the bow laser beside it.
