@@ -68,6 +68,7 @@
 #include "atlas_dirty.h"
 #include "map_zoom.h"
 #include "floating_map.h"
+#include "grab_hint.h"
 #include "wrist_full_map.h"
 #include "interaction_paint.h"
 #include "latest_worker.h"
@@ -1109,6 +1110,8 @@ bool leatherMode=false;
 // image; shown and lit this frame (MenuPointer); its press sends the game one View.
 bool statsIconReady=false,statsShown=false,statsLit=false;
 statsbutton::Press statsPress;
+// The floating map's grab hint (grab_hint.h): its glows painted into the static image this session; its sign too.
+bool grabHintReady=false,grabHintSigns=false;
 // An item let go outside the tabbed menu drops (menu_drop.h): the pad's X, the controller
 // menu's Drop for the item held, while menuDrop is down.
 menudrop::Drop menuDrop;
@@ -2243,7 +2246,16 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
         }
         return ok;
     }();
+    // The floating map's grab hint (grab_hint.h): its sign's frames, the glow reaching out and the border's strips,
+    // premultiplied (in linear light when the image is sRGB). Its border corners are painted for the wrist map's size.
+    static_assert(grabhint::MapSideM==interaction::WristMapSize,"the grab hint's border corners fit the wrist map");
+    const auto hintArt=interaction::GrabHintArt(grabhint::SignTile*grabhint::Frames,grabhint::SignTile);
+    const bool hintPainted=put(grabhint::Paint(hintArt.empty()?nullptr:hintArt.data(),
+        eyeFormat==DXGI_FORMAT_R8G8B8A8_UNORM_SRGB||eyeFormat==DXGI_FORMAT_B8G8R8A8_UNORM_SRGB),GrabHint);
     if(!UploadAtlas(staticChain,eyeFormat,StaticWidth,StaticHeight,pixels))return false;
+    grabHintReady=hintPainted;grabHintSigns=hintPainted&&!hintArt.empty();
+    if(!hintPainted)Say("Frame map hint: its pictures could not be painted; the grab hint stays hidden");
+    else if(hintArt.empty())Say("Frame map hint: its sign could not be decoded; the grab hint shows its glow only");
     stashArtReady=stashPainted;
     statsIconReady=statsPainted;
     keyboardArtReady=keyboardPainted;
@@ -7974,6 +7986,23 @@ void EndPair() {
             (*d.quad)(*d.layer,XrPose({p,q}),side,side,{{0,mapCopyOwn?int32_t(mapCopyTop):0},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);},&Say});
     if(count&&layers[count-1]==reinterpret_cast<const XrCompositionLayerBaseHeader*>(&floatMapQuad)&&floatMapAnchor)
         for(uint32_t i=0;i+1<count;++i)if(layers[i]==floatMapAnchor){std::rotate(layers.data()+i+1,layers.data()+count-1,layers.data()+count);break;}
+    // The grab hint (grab_hint.h): up to six premultiplied quads of the static image at the wrist map, only into the
+    // content slots still free (short of six it drops the border's strips first), then moved together just above
+    // floatMapAnchor, as the copy. No swapchain of its own: it can never leave the runtime short of one.
+    std::array<XrCompositionLayerQuad,grabhint::MaxQuads> hintQuads{};
+    {
+        struct HintDraw {decltype(motionQuad)* quad;XrCompositionLayerQuad* layers;};HintDraw hintDraw{&motionQuad,hintQuads.data()};
+        const uint32_t before=count;
+        floatmap::DrawHint({interactionVisible&&!interactionOutput.wheel&&wristMapShown,grabHintReady&&staticChain,grabHintSigns,
+            floatMapWrist.p,floatMapWrist.q,interaction::WristMapSize,grabhint::SideOf(UiHand(0,handrole::System::WristHud)),
+            count<contentLimit?contentLimit-count:0,&hintDraw,
+            +[](void* c,int slot,math::Vec p,math::Quat q,float w,float h,int x,int y,int rw,int rh){const auto& d=*static_cast<HintDraw*>(c);
+                auto& l=d.layers[std::clamp(slot,0,grabhint::MaxQuads-1)];l={XR_TYPE_COMPOSITION_LAYER_QUAD};
+                (*d.quad)(l,XrPose({p,q}),w,h,At(panelatlas::GrabHint,{{x,y},{rw,rh}}),staticChain);
+                l.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;}});   // premultiplied (SetupStatic)
+        if(count>before&&floatMapAnchor)
+            for(uint32_t i=0;i<before;++i)if(layers[i]==floatMapAnchor){std::rotate(layers.data()+i+1,layers.data()+before,layers.data()+count);break;}
+    }
     XrCompositionLayerQuad winePadding{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(padQuads&&composition::PrependQuadPadding(layers.data(),count,capacity,winePadding,headSpace,pointerChain,{panelatlas::Pointer.x,panelatlas::Pointer.y+32})) {
         static bool reported=false;
@@ -8742,7 +8771,7 @@ void Shutdown(bool preserveResolution) {
     noticeWatch={};noticeCards.Clear();noticeCard={};noticePaintRequest=noticeRequestedSequence=noticePaintedSequence=0;noticeAtlasPending=noticeImageReady=false;
     heartStream.Stop();heartPlaying=false;heartLevel.Reset();heartAt=0;heartHush.Reset();heartHealth=-1;
     guardStrain.Reset();strainOutput={};strainPaintKey=~0ull;strainPaintSession=0;strainPaintAt=0;strainAtlasPending=strainImageReady=strainSlotReported=false;
-    if(staticChain&&pDestroySwapchain)pDestroySwapchain(staticChain);staticChain=pointerChain=leatherChain=XR_NULL_HANDLE;stashArtReady=stashShown=false;stashInput.Reset();stashPad=0;statsIconReady=statsShown=statsLit=false;
+    if(staticChain&&pDestroySwapchain)pDestroySwapchain(staticChain);staticChain=pointerChain=leatherChain=XR_NULL_HANDLE;stashArtReady=stashShown=false;stashInput.Reset();stashPad=0;statsIconReady=statsShown=statsLit=false;grabHintReady=grabHintSigns=false;
     if(aimSpace&&pDestroySpace)pDestroySpace(aimSpace);aimSpace=XR_NULL_HANDLE;
     if(leftAimSpace&&pDestroySpace)pDestroySpace(leftAimSpace);leftAimSpace=XR_NULL_HANDLE;
     if(gazeSpace&&pDestroySpace)pDestroySpace(gazeSpace);gazeSpace=XR_NULL_HANDLE;

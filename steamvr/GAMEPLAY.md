@@ -204,7 +204,7 @@ stays with its hand: each hand's wheel opens from its own stick ([Sticks stay ri
 | Show all nearby loot labels (Alt) | Hold the **right stick down** to hold the native Show Items action; let go to restore normal drop/hover labels. Push it **up** to toggle running / walking. Neither while you look at the wrist / palm map, or point the right controller at a floating map: they zoom it instead. Listed in **VR Settings > Guide** |
 | Explored minimap | Hold Left Y ? **MAP** in the bottom tabs; point right laser + trigger. **SPELLS** returns to skills; releasing Left Y closes the menu |
 | Zoom the minimap | Look at the wrist / palm map or the wheel's MAP tab; right stick up zooms in, down zooms out. No run / walk toggle or loot labels meanwhile; left / right still turns, except during a zoom push; looking away returns the stick. Pointing at a floating map zooms it the same way |
-| Floating map | Point the right controller at the raised wrist map (or roughly at it) and squeeze **Right Grip**: a copy of the map comes off the wrist in your hand. Move and turn it any way, push the right stick forward / back to send it out (up to 3 m) or pull it in, then let go: it stays there, facing you. While you hold it, the right stick does not turn you. Grab it again any time by pointing at it. Squeeze both grips (either order) while pointing at it and spread or close your hands to make it bigger or smaller. Let go of it next to the raised wrist map to put it away. It shows while you look toward it; Save and Exit or a new game puts it back on the wrist |
+| Floating map | Point the right controller at the raised wrist map (or roughly at it) and squeeze **Right Grip**: a copy of the map comes off the wrist in your hand. Move and turn it any way, push the right stick forward / back to send it out (up to 3 m) or pull it in, then let go: it stays there, facing you. While you hold it, the right stick does not turn you. Grab it again any time by pointing at it. Squeeze both grips (either order) while pointing at it and spread or close your hands to make it bigger or smaller. Let go of it next to the raised wrist map to put it away. It shows while you look toward it; Save and Exit or a new game puts it back on the wrist. With no copy out, pointing at the raised wrist map shows a small grab sign beside it and a glow on its border (**VR Settings > Interface > Wrist > Map grab hint**) |
 | Zoom a floating map | Point the right controller anywhere on the floating map and push the right stick up to zoom in, down to zoom out; the area grows and shrinks with the map. The wrist map zooms as before, by looking at it; both show the same picture, so they zoom together |
 | Quest journal | Open the native tabbed game menu with Left X / Frame Left A, then select Journal. The duplicate wheel entry is removed |
 | Journal controls | Right laser + trigger uses native page controls/act tabs; Right B follows native back; Left X performs native X |
@@ -320,6 +320,12 @@ a grab takes it a little past its edges: a share of its size, up to about 15 deg
 screen in the same game keeps it where it is; Save and Exit or a new game puts it back on the wrist. With no copy out, the wrist map and the
 stick work as before; a Left Grip pressed while you point at the raised wrist map reaches the game up to a
 quarter second late, in case Right Grip follows.
+
+**Grab hint:** with no copy out, point the right controller at the raised wrist map (within the same 15 degrees
+that a pull takes) and a small controller sign appears beside the map on the pulling hand's side: it squeezes its
+grip and slides away, the map's border glows, a glow reaches out toward your hand while it slides, and the
+controller ticks once. It hides 5 degrees past the band. After three pulls in a game only the glow shows; a new game
+starts over. **VR Settings > Interface > Wrist > Map grab hint** turns it off; the pull works the same either way.
 
 The label above the compass shows your current **act (I-V)** and **area name**,
 including named dungeon floors. It follows the same wrist/palm placement and

@@ -679,6 +679,8 @@ inline constexpr Override Overrides[]={
     {.id="interactions.floating_map_background_pct",.page=View::Wrist,.section="Map",.kind=RowKind::Slider,.label="Floating map background",
      .help="The floating map's background: 0% shows the world through it, 100% is solid. Walls, the arrow, markers and names stay solid, as does the wrist map.",
      .format={.unit="%"},FRAMEVR_NAMES(MapBackgroundNames)},
+    {.id="interactions.map_grab_hint",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Map grab hint",
+     .help="Point at the raised map: a sign and a glow show that Right Grip pulls a copy off. The sign stops after three pulls a game."},
     // Menus: Game menus
     {.id="hud.menu_distance",.page=View::Menus,.section="Game menus",.kind=RowKind::Choice,.label="Menu distance",
      .help="How far away merchants, the stash and the main menu open, and the inventory with Hold menu Off. Point at one, hold Right Grip and push or pull it.",

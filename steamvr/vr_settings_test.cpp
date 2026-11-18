@@ -1077,8 +1077,8 @@ int main(int argc,char** argv){
         // a slider on Interface > Wrist > Map under Buffs and companions, every class, its ends named, saved alone
         const auto& d=Definitions[FloatingMapBackground];
         Check(Defaults()[FloatingMapBackground]==100&&std::wstring(d.section)==L"interactions"&&std::wstring(d.key)==L"floating_map_background_pct"&&
-              d.min==0&&d.max==100&&d.step==10&&HelpText(FloatingMapBackground)[0]!=0&&FloatingMapBackground<ChangeMask::Bits&&FloatingMapBackground==Count-1,
-              "Floating map background: 100% by default, [interactions] floating_map_background_pct 0 to 100 in 10s, explained, its own change bit, appended last");
+              d.min==0&&d.max==100&&d.step==10&&HelpText(FloatingMapBackground)[0]!=0&&FloatingMapBackground<ChangeMask::Bits&&FloatingMapBackground+1==MapGrabHint,
+              "Floating map background: 100% by default, [interactions] floating_map_background_pct 0 to 100 in 10s, explained, its own change bit, appended (Map grab hint after it)");
         const auto* row=content::RowOf(FloatingMapBackground);const auto* companions=content::RowOf(CompanionCounts);
         Check(row&&companions&&!row->beside&&row->page==View::Wrist&&row->kind==content::RowKind::Slider&&std::strcmp(row->label,"Floating map background")==0&&
               row->section==companions->section&&row->classes==content::AllClasses&&std::strlen(row->help)<=160,
@@ -1094,6 +1094,24 @@ int main(int argc,char** argv){
             Check(t.Get()[FloatingMapBackground]==pct,"the slider takes 0, 50 and 100%");
             if(pct<100)Check(t.Click({Kind::Apply}).changed==(ChangeMask{1}<<FloatingMapBackground),"Apply saves only it");
         }
+    }
+    {   // Map grab hint (grab_hint.h): On by default, a switch on Interface > Wrist > Map under Buffs and companions, every class, saved alone
+        Check(Defaults()[MapGrabHint]==1&&std::wstring(Definitions[MapGrabHint].section)==L"interactions"&&
+              std::wstring(Definitions[MapGrabHint].key)==L"map_grab_hint"&&Definitions[MapGrabHint].min==0&&Definitions[MapGrabHint].max==1&&
+              Definitions[MapGrabHint].step==1&&HelpText(MapGrabHint)[0]!=0&&MapGrabHint<ChangeMask::Bits&&MapGrabHint==Count-1,
+              "Map grab hint: On by default, [interactions] map_grab_hint Off / On, explained, its own change bit, appended last");
+        const auto* row=content::RowOf(MapGrabHint);const auto* companions=content::RowOf(FloatingMapBackground);
+        Check(row&&companions&&!row->beside&&row->page==View::Wrist&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Map grab hint")==0&&
+              row->section==companions->section&&row->classes==content::AllClasses&&std::strlen(row->help)<=160,
+              "a switch of its own on Interface > Wrist, in the Map section, every class");
+        {
+            const auto& rows=content::Menu().rows;size_t at=rows.size(),companionsAt=rows.size();
+            for(size_t i=0;i<rows.size();++i){if(rows[i].key==MapGrabHint)at=i;if(rows[i].key==FloatingMapBackground)companionsAt=i;}
+            Check(companionsAt+1==at,"listed right under Floating map background (under Buffs and companions)");
+        }
+        for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(MapGrabHint,Defaults(),{c}),"shown for every class");
+        Model t;Snapshot ready;ready.ready=true;ready.values=Defaults();t.Open(ready);layout::Press(t,{Kind::Set,MapGrabHint,0,0},0);
+        Check(t.Get()[MapGrabHint]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<MapGrabHint),"the switch turns it Off, and Apply saves only it");
     }
     {   // Loot pick (#257): On by default, a switch on Interface, the right half of Loot name size's row, saved alone
         Check(Defaults()[LootPick]==1&&std::wstring(Definitions[LootPick].section)==L"interactions"&&

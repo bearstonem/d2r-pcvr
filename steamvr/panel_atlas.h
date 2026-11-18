@@ -3,6 +3,7 @@
 #include "blood_screen.h"
 #include "bow_laser.h"
 #include "glyph_trail.h"
+#include "grab_hint.h"
 #include "guard_strain.h"
 #include "notice_card.h"
 #include "stash_buttons.h"
@@ -56,6 +57,9 @@ constexpr Region KeyboardCapsLit{KeyboardLit.x,KeyboardCaps.y,keyboard::TexelWid
 // faces' column ends down (that column is wider than the gap the keyboard leaves beside it).
 constexpr Region Stash(int i){return {KeyboardLit.x+KeyboardLit.w+Gap,Leather.y+RespecPictures*(RespecHeight+Gap)+i*(stashbuttons::Height+Gap),stashbuttons::Width,stashbuttons::Height};}
 constexpr int StaticWidth=1536,StaticHeight=KeyboardCaps.y+KeyboardCaps.h>Stash(3).y+Stash(3).h+Gap?KeyboardCaps.y+KeyboardCaps.h:Stash(3).y+Stash(3).h+Gap;
+// Right of the pointer, above the compass: the floating map's grab hint (grab_hint.h), its sign's frames, the glow
+// reaching out and the border's strips, so the hint needs no swapchain of its own.
+constexpr Region GrabHint{Pointer.x+Pointer.w+Gap,0,grabhint::AtlasWidth,grabhint::AtlasHeight};
 // Dynamic: VR Settings (its help card inside the panel) across the top, the
 // glyph trail beside it, the blood visor under them, then the strain light, the
 // quest card and the bow laser beside it.

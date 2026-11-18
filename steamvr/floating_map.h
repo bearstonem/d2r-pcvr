@@ -31,7 +31,8 @@
 //  - Save and Exit or a new game puts it back on the wrist (Jeff 2026-11-07: "have it not save the map location on save
 //    and exit, should default back to the wrist"): nothing is remembered, and the next pull is the shipped size. A load
 //    screen inside the same game (a waypoint, an Act change) keeps it where it is. Nothing is written to disk.
-// With no copy pulled nothing is drawn, captured or buzzed, and the stick is never taken.
+// With no copy pulled nothing is drawn, captured or buzzed, and the stick is never taken; only the grab hint (grab_hint.h)
+// shows at the raised wrist map while the laser is in the pull band, and it takes nothing either.
 namespace framevr::floatmap {
 namespace math=framevr::math;
 constexpr float Deg=.0174532925f;
@@ -544,6 +545,22 @@ struct LayerFrame {
     void (*quad)(void* ctx, math::Vec p, math::Quat q, float side);
     void (*say)(const char*);
 };
+// DrawHint: transport EndPair, right after DrawFrame (the grab hint, grab_hint.h, which StepFrame steps). visible: as
+// LayerFrame's, and the wrist map drawn this frame; art: the hint's pictures are in the static image this session
+// (panelatlas::GrabHint), signs: its sign pictures too; wrist*: the wrist map quad as drawn this frame; side: +1 the
+// pulling hand is the right one, -1 left-handed; room: the content layer slots still free. quad: one premultiplied quad
+// of the static image's rect (x, y, w, h in the GrabHint region's texels) at pose (p, q), w x h m, slot 0 ..
+// grabhint::MaxQuads-1 (each its own layer), added last; transport then moves the hint's quads just above the wrist
+// panels, as the copy's.
+struct HintFrame {
+    bool visible, art, signs;
+    math::Vec wristP; math::Quat wristQ; float wristSize;
+    int side;
+    uint32_t room;
+    void* quadCtx;
+    void (*quad)(void* ctx, int slot, math::Vec p, math::Quat q, float w, float h, int x, int y, int rw, int rh);
+};
 void StepFrame(InputFrame& f);
 void DrawFrame(const LayerFrame& f);
+void DrawHint(const HintFrame& f);
 }

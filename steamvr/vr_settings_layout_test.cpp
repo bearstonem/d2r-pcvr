@@ -105,6 +105,7 @@ static const GoldenRow Golden[]={
     {"interactions.map_rotate",View::Wrist,1,content::RowKind::Toggle,"Turn map with you",0,0},
     {"interactions.companion_counts",View::Wrist,1,content::RowKind::Toggle,"Buffs and companions",0,0},
     {"interactions.floating_map_background_pct",View::Wrist,1,content::RowKind::Slider,"Floating map background",0,2},   // the floating map's see-through backing (ui_blit.cpp)
+    {"interactions.map_grab_hint",View::Wrist,1,content::RowKind::Toggle,"Map grab hint",0,0},   // the floating map's grab hint (grab_hint.h)
     {"hud.menu_distance",View::Menus,0,content::RowKind::Choice,"Menu distance",3,0},
     {"interactions.leather_menu",View::Menus,0,content::RowKind::Stepper,"Hold menu",0,3},   // main's #360, drawn inside Menu distance's row; Off / On / Menu only (2026-10-29)
     {"hud.tooltip_timing",View::Menus,0,content::RowKind::Choice,"Item details delay",3,0},
@@ -243,7 +244,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==117,"117 settings on the menu, each one row");   // + Floating map background   // + Props have weight (2026-11-12)   // + Weapons hit walls (2026-11-12)   // + Sticks stay right-handed (2026-11-11)   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
+        Check(tables.rowCount==118,"118 settings on the menu, each one row");   // + Map grab hint (grab_hint.h)   // + Floating map background   // + Props have weight (2026-11-12)   // + Weapons hit walls (2026-11-12)   // + Sticks stay right-handed (2026-11-11)   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};

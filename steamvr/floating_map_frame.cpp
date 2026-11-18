@@ -1,16 +1,23 @@
-// Floating map: transport's two calls (steamvr/floating_map.h has the engine and what it does).
+// Floating map: transport's calls (steamvr/floating_map.h has the engine and what it does).
 // StepFrame steps the engine once a frame, takes the grips and the right stick it holds, asks for the map capture and
 // tells the map zoom when the right laser points at a map; DrawFrame draws the copy: one quad of transport's map picture
 // (mapEye, the wrist's own capture), so no new capture, panel or swapchain. Nothing in the game changes: no game call,
 // no memory write. With no copy pulled nothing is drawn, captured or buzzed, and the stick and grips pass untouched.
+// The grab hint (grab_hint.h): StepFrame steps it after the engine, from the same input and the engine's own state (a
+// copy out, a pull this frame), and DrawHint draws it: up to six quads of the static image (no swapchain of its own),
+// only into free layer slots. VR Settings > Interface > Wrist > Map grab hint Off: not stepped, nothing drawn or buzzed.
 // Telemetry "Frame floatmap:": pulled, grabbed, let go (where, its turn, the stick's push / pull), put away, two-hand
 // resize, Save and Exit / a new game putting it back on the wrist, the stick zooming a pointed map (one line a pointing, at most one a 2 s), the
 // first aim buzz of a run, a Right Grip press near a map not taken (at most one a 2 s), a grip held back for two hands
 // and given to the game (at most one a 2 s), what the copy shows against Map view (on a change), no picture for 3 s.
+// "Frame map hint:": the setting On or Off (at the first frame and on a change); a pull while it showed; the layer
+// budget leaving part of it out (at most one a 10 s); how often and how long it showed (the first showing, then at most
+// one line a minute); the pull that stops the sign.
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include "floating_map.h"
+#include "grab_hint.h"
 #include "map_zoom.h"
 #include "vr_settings.h"
 #include "wrist_full_map.h"
@@ -37,6 +44,14 @@ struct State {
     bool shownWas = false, lookSeen = false, lookTold = false; unsigned looks = 0;   // look to show: the first change a run is told, the rest counted
     uint64_t wantSince = 0; bool pictureTold = false;
     KindWatch kind;            // what the copy shows, against Map view
+    // The grab hint: its engine, this frame's step (DrawHint takes it), the setting as last told, the log.
+    grabhint::Engine hint;
+    grabhint::Output hintOut;
+    bool hintFresh = false;
+    int hintOn = -1;           // -1 not told yet
+    bool hintSetting = false; uint64_t hintReadMs = 0;   // VR Settings' Map grab hint as last read; when
+    float hintBand = PointDeg;
+    grabhint::ShowLog hintLog;
 } st;
 
 const char* MapViewName() {
@@ -66,6 +81,55 @@ void Tell(const InputFrame& f, char* line, size_t size) {
         st.looks = 0;
     }
     f.say(line);
+}
+// The grab hint's step, after the engine's on the same input. Its gates are the pull's own (Engine::Step: the head
+// tracked, then the wrist map free), with Right Grip up; its band is the pull's (0 at a belt bottle or holster). A copy
+// out and a pull this frame are the engine's own.
+void StepHint(const InputFrame& f,const Input& in,const Output& o,const Tuning& t) {
+    // The setting, read at most every 250 ms (a lock each read; as gamestate.cpp's companion counts): a change applies
+    // within a quarter second.
+    if(!st.hintReadMs||f.nowMs<st.hintReadMs||f.nowMs-st.hintReadMs>=250){st.hintReadMs=f.nowMs?f.nowMs:1;st.hintSetting=vrsettings::Read().values[framevr::settings::MapGrabHint]>.5f;}
+    const bool on=st.hintSetting;
+    if(int(on)!=st.hintOn) {
+        st.hintOn=on;
+        f.say(on?"Frame map hint: On (VR Settings > Interface > Wrist > Map grab hint)":"Frame map hint: Off (VR Settings > Interface > Wrist > Map grab hint)");
+    }
+    if(!on){st.hintFresh=false;return;}
+    const bool copyOut=st.engine.Placed();
+    const bool ready=in.headValid&&in.gameplay&&in.handFree&&in.aimTracked&&in.wristShown&&!(in.grip[0]>Press);
+    grabhint::Input x;
+    x.time=in.time;x.session=in.session;x.ready=ready;x.copyOut=copyOut;x.pulled=o.event==Event::Pulled;
+    x.band=st.hintBand=t.aimDeg>0&&!in.nearGrab?t.aimDeg:0;
+    if(ready&&!copyOut)x.miss=AimAt(in.aim,Unit(in.aimQ),Pose{in.wristP,Unit(in.wristQ)},in.wristSize).miss;
+    st.hintOut=st.hint.Step(x);
+    st.hintFresh=true;
+    const auto& h=st.hintOut;
+    if(h.buzz>0)f.pulse(0,h.buzz);
+    char line[300];
+    auto& log=st.hintLog;
+    if(h.event==grabhint::Event::Shown)log.Shown(in.time);
+    else if(h.event==grabhint::Event::Hidden) {
+        log.Ended(in.time);
+        if(h.pulledNow) {   // a pull while it showed (a deliberate act, a few a game)
+            std::snprintf(line,sizeof line,"Frame map hint: pulled off the wrist after it showed %.1f s (pull %u this game)",in.time-log.shownAt,h.pulls);
+            f.say(line);
+        }
+        if(log.dropped&&log.DropDue(in.time)) {   // the layer budget left part of it out (frame generation, many panels)
+            char more[48]="";
+            if(log.dropsUntold)std::snprintf(more,sizeof more,"; %u more such showing%s since the last line",log.dropsUntold,log.dropsUntold==1?"":"s");
+            std::snprintf(line,sizeof line,"Frame map hint: the layer budget left out %s while it showed%s",log.dropped==2?"more than its border strips (the glow out, or all of it)":"its border strips",more);
+            f.say(line);log.dropsUntold=0;
+        }
+        if(log.SummaryDue(in.time)) {   // the first showing at once, then at most one line a minute
+            std::snprintf(line,sizeof line,"Frame map hint: shown %u time%s, %.1f s in all, the longest %.1f s (band %.0f deg, sign %s), since the last line",
+                          log.shows,log.shows==1?"":"s",log.shownS,log.longestS,st.hintBand,grabhint::PullsLimit<=0||h.pulls<unsigned(grabhint::PullsLimit)?"on":"stopped");
+            f.say(line);log.Summarized();
+        }
+    }
+    if(h.signStops) {
+        std::snprintf(line,sizeof line,"Frame map hint: pull %u this game: the sign stops, only the glow shows until the next game",h.pulls);
+        f.say(line);
+    }
 }
 }  // namespace
 
@@ -97,6 +161,7 @@ void StepFrame(InputFrame& f) {
         f.pulse(0, AimBuzzStrength); ++st.aims;
         if (!st.aimTold) {st.aimTold = true; f.say("Frame floatmap: aim buzz (the right laser came onto a map: Right Grip takes it); first this run");}
     }
+    StepHint(f,in,o,t);
     char line[560];
     // The stick zooming a pointed map: one line on the first push past the zoom's dead zone while pointing (pointing
     // first and pushing later, or pushing as the laser arrives), once a pointing, at most one a 2 s. Not while the map
@@ -224,5 +289,27 @@ void DrawFrame(const LayerFrame& f) {
             f.say(line);
         } else ++st.looks;
     }
+}
+
+void DrawHint(const HintFrame& f) {
+    const bool fresh=st.hintFresh;
+    st.hintFresh=false;
+    const auto& o=st.hintOut;
+    if(!fresh||!o.Any()||!f.visible||!f.art)return;
+    // Only into free slots: short of six, the border's strips go first (the sign and the glow reaching out still show
+    // the pull), then the rest.
+    const auto want=grabhint::Plan(o,f.signs,f.side<0);
+    const auto d=grabhint::Fit(want,f.room);
+    if(d.need<want.need)st.hintLog.dropped=std::max(st.hintLog.dropped,d.need+(want.side.w>0?grabhint::Edges:0u)<want.need?2:1);   // 1: only the strips
+    if(!d.need)return;
+    const auto at=grabhint::Place(f.wristP,Unit(f.wristQ),f.wristSize,f.side,o.lobeM,o.slide*grabhint::SlideSigns*grabhint::SignM);
+    int slot=0;
+    const auto draw=[&](const grabhint::Quad& q,const grabhint::Cell& c) {
+        if(c.w<=0||q.w<=0||q.h<=0||slot>=grabhint::MaxQuads)return;
+        f.quad(f.quadCtx,slot++,q.p,q.q,q.w,q.h,c.x,c.y,c.w,c.h);
+    };
+    for(int i=0;i<grabhint::Edges;++i)draw(at.edge[i],i%2?d.along:d.side);
+    draw(at.lobe,d.lobe);
+    draw(at.sign,d.sign);
 }
 }  // namespace framevr::floatmap
