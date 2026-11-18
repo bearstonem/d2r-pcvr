@@ -2216,6 +2216,7 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
     if(!noticePainter.Start())Say("Frame notices: background painter unavailable; quest and level-up cards stay hidden");
     if(!strainPainter.Start())Say("Frame guard strain: background painter unavailable; the light stays hidden");
     if(!settingsPainter.Start())Say("Frame VR settings: background painter unavailable; VR Settings and calibration cannot be shown");
+    if(!collectionPainter.Start())Say("Frame collection: background painter unavailable; the panel cannot be shown");
     using namespace panelatlas;
     std::vector<uint8_t> pixels(size_t(StaticWidth)*StaticHeight*4);
     const auto put=[&](const std::vector<uint8_t>& from,Region r) {
@@ -3055,6 +3056,10 @@ int TakeCollectionPicture() {
     }
     const bool uploaded=UploadShared(panelatlas::Collection,painted.pixels,&collectionAtlasPending);
     if(uploaded)collectionImageReady=true;
+    else {
+        static ULONGLONG reportAt=0;const auto now=GetTickCount64();
+        if(now>=reportAt){Say("Frame collection: the panel's picture did not reach the shared atlas");reportAt=now+5000;}
+    }
     return uploaded?1:0;
 }
 // Paints the panel again when nothing is outstanding and the picture would
@@ -3070,6 +3075,10 @@ void RequestCollectionPaint(bool force=false) {
     collectionPaintedHover=collectionHover;
     collectionIconRevision=revision;
     collectionPaintRequest=collectionPainter.Submit({collection::TabLibrary(),collection::TabView()});
+    if(!collectionPaintRequest){
+        static ULONGLONG reportAt=0;const auto now=GetTickCount64();
+        if(now>=reportAt){Say("Frame collection: the background painter did not take the request");reportAt=now+5000;}
+    }
 }
 // What a click on the panel does: another tab, another page, another slot size,
 // or a slot. The slot's entry is reported until deposit and withdraw land.

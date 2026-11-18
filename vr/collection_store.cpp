@@ -154,6 +154,15 @@ void SweepOnGameThread(const D2RL::PluginContext*, void*) noexcept {
                           unsigned(sweep.items.size()), lowest == UINT32_MAX ? 0u : unsigned(lowest), unsigned(highest),
                           unsigned(first), unsigned(beyond - 1));
             Log(line);
+            // Which page holds how many, so the tab numbering can be read off.
+            uint32_t counts[16] {};
+            for (const Seen& item : sweep.items)
+                if (item.page != UINT32_MAX && item.page < 16) ++counts[item.page];
+            std::snprintf(line, sizeof(line), "Frame collection: pages with items: 0:%u 1:%u 2:%u 3:%u 4:%u 5:%u 6:%u 7:%u 8:%u 9:%u 10:%u 11:%u",
+                          unsigned(counts[0]), unsigned(counts[1]), unsigned(counts[2]), unsigned(counts[3]),
+                          unsigned(counts[4]), unsigned(counts[5]), unsigned(counts[6]), unsigned(counts[7]),
+                          unsigned(counts[8]), unsigned(counts[9]), unsigned(counts[10]), unsigned(counts[11]));
+            Log(line);
         }
     }
 
