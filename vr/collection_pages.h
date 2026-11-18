@@ -22,8 +22,10 @@ struct PluginContext;
 namespace framevr::collection {
 
 // Stores the context and queries the inventory service. Registers the console
-// command; it does not register any page by itself.
-void InitPages(const D2RL::PluginContext* ctx);
+// command. When probeAtLoad is true (d2r_pcvr.ini [collection] pages_probe=1) it
+// also registers the three category pages as soon as the plugin loads, which is
+// the console-free route for a headset test. Off by default.
+void InitPages(const D2RL::PluginContext* ctx, bool probeAtLoad);
 
 // Releases any page this session registered. Called from D2RLoaderUnloadPlugin.
 void ShutdownPages();
