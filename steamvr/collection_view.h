@@ -58,15 +58,28 @@ private:
     bool                 finished_ = false;
 };
 
-// What the panel shows: the open category, the slot size, the page inside it and
-// the pointed slot. The slot grid is collection_panel.h's.
+// What the panel shows: the open category, the slot size, the filter, the page
+// inside it and the pointed slot. The slot grid is collection_panel.h's.
 struct ViewState {
-    Category category = Category::Uniques;
-    panel::Size size  = panel::Size::Small;
-    int      page     = 0;
-    int      hovered  = -1;   // slot on this page, -1 none
+    Category     category = Category::Uniques;
+    panel::Size  size     = panel::Size::Small;
+    panel::Show  show     = panel::Show::All;
+    int          page     = 0;
+    int          hovered  = -1;   // slot on this page, -1 none
 
-    int  Pages(const Library& library) const { return panel::PagesFor(int(library.Size(category)), size); }
+    // Entries the filter keeps. Walking the category is cheap (a few hundred)
+    // and it is asked for once a frame, not once a slot.
+    int VisibleCount(const Library& library) const {
+        const uint32_t count = library.Size(category);
+        if (show == panel::Show::All) return int(count);
+        int kept = 0;
+        for (uint32_t slot = 0; slot < count; ++slot) {
+            const bool found = library.IsFound(category, slot);
+            if ((show == panel::Show::Missing && !found) || (show == panel::Show::Found && found)) ++kept;
+        }
+        return kept;
+    }
+    int  Pages(const Library& library) const { return panel::PagesFor(VisibleCount(library), size); }
     void Clamp(const Library& library) {
         page    = std::clamp(page, 0, std::max(0, Pages(library) - 1));
         hovered = -1;
@@ -77,11 +90,18 @@ struct ViewState {
         hovered  = -1;
         Clamp(library);
     }
-    // A bigger slot shows fewer of them, so the page the same entry lands on
-    // changes: the caller keeps the entry it was looking at.
+    // A bigger slot shows fewer of them, and a filter shows fewer entries, so the
+    // page the same entry lands on changes: the caller keeps what it was looking at.
     void SelectSize(const Library& library, panel::Size want) {
         if (size == want) return;
         size    = want;
+        hovered = -1;
+        Clamp(library);
+    }
+    void SelectShow(const Library& library, panel::Show want) {
+        if (show == want) return;
+        show    = want;
+        page    = 0;
         hovered = -1;
         Clamp(library);
     }
@@ -91,17 +111,36 @@ struct ViewState {
     }
 };
 
-// The entry a panel slot shows, or null when the page has fewer entries.
-inline const Entry* SlotEntry(const Library& library, const ViewState& view, int slot) {
-    const int slots = panel::SlotsFor(view.size);
-    if (slot < 0 || slot >= slots) return nullptr;
-    return library.At(view.category, uint32_t(view.page * slots + slot));
+// The catalog slots the filter keeps, in order: the page's slots are positions
+// in this list, not catalog slots. Built once per paint.
+inline std::vector<uint32_t> VisibleSlots(const Library& library, const ViewState& view) {
+    std::vector<uint32_t> slots;
+    const uint32_t        count = library.Size(view.category);
+    slots.reserve(count);
+    for (uint32_t slot = 0; slot < count; ++slot) {
+        const bool found = library.IsFound(view.category, slot);
+        if (view.show == panel::Show::Missing && found) continue;
+        if (view.show == panel::Show::Found && !found) continue;
+        slots.push_back(slot);
+    }
+    return slots;
 }
 
-inline bool SlotFound(const Library& library, const ViewState& view, int slot) {
+// The entry a panel slot shows, or null when the page has fewer entries.
+inline const Entry* SlotEntry(const Library& library, const ViewState& view, const std::vector<uint32_t>& visible, int slot) {
+    const int slots = panel::SlotsFor(view.size);
+    if (slot < 0 || slot >= slots) return nullptr;
+    const size_t at = size_t(view.page) * size_t(slots) + size_t(slot);
+    if (at >= visible.size()) return nullptr;
+    return library.At(view.category, visible[at]);
+}
+
+inline bool SlotFound(const Library& library, const ViewState& view, const std::vector<uint32_t>& visible, int slot) {
     const int slots = panel::SlotsFor(view.size);
     if (slot < 0 || slot >= slots) return false;
-    return library.IsFound(view.category, uint32_t(view.page * slots + slot));
+    const size_t at = size_t(view.page) * size_t(slots) + size_t(slot);
+    if (at >= visible.size()) return false;
+    return library.IsFound(view.category, visible[at]);
 }
 
 // "122 / 403" for the footer, for the open category.

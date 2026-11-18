@@ -32,6 +32,7 @@ void            TabSelectCategory(Category category);
 void            TabStep(int pages);
 void            TabSetPage(int page);
 void            TabSetSize(panel::Size size);
+void            TabSetShow(panel::Show show);
 
 // Whether the panel is open. The stash's Collection tab sets it; the transport
 // shows the panel while it is true.

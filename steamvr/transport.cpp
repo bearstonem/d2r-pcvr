@@ -3081,14 +3081,16 @@ void CollectionPress(const collection::panel::Hit& hit) {
     case HitKind::Previous: collection::TabStep(-1); break;
     case HitKind::Next:     collection::TabStep(1); break;
     case HitKind::Size:     collection::TabSetSize(static_cast<collection::panel::Size>(hit.index)); break;
+    case HitKind::Show:     collection::TabSetShow(static_cast<collection::panel::Show>(hit.index)); break;
     case HitKind::Slot: {
         const auto& library=collection::TabLibrary();const auto& view=collection::TabView();
-        const collection::Entry* entry=collection::SlotEntry(library,view,hit.index);
+        const auto visible=collection::VisibleSlots(library,view);
+        const collection::Entry* entry=collection::SlotEntry(library,view,visible,hit.index);
         if(entry==nullptr)break;
         char message[224];
         std::snprintf(message,sizeof message,"Frame collection: slot %d is %s (%s, id %u), %s",hit.index,
             entry->name.c_str(),collection::CategoryName(view.category),entry->recordId,
-            collection::SlotFound(library,view,hit.index)?"in the stash":"still missing");
+            collection::SlotFound(library,view,visible,hit.index)?"in the stash":"still missing");
         Say(message);
         break;
     }

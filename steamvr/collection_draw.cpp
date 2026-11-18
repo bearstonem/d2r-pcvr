@@ -75,10 +75,11 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
     // it is still missing. A unique's slot is gold on brown, a set item's green.
     const SlotStyle style = StyleOf(view.category);
     painter.Fill(GridField(layout), Color::Ink, 0.45f);
+    const auto visible = VisibleSlots(library, view);
     for (int slot = 0; slot < layout.slotCount; ++slot) {
-        const Entry* entry = SlotEntry(library, view, slot);
+        const Entry* entry = SlotEntry(library, view, visible, slot);
         if (entry == nullptr) continue;
-        const bool   found = SlotFound(library, view, slot);
+        const bool   found = SlotFound(library, view, visible, slot);
         const RectF  box   = Box(layout.slots[slot]);
         const float  side  = layout.slots[slot].width;
         const RectF  inner = Inset(layout.slots[slot], side * 0.15f);
@@ -113,6 +114,12 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
         ControlState step;
         step.chosen = i == int(view.size);
         painter.Socket(Box(layout.sizeSteps[i]), panel::SizeName(static_cast<panel::Size>(i)), step);
+    }
+    painter.Text("Show", TextStyle::Small, Box(layout.showLabel), Color::Quiet, Align::Trailing);
+    for (int i = 0; i < int(panel::Show::Count); ++i) {
+        ControlState step;
+        step.chosen = i == int(view.show);
+        painter.Socket(Box(layout.showSteps[i]), panel::ShowName(static_cast<panel::Show>(i)), step);
     }
 }
 

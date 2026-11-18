@@ -93,25 +93,67 @@ int main() {
 
     // Slots map to entries across pages, and stop at the end of the category.
     view.SelectCategory(library, Category::Uniques);
-    assert(SlotEntry(library, view, 0)->recordId == 1000);
-    assert(SlotEntry(library, view, 95)->recordId == 1095);
-    assert(SlotEntry(library, view, 96) == nullptr);   // the second page, not loaded here
-    view.page = 1;
-    assert(SlotEntry(library, view, 0)->recordId == 1096);
-    assert(SlotEntry(library, view, 3)->recordId == 1099);
-    assert(SlotEntry(library, view, 4) == nullptr);    // the 100th unique is the last
-    assert(SlotEntry(library, view, -1) == nullptr);
-    assert(SlotEntry(library, view, panel::SlotsFor(view.size)) == nullptr);
+    {
+        const auto visible = VisibleSlots(library, view);
+        assert(visible.size() == 100);
+        assert(SlotEntry(library, view, visible, 0)->recordId == 1000);
+        assert(SlotEntry(library, view, visible, 95)->recordId == 1095);
+        assert(SlotEntry(library, view, visible, 96) == nullptr);   // the second page, not loaded here
+        view.page = 1;
+        assert(SlotEntry(library, view, visible, 0)->recordId == 1096);
+        assert(SlotEntry(library, view, visible, 3)->recordId == 1099);
+        assert(SlotEntry(library, view, visible, 4) == nullptr);    // the 100th unique is the last
+        assert(SlotEntry(library, view, visible, -1) == nullptr);
+        assert(SlotEntry(library, view, visible, panel::SlotsFor(view.size)) == nullptr);
+    }
 
     // Found state is per slot, and the counter reads the open category.
     view.page = 0;
     library.MarkFound(Category::Uniques, 1042);
-    assert(!SlotFound(library, view, 41) && SlotFound(library, view, 42));
+    {
+        const auto visible = VisibleSlots(library, view);
+        assert(!SlotFound(library, view, visible, 41) && SlotFound(library, view, visible, 42));
+    }
     assert(CounterText(library, view) == "1 / 100");
     view.SelectCategory(library, Category::Sets);
     library.MarkFound(Category::Sets, 56);
     assert(CounterText(library, view) == "1 / 2");
-    assert(SlotFound(library, view, 0) && !SlotFound(library, view, 1));
+    {
+        const auto visible = VisibleSlots(library, view);
+        assert(SlotFound(library, view, visible, 0) && !SlotFound(library, view, visible, 1));
+    }
 
-    std::puts("Collection view: loading, grouping, found flags, paging and counter passed");
+    // The filter: Missing keeps what the stash does not hold, Found what it does,
+    // and the pages follow the kept count.
+    view.SelectCategory(library, Category::Uniques);
+    assert(view.VisibleCount(library) == 100);
+    view.SelectShow(library, panel::Show::Found);
+    assert(view.show == panel::Show::Found && view.page == 0);
+    assert(view.VisibleCount(library) == 1);
+    assert(view.Pages(library) == 1);
+    {
+        const auto visible = VisibleSlots(library, view);
+        assert(visible.size() == 1);
+        assert(SlotEntry(library, view, visible, 0)->recordId == 1042);   // the one that was marked
+        assert(SlotFound(library, view, visible, 0));
+    }
+    view.SelectShow(library, panel::Show::Missing);
+    assert(view.VisibleCount(library) == 99);
+    assert(view.Pages(library) == 2);
+    {
+        const auto visible = VisibleSlots(library, view);
+        assert(visible.size() == 99);
+        assert(SlotEntry(library, view, visible, 0)->recordId == 1000);
+        assert(SlotEntry(library, view, visible, 41)->recordId == 1041);   // 1042 is skipped
+        assert(SlotEntry(library, view, visible, 42)->recordId == 1043);
+    }
+    // A filter that keeps nothing still shows one page, and no slots.
+    view.SelectShow(library, panel::Show::Found);
+    view.SelectCategory(library, Category::Runewords);
+    assert(view.VisibleCount(library) == 0 && view.Pages(library) == 1);
+    assert(SlotEntry(library, view, VisibleSlots(library, view), 0) == nullptr);
+    view.SelectShow(library, panel::Show::All);
+    assert(view.VisibleCount(library) == 1);
+
+    std::puts("Collection view: loading, grouping, found flags, paging, the filter and the counter passed");
 }

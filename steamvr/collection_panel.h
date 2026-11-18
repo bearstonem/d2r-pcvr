@@ -62,6 +62,23 @@ inline constexpr const char* SizeName(Size size) {
 // The most slots any size shows: the layout's slot array is this long.
 inline constexpr int MaxSlots = 12 * 8;
 
+// What the grid shows, from the footer's Show control: everything, or only what
+// is still missing, or only what the stash already holds.
+enum class Show : uint32_t {
+    All     = 0,
+    Missing = 1,
+    Found   = 2,
+    Count   = 3,
+};
+
+inline constexpr const char* ShowName(Show show) {
+    switch (show) {
+    case Show::Missing: return "Missing";
+    case Show::Found:   return "Found";
+    default:            return "All";
+    }
+}
+
 inline constexpr int MaxTabs       = 4;   // uniques, sets, runewords, room for runes later
 inline constexpr int MaxPageButtons = 8;  // more pages than this and the number buttons go away
 
@@ -90,6 +107,7 @@ struct Layout {
     int  pageButtonCount = 0;
     Rect previous {}, next {}, counter {};
     Rect sizeLabel {}, sizeSteps[static_cast<int>(Size::Count)] {};   // the footer's Size control
+    Rect showLabel {}, showSteps[static_cast<int>(Show::Count)] {};   // and its Show control
     Rect slots[MaxSlots] {};
     int  slotCount = 0;
     int  columns   = 12;
@@ -151,13 +169,21 @@ inline Layout Build(int page, int pages, int tabs, Size size = Size::Small) {
     const float footerY = CanvasHeight - Margin - FooterSize;
     layout.previous = {Margin, footerY, ArrowSize, FooterSize};
     layout.next     = {CanvasWidth - Margin - ArrowSize, footerY, ArrowSize, FooterSize};
-    layout.counter  = {CanvasWidth * 0.5f - 160.0f, footerY, 320.0f, FooterSize};
-    // The Size control: its label, then one step per size, left of the counter.
+    layout.counter  = {CanvasWidth * 0.5f - 240.0f, footerY, 240.0f, FooterSize};
+    // The Size control: its label, then one step per size, left of the counter;
+    // the Show control the same way, right of it.
     layout.sizeLabel = {layout.previous.x + ArrowSize + 28.0f, footerY, 62.0f, FooterSize};
     constexpr float StepWidth = 44.0f, StepGap = 6.0f;
     for (int i = 0; i < static_cast<int>(Size::Count); ++i) {
         layout.sizeSteps[i] = {layout.sizeLabel.x + layout.sizeLabel.width + i * (StepWidth + StepGap),
                                footerY + 6.0f, StepWidth, FooterSize - 12.0f};
+    }
+    const float showLeft = layout.counter.x + layout.counter.width + 40.0f;
+    layout.showLabel = {showLeft, footerY, 62.0f, FooterSize};
+    constexpr float ShowStep = 120.0f;
+    for (int i = 0; i < static_cast<int>(Show::Count); ++i) {
+        layout.showSteps[i] = {layout.showLabel.x + layout.showLabel.width + i * (ShowStep + StepGap),
+                               footerY + 6.0f, ShowStep, FooterSize - 12.0f};
     }
     return layout;
 }
@@ -170,6 +196,7 @@ enum class HitKind {
     Next,
     Slot,
     Size,
+    Show,
 };
 
 struct Hit {
@@ -188,6 +215,8 @@ inline Hit Pick(const Layout& layout, float x, float y) {
     if (Inside(layout.next, x, y)) return {HitKind::Next, 0};
     for (int i = 0; i < static_cast<int>(Size::Count); ++i)
         if (Inside(layout.sizeSteps[i], x, y)) return {HitKind::Size, i};
+    for (int i = 0; i < static_cast<int>(Show::Count); ++i)
+        if (Inside(layout.showSteps[i], x, y)) return {HitKind::Show, i};
     for (int i = 0; i < layout.slotCount; ++i)
         if (Inside(layout.slots[i], x, y)) return {HitKind::Slot, i};
     return {};

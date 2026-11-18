@@ -110,6 +110,11 @@ void TabSetSize(panel::Size size) {
     g_view.SelectSize(g_library, size);
 }
 
+void TabSetShow(panel::Show show) {
+    std::lock_guard lock(g_lock);
+    g_view.SelectShow(g_library, show);
+}
+
 bool TabWanted() { return g_wanted.load(); }
 
 void TabSetWanted(bool wanted) { g_wanted.store(wanted); }
