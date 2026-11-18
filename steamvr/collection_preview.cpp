@@ -123,6 +123,7 @@ int main(int argc, char** argv) {
     const char* outPath     = "collection.png";
     const char* foundText   = nullptr;
     const char* categoryName = nullptr;
+    const char* sizeName     = nullptr;
     int         page        = 0;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -132,6 +133,7 @@ int main(int argc, char** argv) {
         else if (arg == "--out") next(outPath);
         else if (arg == "--found") next(foundText);
         else if (arg == "--category") next(categoryName);
+        else if (arg == "--size") next(sizeName);
         else if (arg == "--page") page = std::atoi(i + 1 < argc ? argv[++i] : "0");
     }
     if (catalogPath == nullptr) {
@@ -166,6 +168,13 @@ int main(int argc, char** argv) {
 
     ViewState view;
     view.page = page;
+    if (sizeName != nullptr) {
+        const char first = sizeName[0];
+        if (first == 's' || first == 'S') view.size = framevr::collection::panel::Size::Small;
+        else if (first == 'm' || first == 'M') view.size = framevr::collection::panel::Size::Medium;
+        else if (first == 'l' || first == 'L') view.size = framevr::collection::panel::Size::Large;
+        else std::fprintf(stderr, "unknown size %s\n", sizeName);
+    }
     if (categoryName != nullptr) {
         Category wanted = Category::Count;
         if (CategoryFromTag(categoryName, wanted)) view.SelectCategory(library, wanted);

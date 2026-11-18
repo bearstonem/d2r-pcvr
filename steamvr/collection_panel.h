@@ -21,9 +21,46 @@ namespace framevr::collection::panel {
 inline constexpr float CanvasWidth  = 1280.0f;
 inline constexpr float CanvasHeight = 1024.0f;
 
-inline constexpr int Columns      = 12;
-inline constexpr int Rows         = 8;
-inline constexpr int SlotsPerPage = Columns * Rows;
+// How big the slots are, from the footer's Size control: fewer, larger slots
+// mean more pages. The grid is centred in what is left between the tab row and
+// the footer, so the slot side follows on its own.
+enum class Size : uint32_t {
+    Small  = 0,   // 12 x 8 = 96 slots a page
+    Medium = 1,   // 10 x 6 = 60
+    Large  = 2,   // 8 x 5 = 40
+    Count  = 3,
+};
+
+struct Grid {
+    int columns = 12;
+    int rows    = 8;
+};
+
+inline constexpr Grid GridOf(Size size) {
+    switch (size) {
+    case Size::Medium: return {10, 6};
+    case Size::Large:  return {8, 5};
+    default:           return {12, 8};
+    }
+}
+
+inline constexpr int SlotsFor(Size size) {
+    const Grid grid = GridOf(size);
+    return grid.columns * grid.rows;
+}
+
+// The word on the Size control's step.
+inline constexpr const char* SizeName(Size size) {
+    switch (size) {
+    case Size::Small:  return "S";
+    case Size::Medium: return "M";
+    case Size::Large:  return "L";
+    default:           return "?";
+    }
+}
+
+// The most slots any size shows: the layout's slot array is this long.
+inline constexpr int MaxSlots = 12 * 8;
 
 inline constexpr int MaxTabs       = 4;   // uniques, sets, runewords, room for runes later
 inline constexpr int MaxPageButtons = 8;  // more pages than this and the number buttons go away
@@ -52,17 +89,22 @@ struct Layout {
     Rect pageButtons[MaxPageButtons] {};
     int  pageButtonCount = 0;
     Rect previous {}, next {}, counter {};
-    Rect slots[SlotsPerPage] {};
-    int  page = 0;
+    Rect sizeLabel {}, sizeSteps[static_cast<int>(Size::Count)] {};   // the footer's Size control
+    Rect slots[MaxSlots] {};
+    int  slotCount = 0;
+    int  columns   = 12;
+    int  rows      = 8;
+    int  page      = 0;
 };
 
-// Pages a category needs for its entries, at least one.
-inline constexpr int PagesFor(int entries) {
-    return entries <= 0 ? 1 : (entries + SlotsPerPage - 1) / SlotsPerPage;
+// Pages a category needs for its entries at this slot size, at least one.
+inline constexpr int PagesFor(int entries, Size size = Size::Small) {
+    const int slots = SlotsFor(size);
+    return entries <= 0 ? 1 : (entries + slots - 1) / slots;
 }
 
 // Places everything for one page. page is clamped to the available pages.
-inline Layout Build(int page, int pages, int tabs) {
+inline Layout Build(int page, int pages, int tabs, Size size = Size::Small) {
     Layout layout;
     layout.tabCount = std::clamp(tabs, 0, MaxTabs);
     const int pageCount = std::max(1, pages);
@@ -82,22 +124,27 @@ inline Layout Build(int page, int pages, int tabs) {
                                  Margin + (TabHeight - PageSize) * 0.5f, PageSize, PageSize};
     }
 
-    // The grid takes what is left between the tab row and the footer, centred.
+    // The grid takes what is left between the tab row and the footer, centred;
+    // the slot side follows the size's column and row counts.
+    const Grid  grid       = GridOf(size);
+    layout.columns         = grid.columns;
+    layout.rows            = grid.rows;
+    layout.slotCount       = grid.columns * grid.rows;
     const float areaTop    = Margin + TabHeight + 16.0f;
     const float areaBottom = CanvasHeight - Margin - FooterSize - 16.0f;
     const float areaWidth  = CanvasWidth - 2 * Margin;
     const float areaHeight = areaBottom - areaTop;
-    const float cell       = std::min(areaWidth / Columns, areaHeight / Rows);
+    const float cell       = std::min(areaWidth / float(grid.columns), areaHeight / float(grid.rows));
     const float side       = std::max(1.0f, cell - SlotGap);
-    const float gridWidth  = cell * Columns;
-    const float gridHeight = cell * Rows;
+    const float gridWidth  = cell * float(grid.columns);
+    const float gridHeight = cell * float(grid.rows);
     const float gridLeft   = (CanvasWidth - gridWidth) * 0.5f;
     const float gridTop    = areaTop + (areaHeight - gridHeight) * 0.5f;
-    for (int row = 0; row < Rows; ++row) {
-        for (int column = 0; column < Columns; ++column) {
+    for (int row = 0; row < grid.rows; ++row) {
+        for (int column = 0; column < grid.columns; ++column) {
             const float cellX = gridLeft + column * cell;
             const float cellY = gridTop + row * cell;
-            layout.slots[row * Columns + column] = {cellX + (cell - side) * 0.5f, cellY + (cell - side) * 0.5f, side, side};
+            layout.slots[row * grid.columns + column] = {cellX + (cell - side) * 0.5f, cellY + (cell - side) * 0.5f, side, side};
         }
     }
 
@@ -105,6 +152,13 @@ inline Layout Build(int page, int pages, int tabs) {
     layout.previous = {Margin, footerY, ArrowSize, FooterSize};
     layout.next     = {CanvasWidth - Margin - ArrowSize, footerY, ArrowSize, FooterSize};
     layout.counter  = {CanvasWidth * 0.5f - 160.0f, footerY, 320.0f, FooterSize};
+    // The Size control: its label, then one step per size, left of the counter.
+    layout.sizeLabel = {layout.previous.x + ArrowSize + 28.0f, footerY, 62.0f, FooterSize};
+    constexpr float StepWidth = 44.0f, StepGap = 6.0f;
+    for (int i = 0; i < static_cast<int>(Size::Count); ++i) {
+        layout.sizeSteps[i] = {layout.sizeLabel.x + layout.sizeLabel.width + i * (StepWidth + StepGap),
+                               footerY + 6.0f, StepWidth, FooterSize - 12.0f};
+    }
     return layout;
 }
 
@@ -115,6 +169,7 @@ enum class HitKind {
     Previous,
     Next,
     Slot,
+    Size,
 };
 
 struct Hit {
@@ -131,7 +186,9 @@ inline Hit Pick(const Layout& layout, float x, float y) {
         if (Inside(layout.pageButtons[i], x, y)) return {HitKind::Page, i};
     if (Inside(layout.previous, x, y)) return {HitKind::Previous, 0};
     if (Inside(layout.next, x, y)) return {HitKind::Next, 0};
-    for (int i = 0; i < SlotsPerPage; ++i)
+    for (int i = 0; i < static_cast<int>(Size::Count); ++i)
+        if (Inside(layout.sizeSteps[i], x, y)) return {HitKind::Size, i};
+    for (int i = 0; i < layout.slotCount; ++i)
         if (Inside(layout.slots[i], x, y)) return {HitKind::Slot, i};
     return {};
 }

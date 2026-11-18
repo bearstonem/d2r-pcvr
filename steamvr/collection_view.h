@@ -58,14 +58,15 @@ private:
     bool                 finished_ = false;
 };
 
-// What the panel shows: the open category, the page inside it and the pointed
-// slot. The slot grid is collection_panel.h's.
+// What the panel shows: the open category, the slot size, the page inside it and
+// the pointed slot. The slot grid is collection_panel.h's.
 struct ViewState {
     Category category = Category::Uniques;
+    panel::Size size  = panel::Size::Small;
     int      page     = 0;
     int      hovered  = -1;   // slot on this page, -1 none
 
-    int  Pages(const Library& library) const { return panel::PagesFor(int(library.Size(category))); }
+    int  Pages(const Library& library) const { return panel::PagesFor(int(library.Size(category)), size); }
     void Clamp(const Library& library) {
         page    = std::clamp(page, 0, std::max(0, Pages(library) - 1));
         hovered = -1;
@@ -76,6 +77,14 @@ struct ViewState {
         hovered  = -1;
         Clamp(library);
     }
+    // A bigger slot shows fewer of them, so the page the same entry lands on
+    // changes: the caller keeps the entry it was looking at.
+    void SelectSize(const Library& library, panel::Size want) {
+        if (size == want) return;
+        size    = want;
+        hovered = -1;
+        Clamp(library);
+    }
     void Step(const Library& library, int by) {
         page += by;
         Clamp(library);
@@ -84,13 +93,15 @@ struct ViewState {
 
 // The entry a panel slot shows, or null when the page has fewer entries.
 inline const Entry* SlotEntry(const Library& library, const ViewState& view, int slot) {
-    if (slot < 0 || slot >= panel::SlotsPerPage) return nullptr;
-    return library.At(view.category, uint32_t(view.page * panel::SlotsPerPage + slot));
+    const int slots = panel::SlotsFor(view.size);
+    if (slot < 0 || slot >= slots) return nullptr;
+    return library.At(view.category, uint32_t(view.page * slots + slot));
 }
 
 inline bool SlotFound(const Library& library, const ViewState& view, int slot) {
-    if (slot < 0 || slot >= panel::SlotsPerPage) return false;
-    return library.IsFound(view.category, uint32_t(view.page * panel::SlotsPerPage + slot));
+    const int slots = panel::SlotsFor(view.size);
+    if (slot < 0 || slot >= slots) return false;
+    return library.IsFound(view.category, uint32_t(view.page * slots + slot));
 }
 
 // "122 / 403" for the footer, for the open category.

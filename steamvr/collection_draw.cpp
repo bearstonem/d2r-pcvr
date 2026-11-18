@@ -42,7 +42,7 @@ SlotStyle StyleOf(Category category) {
 // rather than loose squares.
 RectF GridField(const panel::Layout& layout) {
     const panel::Rect& first = layout.slots[0];
-    const panel::Rect& last  = layout.slots[panel::SlotsPerPage - 1];
+    const panel::Rect& last  = layout.slots[layout.slotCount - 1];
     const float        pad   = first.width * 0.25f;
     return {first.x - pad, first.y - pad,
             (last.x + last.width) - first.x + 2 * pad, (last.y + last.height) - first.y + 2 * pad};
@@ -51,7 +51,7 @@ RectF GridField(const panel::Layout& layout) {
 }   // namespace
 
 void Paint(Painter& painter, const Library& library, const ViewState& view, const IconLookup& icons) {
-    const panel::Layout layout = panel::Build(view.page, view.Pages(library), int(CategoryCount));
+    const panel::Layout layout = panel::Build(view.page, view.Pages(library), int(CategoryCount), view.size);
 
     // The panel's own surface: stone inside a bronze frame.
     painter.Stone({0, 0, panel::CanvasWidth, panel::CanvasHeight}, Color::Stone, 0.30f);
@@ -75,7 +75,7 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
     // it is still missing. A unique's slot is gold on brown, a set item's green.
     const SlotStyle style = StyleOf(view.category);
     painter.Fill(GridField(layout), Color::Ink, 0.45f);
-    for (int slot = 0; slot < panel::SlotsPerPage; ++slot) {
+    for (int slot = 0; slot < layout.slotCount; ++slot) {
         const Entry* entry = SlotEntry(library, view, slot);
         if (entry == nullptr) continue;
         const bool   found = SlotFound(library, view, slot);
@@ -99,7 +99,8 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
         }
     }
 
-    // Footer: the two page arrows and the counter for the open category.
+    // Footer: the page arrows, the counter for the open category, and the Size
+    // control (a bigger slot shows fewer of them, so there are more pages).
     ControlState back;
     back.disabled = view.page <= 0;
     painter.Button(Box(layout.previous), {}, Icon::ChevronLeft, back);
@@ -107,6 +108,12 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
     forward.disabled = view.page + 1 >= view.Pages(library);
     painter.Button(Box(layout.next), {}, Icon::Chevron, forward);
     painter.Text(CounterText(library, view), TextStyle::Value, Box(layout.counter), Color::Text, Align::Center);
+    painter.Text("Size", TextStyle::Small, Box(layout.sizeLabel), Color::Quiet, Align::Trailing);
+    for (int i = 0; i < int(panel::Size::Count); ++i) {
+        ControlState step;
+        step.chosen = i == int(view.size);
+        painter.Socket(Box(layout.sizeSteps[i]), panel::SizeName(static_cast<panel::Size>(i)), step);
+    }
 }
 
 }   // namespace framevr::collection::draw

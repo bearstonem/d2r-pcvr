@@ -7917,6 +7917,7 @@ void EndPair() {
     // when its tab, page or an icon changed, its picture taken into the atlas.
     // It hangs where the settings panel does, so the laser can reach it.
     collectionOpen=collection::TabWanted();
+    collectionView=collection::TabView();
     if(collectionOpen){
         const auto q=math::Yaw(math::Heading(Q(head.orientation)));
         collectionPose=XrPose({V(head.position)+math::Rotate(q,{0,-.06f,-1.05f}),q});

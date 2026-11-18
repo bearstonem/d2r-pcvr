@@ -101,7 +101,7 @@ int main() {
     assert(SlotEntry(library, view, 3)->recordId == 1099);
     assert(SlotEntry(library, view, 4) == nullptr);    // the 100th unique is the last
     assert(SlotEntry(library, view, -1) == nullptr);
-    assert(SlotEntry(library, view, panel::SlotsPerPage) == nullptr);
+    assert(SlotEntry(library, view, panel::SlotsFor(view.size)) == nullptr);
 
     // Found state is per slot, and the counter reads the open category.
     view.page = 0;
