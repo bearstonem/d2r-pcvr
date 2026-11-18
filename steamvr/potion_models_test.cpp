@@ -11,8 +11,9 @@ using namespace framevr;
 static void Check(HRESULT h,const char* s){if(FAILED(h)){std::fprintf(stderr,"%s %08lx\n",s,(unsigned long)h);throw std::runtime_error(s);}}
 int main(int argc,char** argv){try {
     if(argc<3)return 2;
-    bool typeless=false,srgb=false,toss=false;   // --toss: the thrown trap models in the middle row (#224)
+    bool typeless=false,srgb=false,toss=false,suggested=false;   // --toss: the thrown trap models in the middle row (#224)
     for(int i=3;i<argc;++i){typeless|=!std::strcmp(argv[i],"--typeless");srgb|=!std::strcmp(argv[i],"--srgb");toss|=!std::strcmp(argv[i],"--toss");}
+    for(int i=3;i<argc;++i)suggested|=!std::strcmp(argv[i],"--suggested");
     const auto format=srgb?DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:DXGI_FORMAT_R8G8B8A8_UNORM;
     constexpr unsigned W=960,H=720;
     ComPtr<ID3D12Device> device;Check(D3D12CreateDevice(nullptr,D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device)),"device");
@@ -44,6 +45,7 @@ int main(int argc,char** argv){try {
                 auto& item=scene.items[col];const char* code=toss&&row==1?tossCodes[col]:codes[row*5+col];item.code=interaction::Code(code[0],code[1],code[2]);
                 item.pose={{(float(col)-2)*.19f,(1-float(row))*.255f,-.85f},math::Yaw(.55f)};
                 item.highlight=col==0;
+                item.suggested=suggested;
             }
             // Under the potions, the cached arrow pointing right (along its +Y).
             if(row==2&&models.HasArrow())potions::AddArrow(scene,{{0,-.47f,-.85f},math::BeamOrientation({1,0,0},{0,0,1})});

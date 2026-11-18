@@ -138,7 +138,7 @@ float4 PS(Out v):SV_Target {
     float3 c=base*(.38+.62*diffuse)+pow(saturate(dot(n,normalize(light.xyz+eye))),32)*lerp(.12,.38,v.glass);
     c+=options.y*float3(.14,.08,.02)*pow(1-saturate(dot(n,eye)),2);
     if(options.z>0)c=lerp(1.055*pow(max(c,0),1/2.4)-.055,c*12.92,c<=.0031308);
-    return float4(c,1);
+    return float4(c,options.w>0?.5:1);
 })";
         ComPtr<ID3DBlob> vs,ps,errors,signature;
         Check(compile(source,sizeof(source)-1,"potion-models",nullptr,nullptr,"VS","vs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&vs,&errors),"potion vertex shader failed");
@@ -157,6 +157,12 @@ float4 PS(Out v):SV_Target {
             {"TEXCOORD",1,DXGI_FORMAT_R32_FLOAT,0,32,D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0}};
         D3D12_GRAPHICS_PIPELINE_STATE_DESC state{};state.pRootSignature=p->root.Get();state.VS={vs->GetBufferPointer(),vs->GetBufferSize()};state.PS={ps->GetBufferPointer(),ps->GetBufferSize()};
         state.InputLayout={elements,4};state.BlendState.RenderTarget[0].RenderTargetWriteMask=D3D12_COLOR_WRITE_ENABLE_ALL;state.SampleMask=UINT_MAX;
+        auto& blend=state.BlendState.RenderTarget[0];
+        blend.BlendEnable=TRUE;
+        blend.SrcBlend=D3D12_BLEND_SRC_ALPHA;blend.DestBlend=D3D12_BLEND_INV_SRC_ALPHA;
+        blend.BlendOp=D3D12_BLEND_OP_ADD;
+        blend.SrcBlendAlpha=D3D12_BLEND_ONE;blend.DestBlendAlpha=D3D12_BLEND_INV_SRC_ALPHA;
+        blend.BlendOpAlpha=D3D12_BLEND_OP_ADD;
         state.RasterizerState.FillMode=D3D12_FILL_MODE_SOLID;state.RasterizerState.CullMode=D3D12_CULL_MODE_NONE;state.RasterizerState.DepthClipEnable=TRUE;
         state.DepthStencilState.DepthEnable=TRUE;state.DepthStencilState.DepthWriteMask=D3D12_DEPTH_WRITE_MASK_ALL;state.DepthStencilState.DepthFunc=D3D12_COMPARISON_FUNC_GREATER_EQUAL;
         state.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;state.NumRenderTargets=1;state.RTVFormats[0]=format;state.DSVFormat=DXGI_FORMAT_D32_FLOAT;state.SampleDesc.Count=1;
@@ -243,6 +249,7 @@ bool Models::Render(ID3D12GraphicsCommandList* list,ID3D12Resource* target,unsig
         constants[23]=item.scale>0&&item.scale<=4?item.scale:0;   // the shader's size multiplier (0 = 1)
         constants[24]=light.x;constants[25]=light.y;constants[26]=light.z;
         constants[28]=item.empty?1:0;constants[29]=item.highlight?1:0;constants[30]=p.encode?1:0;
+        constants[31]=item.suggested?1:0;
         if(item.occR>0) {   // the forearm capsule in view space (the shader hides pixels behind it)
             const auto a=math::Rotate(inverse,item.occA-view.p),b=math::Rotate(inverse,item.occB-view.p);
             constants[32]=a.x;constants[33]=a.y;constants[34]=a.z;constants[35]=item.occR;
