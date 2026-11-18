@@ -273,5 +273,16 @@ int main(){
         both("PanelManager","OpenPanel","ConfirmationModal");both("PanelManager","OpenPanel","PlayerInventoryExpansionLayout");
         Check(want()==Want::None,"unrelated panels: no keyboard");
     }
+    {   // the game's pointer while the multiplayer keyboard is up
+        constexpr auto free=ParkedPointer(false,false,false),freePull=ParkedPointer(false,true,false);
+        static_assert(free.move&&!free.jump&&freePull.move&&!freePull.jump,"not parked: the pointer follows the laser, clicks at once");
+        constexpr auto rest=ParkedPointer(true,false,false);
+        static_assert(!rest.move&&!rest.jump,"parked: the laser passing over the panel's buttons moves nothing (a box keeps its focus)");
+        constexpr auto pull=ParkedPointer(true,true,false);
+        static_assert(pull.move&&pull.jump,"parked, a pull: the pointer to the laser first, its click the frame after");
+        constexpr auto drag=ParkedPointer(true,false,true);
+        static_assert(drag.move&&!drag.jump,"parked with a button held: it follows (a drag), then stays where let go");
+        Check(true,"parked pointer");
+    }
     std::puts("VR keyboards (name and multiplayer) layout, laser hits, typing, picture and when they show passed");
 }

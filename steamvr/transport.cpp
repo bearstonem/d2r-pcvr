@@ -1178,6 +1178,7 @@ respecbutton::Face respecFace=respecbutton::Face::Reset;
 bool keyboardArtReady=false,keyboardShown=false,keyboardText=false,keyboardClosed=false,keyboardPointer=false;
 int keyboardLit=-1;
 uint32_t keyboardClosedEpoch=0;
+uint64_t boxCheckAt=0;   // when to log the multiplayer panel's box lengths after a key (0: none due)
 statsbutton::Press keyboardPress;
 keyboard::Typist keyboardTypist;
 leather::Holder leatherHolder;
@@ -2648,9 +2649,12 @@ void MenuPointer(const menus::Pad& controls) {
             else {
                 static bool told=false;
                 if(!told){told=true;Say("Frame panels: VR keyboard typing into the game");}
+                if(keyboardText)boxCheckAt=GetTickCount64()+250;   // the game has read the key by then
             }
         }
     }
+    // The multiplayer panel's box lengths a moment after a key (gamestate logs a change only): did it land?
+    if(boxCheckAt&&GetTickCount64()>=boxCheckAt){boxCheckAt=0;gamestate::CheckMultiplayerBoxes();}
     const bool onButton=onStats||onRespec||stashHover>=0||onKeyboard;   // a stamped button: no game cursor, no game trigger
     // An item on the game's cursor and a trigger pull begun off the menu's art (past or on the
     // hide, or the band's see-through margins): the pad's X, the controller menu's own Drop for
@@ -2700,6 +2704,15 @@ void MenuPointer(const menus::Pad& controls) {
     // The campfire: the board owns the game's pointer only while the laser is on it - owned, a
     // pointer event no menu takes never reaches the scene, and the heroes could not be picked.
     if(active&&(!campfirePointer.load()||pointerHit))panelinput::OwnPointer();
+    // The multiplayer panel's boxes (keyboard::ParkedPointer): the laser crosses the panel's tabs and
+    // buttons on its way up to the VR keyboard, and the first one passed over took the clicked box's
+    // focus (owner 2026-11-17: nothing could be typed into the game name, password or description).
+    const bool parkPointer=keyboardShown&&keyboardText;
+    const auto park=keyboard::ParkedPointer(parkPointer,
+        active&&pointerHit&&!onButton&&!dropOwns&&!grabbing&&pressed&&!triggerWasDown,mouseDown||rightMouseDown);
+    const bool parkJump=park.jump;
+    static bool pointerParkTold=false;
+    if(parkPointer&&!pointerParkTold){pointerParkTold=true;Say("Frame panels: multiplayer panel - the game's pointer stays where the laser last clicked (passing over a button would take a box's focus)");}
     if(active&&pointerHit&&!onButton&&!dropOwns) {
         RECT client{};
         if(GetClientRect(gameWindow,&client)) {
@@ -2707,7 +2720,8 @@ void MenuPointer(const menus::Pad& controls) {
             if(!spatialMode&&cinemaMode)cinema::ToFrame(hit.u,hit.v,flat.band,width,height,native.x,native.y);   // the band's point in the frame
             if(spatialMode&&!journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},hit.u,hit.v,uiWidth,uiHeight,native))pointerHit=false;
             POINT pixel{LONG(native.x*(client.right-1)),LONG(native.y*(client.bottom-1))};
-            if(pointerHit&&ClientToScreen(gameWindow,&pixel))pointerHit=SetCursorPos(pixel.x,pixel.y)!=FALSE;
+            if(pointerHit&&ClientToScreen(gameWindow,&pixel))
+                pointerHit=!park.move||SetCursorPos(pixel.x,pixel.y)!=FALSE;   // parked: the dot shows, the game's pointer stays
             else pointerHit=false;
         } else pointerHit=false;
     }
@@ -2716,7 +2730,7 @@ void MenuPointer(const menus::Pad& controls) {
     const bool modifiers=active&&(gamePointer||mouseDown||rightMouseDown);
     PanelModifier(VK_CONTROL,modifiers&&controls.lt>140,controlDown);
     PanelModifier(VK_SHIFT,modifiers&&!grabbing&&(controls.buttons&menus::RightBumper),shiftDown);
-    laserClick.Step(pressed&&!grabbing,(controls.buttons&menus::LeftBumper)!=0);
+    laserClick.Step(pressed&&!grabbing&&!parkJump,(controls.buttons&menus::LeftBumper)!=0);   // a Jump's click the frame after
     const auto edges=panelMouse.Step(active,gamePointer,laserClick.Left(),laserClick.Right());
     panelinput::ItemHover(active,gamePointer,panelMouse.down[0]||panelMouse.down[1]);
     for(int i=0;i<2;++i) {

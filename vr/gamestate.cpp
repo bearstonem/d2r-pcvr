@@ -1504,6 +1504,34 @@ bool CloseFrontPanel(const char* name) {
 }
 bool CloseFrontSettings(){return CloseFrontPanel("D2RLoaderSettingsPanel");}
 bool CloseFrontMultiplayer(){return CloseFrontPanel("D2RLoaderMultiplayerPanel");}
+// What the multiplayer panel's boxes hold (the names D2RCore gives them), as lengths only - never the
+// text, a password among them: whether the VR keyboard's letters reached a box, and which. A line only
+// when a length changed since the last read. UI thread.
+void __cdecl ReadMultiplayerBoxes(const PluginContext* ctx,void*) noexcept {
+    if(!g_widgets||!g_widgets->findPanel||!g_widgets->findWidget||!g_widgets->getInputText||!g_multiplayer.Open())return;
+    static constexpr const char* names[]={"HostGameNameInput","HostPasswordInput","HostDescriptionInput","SearchInput",
+                                          "DirectJoinAddressInput","DirectJoinPasswordInput","JoinPasswordInput"};
+    static int last[std::size(names)]={-2,-2,-2,-2,-2,-2,-2};
+    Widgets::WidgetHandle panel=0;
+    if(g_widgets->findPanel(ctx,"D2RLoaderMultiplayerPanel",&panel)!=Widgets::Result::Success)return;
+    int now[std::size(names)];bool changed=false;
+    for(size_t i=0;i<std::size(names);++i) {
+        Widgets::WidgetHandle box=0;char text[256]{};uint32_t need=0;
+        now[i]=-1;   // not found
+        if(g_widgets->findWidget(ctx,panel,names[i],&box)!=Widgets::Result::Success)continue;
+        const auto r=g_widgets->getInputText(ctx,box,text,sizeof text,&need);
+        now[i]=r==Widgets::Result::Success?int(strnlen(text,sizeof text)):r==Widgets::Result::BufferTooSmall&&need?int(need)-1:-3;
+        changed|=now[i]!=last[i];
+    }
+    if(!changed)return;
+    char line[400];int n=snprintf(line,sizeof line,"Frame multiplayer: box lengths (-1 not found)");
+    for(size_t i=0;i<std::size(names)&&n>0&&n<int(sizeof line);++i){n+=snprintf(line+n,sizeof line-n," %s %d",names[i],now[i]);last[i]=now[i];}
+    Log(line);
+}
+bool CheckMultiplayerBoxes() {
+    return g_ctx&&g_threads&&g_threads->runOnUiThread&&g_widgets&&g_keyboardText.load()&&
+        g_threads->runOnUiThread(g_ctx,&ReadMultiplayerBoxes,nullptr)==Threads::Result::Success;
+}
 bool CloseLeatherMenu() {
     return g_ctx&&g_threads&&g_threads->runOnUiThread&&g_widgets&&g_widgets->dispatchUiAction&&
         g_threads->runOnUiThread(g_ctx,&DispatchLeatherClose,nullptr)==Threads::Result::Success;

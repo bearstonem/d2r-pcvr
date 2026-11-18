@@ -207,6 +207,18 @@ inline Board PlaceAbove(const Layout& l,math::Vec surface,math::Quat facing,floa
     const math::Quat tilt{std::sin(upright*.5f),0,0,std::cos(upright*.5f)};   // about the panel's x axis
     return {surface+math::Rotate(facing,bottom+up*(h*.5f)),math::Multiply(facing,tilt),w,h};
 }
+// The game's pointer while the multiplayer keyboard is up (parked): a click gives a
+// box the focus, and in the game's mouse layout a button the pointer then passes over
+// takes it (focusOnMouseOver; the game's loot filter turns it off on the Back button
+// beside its name box). On its way up to this keyboard the laser crosses the panel's
+// tabs and buttons, so the pointer stays where the laser last clicked. A pull on the
+// board moves it to the laser (jump) and the click goes the frame after; while a mouse
+// button is held it follows (a drag). Not parked, it follows the laser as anywhere.
+struct PointerMove { bool move,jump; };
+constexpr PointerMove ParkedPointer(bool parked,bool pullStarts,bool buttonHeld) {
+    if(!parked||buttonHeld)return {true,false};
+    return {pullStarts,pullStarts};
+}
 // The key at the laser's hit on the board (u, v from its top left, 0-1: the
 // board's own math::IntersectPanel), or -1: in the gap between two keys.
 inline int KeyAt(const Layout& l,float u,float v) {

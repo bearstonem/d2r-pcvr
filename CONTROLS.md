@@ -772,6 +772,12 @@ digit types its symbol (`!` for `1`). Close hides it until you pick another
 view (Host Game, Browse Games, Direct join) or open the panel again. Right B
 closes the multiplayer panel itself.
 
+While this keyboard is up, the game's pointer stays where you last clicked.
+In the game, a button the pointer passes over takes the focus from a text
+box, and the laser crosses the panel's buttons on its way up to the keyboard.
+So the panel's buttons don't light up as the laser passes over them. A trigger
+pull still clicks exactly where the laser points.
+
 The keys follow your Windows keyboard layout, so a letter types the same
 character on any layout. A physical keyboard keeps working alongside it.
 

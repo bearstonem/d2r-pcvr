@@ -16,6 +16,7 @@ bool KeyboardShown();     // a text box on screen, so the VR keyboard (vr_keyboa
                           // picked (the name box), or D2RLoader's multiplayer panel open (KeyboardText)
 bool KeyboardText();      // that keyboard is the multiplayer panel's (digits, . : and a space), not the name's
 uint32_t KeyboardEpoch(); // changes each time a box comes up anew (a closed keyboard comes back)
+bool CheckMultiplayerBoxes(); // queue: log the multiplayer panel's box lengths if one changed (never the text)
 bool CloseLeatherMenu();  // queue: close the tabbed menu if only it and its pages are open, the cursor empty
 bool StowLeatherMenu();   // queue: the held menu put away over the left shoulder (any page or dialog; not with an item on the cursor)
 bool NpcChoicesOnly();
