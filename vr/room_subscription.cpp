@@ -300,9 +300,20 @@ void Poll(const D2RL::PluginContext* ctx,const wchar_t* ini,bool vr){
     requested=choice;
     if(ready.load(std::memory_order_acquire)){QueueRefresh(ctx);return;}
     if(!choice)return;
-    if(!ctx||!ctx->exeBase||!ctx->buildName||std::strcmp(ctx->buildName,"95032")){state=7;return;}
+    // No game build gate (the repository's rule): the code bytes below (Guards) are the check. A build named
+    // otherwise but with the same code is served; one whose code differs is refused there (owner 2026-11-17: on
+    // Steam 3.4.95041 the old buildName == "95032" test turned this off without a word).
+    if(!ctx||!ctx->exeBase){state=7;return;}
     state=1;
-    if(!Guards())return; // late-published protected code is retried next poll
+    if(!Guards()) {   // late-published protected code is retried next poll; said once, if it never holds
+        static unsigned misses=0;
+        if(++misses==2000) {
+            char line[200];std::snprintf(line,sizeof line,"Frame subscriptions: refused - the game's room coverage code (build %s) is not what this mod knows; "
+                "native coverage stays",ctx->buildName?ctx->buildName:"?");
+            framevr::logging::Write(line);
+        }
+        return;
+    }
     image=ctx->exeBase;
     if(!nearHook)nearHook=d2rsig::Hook(abi::Near,abi::NearSig,sizeof abi::NearSig,reinterpret_cast<void*>(&Near),reinterpret_cast<void**>(&originalNear));
     if(!cleanupHook)cleanupHook=d2rsig::Hook(abi::Cleanup,abi::CleanupSig,sizeof abi::CleanupSig,reinterpret_cast<void*>(&Cleanup),reinterpret_cast<void**>(&originalCleanup));
@@ -311,7 +322,9 @@ void Poll(const D2RL::PluginContext* ctx,const wchar_t* ini,bool vr){
     if(!removeHook)removeHook=d2rsig::Hook(abi::Remove,abi::RemoveSig,sizeof abi::RemoveSig,reinterpret_cast<void*>(&Remove),reinterpret_cast<void**>(&originalRemove));
     if(nearHook&&cleanupHook&&transitionHook&&updateHook&&removeHook){
         ready.store(true,std::memory_order_release);
-        framevr::logging::Write("Frame subscriptions: exact 95032 guards ready; adjustable offline server activation/client subscriptions (0-8 rings); automatic initialization and expanded native unit update/removal passes enabled");
+        char line[320];std::snprintf(line,sizeof line,"Frame subscriptions: guards ready on build %s (the code bytes of 95032); adjustable offline server activation/client "
+            "subscriptions (0-8 rings, %d asked); automatic initialization and expanded native unit update/removal passes enabled",ctx->buildName?ctx->buildName:"?",choice);
+        framevr::logging::Write(line);
         QueueRefresh(ctx);
     }
 }
