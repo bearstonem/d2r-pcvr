@@ -694,9 +694,6 @@ inline constexpr Override Overrides[]={
     {.id="interactions.map_grab_hint",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Map grab hint",
      .help="Point at the raised map: a sign and a glow show that Right Grip pulls a copy off. The sign stops after three pulls a game.",
      .beside=true,.besideLabel="Grab hint"},   // the right half of Floating map background's row: the Wrist page holds at most 8 rows (dev build with #581)
-    {.id="interactions.ally_health_bars",.page=View::Wrist,.section="Allies",.kind=RowKind::Choice,.label="Ally health bars",
-     .help="Party and owned mercenary health. Stale data is hidden. Wrist follows the map gesture; overhead needs a current position.",
-     FRAMEVR_OPTIONS(AllyHealthOptions)},
     // Menus: Game menus
     {.id="hud.menu_distance",.page=View::Menus,.section="Game menus",.kind=RowKind::Choice,.label="Menu distance",
      .help="How far away merchants, the stash and the main menu open, and the inventory with Hold menu Off. Point at one, hold Right Grip and push or pull it.",
@@ -726,6 +723,11 @@ inline constexpr Override Overrides[]={
     {.id="hud.monster_names",.page=View::Labels,.section="Names and bars",.kind=RowKind::Choice,.label="Monster names",
      .help="Which monsters show their name and health when they are your target. NPC, mercenary, player and item names always show.",
      FRAMEVR_OPTIONS(MonsterNamesOptions)},
+    // Ally health bars (#519): on Labels > Names and bars beside the monsters' - the Wrist page holds at most 8 rows
+    // and is full with the map settings (2026-11-17 dev build).
+    {.id="interactions.ally_health_bars",.page=View::Labels,.section="Names and bars",.kind=RowKind::Choice,.label="Ally health bars",
+     .help="Party and owned mercenary health. Stale data is hidden. Wrist follows the map gesture; overhead needs a current position.",
+     FRAMEVR_OPTIONS(AllyHealthOptions)},
     // Labels: Loot beams
     // Loot beams (vr/loot_beam_scan.cpp): one row - its brightness slider, then a Filter button
     // opening a card of four switches (owner 2026-10-31: "one line item that says loot beams and

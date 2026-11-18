@@ -106,7 +106,6 @@ static const GoldenRow Golden[]={
     {"interactions.companion_counts",View::Wrist,1,content::RowKind::Toggle,"Buffs and companions",0,0},
     {"interactions.floating_map_background_pct",View::Wrist,1,content::RowKind::Slider,"Map background",0,2},   // the floating map's see-through backing (ui_blit.cpp)
     {"interactions.map_grab_hint",View::Wrist,1,content::RowKind::Toggle,"Map grab hint",0,0},   // the floating map's grab hint (grab_hint.h)
-    {"interactions.ally_health_bars",View::Wrist,2,content::RowKind::Choice,"Ally health bars",4,0},
     {"hud.menu_distance",View::Menus,0,content::RowKind::Choice,"Menu distance",3,0},
     {"interactions.leather_menu",View::Menus,0,content::RowKind::Stepper,"Hold menu",0,3},   // main's #360, drawn inside Menu distance's row; Off / On / Menu only (2026-10-29)
     {"hud.tooltip_timing",View::Menus,0,content::RowKind::Choice,"Item details delay",3,0},
@@ -114,6 +113,7 @@ static const GoldenRow Golden[]={
     {"hud.labels_size",View::Labels,0,content::RowKind::Slider,"Loot name size",0,0},
     {"interactions.loot_pick",View::Labels,0,content::RowKind::Toggle,"Loot pick",0,0},   // #257: Loot pick, Off / On
     {"hud.monster_names",View::Labels,0,content::RowKind::Choice,"Monster names",3,0},   // All / Bosses and elites / None (2026-11-11; the Weak monster bars toggle before)
+    {"interactions.ally_health_bars",View::Labels,0,content::RowKind::Choice,"Ally health bars",4,0},   // #519, on Labels: the Wrist page is full
     {"loot.beams_brightness",View::Labels,1,content::RowKind::Filter,"Loot beams",0,0},   // loot beams: one row, its brightness slider
     {"loot.beams_unique",View::Labels,1,content::RowKind::Toggle,"Unique",0,0},           // (2026-11-01) and a Filter button whose
     {"loot.beams_set",View::Labels,1,content::RowKind::Toggle,"Set",0,0},                 // card holds Unique, Set, Rare and Runes
