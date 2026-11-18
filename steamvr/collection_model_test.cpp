@@ -14,14 +14,14 @@ int main() {
     static_assert(StoresNamedQuality(Category::Sets));
     static_assert(!StoresNamedQuality(Category::Runewords));
 
-    // Every category has a label, a tag, and both are distinct.
+    // Every category has a name, a tag, and both are distinct.
     for (std::size_t i = 0; i < CategoryCount; ++i) {
         const auto category = static_cast<Category>(i);
-        assert(CategoryLabel(category) != nullptr && CategoryLabel(category)[0] != L'?');
+        assert(CategoryName(category) != nullptr && CategoryName(category)[0] != '?');
         assert(std::string_view(CategoryTag(category)).size() > 0);
         for (std::size_t j = i + 1; j < CategoryCount; ++j) {
             assert(std::string_view(CategoryTag(category)) != std::string_view(CategoryTag(static_cast<Category>(j))));
-            assert(std::wstring_view(CategoryLabel(category)) != std::wstring_view(CategoryLabel(static_cast<Category>(j))));
+            assert(std::string_view(CategoryName(category)) != std::string_view(CategoryName(static_cast<Category>(j))));
         }
     }
 

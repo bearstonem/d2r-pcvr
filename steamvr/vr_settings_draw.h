@@ -236,6 +236,10 @@ public:
     // Footer and card buttons: icon + text centered as a pair. textSize 0: Value (30 px).
     void Button(RectF r,std::string_view utf8,Icon icon,ControlState s,Plate plate=Plate::Socket,float textSize=0);
     void IconAt(Icon icon,RectF r,Color c,float alpha=1.f);
+    // A decoded image (straight RGBA, width x height) scaled to fill r: the
+    // collection panel's item icons, which come from the mod's icon cache. A
+    // bitmap is made per call, so draw each icon once a frame.
+    void Image(RectF r,const uint8_t* rgba,int width,int height,float alpha=1.f);
     // A rail tab: icon + name. chosen: the current page's tongue (crimson notch,
     // gold, bold) out to the seam; pointed: slab + ring; changed: the ember on the icon.
     // level 1: a page under its group, its icon (36 px) and name 22 px further in, on
