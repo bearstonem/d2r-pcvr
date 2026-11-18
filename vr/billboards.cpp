@@ -15,8 +15,14 @@
 #include "shrine_placement.h"
 #include "overlay_view.h"
 #include "bone_armor_height.h"
+#include "frozen_armor_overlay.h"
+#include "armor_visuals.h"
+#include "aura_filter.h"
+#include "effect_visibility.h"
 #include <cstdio>
 #endif
+
+namespace gamestate {uint64_t LocalPlayer();}
 
 namespace billboards {
 namespace {
@@ -32,6 +38,8 @@ using ScriptView=void (*)(void*,const void*,const void*);
 ScriptView originalDirection=nullptr,originalPosition=nullptr;
 using LocalPosition=void (*)(void*,const void*,uint32_t,const void*);
 LocalPosition originalLocalPosition=nullptr;
+using RenderEnabled=void (*)(void*,const void*);
+RenderEnabled originalRenderEnabled=nullptr;
 std::atomic<bool> portalReady{false},portalReported{false};
 std::atomic<bool> centerEnabled{true},centerReported{false};
 uintptr_t gameBase=0;
@@ -101,6 +109,9 @@ bool BoneArmorDefinition(uint64_t definition) {
 // Its own by the hero's point (vrcam's camera target, the feet; kept in menus
 // too), not the head: third person, overhead views and menus have no head here.
 std::atomic<bool> hideOwnOrbit{true},boneHiddenReported{false};
+std::atomic<bool> hideOwnFrozen{true},frozenHiddenReported{false};
+std::atomic<ULONGLONG> frozenGraftUntil{0};
+std::atomic<bool> iceAlwaysHidden{false},cycloneHidden{false};
 SRWLOCK heroLock=SRWLOCK_INIT;portal::Vec heroPoint{};ULONGLONG heroAt=0;
 bool HeroPoint(portal::Vec& hero) {
     ULONGLONG at;
@@ -172,7 +183,9 @@ void CorrectOverlayView(void* output,const void* context) {
         if(id<0)continue;
         if(id!=lastId) {
             lastId=id;entry=nullptr;portal::Instance instance{};
-            if(portal::Resolve(ReadAt,c,i,gameBase,instance))entry=&OverlayDefinition(instance.definition);
+            if(portal::Resolve(ReadAt,c,i,gameBase,instance)) {
+                entry=&OverlayDefinition(instance.definition);
+            }
         }
         if(!entry||!entry->overlay)continue;
         // Frame aura: the direction the effect asked for and what it got, at
@@ -255,12 +268,17 @@ void CenterPosition(void* output,const void* input,uint32_t mask,const void* wor
 #ifdef D2RVR_NATIVE_OPENXR
     portal::Vec hero{};
     const bool hideOrbit=mask==19&&hideOwnOrbit.load(std::memory_order_relaxed)&&HeroPoint(hero);
+    const auto frozenUntil=frozenGraftUntil.load(std::memory_order_relaxed);
+    const bool frozen=frozen_overlay::PointMask(mask)&&hideOwnFrozen.load(std::memory_order_relaxed)&&
+        (iceAlwaysHidden.load()||(frozenUntil&&GetTickCount64()<=frozenUntil))&&HeroPoint(hero);
+    const bool cyclone=frozen_overlay::PointMask(mask)&&cycloneHidden.load()&&HeroPoint(hero);
+    const bool auras=aurafilter::Wanted()&&frozen_overlay::PointMask(mask);
     const bool lowerOthers=view&&BoneArmorWanted(),bones=lowerOthers||hideOrbit;
 #else
-    const bool bones=false;
+    const bool bones=false,frozen=false,cyclone=false,auras=false;
 #endif
     const bool centers=view&&centerEnabled.load();
-    if(mask!=19||!portalReady.load()||(!centers&&!bones)) {
+    if((mask!=19&&!frozen&&!cyclone&&!auras)||!portalReady.load()||(!centers&&!bones&&!frozen&&!cyclone&&!auras)) {
         originalLocalPosition(output,input,mask,worker);return;
     }
     struct Stream {uint64_t data;uint32_t count,stride;};
@@ -282,16 +300,39 @@ void CenterPosition(void* output,const void* input,uint32_t mask,const void* wor
     if(!in.stride)for(uint32_t i=1;i<out.count;++i)points[i]=points[0];
     const bool portals=centers&&portal::CorrectCenters(points,out.count,c,gameBase,ReadAt,
         [](uint64_t definition){return PortalDefinition(definition,true);});
-    bool lowered=false;
+    bool lowered=false,frozenHidden=false,windHidden=false,auraHidden=false;
 #ifdef D2RVR_NATIVE_OPENXR
     lowered=bones&&LowerBoneArmor(points,out.count,c,hero,hideOrbit,lowerOthers);
+    frozenHidden=frozen&&frozen_overlay::Hide(points,out.count,c,gameBase,ReadAt,hero,true);
+    windHidden=cyclone&&frozen_overlay::Hide(points,out.count,c,gameBase,ReadAt,hero,true,armorvisuals::CycloneAsset);
+    if(auras){
+        struct Match {int32_t id=-1;bool hidden=false;};Match cache[8];
+        const auto session=gamestate::LocalPlayer(),now=GetTickCount64();
+        for(unsigned i=0;i<out.count;++i){
+            int32_t id=c.instance;
+            if(id<0&&(i>=c.count||!ReadAt(&id,c.indices+4ull*i,4)))continue;
+            if(id<0||!portal::Finite(points[i]))continue;
+            auto& match=cache[uint32_t(id)%8];
+            if(match.id!=id){
+                portal::Instance instance{};match={id,false};
+                match.hidden=portal::Resolve(ReadAt,c,i,gameBase,instance)&&
+                    aurafilter::Hidden(ReadAt,gameBase,session,now,instance.address,instance.definition);
+            }
+            if(match.hidden){points[i].y-=bone_armor::HiddenDepth;auraHidden=true;}
+        }
+    }
 #endif
-    if(!portals&&!lowered){originalLocalPosition(output,input,mask,worker);return;}
+    if(!portals&&!lowered&&!frozenHidden&&!windHidden&&!auraHidden){originalLocalPosition(output,input,mask,worker);return;}
     // A private input stream keeps the native transform/interpolation path and
     // never edits shared VM inputs. Resolve separately for mixed-instance lanes.
     const Stream local{reinterpret_cast<uint64_t>(points),out.count,12};
     originalLocalPosition(output,&local,mask,worker);
 #ifdef D2RVR_NATIVE_OPENXR
+    if(frozenHidden&&!frozenHiddenReported.exchange(true)&&logger) {
+        char line[320];std::snprintf(line,sizeof line,
+            "Frame Frozen Armor overlay: own permanent ice hidden under floor, mask=%u lanes=%u; hit effect and other units unchanged; asset=%s",
+            mask,out.count,frozen_overlay::Path.data());logger(line);
+    }
     if(lowered&&!boneArmorReported.exchange(true)&&logger) {
         char line[160];
         std::snprintf(line,sizeof line,"VR overlays: Bone Armor orbit centre lowered to %.2f units (native %.2f); native transform retained",
@@ -419,6 +460,29 @@ void ViewPosition(void* out,const void* in,const void* context) {
 #endif
     CorrectScriptView(out,in,context,false);
 }
+void EffectRenderEnabled(void* output,const void* args){
+    originalRenderEnabled(output,args);
+#ifdef D2RVR_NATIVE_OPENXR
+    const bool wind=cycloneHidden.load(),buffs=aurafilter::Wanted();
+    if(!wind&&!buffs)return;
+    const auto session=gamestate::LocalPlayer(),now=GetTickCount64();
+    portal::Vec hero{};const bool haveHero=wind&&HeroPoint(hero);
+    const auto changed=visibility::Filter(ReadAt,[](uint64_t p,const void* value,size_t bytes){
+        return framevr::WriteMemory(reinterpret_cast<void*>(p),value,bytes);
+    },reinterpret_cast<uint64_t>(output),reinterpret_cast<uint64_t>(args),gameBase,[&](const portal::Instance& instance){
+        if(buffs&&aurafilter::Hidden(ReadAt,gameBase,session,now,instance.address,instance.definition))return true;
+        if(haveHero){
+            char path[160]{};portal::Vec origin{};
+            return portal::DefinitionPath(ReadAt,instance.definition,gameBase,path)&&armorvisuals::CycloneAsset(path)&&
+                portal::Origin(ReadAt,instance,origin)&&bone_armor::Own(origin,hero);
+        }
+        return false;
+    });
+    static std::atomic<bool> reportedVisibility{false};
+    if(changed&&!reportedVisibility.exchange(true)&&logger)
+        logger("Frame effect visibility: selected emitter rendering disabled through native bool output; scene flags and other recipients unchanged");
+#endif
+}
 void ScreenAlign(void* self,const void* view,void* batch) {
     if(!wanted||!wanted()||!viewAligned||!view||!batch){original(self,view,batch);return;}
     alignas(16) float local[16];float eye[3];ULONGLONG at;
@@ -447,6 +511,20 @@ void ConfigureBoneArmorHidden(bool hidden) {
     (void)hidden;
 #endif
 }
+void ConfigureArmorVisuals(int ice,bool cyclone) {
+#ifdef D2RVR_NATIVE_OPENXR
+    iceAlwaysHidden=ice==0;hideOwnFrozen=ice!=1;cycloneHidden=!cyclone;
+#else
+    (void)ice;(void)cyclone;
+#endif
+}
+void SetFrozenArmorGraftActive(bool active) {
+#ifdef D2RVR_NATIVE_OPENXR
+    frozenGraftUntil.store(active?GetTickCount64()+500:0,std::memory_order_relaxed);
+#else
+    (void)active;
+#endif
+}
 void SetHero(const float position[3]) {
 #ifdef D2RVR_NATIVE_OPENXR
     AcquireSRWLockExclusive(&heroLock);
@@ -473,7 +551,7 @@ void SetGameForward(const float forward[3]) {
 #endif
 }
 void Install(void (*log)(const char*),bool (*active)()) {
-    if(installed&&portalReady.load()&&originalLocalPosition)return;logger=log;wanted=active;
+    if(installed&&portalReady.load()&&originalLocalPosition&&originalRenderEnabled)return;logger=log;wanted=active;
     using namespace signatures;
     if(!portalReady.load()&&
        (originalDirection||d2rsig::Check(DirectionRva,DirectionSig,sizeof DirectionSig))&&
@@ -496,6 +574,13 @@ void Install(void (*log)(const char*),bool (*active)()) {
 #if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
         if(logger)logger("Frame shrine trace: read-only native-input capture enabled; floating symbols and environment, view queries and mask19; max1024 samples (128 environment), 8 lanes per callback; mana/stamina correction runs AFTER direction capture");
 #endif
+    }
+    if(portalReady.load()&&!originalRenderEnabled&&
+       d2rsig::Check(RenderEnabledInstanceRva,RenderEnabledInstanceSig,sizeof RenderEnabledInstanceSig)&&
+       d2rsig::Check(RenderEnabledIndicesRva,RenderEnabledIndicesSig,sizeof RenderEnabledIndicesSig)&&
+       d2rsig::Hook(RenderEnabledRva,RenderEnabledSig,sizeof RenderEnabledSig,
+           reinterpret_cast<void*>(&EffectRenderEnabled),reinterpret_cast<void**>(&originalRenderEnabled))){
+        if(logger)logger("Frame effect visibility: verified native rendering-enabled callback installed; selected recipients only");
     }
     if(installed)return;
     if(!d2rsig::Check(ScreenRva,ScreenSig,sizeof ScreenSig)||

@@ -14,12 +14,14 @@ uint32_t player[4]={0,3,7,1};
 std::array<uint8_t,32> inv{},unit{};
 std::array<uint8_t,192> itemData{};
 Items::ItemInfo item{};
-int uses=0,opens=0;
+int uses=0,opens=0,mercUses=0;
+bool mercVerified=true;
 template<class T>void Put(uint8_t* dst,size_t offset,T value){std::memcpy(dst+offset,&value,sizeof value);}
 uintptr_t ClientInventory(uintptr_t p){assert(p==uintptr_t(player));return uintptr_t(inv.data());}
 uint32_t CodeOf(uintptr_t p){assert(p==uintptr_t(unit.data()));return item.code;}
 int Usable(uintptr_t p){assert(p==uintptr_t(unit.data()));return usable;}
 void Use(uintptr_t p,int mask){assert(p==uintptr_t(unit.data())&&mask==3);++uses;}
+void FeedMerc(uintptr_t p){assert(p==uintptr_t(unit.data()));++mercUses;}
 Inventory::Result __cdecl Enumerate(const PluginContext* c,PlayerHandle p,const Inventory::ItemFilter*,Inventory::ItemCallback callback,void* user) noexcept {
     assert(p==session);callback(c,&item,user);return Inventory::Result::Success;
 }
@@ -38,8 +40,8 @@ Request RequestFor(Action action,const Snapshot& s){return {action,1,session,Get
 namespace gamestate {uint64_t LocalPlayer(){return session;}bool MenuOpen(){return menu;}}
 namespace combat {bool LocalPlayerUnit(uintptr_t& out){out=uintptr_t(player);return local;}}
 namespace d2rsig {
-bool Check(uint64_t,const void*,uint32_t){return verified;}
-uintptr_t Addr(uint64_t rva){switch(rva){case 0x34a360:return uintptr_t(&ClientInventory);case 0x36ef50:return uintptr_t(&CodeOf);case 0x374920:return uintptr_t(&Usable);case 0x161f20:return uintptr_t(&Use);}assert(false);return 0;}
+bool Check(uint64_t rva,const void*,uint32_t){return verified&&((rva!=0x162460&&rva!=0x16250e)||mercVerified);}
+uintptr_t Addr(uint64_t rva){switch(rva){case 0x34a360:return uintptr_t(&ClientInventory);case 0x36ef50:return uintptr_t(&CodeOf);case 0x374920:return uintptr_t(&Usable);case 0x161f20:return uintptr_t(&Use);case 0x162460:return uintptr_t(&FeedMerc);}assert(false);return 0;}
 }
 namespace framevr::logging {void Write(const char*){}}
 namespace gamecmd {bool ExecuteUiCommand(uint32_t command){assert(command==1);++opens;menu=true;return true;}}
@@ -92,5 +94,20 @@ int main(int argc,char**) {
     assert(quickitems::HoldsClientItem(session,{18,22,Code('t','o','a')},holds)&&!holds);
     local=false;assert(!quickitems::HoldsClientItem(session,token,holds));local=true;
     assert(uses==before+1&&opens==1);menu=false; // refusals never dispatch
+    item.code=Code('h','p','1');s=Capture();s.merc={true,40,100,338,99};
+    auto feed=RequestFor(Action::FeedMerc,s);feed.inventoryPotion=true;
+    const int playerUses=uses;
+    assert(quickitems::UsePotion(feed,s)&&mercUses==1&&uses==playerUses);
+    s.merc.health=0;assert(!quickitems::UsePotion(feed,s));s.merc.health=40;
+    s.merc.known=false;assert(!quickitems::UsePotion(feed,s));s.merc.known=true;
+    mercVerified=false;assert(!quickitems::UsePotion(feed,s));mercVerified=true;
+    feed.inventoryPotion=false;assert(!quickitems::UsePotion(feed,s));feed.inventoryPotion=true;
+    item.handle=43;assert(!quickitems::UsePotion(feed,s));item.handle=42;
+    menu=true;assert(!quickitems::UsePotion(feed,s));menu=false;
+    ++session;assert(!quickitems::UsePotion(feed,s));--session;
+    item.container=Items::ItemContainer::PersonalStash;assert(!quickitems::UsePotion(feed,s));item.container=Items::ItemContainer::Inventory;
+    item.code=Code('m','p','1');s=Capture();s.merc={true,40,100,338,99};
+    feed=RequestFor(Action::FeedMerc,s);feed.inventoryPotion=true;
+    assert(!quickitems::UsePotion(feed,s)&&mercUses==1&&uses==playerUses);
     std::puts("Quick-use ownership, native dispatch, empty tomes, targeting, cancellation, persistence and corrupt-list guards passed");
 }

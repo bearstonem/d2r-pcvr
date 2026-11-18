@@ -180,3 +180,11 @@ The texture header/format mapping was checked against
 Original potion models and textures belong to the game and are extracted into
 the local `d2r_vr_potions` cache; neither that cache nor raw game assets are
 distributed in the repository or release. No Granny runtime is needed.
+
+## Sorceress ice armor
+
+`steamvr/assets/ice-armor/` contains geometry adapted from PK Icicles by
+FacadeGaikan / PlanetKiller, released under CC0:
+https://opengameart.org/content/pk-icicles . The accompanying generated frost
+texture and forearm adaptations contain no extracted game assets. See the
+asset README for the editable source and runtime format.

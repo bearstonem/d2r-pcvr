@@ -7,6 +7,7 @@ void Init(const D2RL::PluginContext*,const wchar_t* settingsPath=nullptr);
 void Capture(framevr::interaction::Snapshot&);
 bool Assign(const framevr::interaction::Request&,const framevr::interaction::Snapshot&);
 bool Use(const framevr::interaction::Request&,const framevr::interaction::Snapshot&);
+bool UsePotion(const framevr::interaction::Request&,const framevr::interaction::Snapshot&);
 // Reset Skills & Stats (vr/respec.cpp): one item in the client's own
 // inventory list, found by the identity the game gave it (runtime id, class,
 // code: read on the game thread when it was made). UI thread.

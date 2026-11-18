@@ -33,6 +33,7 @@ import prepare_frontend_floor
 import prepare_frontend_scene
 from game_install import validate_game
 import mod_identity
+import enemy_health_layout
 
 ROOT = Path(__file__).resolve().parent.parent
 STEAM = Path.home() / '.local/share/Steam'
@@ -535,6 +536,7 @@ def main():
     # every other file, so a restore or removal takes it away with the mod.
     payload[mod_identity.MOD_DIR / 'vrmod-manifest.json'] = (ROOT / 'vrmod-manifest.json').read_bytes()
     payload[mod_identity.MOD_DIR / 'launcher_icon.png'] = (ROOT / 'launcher_icon.png').read_bytes()
+    payload[mod_identity.MODINFO.parent / enemy_health_layout.RELATIVE_PATH] = enemy_health_layout.payload()
     # Native artwork is read locally, never downloaded/bundled with the mod.
     # Prepare before mutating the install and journal it with all other files.
     with tempfile.TemporaryDirectory(prefix='d2r-vr-icons-') as temporary:
@@ -546,6 +548,8 @@ def main():
             for name in result['images'] + ['manifest.tsv', 'cache.json']:
                 payload[mod_identity.PLUGIN.parent / 'd2r_vr_icons' / safe_relative(name)] = (Path(temporary) / name).read_bytes()
             print(f"Prepared {result['icons']} native icon bindings from your installed game.")
+    for name in ('ic1.pvr', 'ic2.pvr', 'ic3.pvr'):
+        payload[mod_identity.PLUGIN.parent / 'd2r_vr_potions' / name] = (ROOT / 'steamvr/assets/ice-armor' / name).read_bytes()
     with tempfile.TemporaryDirectory(prefix='d2r-vr-potions-') as temporary:
         try:
             result = prepare_potions(game, temporary, casclib=args.casclib)
