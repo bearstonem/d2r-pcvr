@@ -5,13 +5,18 @@
 
 #include <windows.h>
 
+#include <atomic>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <string>
 
+#include "../steamvr/collection_draw.h"
 #include "../steamvr/collection_view.h"
+#include "../steamvr/interaction_icons.h"
+#include "../steamvr/vr_settings_draw.h"
 #include "logging.h"
 
 namespace framevr::collection {
@@ -81,6 +86,75 @@ void ShutdownTab() {
     g_view    = ViewState {};
     g_loaded  = false;
     g_ctx     = nullptr;
+}
+
+namespace {
+
+// A plain 24-bit BMP: no encoder and no COM, so it works on any thread.
+bool SaveBmp(const std::filesystem::path& path, const std::vector<uint8_t>& rgba, int width, int height) {
+    if (width <= 0 || height <= 0 || rgba.size() < size_t(width) * size_t(height) * 4) return false;
+    const uint32_t row = (uint32_t(width) * 3 + 3) & ~3u, size = row * uint32_t(height);
+    FILE*          file = _wfopen(path.c_str(), L"wb");
+    if (file == nullptr) return false;
+    uint8_t head[54] = {'B', 'M'};
+    const auto put = [&](int at, uint32_t value) { for (int i = 0; i < 4; ++i) head[at + i] = uint8_t(value >> (8 * i)); };
+    put(2, 54 + size); put(10, 54); put(14, 40); put(18, uint32_t(width)); put(22, uint32_t(height));
+    head[26] = 1; head[28] = 24; put(34, size);
+    bool                 ok = fwrite(head, 1, 54, file) == 54;
+    std::vector<uint8_t> line(row, 0);
+    for (uint32_t y = 0; ok && y < uint32_t(height); ++y) {
+        const uint8_t* from = rgba.data() + size_t(height - 1 - int(y)) * size_t(width) * 4;
+        for (uint32_t x = 0; x < uint32_t(width); ++x) {   // RGBA in, BGR out
+            line[x * 3 + 0] = from[x * 4 + 2];
+            line[x * 3 + 1] = from[x * 4 + 1];
+            line[x * 3 + 2] = from[x * 4 + 0];
+        }
+        ok = fwrite(line.data(), 1, row, file) == row;
+    }
+    fclose(file);
+    return ok;
+}
+
+}   // namespace
+
+void TabDumpPanel() {
+    // The icons decode on the mod's worker, so the first calls would draw dots:
+    // wait about a second (TickStore runs every 250 ms) before writing.
+    static std::atomic<int>  calls{0};
+    static std::atomic<bool> done{false};
+    if (done.load() || calls.fetch_add(1) < 4) return;
+    if (done.exchange(true)) return;
+
+    Library    library;
+    ViewState  view;
+    {
+        std::lock_guard lock(g_lock);
+        if (!g_loaded) return;
+        library = g_library;
+        view    = g_view;
+    }
+
+    thread_local std::unique_ptr<framevr::settings::draw::Painter> painter;
+    if (!painter) painter = std::make_unique<framevr::settings::draw::Painter>();
+    if (!painter->Ready() || !painter->Begin()) return;
+
+    const auto lookup = [](const std::string& key) -> const draw::IconPixels* {
+        static thread_local std::shared_ptr<const interaction::icons::Image> held;
+        static thread_local draw::IconPixels                                 view;
+        held = interaction::icons::Get(key);
+        if (!held || held->rgba.empty()) return nullptr;
+        view.rgba = held->rgba.data(); view.width = int(held->width); view.height = int(held->height);
+        return &view;
+    };
+    draw::Paint(*painter, library, view, lookup);
+    const auto pixels = painter->End();
+    if (pixels.empty()) return;
+
+    const auto path = PluginFolder() / L"collection-panel.bmp";
+    if (SaveBmp(path, pixels, int(settings::draw::CanvasWidth), int(settings::draw::CanvasHeight)))
+        Log("collection tab: wrote collection-panel.bmp beside the plugin");
+    else
+        Log("collection tab: could not write collection-panel.bmp");
 }
 
 const Library& TabLibrary() {

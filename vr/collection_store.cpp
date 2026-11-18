@@ -136,6 +136,27 @@ void SweepOnGameThread(const D2RL::PluginContext*, void*) noexcept {
     const uint32_t first  = uint32_t(g_firstTab.load());
     const uint32_t beyond = first + uint32_t(std::max(0, tabs));
 
+    // One line a session: which shared pages exist and what the collection claims,
+    // so a wrong first_tab is visible at once.
+    {
+        static bool reported = false;
+        if (!reported) {
+            reported = true;
+            uint32_t lowest = UINT32_MAX, highest = 0;
+            for (const Seen& item : sweep.items) {
+                if (item.page == UINT32_MAX) continue;
+                lowest  = std::min(lowest, item.page);
+                highest = std::max(highest, item.page);
+            }
+            char line[224];
+            std::snprintf(line, sizeof(line),
+                          "Frame collection: shared stash holds %u items over pages %u..%u; the collection claims pages %u..%u",
+                          unsigned(sweep.items.size()), lowest == UINT32_MAX ? 0u : unsigned(lowest), unsigned(highest),
+                          unsigned(first), unsigned(beyond - 1));
+            Log(line);
+        }
+    }
+
     // What the collection's own tabs already hold, and what is still loose in
     // the player's own tabs.
     const Library& library = TabLibrary();
@@ -168,7 +189,13 @@ void SweepOnGameThread(const D2RL::PluginContext*, void*) noexcept {
                                     : item.category == Category::Sets    ? heldSet
                                                                          : heldMaterial;
         if (std::find(held.begin(), held.end(), item.identity) != held.end()) continue;
-        if (!MoveToBand(player, item.seen.handle, item.category)) continue;
+        if (!MoveToBand(player, item.seen.handle, item.category)) {
+            char line[192];
+            std::snprintf(line, sizeof(line), "Frame collection: could not move a %s item (id %u) out of page %u",
+                          CategoryName(item.category), unsigned(item.identity), unsigned(item.seen.page));
+            Log(line);
+            continue;
+        }
         held.push_back(item.identity);
         ++moved;
         // A unique or set brings itself into view; a material does not.
@@ -231,6 +258,9 @@ void ShutdownStore() {
 }
 
 void TickStore(bool stashOpen) {
+    // The panel is a VR layer; on a monitor this writes it beside the plugin once
+    // so it can be looked at there.
+    if (TabWanted()) TabDumpPanel();
     if (!g_affinity.load() || !stashOpen || g_sweeping.load()) return;
     const uint64_t now = GetTickCount64();
     const uint64_t last = g_lastSweep.load();

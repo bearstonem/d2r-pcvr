@@ -38,6 +38,11 @@ void            TabSetShow(panel::Show show);
 // lands on under the current filter. Does nothing when it is not in the catalog.
 void            TabShowEntry(Category category, uint32_t recordId);
 
+// Paints the panel once with the loaded catalog and the mod's own icons, and
+// writes it beside the plugin as collection-panel.bmp. The panel is a VR layer,
+// so this is how it can be looked at on a monitor.
+void            TabDumpPanel();
+
 // Whether the panel is open. The stash's Collection tab sets it; the transport
 // shows the panel while it is true.
 bool TabWanted();
