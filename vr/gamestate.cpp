@@ -342,6 +342,11 @@ std::atomic<bool> g_respecButton{false};  // its Character page alone: Reset Ski
 // shows; the epoch changes each time it comes up anew. The box is read on the UI message thread.
 framevr::keyboard::NameBox g_nameBox;
 std::atomic<bool> g_keyboard{false};
+// The main menu (owner 2026-11-14): what Right B may close over it. The cog's panel is D2RLoader's own
+// (D2RLoaderSettingsPanel) - Escape does not close it, the game asked whether to quit instead; it gets a
+// ClosePanel. Anything else not of the menu itself (a dialog, the game's options, character creation) gets
+// Escape; with nothing over the menu B does nothing.
+std::atomic<bool> g_frontSettings{false}, g_frontOver{false};
 std::atomic<uint32_t> g_keyboardEpoch{0};
 std::atomic<uint32_t> g_panelChanges{0};   // every panel opened or closed (leather::Back)
 std::atomic<bool> g_npcChoices{false};
@@ -982,6 +987,16 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         g_statsButton.store(framevr::statsbutton::Shown(g_panels));
         g_stashButtons.store(framevr::stashbuttons::Shown(g_panels));
         g_respecButton.store(framevr::respecbutton::Shown(g_panels));
+        {
+            static const char* const kFrontBase[] = {"TitleScreenPanel", "TooltipsPanel", "MainMenuPanel", "MainMenuLoadingPanel",
+                "MainMenuLinks", "MainMenuButtonRibbon", "CharacterSelectPanel", "ShowItemsPanel", "EmoteWheelPanel", "BlockingPanel",
+                "D2RLoaderSettingsPanel", "LogoMenuPanel"};
+            bool over = false;
+            for (const std::string& n : g_panels)
+                if (std::none_of(std::begin(kFrontBase), std::end(kFrontBase), [&](const char* b) { return n == b; })) over = true;
+            g_frontOver.store(over);
+            g_frontSettings.store(g_panels.count("D2RLoaderSettingsPanel") != 0);
+        }
         bool menu = false;
         for (const std::string& n : g_panels) if (IsMenuPanel(n)) { menu = true; break; }
         if(menu!=before)++g_menuEpoch;
@@ -1239,6 +1254,8 @@ bool RespecButtonShown(){return false;}   // the reset engine is in the native O
 #endif
 uint32_t PanelChanges(){return g_panelChanges.load();}
 bool KeyboardShown(){return g_keyboard.load();}
+bool FrontSettingsOpen(){return g_frontSettings.load();}
+bool FrontOverlayOpen(){return g_frontOver.load();}
 uint32_t KeyboardEpoch(){return g_keyboardEpoch.load();}
 bool NpcChoicesOnly(){return g_npcChoices.load();}
 void ReadNpcChoicesRect() {
@@ -1433,6 +1450,18 @@ void __cdecl DispatchLeatherStow(const PluginContext* ctx,void*) noexcept {
 bool StowLeatherMenu() {
     return g_ctx&&g_threads&&g_threads->runOnUiThread&&g_widgets&&g_widgets->dispatchUiAction&&
         g_threads->runOnUiThread(g_ctx,&DispatchLeatherStow,nullptr)==Threads::Result::Success;
+}
+// Right B on the main menu's board with the cog's panel open: ClosePanel, on the UI thread.
+void __cdecl DispatchFrontSettingsClose(const PluginContext* ctx,void*) noexcept {
+    if(!g_widgets||!g_widgets->dispatchUiAction)return;
+    Widgets::UiAction action{};action.structSize=sizeof action;
+    action.target="PanelManager";action.text="D2RLoaderSettingsPanel";action.command="ClosePanel";
+    const auto result=g_widgets->dispatchUiAction(ctx,&action);
+    char line[160];snprintf(line,sizeof line,"gamestate: Right B on the main menu - ClosePanel D2RLoaderSettingsPanel (result %u)",unsigned(result));Log(line);
+}
+bool CloseFrontSettings() {
+    return g_ctx&&g_threads&&g_threads->runOnUiThread&&g_widgets&&g_widgets->dispatchUiAction&&
+        g_threads->runOnUiThread(g_ctx,&DispatchFrontSettingsClose,nullptr)==Threads::Result::Success;
 }
 bool CloseLeatherMenu() {
     return g_ctx&&g_threads&&g_threads->runOnUiThread&&g_widgets&&g_widgets->dispatchUiAction&&

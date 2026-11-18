@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<title>Podgląd modeli D2R</title>
+<style>
+  html,body{margin:0;height:100%;background:#1b1712;color:#e8dcc4;font:13px system-ui,sans-serif;overflow:hidden}
+  #side{position:absolute;left:0;top:0;bottom:0;width:330px;overflow:auto;background:#241f18;border-right:1px solid #4a3f30}
+  #side h2{font-size:13px;margin:10px 10px 4px;color:#d9b36a;text-transform:uppercase;letter-spacing:.05em}
+  #side input{margin:6px 10px;width:300px;background:#15120e;color:#e8dcc4;border:1px solid #4a3f30;padding:5px}
+  .it{padding:4px 10px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .it:hover{background:#3a3125}.it.on{background:#5a4528;color:#fff}
+  .it small{color:#9c8c70}
+  #view{position:absolute;left:331px;top:0;right:0;bottom:0}
+  canvas{width:100%;height:100%;display:block}
+  #info{position:absolute;left:342px;top:8px;background:rgba(20,16,12,.8);padding:8px 10px;border-radius:4px;max-width:60%;pointer-events:none}
+  #help{position:absolute;right:10px;bottom:8px;color:#9c8c70;background:rgba(20,16,12,.7);padding:6px 8px;border-radius:4px}
+</style>
+</head>
+<body>
+<div id="side">
+  <input id="q" placeholder="szukaj (np. head, statue)…">
+  <h2>Całe kafelki mapy</h2><div id="scenes"></div>
+  <h2>Pojedyncze modele</h2><div id="list"></div>
+</div>
+<div id="view"><canvas id="c"></canvas></div>
+<div id="info"></div>
+<div id="help">mysz: obrót · prawy / Shift: przesuń · kółko: zoom · V: odwróć tekstury · T: bez tekstur · S: siatka</div>
+<script>
+const DATA = /*DATA*/null;
+const cv = document.getElementById('c');
+const gl = cv.getContext('webgl', {antialias: true});
+gl.getExtension('OES_element_index_uint');
+const vs = `attribute vec3 p;attribute vec3 n;attribute vec2 t;uniform mat4 M,VP;varying vec3 N;varying vec2 T;varying vec3 W;
+void main(){vec4 w=M*vec4(p,1.);W=w.xyz;N=mat3(M)*n;T=t;gl_Position=VP*w;}`;
+const fs = `precision mediump float;varying vec3 N;varying vec2 T;varying vec3 W;uniform sampler2D S;uniform float useT,flipV;uniform vec3 tint;
+void main(){vec2 uv=vec2(T.x,flipV>.5?1.-T.y:T.y);vec4 c=useT>.5?texture2D(S,uv):vec4(tint,1.);
+if(c.a<.35)discard;vec3 nn=normalize(N);if(!gl_FrontFacing)nn=-nn;float l=.38+.62*max(dot(nn,normalize(vec3(.4,.8,.3))),0.)+.12*max(dot(nn,vec3(-.5,.2,-.6)),0.);
+gl_FragColor=vec4(c.rgb*l,1.);}`;
+function sh(t, s){const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);if(!gl.getShaderParameter(o,gl.COMPILE_STATUS))throw gl.getShaderInfoLog(o);return o;}
+const pr = gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,vs));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,fs));gl.linkProgram(pr);gl.useProgram(pr);
+const L = n => gl.getUniformLocation(pr, n), A = n => gl.getAttribLocation(pr, n);
+const aP=A('p'), aN=A('n'), aT=A('t');
+gl.enable(gl.DEPTH_TEST);
+
+function b64(s, T){const b=atob(s);const u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return new T(u.buffer);}
+const gpu = {}, texs = [];
+const white = gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,white);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([160,150,135,255]));
+DATA.textures.forEach((src, i) => {
+  const t = gl.createTexture(); texs[i] = t;
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([160,150,135,255]));
+  const im = new Image(); im.onload = () => {gl.bindTexture(gl.TEXTURE_2D,t);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,im);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.REPEAT);draw();};
+  im.src = src;
+});
+function model(name){
+  if (gpu[name]) return gpu[name];
+  const m = DATA.models[name]; if (!m) return null;
+  let last = null;
+  return gpu[name] = m.parts.map(p => {
+    let v = last;
+    if (p.v) {v = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, v); gl.bufferData(gl.ARRAY_BUFFER, b64(p.v, Float32Array), gl.STATIC_DRAW); last = v;}
+    const ia = b64(p.i, Uint32Array); const i = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, i); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, ia, gl.STATIC_DRAW);
+    return {v, i, n: ia.length, t: p.t};
+  });
+}
+
+// macierze
+const I4=()=>[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];
+function mul(a,b){const r=new Array(16);for(let c=0;c<4;c++)for(let rr=0;rr<4;rr++){let s=0;for(let k=0;k<4;k++)s+=a[k*4+rr]*b[c*4+k];r[c*4+rr]=s;}return r;}
+function persp(f,a,n,fa){const t=1/Math.tan(f/2);return[t/a,0,0,0,0,t,0,0,0,0,(fa+n)/(n-fa),-1,0,0,2*fa*n/(n-fa),0];}
+function look(e,c,u){const z=norm(sub(e,c)),x=norm(cross(u,z)),y=cross(z,x);return[x[0],y[0],z[0],0,x[1],y[1],z[1],0,x[2],y[2],z[2],0,-dot(x,e),-dot(y,e),-dot(z,e),1];}
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],norm=a=>{const l=Math.hypot(...a)||1;return a.map(x=>x/l);};
+function trs(p,q,s){const[x,y,z,w]=q;return[(1-2*(y*y+z*z))*s[0],(2*(x*y+z*w))*s[0],(2*(x*z-y*w))*s[0],0,(2*(x*y-z*w))*s[1],(1-2*(x*x+z*z))*s[1],(2*(y*z+x*w))*s[1],0,(2*(x*z+y*w))*s[2],(2*(y*z-x*w))*s[2],(1-2*(x*x+y*y))*s[2],0,p[0],p[1],p[2],1];}
+
+let items = [], cam = {yaw: .8, pitch: .45, dist: 10, tgt: [0,0,0]}, useT = 1, flipV = 0, wire = 0;
+function fit(lo, hi){cam.tgt=[(lo[0]+hi[0])/2,(lo[1]+hi[1])/2,(lo[2]+hi[2])/2];cam.dist=Math.max(1,Math.hypot(hi[0]-lo[0],hi[1]-lo[1],hi[2]-lo[2]))*1.5;}
+function draw(){
+  const w = cv.clientWidth, h = cv.clientHeight; if (cv.width !== w || cv.height !== h){cv.width=w;cv.height=h;}
+  gl.viewport(0,0,w,h); gl.clearColor(.11,.09,.07,1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+  const e=[cam.tgt[0]+cam.dist*Math.cos(cam.pitch)*Math.sin(cam.yaw),cam.tgt[1]+cam.dist*Math.sin(cam.pitch),cam.tgt[2]+cam.dist*Math.cos(cam.pitch)*Math.cos(cam.yaw)];
+  gl.uniformMatrix4fv(L('VP'),false,mul(persp(.9,w/h,cam.dist/500,cam.dist*20),look(e,cam.tgt,[0,1,0])));
+  gl.uniform1f(L('useT'),useT); gl.uniform1f(L('flipV'),flipV); gl.uniform3f(L('tint'),.63,.59,.53);
+  for (const it of items){
+    const parts = model(it.m); if (!parts) continue;
+    gl.uniformMatrix4fv(L('M'), false, it.M);
+    for (const p of parts){
+      gl.bindBuffer(gl.ARRAY_BUFFER, p.v);
+      gl.enableVertexAttribArray(aP); gl.vertexAttribPointer(aP,3,gl.FLOAT,false,32,0);
+      if (aN>=0){gl.enableVertexAttribArray(aN); gl.vertexAttribPointer(aN,3,gl.FLOAT,false,32,12);}
+      if (aT>=0){gl.enableVertexAttribArray(aT); gl.vertexAttribPointer(aT,2,gl.FLOAT,false,32,24);}
+      gl.bindTexture(gl.TEXTURE_2D, p.t == null ? white : texs[p.t]);
+      gl.uniform1f(L('useT'), useT && p.t != null ? 1 : 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, p.i);
+      gl.drawElements(wire ? gl.LINES : gl.TRIANGLES, p.n, gl.UNSIGNED_INT, 0);
+    }
+  }
+}
+const info = document.getElementById('info');
+function short(m){return m.split('/').slice(-2).join('/').replace('.model','');}
+function showModel(m, el){
+  sel(el); const d = DATA.models[m];
+  items = [{m, M: I4()}]; fit(d.lo, d.hi);
+  info.innerHTML = `<b>${short(m)}</b><br>${m}<br>rozmiar: ${(d.hi[0]-d.lo[0]).toFixed(1)} × ${(d.hi[1]-d.lo[1]).toFixed(1)} (wys.) × ${(d.hi[2]-d.lo[2]).toFixed(1)} · ${d.lod}<br>skąd: ${d.from.join(', ')}<br>tekstury: ${d.tex.join(', ')||'—'}`;
+  draw();
+}
+function showScene(s, el){
+  sel(el); const lo=[1e9,1e9,1e9], hi=[-1e9,-1e9,-1e9];
+  items = DATA.scenes[s].filter(it => DATA.models[it.m]).map(it => {
+    const M = trs(it.p, it.q, it.s), d = DATA.models[it.m];
+    for (const c of [[d.lo[0],d.lo[1],d.lo[2]],[d.hi[0],d.hi[1],d.hi[2]]]) for (let a=0;a<3;a++){const v=M[12+a]+M[a]*c[0]+M[4+a]*c[1]+M[8+a]*c[2];lo[a]=Math.min(lo[a],v);hi[a]=Math.max(hi[a],v);}
+    return {m: it.m, M};
+  });
+  fit(lo, hi);
+  const cnt = {}; DATA.scenes[s].forEach(it => cnt[short(it.m)] = (cnt[short(it.m)]||0)+1);
+  info.innerHTML = `<b>kafelek ${s}</b> (bez gruntu) · ${items.length} obiektów<br>` + Object.entries(cnt).sort((a,b)=>b[1]-a[1]).slice(0,14).map(([k,v])=>`${v}× ${k}`).join(' · ');
+  draw();
+}
+let selEl = null; function sel(el){if(selEl)selEl.classList.remove('on');selEl=el;if(el)el.classList.add('on');}
+const sc = document.getElementById('scenes'), li = document.getElementById('list');
+Object.keys(DATA.scenes).forEach(s => {const d=document.createElement('div');d.className='it';d.textContent=s+` (${DATA.scenes[s].length})`;d.onclick=()=>showScene(s,d);sc.appendChild(d);});
+const names = Object.keys(DATA.models).sort((a,b)=>short(a).localeCompare(short(b)));
+names.forEach(m => {const d=document.createElement('div');d.className='it';d.dataset.k=m;const z=DATA.models[m];
+  d.innerHTML=`${short(m)} <small>${(z.hi[1]-z.lo[1]).toFixed(1)} wys. · ${z.from.join(', ')}</small>`;d.onclick=()=>showModel(m,d);li.appendChild(d);});
+document.getElementById('q').oninput = e => {const q=e.target.value.toLowerCase();for(const d of li.children)d.style.display=d.dataset.k.includes(q)?'':'none';};
+
+let drag = null;
+cv.onmousedown = e => drag = {x: e.clientX, y: e.clientY, pan: e.button === 2 || e.shiftKey};
+cv.oncontextmenu = e => e.preventDefault();
+window.onmouseup = () => drag = null;
+window.onmousemove = e => {
+  if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
+  if (drag.pan){const s=cam.dist/600, r=[Math.cos(cam.yaw),0,-Math.sin(cam.yaw)];cam.tgt=[cam.tgt[0]-r[0]*dx*s,cam.tgt[1]+dy*s,cam.tgt[2]-r[2]*dx*s];}
+  else {cam.yaw -= dx*.008; cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch + dy*.008));}
+  draw();
+};
+cv.onwheel = e => {e.preventDefault(); cam.dist *= Math.exp(e.deltaY*.0012); draw();};
+window.onkeydown = e => {if(e.target.tagName==='INPUT')return;const k=e.key.toLowerCase();if(k==='v')flipV^=1;else if(k==='t')useT^=1;else if(k==='s')wire^=1;else return;draw();};
+window.onresize = draw;
+const first = sc.firstChild || li.firstChild; if (first) first.click(); else info.textContent = 'Brak modeli w pliku.';
+</script>
+</body>
+</html>

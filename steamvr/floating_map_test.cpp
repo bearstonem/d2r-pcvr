@@ -1369,6 +1369,50 @@ int main() {
         Check(heldFrames > 300 && resizeFrames > 20 && pulls >= 1 && shownFrames > 600, "the session really pulled, held and resized a copy");
         std::printf("floating map, left-handed mirror session: %d frames, %d held, %d resizing, %d pulls, %d put away\n", frames, heldFrames, resizeFrames, pulls, putAways);
     }
+    {   // The copy's frame (Jeff 2026-11-15: "the floating map should not show the border when looking at the map ... can
+        // show up when you point to the map"): hidden while only looked at; fades in over FrameFadeS while Right Grip would
+        // take it (the laser on it), stays while held, fades out over FrameFadeS; never with no copy out
+        Check(fm::FrameFadeS == .15f, "the frame fades in 150 ms and out in 150 ms");
+        Check(fm::FrameStep(0, true, .075f) == .5f && fm::FrameStep(1, false, .075f) == .5f && fm::FrameStep(.5f, true, 1) == 1 &&
+              fm::FrameStep(.5f, false, 1) == 0 && fm::FrameStep(.3f, true, 0) == .3f, "FrameStep: halfway at 75 ms, at once after a long step");
+        fm::Engine e;
+        auto o = Out(e, t);   // pulled (held) and let go with the laser still on it
+        const auto center = o.p;
+        o = e.Step(Standing(.66, center), t);
+        Check(o.aimed && o.frame > 0 && o.frame < 1, "pulled and let go, the laser still on it: fading in");
+        o = e.Step(Standing(.70), t);
+        Check(o.frame == 0, "pointed away: faded out");
+        o = e.Step(Standing(1.0), t);
+        Check(o.shown && o.frame == 0 && !o.aimed, "shown and looked at, not pointed at: no frame");
+        o = e.Step(Standing(1.075, center), t);
+        Check(o.aimed && Near(o.frame, .5f, .01f), "the laser onto it: half shown after 75 ms");
+        o = e.Step(Standing(1.15, center), t);
+        Check(o.frame == 1, "fully shown after 150 ms");
+        o = e.Step(Standing(1.3, center), t);
+        Check(o.frame == 1, "and it stays while pointed at");
+        o = e.Step(Standing(1.375), t);
+        Check(!o.aimed && Near(o.frame, .5f, .01f), "pointed away: half after 75 ms");
+        o = e.Step(Standing(1.45), t);
+        Check(o.frame == 0, "hidden 150 ms after");
+        fm::Input in = Standing(1.5, center); in.grip[0] = 1; o = e.Step(in, t);
+        Check(o.held && o.frame > 0 && o.frame < 1, "grabbed: fading in");
+        in.time = 1.7; o = e.Step(in, t);
+        Check(o.held && o.frame == 1, "held: shown");
+        in.time = 1.72; in.grip[0] = 0; e.Step(in, t);
+        fm::Input away = Standing(1.9); o = e.Step(away, t);
+        Check(!o.held && o.frame == 0, "let go and pointed away: hidden");
+        fm::Tuning band = t; band.aimDeg = fm::PointDeg;   // point to grab On: the grab band counts too
+        fm::Engine b; o = Out(b, band);
+        const auto bandCenter = o.p;
+        b.Step(Standing(.70), band); b.Step(Standing(1.0), band);
+        fm::Input past = Standing(1.2, bandCenter + math::Rotate(HomePose().q, {b.Size(band) * .5f + .04f, 0, 0}));
+        o = b.Step(past, band);
+        Check(o.aimed && o.frame == 1, "just past its edge, within the grab band: shown (a grab would take it)");
+        fm::Engine none;
+        fm::Input wrist = Standing(1, {0, 1, -1}); wrist.wristShown = true; wrist.wristP = {0, 1, -1}; wrist.wristQ = {0, 0, 0, 1};
+        o = none.Step(wrist, t);
+        Check(!none.Placed() && o.frame == 0, "no copy out: no frame of a copy (the wrist map keeps its own)");
+    }
     if (g_fail) { std::printf("floating map: %d failed\n", g_fail); return 1; }
     std::puts("floating map: ok");
     return 0;

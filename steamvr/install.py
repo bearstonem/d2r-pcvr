@@ -29,6 +29,8 @@ import prepare_sewer_backdrop
 import prepare_kurast_dock
 import prepare_game_ceiling
 import prepare_campfire_sky
+import prepare_frontend_floor
+import prepare_frontend_scene
 from game_install import validate_game
 import mod_identity
 
@@ -633,6 +635,14 @@ def main():
     else:
         payload.update({mod_identity.MOD_DIR / name: data for name, data in campfire.items()})
         print('Prepared character creation preset (removed screen-fixed clouds) from your installed game.')
+    try:   # the main menu's five act scenes in 3D (floors of ours first: the scenes lay them)
+        front = prepare_frontend_floor.prepare(game, casclib=args.casclib)
+        front.update(prepare_frontend_scene.prepare_install(game, casclib=args.casclib))
+    except (OSError, ValueError, KeyError, IndexError, SystemExit) as error:
+        print(f'Main menu 3D scenes unavailable; the flat menu stays: {error}')
+    else:
+        payload.update({mod_identity.MOD_DIR / name: data for name, data in front.items()})
+        print('Prepared the main menu\'s act scenes in 3D from your installed game.')
     require_game_closed()
     check_launcher_icon(game, payload[mod_identity.MOD_DIR / 'launcher_icon.png'])
     snapshot = args.backup_dir / datetime.now().strftime('%Y%m%d-%H%M%S-%f')

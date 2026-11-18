@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<title>Edytor sceny – Akt 2 (D2R VR, menu)</title>
+<style>
+  :root { --bg:#16140f; --panel:#221f18; --line:#3a352a; --text:#e9e1cf; --dim:#9a917c; --acc:#e0a84a; --road:#3d8bff; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text); font:13px/1.4 system-ui,Segoe UI,sans-serif; }
+  #app { display:grid; grid-template-columns: 1fr 330px; height:100%; }
+  #wrap { position:relative; overflow:hidden; }
+  canvas { display:block; width:100%; height:100%; cursor:default; }
+  #side { background:var(--panel); border-left:1px solid var(--line); overflow:auto; padding:12px 14px; }
+  h1 { font-size:15px; margin:0 0 4px; color:var(--acc); }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); margin:16px 0 6px; }
+  .row { display:flex; gap:6px; align-items:center; margin:4px 0; }
+  .row label { width:78px; color:var(--dim); }
+  input[type=number], input[type=text], select { background:#15130e; color:var(--text); border:1px solid var(--line); border-radius:4px; padding:4px 6px; width:100%; }
+  button { background:#2f2a20; color:var(--text); border:1px solid #4a4334; border-radius:5px; padding:6px 9px; cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  button.main { background:var(--acc); color:#1a1408; border-color:var(--acc); font-weight:600; }
+  .btns { display:flex; flex-wrap:wrap; gap:6px; }
+  .muted { color:var(--dim); }
+  .chk { display:flex; gap:6px; align-items:center; margin:2px 0; }
+  .sw { width:11px; height:11px; border-radius:2px; display:inline-block; }
+  #hint { position:absolute; left:10px; bottom:10px; background:#000a; padding:6px 9px; border-radius:6px; color:#d8cfbb; font-size:12px; pointer-events:none; }
+  #status { position:absolute; right:10px; top:10px; background:#000a; padding:6px 9px; border-radius:6px; font-size:12px; }
+  textarea { width:100%; height:110px; background:#15130e; color:var(--text); border:1px solid var(--line); border-radius:4px; font:11px/1.3 Consolas,monospace; }
+  #pv { width:100%; height:230px; background:#0f0d0a; border:1px solid var(--line); border-radius:4px; display:block; cursor:grab; }
+  #pvInfo { font-size:11px; color:var(--dim); margin-top:3px; }
+  #addList:focus { outline:1px solid var(--acc); }
+  #addList { max-height:660px; overflow:auto; border:1px solid var(--line); border-radius:4px; background:#15130e; margin:4px 0; }
+  .grp { padding:4px 6px; cursor:pointer; color:var(--acc); font-weight:600; user-select:none; border-top:1px solid #2a261e; }
+  .grp.sub { padding-left:16px; color:#d9c08a; font-weight:500; border-top:none; }
+  .grp:hover { background:#2a251c; }
+  .grp small { color:var(--dim); font-weight:400; }
+  .mi { padding:2px 6px 2px 30px; cursor:pointer; user-select:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mi:hover { background:#2a251c; } .mi.on { background:#5a4528; color:#fff; } .mi.np { color:var(--dim); }
+  kbd { background:#333; border-radius:3px; padding:0 4px; font-size:11px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="wrap"><canvas id="cv"></canvas>
+    <div id="status"></div>
+    <div id="hint">Kółko: przybliż · przeciągnij tło: przesuń mapę · klik: zaznacz · przeciągnij: przesuń · <kbd>Q</kbd>/<kbd>E</kbd> obrót 5° (<kbd>Shift</kbd> 45°) · <kbd>Del</kbd> usuń · <kbd>Ctrl+D</kbd> kopia · <kbd>+</kbd>/<kbd>−</kbd> rozmiar · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> wysokość · <kbd>R</kbd>/<kbd>F</kbd> i <kbd>T</kbd>/<kbd>G</kbd> przechył · <kbd>Ctrl+Z</kbd> cofnij</div>
+  </div>
+  <div id="side">
+    <h1>Akt 2 – scena za tobą</h1>
+    <div class="muted">Wysokość: pole „wysokość” albo <kbd>PgUp</kbd>/<kbd>PgDn</kbd>; gdy coś leży na czymś, klik wybiera to, co wyżej. </div>
+    <div class="muted" style="margin-top:6px">Góra mapy = przed tobą, ★ = ty. Kratka 40 jednostek, jak na moich mapach. Niebieska linia = oś drogi, jej punkty można przeciągać; krawężniki skrypt ułoży sam wzdłuż niej.</div>
+
+    <h2>Zaznaczony</h2>
+    <div id="selbox" class="muted">nic – kliknij coś na mapie</div>
+
+    <h2>Podgląd 3D</h2>
+    <canvas id="pv"></canvas>
+    <div id="pvInfo">kliknij coś na mapie albo wybierz model niżej · przeciągnij: obrót · kółko: zoom</div>
+
+    <h2>Dodaj</h2>
+    <div class="row"><input id="addFind" type="text" placeholder="szukaj: head, tablet, barrel, grass…"></div>
+    <div id="addList" tabindex="0"></div>
+    <div class="btns"><button id="addBtn">Dodaj na środek widoku</button> <span class="muted">(albo dwuklik na liście)</span></div>
+
+    <h2>Droga</h2>
+    <div class="btns">
+      <button id="roadAdd">+ punkt na końcu</button>
+      <button id="roadDel">− ostatni punkt</button>
+    </div>
+    <div class="row"><label>pół szer.</label><input id="roadHalf" type="number" step="0.5"></div>
+
+    <h2>Pokaż / zablokuj</h2>
+    <div id="cats"></div>
+
+    <h2>Komendy (cmd)</h2>
+    <div class="muted" style="font-size:11px">Zbuduj scenę do gry z zapisanego pliku zmian:</div>
+    <textarea id="cmdGame" readonly style="height:62px">cd /d D:\Github\d2r-pcvr-v0332 &amp;&amp; deps\python\python.exe steamvr\prepare_frontend_scene.py "F:\Blizzard\Diablo II Resurrected" --casclib build-frame\casclib-installer\CascLib.dll --write</textarea>
+    <div class="btns"><button data-copy="cmdGame">Kopiuj</button></div>
+    <div class="muted" style="font-size:11px;margin-top:6px">Zbuduj ten edytor od nowa:</div>
+    <textarea id="cmdEd" readonly style="height:78px">cd /d D:\Github\d2r-pcvr-v0332 &amp;&amp; deps\python\python.exe tools\scene_editor\make_editor.py - extracted\podglad\akt2_edytor.html --version v19 --transw2 extracted\act2\town__transw2.json --game "F:\Blizzard\Diablo II Resurrected" --casclib build-frame\casclib-installer\CascLib.dll</textarea>
+    <div class="btns"><button data-copy="cmdEd">Kopiuj</button></div>
+
+    <h2>Zapisz</h2>
+    <div class="btns">
+      <button class="main" id="saveBtn">Zapisz plik zmian</button>
+      <button id="copyBtn">Kopiuj</button>
+    </div>
+    <div class="muted" style="margin-top:6px">Zapisz jako <b>frontend_edits_act2.json</b> w folderze <b>D:\Github\d2r-pcvr-v0332\steamvr</b> (okno zapisu zapamięta folder) i zbuduj scenę. Zmiany pamiętane też w tej przeglądarce.</div>
+    <textarea id="out" readonly></textarea>
+    <div class="btns" style="margin-top:6px"><button id="loadBtn">Wczytaj plik zmian…</button><button id="resetAll">Wyczyść wszystkie zmiany</button></div>
+    <input id="loadFile" type="file" accept=".json" style="display:none">
+  </div>
+</div>
+<script>
+const DATA = /*DATA*/null;
+const KEY = 'd2r_vr_scene_editor_act2_' + DATA.version;
+const COL = {'posągi i ruiny':'#ffd84a','budowle':'#e8c07a','miasto (karty)':'#c890ff','skały':'#ff8c3a','palmy':'#3fbf5f','rośliny i piasek':'#8fa046','kamienie bruku':'#f0f0f0','rzeczy':'#b98d5e','teren':'#6b6250','podłoga':'#c9b48a','pomosty':'#d98a3a','dodane':'#ff5fa0',
+             // Act 5 (2026-11-15 21:44: its categories had no colour, so no "show" switch - every tree, cliff, snow pile
+             // and stake in them was left off the map, the act's own and the ones added alike)
+             'drzewa':'#2fae5a','rośliny':'#9cb04a','klify i ściany':'#a9b3c6','śnieg i lód':'#d6f1ff','doły i zasieki':'#d0783a'};
+// any other category the page carries gets a colour too (never hidden for want of one)
+(() => { const extra = ['#e07ad0','#7ad0e0','#d0d07a','#7a9ae0','#e0a07a','#a07ae0'];
+  const all = new Set([...Object.values(DATA.cats || {}), ...DATA.items.map(i => i.cat)]);
+  let k = 0; all.forEach(c => { if (c && !(c in COL)) COL[c] = extra[k++ % extra.length]; }); })();
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let view = {cx:0, cy:-60, s:2.2};            // world (right, ahead) at the canvas middle; pixels per unit
+let items = [], road = [], half = DATA.half, sel = null, drag = null, undo = [];
+const show = {}, lock = {};
+Object.keys(COL).forEach(c => { show[c] = true; lock[c] = (c === 'teren' || c === 'miasto (karty)'); });
+
+function fresh() {
+  items = DATA.items.map(i => ({...i, orig:{right:i.right, ahead:i.ahead, y:i.y, yaw:i.yaw, scale:i.scale}, deleted:false, added:false}));
+  road = DATA.road.map(p => p.slice()); half = DATA.half;
+}
+function snapshot() { return JSON.stringify({items, road, half}); }
+function restore(s) { const o = JSON.parse(s); items = o.items; road = o.road; half = o.half; }
+function remember() { undo.push(snapshot()); if (undo.length > 200) undo.shift(); }
+function persist() { try { localStorage.setItem(KEY, snapshot()); } catch (e) {} out(); }
+fresh();
+let stored = null; try { stored = localStorage.getItem(KEY); } catch (e) {}
+if (stored) restore(stored);
+
+// ---- view
+function resize() { const r = cv.parentElement.getBoundingClientRect(); cv.width = r.width * devicePixelRatio; cv.height = r.height * devicePixelRatio; draw(); }
+function toScr(r, a) { return [cv.width/2 + (r - view.cx) * view.s * devicePixelRatio, cv.height/2 - (a - view.cy) * view.s * devicePixelRatio]; }
+function toWorld(px, py) { return [view.cx + (px*devicePixelRatio - cv.width/2) / (view.s*devicePixelRatio), view.cy - (py*devicePixelRatio - cv.height/2) / (view.s*devicePixelRatio)]; }
+// local axes of a model turned by yaw (degrees) in (right, ahead): x -> (sin, -cos), z -> (-cos, -sin)
+function axes(yaw) { const t = yaw * Math.PI / 180; return [[Math.sin(t), -Math.cos(t)], [-Math.cos(t), -Math.sin(t)]]; }
+function geoOf(m) { return DATA.geo && DATA.geo.models[(m || '').toLowerCase()]; }
+// the outline in the model's own x/z: its true bounds when the page carries the model, else the guessed box
+// a model tipped over in its own frame: first about its z (tz), then about its x (tx), degrees - as the build does it
+function tiltPt(p, tx, tz) {
+  const a = (tz || 0) * Math.PI / 180, b = (tx || 0) * Math.PI / 180;
+  let [x, y, z] = p; [x, y] = [x*Math.cos(a) - y*Math.sin(a), x*Math.sin(a) + y*Math.cos(a)];
+  [y, z] = [y*Math.cos(b) - z*Math.sin(b), y*Math.sin(b) + z*Math.cos(b)]; return [x, y, z];
+}
+// the model's bounds after size and tilt, in its own frame: [x0, x1, z0, z1, y0, y1]
+function bounds(i) {
+  const g = geoOf(i.model), s = i.scale;
+  if (!g) return [-i.w*s/2, i.w*s/2, -i.d*s/2, i.d*s/2, 0, 0];
+  const r = [1e9, -1e9, 1e9, -1e9, 1e9, -1e9];
+  for (const X of [g.lo[0], g.hi[0]]) for (const Y of [g.lo[1], g.hi[1]]) for (const Z of [g.lo[2], g.hi[2]]) {
+    const [x, y, z] = tiltPt([X*s, Y*s, Z*s], i.tx, i.tz);
+    r[0] = Math.min(r[0], x); r[1] = Math.max(r[1], x); r[2] = Math.min(r[2], z); r[3] = Math.max(r[3], z); r[4] = Math.min(r[4], y); r[5] = Math.max(r[5], y);
+  }
+  return r;
+}
+function box(i) { return bounds(i).slice(0, 4); }
+function area(i) { const b = box(i); return (b[1]-b[0]) * (b[3]-b[2]); }
+function corners(i) {
+  const [ax, az] = axes(i.yaw), g = geoOf(i.model);
+  // a model's true outline seen from above (its most detailed mesh's convex hull) - a ground is no box: Act 5's lies
+  // turned and its light LOD was only a piece of it (2026-11-15 21:44)
+  if (g && g.hull && g.hull.length > 2 && !i.tx && !i.tz)
+    return g.hull.map(([u, v]) => [i.right + (ax[0]*u + az[0]*v) * i.scale, i.ahead + (ax[1]*u + az[1]*v) * i.scale]);
+  const b = box(i);
+  return [[b[0],b[2]],[b[1],b[2]],[b[1],b[3]],[b[0],b[3]]].map(([u,v]) => [i.right + ax[0]*u + az[0]*v, i.ahead + ax[1]*u + az[1]*v]);
+}
+function topOf(i) { return geoOf(i.model) ? +(i.y + bounds(i)[5]).toFixed(1) : null; }
+function bottomOf(i) { return geoOf(i.model) ? +(i.y + bounds(i)[4]).toFixed(1) : null; }
+function catmull(pts, n) {
+  const p = [pts[0], ...pts, pts[pts.length-1]], out = [];
+  for (let i = 1; i < p.length - 2; i++) for (let k = 0; k < n; k++) {
+    const t = k / n, f = (c) => 0.5*(2*p[i][c] + (-p[i-1][c]+p[i+1][c])*t + (2*p[i-1][c]-5*p[i][c]+4*p[i+1][c]-p[i+2][c])*t*t + (-p[i-1][c]+3*p[i][c]-3*p[i+1][c]+p[i+2][c])*t*t*t);
+    out.push([f(0), f(1)]);
+  }
+  out.push(pts[pts.length-1]); return out;
+}
+function offset(line, o) {
+  return line.map((q, i) => { const a = line[Math.max(0,i-1)], b = line[Math.min(line.length-1,i+1)]; const dx = b[0]-a[0], dy = b[1]-a[1], L = Math.hypot(dx,dy)||1; return [q[0] + dy/L*o, q[1] - dx/L*o]; });
+}
+function draw() {
+  const W = cv.width, H = cv.height, D = devicePixelRatio;
+  ctx.fillStyle = '#1d1a14'; ctx.fillRect(0,0,W,H);
+  // grid 40, columns A-M from -260, rows from +260
+  ctx.lineWidth = 1; ctx.font = (12*D)+'px system-ui'; ctx.fillStyle = '#8a8170';
+  for (let c = 0; c <= 13; c++) { const [x] = toScr(-260 + 40*c, 0); ctx.strokeStyle = '#332e24'; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); if (c < 13) { const [lx, ly] = toScr(-240 + 40*c, 260); ctx.fillText(String.fromCharCode(65+c), lx-4*D, Math.max(14*D, ly-6*D)); } }
+  for (let r = 0; r <= 20; r++) { const [, y] = toScr(0, 260 - 40*r); ctx.strokeStyle = '#332e24'; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); if (r < 20) { const [lx, ly] = toScr(-260, 240 - 40*r); ctx.fillText(String(r+1), Math.max(4*D, lx-22*D), ly+4*D); } }
+  // walls of our sky
+  ctx.setLineDash([8*D,6*D]); ctx.strokeStyle = '#d04040';
+  DATA.cuts.forEach(c => { const [x] = toScr(c, 0); ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); });
+  ctx.setLineDash([]);
+  // items (terrain first)
+  const order = items.filter(i => !i.deleted && show[i.cat]).sort((a,b) => (area(b) - area(a)) || (a.y - b.y));
+  for (const i of order) {
+    const cs = corners(i).map(p => toScr(...p)), col = i.added ? COL['dodane'] : COL[i.cat] || '#aaa';
+    ctx.beginPath(); cs.forEach((p,k) => k ? ctx.lineTo(...p) : ctx.moveTo(...p)); ctx.closePath();
+    ctx.globalAlpha = i.cat === 'teren' ? 0.12 : 0.55; ctx.fillStyle = col; ctx.fill();
+    ctx.globalAlpha = 1; ctx.strokeStyle = i === sel ? '#fff' : col; ctx.lineWidth = (i === sel ? 2.5 : 1) * D; ctx.stroke();
+    // facing tick (local x)
+    const [ax] = axes(i.yaw), bx = box(i)[1], c0 = toScr(i.right, i.ahead), c1 = toScr(i.right + ax[0]*bx, i.ahead + ax[1]*bx);
+    ctx.beginPath(); ctx.moveTo(...c0); ctx.lineTo(...c1); ctx.strokeStyle = '#0008'; ctx.lineWidth = 1*D; ctx.stroke();
+  }
+  // road
+  const line = road.length > 1 ? catmull(road, 24) : [];
+  if (line.length) [[-half, '#cfd8e8'], [half, '#cfd8e8']].forEach(([o, c]) => { const l = offset(line, o); ctx.beginPath(); l.forEach((p,k) => { const s = toScr(...p); k ? ctx.lineTo(...s) : ctx.moveTo(...s); }); ctx.strokeStyle = c; ctx.setLineDash([3*D,3*D]); ctx.lineWidth = 2*D; ctx.stroke(); ctx.setLineDash([]); });
+  ctx.beginPath(); line.forEach((p,k) => { const s = toScr(...p); k ? ctx.lineTo(...s) : ctx.moveTo(...s); }); ctx.strokeStyle = '#3d8bff'; ctx.lineWidth = 3*D; ctx.stroke();
+  road.forEach((p,k) => { const [x,y] = toScr(...p); ctx.beginPath(); ctx.arc(x,y,6*D,0,7); ctx.fillStyle = (sel && sel.road === k) ? '#fff' : '#3d8bff'; ctx.fill(); });
+  // you
+  const [sx, sy] = toScr(0,0); ctx.fillStyle = '#5fb8ff'; ctx.font = (22*D)+'px system-ui'; ctx.fillText('★', sx-8*D, sy+8*D);
+  // selected label
+  if (sel && !sel.road && sel.road !== 0) { const [x,y] = toScr(sel.right, sel.ahead); ctx.font = (12*D)+'px system-ui'; ctx.fillStyle = '#fff'; const t = topOf(sel); ctx.fillText(sel.short + '  (wys. ' + sel.y + (t !== null ? ', szczyt ' + t : '') + ')', x+8*D, y-8*D); }
+  document.getElementById('status').textContent = `zmienione: ${changes().count}`;
+}
+
+// ---- picking
+function inside(i, w) {
+  const [ax, az] = axes(i.yaw), dx = w[0]-i.right, dy = w[1]-i.ahead;
+  const u = dx*ax[0] + dy*ax[1], v = dx*az[0] + dy*az[1], m = 3 / view.s, b = box(i);
+  return u >= b[0] - m && u <= b[1] + m && v >= b[2] - m && v <= b[3] + m;
+}
+let lastClick = null, stackInfo = '';
+function pick(w, px, py) {
+  for (let k = 0; k < road.length; k++) if (Math.hypot(road[k][0]-w[0], road[k][1]-w[1]) < 8 / view.s) return {road:k};
+  const c = items.filter(i => !i.deleted && show[i.cat] && !lock[i.cat] && inside(i, w));
+  c.sort((a,b) => ((topOf(b) ?? b.y) - (topOf(a) ?? a.y)) * 4 + (area(a) - area(b)) * 0.001);   // the higher first (one thing standing on another), then the smaller
+  // a click again on the same spot takes the next one down (what lies under it), round and round
+  let k = 0;
+  if (lastClick && Math.hypot(px - lastClick[0], py - lastClick[1]) < 5 && sel && c.includes(sel)) k = (c.indexOf(sel) + 1) % c.length;
+  lastClick = [px, py];
+  stackInfo = c.length > 1 ? `${k + 1} z ${c.length} pod kursorem – kliknij znowu w to samo miejsce, by wziąć niższy` : '';
+  return c[k] || null;
+}
+cv.addEventListener('mousedown', e => {
+  const w = toWorld(e.offsetX, e.offsetY), p = pick(w, e.offsetX, e.offsetY);
+  if (p) { sel = p.road !== undefined ? p : p; remember(); drag = {kind: p.road !== undefined ? 'road' : 'item', w0:w, start: p.road !== undefined ? road[p.road].slice() : [p.right, p.ahead]}; }
+  else { sel = null; drag = {kind:'pan', x0:e.offsetX, y0:e.offsetY, c:[view.cx, view.cy]}; }
+  panel(); draw();
+});
+window.addEventListener('mousemove', e => {
+  if (!drag) return;
+  const r = cv.getBoundingClientRect(), ox = e.clientX - r.left, oy = e.clientY - r.top;
+  if (drag.kind === 'pan') { view.cx = drag.c[0] - (ox - drag.x0)/view.s; view.cy = drag.c[1] + (oy - drag.y0)/view.s; }
+  else { const w = toWorld(ox, oy), dx = w[0]-drag.w0[0], dy = w[1]-drag.w0[1];
+    if (drag.kind === 'road') road[sel.road] = [drag.start[0]+dx, drag.start[1]+dy];
+    else { sel.right = +(drag.start[0]+dx).toFixed(2); sel.ahead = +(drag.start[1]+dy).toFixed(2); } panel(); }
+  draw();
+});
+window.addEventListener('mouseup', () => { if (drag && drag.kind !== 'pan') persist(); drag = null; });
+cv.addEventListener('wheel', e => { e.preventDefault(); const w = toWorld(e.offsetX, e.offsetY); view.s *= Math.exp(-e.deltaY * 0.0015); view.s = Math.min(30, Math.max(0.4, view.s)); const w2 = toWorld(e.offsetX, e.offsetY); view.cx += w[0]-w2[0]; view.cy += w[1]-w2[1]; draw(); }, {passive:false});
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.id === 'addList') return;
+  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase() === 'z') { if (undo.length) { restore(undo.pop()); sel = null; persist(); panel(); draw(); } e.preventDefault(); return; }
+  if (!sel || sel.road !== undefined) return;
+  let done = true; remember();
+  if (e.key === 'q' || e.key === 'Q') sel.yaw = +(sel.yaw + (e.shiftKey ? 45 : 5)).toFixed(1);
+  else if (e.key === 'e' || e.key === 'E') sel.yaw = +(sel.yaw - (e.shiftKey ? 45 : 5)).toFixed(1);
+  else if (e.key === 'Delete' || e.key === 'Backspace') { sel.deleted = true; sel = null; }
+  else if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); sel = dup(sel); }
+  else if (e.key === '+' || e.key === '=') sel.scale = +(sel.scale * 1.1).toFixed(3);
+  else if (e.key === '-') sel.scale = +(sel.scale / 1.1).toFixed(3);
+  else if (e.key === 'PageUp') sel.y = +(sel.y + 0.5).toFixed(2);
+  else if (e.key === 'PageDown') sel.y = +(sel.y - 0.5).toFixed(2);
+  else if (e.key === 'r' || e.key === 'R') sel.tx = +((sel.tx || 0) + (e.shiftKey ? 45 : 5)).toFixed(1);
+  else if (e.key === 'f' || e.key === 'F') sel.tx = +((sel.tx || 0) - (e.shiftKey ? 45 : 5)).toFixed(1);
+  else if (e.key === 't' || e.key === 'T') sel.tz = +((sel.tz || 0) + (e.shiftKey ? 45 : 5)).toFixed(1);
+  else if (e.key === 'g' || e.key === 'G') sel.tz = +((sel.tz || 0) - (e.shiftKey ? 45 : 5)).toFixed(1);
+  else { done = false; undo.pop(); }
+  if (done) { e.preventDefault(); persist(); panel(); draw(); }
+});
+let addN = 0;
+function dup(i) { const n = {...i, name:'pcvr_ed_2_' + Date.now().toString(36) + (addN++), added:true, deleted:false, orig:null, right:i.right+6, ahead:i.ahead-6}; items.push(n); return n; }
+
+// ---- side panel
+function field(label, key, step) { return `<div class="row"><label>${label}</label><input type="number" step="${step}" data-k="${key}" value="${sel[key] || 0}"></div>`; }
+function panel() {
+  const box = document.getElementById('selbox');
+  if (!sel) { box.innerHTML = 'nic – kliknij coś na mapie'; box.className = 'muted'; return; }
+  box.className = '';
+  if (sel.road !== undefined) { box.innerHTML = `Punkt drogi nr ${sel.road+1}<br><span class="muted">(${road[sel.road][0].toFixed(1)} w prawo, ${road[sel.road][1].toFixed(1)} do przodu)</span>`; return; }
+  const g = geoOf(sel.model), bb = bounds(sel), sz = g ? `<div class="muted" style="font-size:11px">na mapie ${(bb[1]-bb[0]).toFixed(1)} × ${(bb[3]-bb[2]).toFixed(1)}, wysoki ${(bb[5]-bb[4]).toFixed(1)} · spód ${bottomOf(sel)}, szczyt ${topOf(sel)}</div>` : '';
+  preview(sel.model, sel);
+  box.innerHTML = (stackInfo ? `<div style="color:var(--acc);font-size:11px">${stackInfo}</div>` : '') + `<div><b>${sel.short}</b> <span class="muted">${sel.added ? '(dodany)' : ''}</span></div><div class="muted" style="font-size:11px;word-break:break-all">${sel.name}</div>` + sz
+    + field('w prawo','right',1) + field('do przodu','ahead',1) + field('wysokość','y',0.25) + field('obrót °','yaw',5) + field('przechył X °','tx',5) + field('przechył Z °','tz',5) + field('rozmiar','scale',0.05)
+    + `<div class="btns" style="margin:2px 0 6px"><button id="bLay">Połóż (X 90°)</button><button id="bLay2">Na bok (Z 90°)</button><button id="bUp">Postaw</button></div>`
+    + `<div class="btns"><button id="bDup">Kopia (Ctrl+D)</button><button id="bDel">Usuń (Del)</button>${sel.orig ? '<button id="bRst">Przywróć</button>' : ''}</div>`;
+  box.querySelectorAll('input').forEach(inp => inp.addEventListener('change', () => { remember(); sel[inp.dataset.k] = parseFloat(inp.value) || 0; persist(); draw(); }));
+  box.querySelector('#bDup').onclick = () => { remember(); sel = dup(sel); persist(); panel(); draw(); };
+  box.querySelector('#bDel').onclick = () => { remember(); sel.deleted = true; sel = null; persist(); panel(); draw(); };
+  const r = box.querySelector('#bRst'); if (r) r.onclick = () => { remember(); Object.assign(sel, {tx:0, tz:0}, sel.orig); persist(); panel(); draw(); };
+  const tilt = (tx, tz) => () => { remember(); const b0 = bottomOf(sel); sel.tx = tx; sel.tz = tz; const b1 = bottomOf(sel); if (b0 !== null) sel.y = +(sel.y + b0 - b1).toFixed(2); persist(); panel(); draw(); };   // keeps it standing on the same ground
+  box.querySelector('#bLay').onclick = tilt(90, 0); box.querySelector('#bLay2').onclick = tilt(0, 90); box.querySelector('#bUp').onclick = tilt(0, 0);
+}
+const cats = document.getElementById('cats');
+Object.keys(COL).forEach(c => {
+  const d = document.createElement('div'); d.className = 'chk';
+  d.innerHTML = `<span class="sw" style="background:${COL[c]}"></span><label style="flex:1"><input type="checkbox" ${show[c]?'checked':''} data-s> ${c}</label><label class="muted"><input type="checkbox" ${lock[c]?'checked':''} data-l> blokada</label>`;
+  d.querySelector('[data-s]').onchange = e => { show[c] = e.target.checked; draw(); };
+  d.querySelector('[data-l]').onchange = e => { lock[c] = e.target.checked; };
+  cats.appendChild(d);
+});
+const addList = document.getElementById('addList'), openGrp = {};
+let addPick = null;
+// the models to add, in groups that fold (click a group's name); click a model: preview, double click: add it
+// the act a model belongs to (Lord of Destruction's folders are 'expansion' - Act 5's, 2026-11-15 21:44: they fell into
+// 'ogólne'); a menu ground ui_groundplane/terrain_actN by its number
+function actOf(m) {
+  const p = m.toLowerCase(), tail = p.split('/model/').pop();
+  if (/expansion|snowprops|ui_act5|act5_/.test(p)) return 'Akt 5';
+  const r = /act([1-5])/.exec(tail); return r ? 'Akt ' + r[1] : 'ogólne';
+}
+function fillAdd(q) {
+  addList.innerHTML = ''; const tree = {};
+  DATA.models.filter(m => !q || m.toLowerCase().includes(q)).forEach(m => {
+    const a = actOf(m), c = (DATA.cats && DATA.cats[m]) || 'rzeczy';
+    ((tree[a] = tree[a] || {})[c] = tree[a][c] || []).push(m);
+  });
+  const head = (key, label, n, sub) => {
+    const open = q ? true : !!openGrp[key], h = document.createElement('div');
+    h.className = 'grp' + (sub ? ' sub' : ''); h.innerHTML = `${open ? '▾' : '▸'} ${label} <small>(${n})</small>`;
+    h.onclick = () => { openGrp[key] = !open; fillAdd(q); }; addList.appendChild(h); return open;
+  };
+  Object.keys(tree).sort().forEach(a => {
+    const cats = tree[a], total = Object.values(cats).reduce((s, l) => s + l.length, 0);
+    if (!head(a, a, total, false)) return;
+    Object.keys(cats).sort().forEach(c => {
+      if (!head(a + '|' + c, c, cats[c].length, true)) return;
+      cats[c].forEach(m => {
+        const d = document.createElement('div'); d.className = 'mi' + (m === addPick ? ' on' : '') + (geoOf(m) ? '' : ' np');
+        d.textContent = m.split('/').slice(-2).join('/').replace('.model','') + (geoOf(m) ? '' : '  (bez podglądu)'); d.title = m;
+        d.onclick = () => { addPick = m; addList.querySelectorAll('.mi.on').forEach(x => x.classList.remove('on')); d.classList.add('on'); preview(m); };
+        d.ondblclick = () => { addPick = m; document.getElementById('addBtn').click(); };
+        addList.appendChild(d);
+      });
+    });
+  });
+}
+fillAdd('');
+document.getElementById('addFind').oninput = e => fillAdd(e.target.value.trim().toLowerCase());
+// arrows walk the list (and show each model), Enter adds it; from the search box Down jumps into the list
+function stepAdd(d) {
+  const all = [...addList.querySelectorAll('.mi')]; if (!all.length) return;
+  let k = all.findIndex(x => x.classList.contains('on')); k = k < 0 ? (d > 0 ? 0 : all.length - 1) : Math.max(0, Math.min(all.length - 1, k + d));
+  all[k].click(); all[k].scrollIntoView({block:'nearest'});
+}
+addList.addEventListener('keydown', e => {
+  if (e.key === 'ArrowDown') { stepAdd(1); e.preventDefault(); }
+  else if (e.key === 'ArrowUp') { stepAdd(-1); e.preventDefault(); }
+  else if (e.key === 'PageDown') { stepAdd(10); e.preventDefault(); }
+  else if (e.key === 'PageUp') { stepAdd(-10); e.preventDefault(); }
+  else if (e.key === 'Enter') { document.getElementById('addBtn').click(); e.preventDefault(); }
+});
+document.getElementById('addFind').addEventListener('keydown', e => { if (e.key === 'ArrowDown') { addList.focus(); stepAdd(1); e.preventDefault(); } });
+addList.addEventListener('mousedown', () => setTimeout(() => addList.focus(), 0));
+document.getElementById('addBtn').onclick = () => {
+  const m = addPick; if (!m) { alert('Najpierw kliknij model na liście.'); return; }
+  remember(); const s = m.split('/').pop().replace('.model',''); const like = items.find(i => i.model === m), gm = geoOf(m);
+  const n = {name:'pcvr_ed_2_' + Date.now().toString(36) + (addN++), model:m, short:s, cat: like ? like.cat : ((DATA.cats && DATA.cats[m]) || 'dodane'), right:+view.cx.toFixed(1), ahead:+view.cy.toFixed(1), y: like ? like.y : (gm ? +(0.6 - gm.lo[1]).toFixed(2) : 0), yaw:0, scale:1, w: like ? like.w : (/border/.test(s) ? 31 : /cliff|boulder/.test(s) ? 20 : 4), d: like ? like.d : (/border/.test(s) ? 62 : /cliff|boulder/.test(s) ? 14 : 4), added:true, deleted:false, orig:null};
+  items.push(n); sel = n; persist(); panel(); draw();
+};
+document.getElementById('roadAdd').onclick = () => { remember(); const a = road[road.length-2], b = road[road.length-1]; road.push([b[0] + (b[0]-a[0]), b[1] + (b[1]-a[1])]); persist(); draw(); };
+document.getElementById('roadDel').onclick = () => { if (road.length > 3) { remember(); road.pop(); persist(); draw(); } };
+const rh = document.getElementById('roadHalf'); rh.value = half; rh.onchange = () => { remember(); half = parseFloat(rh.value) || DATA.half; persist(); draw(); };
+
+// ---- export
+function changes() {
+  const moved = {}, deleted = [], added = []; let count = 0;
+  for (const i of items) {
+    if (i.added) { if (!i.deleted) { const a = {name:i.name, model:i.model, right:i.right, ahead:i.ahead, y:i.y, yaw:i.yaw, scale:i.scale}; if (i.tx) a.tilt_x = i.tx; if (i.tz) a.tilt_z = i.tz; added.push(a); count++; } continue; }
+    if (i.deleted) { deleted.push(i.name); count++; continue; }
+    const o = i.orig, d = {};
+    if (Math.abs(i.right-o.right) > 0.01 || Math.abs(i.ahead-o.ahead) > 0.01) { d.right = i.right; d.ahead = i.ahead; }
+    if (Math.abs(i.y-o.y) > 0.001) d.y = i.y;
+    if (Math.abs(i.yaw-o.yaw) > 0.05) d.turn = +(i.yaw - o.yaw).toFixed(1);
+    if (Math.abs(i.scale-o.scale) > 0.0005) d.scale_by = +(i.scale / o.scale).toFixed(4);
+    if (i.tx) d.tilt_x = i.tx; if (i.tz) d.tilt_z = i.tz;
+    if (Object.keys(d).length) { moved[i.name] = d; count++; }
+  }
+  const roadChanged = JSON.stringify(road) !== JSON.stringify(DATA.road) || half !== DATA.half;
+  if (roadChanged) count++;
+  return {count, data:{act:DATA.act, base:DATA.version, moved, deleted, added, road: roadChanged ? road.map(p => [+p[0].toFixed(1), +p[1].toFixed(1)]) : null, road_half: half !== DATA.half ? half : null}};
+}
+function out() { document.getElementById('out').value = JSON.stringify(changes().data, null, 1); }
+// Save straight as the scene script's own file (owner 2026-11-15: "propose the name frontend_edits_act5.json"):
+// a save dialog with that name, opening where the last one was saved (the steamvr folder, once chosen); a browser
+// without the dialog downloads the file under the same name.
+document.getElementById('saveBtn').onclick = async () => {
+  const text = JSON.stringify(changes().data, null, 1);
+  const name = 'frontend_edits_act2.json';
+  if (window.showSaveFilePicker) {
+    try {
+      const h = await window.showSaveFilePicker({id: 'scene_editor_save', suggestedName: name,
+        types: [{description: 'Zmiany sceny (JSON)', accept: {'application/json': ['.json']}}]});
+      const w = await h.createWritable(); await w.write(text); await w.close();
+      return;
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  const blob = new Blob([text], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+};
+document.getElementById('copyBtn').onclick = () => { const t = document.getElementById('out'); t.select(); try { navigator.clipboard.writeText(t.value); } catch (e) { document.execCommand('copy'); } };
+document.getElementById('resetAll').onclick = () => { if (confirm('Wyczyścić wszystkie zmiany?')) { remember(); fresh(); sel = null; persist(); panel(); draw(); } };
+// ---- 3D preview of one model (the page carries light LODs when built with --game)
+const pv = document.getElementById('pv'), pvInfo = document.getElementById('pvInfo');
+const gl = pv.getContext('webgl', {antialias:true});
+let pvModel = null, pvCam = {yaw:0.8, pitch:0.35, dist:10, tgt:[0,0,0]};
+const gpu = {}, texs = [];
+let prog = null, white = null;
+if (gl && DATA.geo) {
+  gl.getExtension('OES_element_index_uint');
+  const vs = 'attribute vec3 p;attribute vec3 n;attribute vec2 t;uniform mat4 VP;uniform mat4 M;varying vec3 N;varying vec2 T;void main(){N=mat3(M)*n;T=t;gl_Position=VP*M*vec4(p,1.);}';
+  const fs = 'precision mediump float;varying vec3 N;varying vec2 T;uniform sampler2D S;uniform float useT;void main(){vec4 c=useT>.5?texture2D(S,T):vec4(.63,.59,.53,1.);if(c.a<.35)discard;vec3 nn=normalize(N);if(!gl_FrontFacing)nn=-nn;float l=.4+.6*max(dot(nn,normalize(vec3(.4,.8,.3))),0.);gl_FragColor=vec4(c.rgb*l,1.);}';
+  const sh = (t, src) => { const o = gl.createShader(t); gl.shaderSource(o, src); gl.compileShader(o); return o; };
+  prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(prog); gl.useProgram(prog);
+  gl.enable(gl.DEPTH_TEST);
+  white = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, white); gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([160,150,135,255]));
+  DATA.geo.textures.forEach((src, k) => {
+    const t = gl.createTexture(); texs[k] = t; gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([160,150,135,255]));
+    t.src = src; t.loaded = false;
+  });
+}
+function loadTex(k) {
+  const t = texs[k]; if (!t || t.loaded) return; t.loaded = true;
+  const im = new Image(); im.onload = () => { gl.bindTexture(gl.TEXTURE_2D, t); gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,im);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.REPEAT); pvDraw(); };
+  im.src = t.src;
+}
+function b64(s, T) { const b = atob(s), u = new Uint8Array(b.length); for (let k = 0; k < b.length; k++) u[k] = b.charCodeAt(k); return new T(u.buffer); }
+function gpuOf(m) {
+  if (gpu[m]) return gpu[m]; const g = geoOf(m); if (!g) return null; let last = null;
+  return gpu[m] = g.parts.map(p => {
+    let v = last; if (p.v) { v = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, v); gl.bufferData(gl.ARRAY_BUFFER, b64(p.v, Float32Array), gl.STATIC_DRAW); last = v; }
+    const ia = b64(p.i, Uint32Array), i = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, i); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, ia, gl.STATIC_DRAW);
+    if (p.t != null) loadTex(p.t);
+    return {v, i, n: ia.length, t: p.t};
+  });
+}
+function m4mul(a,b){const r=new Array(16);for(let c=0;c<4;c++)for(let q=0;q<4;q++){let s=0;for(let k=0;k<4;k++)s+=a[k*4+q]*b[c*4+k];r[c*4+q]=s;}return r;}
+function pvDraw() {
+  if (!prog) return;
+  const w = pv.clientWidth * devicePixelRatio, h = pv.clientHeight * devicePixelRatio; if (pv.width !== w || pv.height !== h) { pv.width = w; pv.height = h; }
+  gl.viewport(0,0,w,h); gl.clearColor(.06,.05,.04,1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+  const parts = pvModel && gpuOf(pvModel); if (!parts) return;
+  const c = pvCam, e = [c.tgt[0]+c.dist*Math.cos(c.pitch)*Math.sin(c.yaw), c.tgt[1]+c.dist*Math.sin(c.pitch), c.tgt[2]+c.dist*Math.cos(c.pitch)*Math.cos(c.yaw)];
+  const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]], dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2], cr=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]], nz=a=>{const l=Math.hypot(...a)||1;return a.map(x=>x/l);};
+  const z = nz(sub(e, c.tgt)), x = nz(cr([0,1,0], z)), y = cr(z, x);
+  const V = [x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0, -dot(x,e),-dot(y,e),-dot(z,e),1];
+  const f = 1/Math.tan(0.45), n = c.dist/200, fa = c.dist*10, P = [f/(w/h),0,0,0, 0,f,0,0, 0,0,(fa+n)/(n-fa),-1, 0,0,2*fa*n/(n-fa),0];
+  gl.uniformMatrix4fv(gl.getUniformLocation(prog,'VP'), false, m4mul(P, V));
+  const ex = tiltPt([1,0,0], pvTilt[0], pvTilt[1]), ey = tiltPt([0,1,0], pvTilt[0], pvTilt[1]), ez = tiltPt([0,0,1], pvTilt[0], pvTilt[1]);
+  gl.uniformMatrix4fv(gl.getUniformLocation(prog,'M'), false, [...ex,0, ...ey,0, ...ez,0, 0,0,0,1]);
+  const aP = gl.getAttribLocation(prog,'p'), aN = gl.getAttribLocation(prog,'n'), aT = gl.getAttribLocation(prog,'t');
+  for (const p of parts) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, p.v);
+    gl.enableVertexAttribArray(aP); gl.vertexAttribPointer(aP,3,gl.FLOAT,false,32,0);
+    gl.enableVertexAttribArray(aN); gl.vertexAttribPointer(aN,3,gl.FLOAT,false,32,12);
+    gl.enableVertexAttribArray(aT); gl.vertexAttribPointer(aT,2,gl.FLOAT,false,32,24);
+    gl.bindTexture(gl.TEXTURE_2D, p.t == null ? white : texs[p.t]); gl.uniform1f(gl.getUniformLocation(prog,'useT'), p.t == null ? 0 : 1);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, p.i); gl.drawElements(gl.TRIANGLES, p.n, gl.UNSIGNED_INT, 0);
+  }
+}
+let pvTilt = [0, 0];
+function preview(m, item) {
+  const tl = item ? [item.tx || 0, item.tz || 0] : [0, 0];
+  if (!m) return;
+  if (m === pvModel && tl[0] === pvTilt[0] && tl[1] === pvTilt[1]) return;
+  pvTilt = tl;
+  const g = geoOf(m);
+  if (!DATA.geo) { pvInfo.textContent = 'podgląd niedostępny – strona zrobiona bez --game'; return; }
+  if (!g) { pvModel = null; pvDraw(); pvInfo.textContent = m.split('/').pop().replace('.model','') + ' – brak podglądu'; return; }
+  pvModel = m; pvCam.tgt = tiltPt([(g.lo[0]+g.hi[0])/2, (g.lo[1]+g.hi[1])/2, (g.lo[2]+g.hi[2])/2], pvTilt[0], pvTilt[1]);
+  pvCam.dist = Math.max(1, Math.hypot(g.hi[0]-g.lo[0], g.hi[1]-g.lo[1], g.hi[2]-g.lo[2])) * 1.3;
+  pvInfo.textContent = `${m.split('/').slice(-2).join('/').replace('.model','')} · ${(g.hi[0]-g.lo[0]).toFixed(1)} × ${(g.hi[2]-g.lo[2]).toFixed(1)}, wysoki ${(g.hi[1]-g.lo[1]).toFixed(1)} (przy rozmiarze 1)`;
+  pvDraw();
+}
+let pvDrag = null;
+pv.addEventListener('mousedown', e => { pvDrag = [e.clientX, e.clientY]; });
+window.addEventListener('mouseup', () => { pvDrag = null; });
+window.addEventListener('mousemove', e => { if (!pvDrag) return; pvCam.yaw -= (e.clientX - pvDrag[0]) * 0.01; pvCam.pitch = Math.max(-1.4, Math.min(1.4, pvCam.pitch + (e.clientY - pvDrag[1]) * 0.01)); pvDrag = [e.clientX, e.clientY]; pvDraw(); });
+pv.addEventListener('wheel', e => { e.preventDefault(); pvCam.dist *= Math.exp(e.deltaY * 0.0012); pvDraw(); }, {passive:false});
+if (!DATA.geo) pvInfo.textContent = 'podgląd niedostępny – strona zrobiona bez --game';
+
+// ---- load a saved changes file (akt2_zmiany.json / steamvr/frontend_edits_act2.json) over the act as built
+function applyChanges(c) {
+  fresh();
+  const by = {}; items.forEach(i => by[i.name] = i);
+  for (const [n, d] of Object.entries(c.moved || {})) { const i = by[n]; if (!i) continue;
+    if (d.right !== undefined) i.right = d.right; if (d.ahead !== undefined) i.ahead = d.ahead; if (d.y !== undefined) i.y = d.y;
+    if (d.turn) i.yaw = +(i.yaw + d.turn).toFixed(1); if (d.scale_by) i.scale = +(i.scale * d.scale_by).toFixed(4); if (d.tilt_x) i.tx = d.tilt_x; if (d.tilt_z) i.tz = d.tilt_z; }
+  (c.deleted || []).forEach(n => { if (by[n]) by[n].deleted = true; });
+  (c.added || []).forEach(a => { const like = items.find(i => i.model === a.model), s = a.model.split('/').pop().replace('.model','');
+    items.push({name:a.name, model:a.model, short:s, cat: like ? like.cat : ((DATA.cats && DATA.cats[a.model]) || 'dodane'), right:a.right, ahead:a.ahead, y:a.y, yaw:a.yaw, scale:a.scale, tx:a.tilt_x || 0, tz:a.tilt_z || 0,
+                w: like ? like.w : 4, d: like ? like.d : 4, added:true, deleted:false, orig:null}); });
+  if (c.road) road = c.road.map(p => p.slice()); if (c.road_half) half = c.road_half;
+}
+document.getElementById('loadBtn').onclick = () => document.getElementById('loadFile').click();
+document.getElementById('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return; f.text().then(t => {
+  try { const c = JSON.parse(t); remember(); applyChanges(c); sel = null; rh.value = half; persist(); panel(); draw(); }
+  catch (err) { alert('To nie jest plik zmian: ' + err); } }); e.target.value = ''; };
+// the owner's saved changes come with the page: start from them unless this browser already holds newer work
+if (!stored && DATA.preload) { applyChanges(DATA.preload); persist(); }
+document.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => { const t = document.getElementById(b.dataset.copy); t.select();
+  try { navigator.clipboard.writeText(t.value); } catch (e) { document.execCommand('copy'); } b.textContent = 'Skopiowane'; setTimeout(() => b.textContent = 'Kopiuj', 1500); });
+window.addEventListener('resize', () => { resize(); pvDraw(); });
+out(); resize();
+</script>
+</body>
+</html>

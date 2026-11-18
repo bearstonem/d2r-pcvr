@@ -426,6 +426,7 @@ inline constexpr ValueName LeatherNames[]={{0,"Off"},{1,"Leather"},{2,"Menu only
 inline constexpr ValueName ByRangeAtZero[]={{0,"By range"}};
 inline constexpr ValueName LaserOffName[]={{LaserOff,"Off"}};
 inline constexpr ValueName ShieldFollowNames[]={{0,"Forearm"},{100,"Wrist"}};
+inline constexpr ValueName MapBackgroundNames[]={{0,"See-through"},{100,"Solid"}};   // Floating map background's ends
 inline constexpr ValueName OfflinePlayersNames[]={{0,"Game's setting"},{1,"1 player"}};
 // Main's Movement speed words (ValueLabel): Walk, Base run, Run N%, Full run (run_speed.h stops).
 inline constexpr ValueName RunSpeedNames[]={{-10,"Walk"},{0,"Base run"},{10,"Run 10%"},{20,"Run 20%"},{30,"Run 30%"},{40,"Run 40%"},
@@ -675,6 +676,12 @@ inline constexpr Override Overrides[]={
      .help="On keeps the way you face at the top of the map. Off keeps north at the top and turns the arrow. Top-down views only."},
     {.id="interactions.companion_counts",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Buffs and companions",
      .help="Under the minimap: your companion counts, and the buffs, auras and harmful effects on you. Follows the minimap's gesture."},
+    {.id="interactions.floating_map_background_pct",.page=View::Wrist,.section="Map",.kind=RowKind::Slider,.label="Map background",
+     .help="The floating map's background: 0% shows the world through it, 100% is solid. Walls, the arrow, markers and names stay solid, as does the wrist map.",
+     .format={.unit="%"},FRAMEVR_NAMES(MapBackgroundNames)},
+    {.id="interactions.map_grab_hint",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Map grab hint",
+     .help="Point at the raised map: a sign and a glow show that Right Grip pulls a copy off. The sign stops after three pulls a game.",
+     .beside=true,.besideLabel="Grab hint"},   // the right half of Floating map background's row: the Wrist page holds at most 8 rows (dev build with #581)
     // Menus: Game menus
     {.id="hud.menu_distance",.page=View::Menus,.section="Game menus",.kind=RowKind::Choice,.label="Menu distance",
      .help="How far away merchants, the stash and the main menu open, and the inventory with Hold menu Off. Point at one, hold Right Grip and push or pull it.",

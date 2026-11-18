@@ -128,6 +128,80 @@ float3 SceneLight(float3 p, float3 nrm)
         return sum * CeilTorchBright;
 }
 float3 SceneLight(float3 p) { return SceneLight(p, float3(0.0, 1.0, 0.0)); }
+// The main menu's will-o'-the-wisps ([frontend] wisps, owner 2026-11-13): warm lights wandering through the
+// forest behind you, placed by vrcam each frame (WispPos: xyz less the ground under the head, heights over the
+// floor - GameLightPos's frame; w its breath 0..1), their colour and strength in WispCol. Each lights what is
+// within twice WispRadius, and is seen as a small glowing orb (WispGlow).
+uniform bool WispOn < hidden = true; > = false;
+uniform float4 WispPos[12] < hidden = true; >;
+uniform float4 WispCol < hidden = true; > = float4(1.0, 0.55, 0.2, 3.0);
+uniform float WispRadius < hidden = true; > = 40.0;
+uniform float WispGlowStrength < hidden = true; > = 1.0;
+uniform bool WispShadowOn < hidden = true; > = true;      // [frontend] wisp_shadow
+uniform float WispShadowDark < hidden = true; > = 0.85;   // [frontend] wisp_shadow_dark: how much of the light a shadow takes
+uniform float WispShadowBias < hidden = true; > = 0.3;    // world units nearer than the step before it counts
+uniform float WispShadowThick < hidden = true; > = 8.0;   // ... and at most this much nearer (a branch, a trunk)
+
+// Is the way from p to a wisp at L free? Walked in the picture: 12 steps along it, each put on the screen of
+// this eye and held against the depth drawn there - something drawn nearer than the step (by more than a hair,
+// less than a tree's thickness) stands between: shadow (owner 2026-11-13: "the wisps' light casts no shadow;
+// the tree by the campfire has one on every branch"). Only what is on the screen can cast one.
+float WispShadow(float3 p, float3 L, float3 eyeP, int eye)
+{
+    const float4 sp = eye == 0 ? SkyProj0 : SkyProj1;
+    const float3 R = eye == 0 ? CamRight0 : CamRight1;
+    const float3 U = eye == 0 ? CamUp0 : CamUp1;
+    const float3 B = eye == 0 ? CamBack0 : CamBack1;
+    [loop] for (int s = 1; s <= 12; ++s) {
+        const float3 q = lerp(p, L, s / 13.0) - eyeP;
+        const float z = -dot(q, B);
+        if (z <= NearPlane) break;
+        const float2 ndc = float2(dot(q, R) / z * sp.x - sp.z, dot(q, U) / z * sp.y - sp.w);
+        if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0) break;
+        float2 uv = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+        if (UpsideDown) uv.y = 1.0 - uv.y;
+        const float d = DepthAt(uv).x;
+        if (d <= 1e-6) continue;   // the sky there: nothing in the way
+        const float gap = z - NearPlane / d;
+        if (gap > WispShadowBias && gap < WispShadowThick) return 1.0 - WispShadowDark;
+    }
+    return 1.0;
+}
+
+// The wisps' light on a drawn point p (eyeP: the eye, eye: which - for the shadow). No surface normal: the
+// one rebuilt from the depth (ddx/ddy) changes per 2x2 pixels at every leaf's edge, and the light showed it
+// as squares round them (2026-11-13) - lit all round, but shaded where something stands between.
+float3 WispLight(float3 p, float3 eyeP, int eye)
+{
+    float3 sum = float3(0.0, 0.0, 0.0);
+    [loop] for (int i = 0; i < 12; ++i) {
+        const float4 L = WispPos[i];
+        if (L.w <= 0.0) continue;
+        const float dist = length(L.xyz - p);
+        if (dist >= WispRadius * 2.0) continue;
+        const float f = Falloff(dist / WispRadius) * L.w * 0.75;
+        sum += f * (WispShadowOn ? WispShadow(p, L.xyz, eyeP, eye) : 1.0);
+    }
+    return sum * WispCol.rgb * WispCol.w;
+}
+
+// The orbs along a pixel's ray (from eyeP toward dir, reach: how far the drawn point is): a bright core and a
+// soft halo round each wisp in front of what is drawn there.
+float3 WispGlow(float3 eyeP, float3 dir, float reach)
+{
+    float g = 0.0;
+    [loop] for (int i = 0; i < 12; ++i) {
+        const float4 L = WispPos[i];
+        if (L.w <= 0.0) continue;
+        const float3 w = L.xyz - eyeP;
+        const float t = dot(w, dir);
+        if (t <= 0.5 || t > reach + 1.0) continue;
+        const float perp = length(w - dir * t);
+        g += L.w * (exp(-perp * perp / 0.25) + 0.25 * exp(-perp * perp / 6.0));
+    }
+    return g * WispGlowStrength * float3(1.0, 0.75, 0.45) * 1.5;
+}
+
 
 // The hero's own light in dungeons whose ceiling the game draws (#440: Light Radius "doesnt seem to expand
 // the light radius at all"). The game's light round him is left as it is; this modest one of ours reaches

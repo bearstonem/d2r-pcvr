@@ -2,6 +2,16 @@
 // A feature header of D2R_DepthFog.fx, #included by it: a pure move out of the one effect, no line changed. The headers come after the effect's own inputs and in an order where
 // every name is defined before it is used; where features interleaved in the old single file the order differs from it, which cannot change what the shader draws.
 
+// [frontend] cut: how much of a point (side: to the camera's right, ahead: in front of it, on the ground) is
+// past the wall between this act and the next - 0 here, 1 our sky.
+float SkyCutAt(float side, float ahead)
+{
+    const float k = max(smoothstep(SkyCutRight, SkyCutRight + 25.0, side), smoothstep(SkyCutLeft, SkyCutLeft + 25.0, -side));
+    // and the wall's far part, nearer: past SkyCutFarAhead ahead, from SkyCutFarRight (the next act's sky card
+    // stands there, closer to the side than this act's own forest by the camera - 2026-11-14)
+    return max(k, smoothstep(SkyCutFarRight, SkyCutFarRight + 25.0, side) * smoothstep(SkyCutFarAhead, SkyCutFarAhead + 15.0, ahead));
+}
+
 float3 DepthFogWorld(float4 pos, float2 uv, int eye)
 {
     const float3 colour = tex2D(FogColorSmp, uv).rgb;
@@ -49,6 +59,46 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
         // A rim pixel with no depth of its own but a drawn neighbour takes the neighbour's:
         // left out, the cut shapes stayed outlined in black on the vault.
         const float dPt = d > 1e-6 ? d : dNear;
+        // The main menu's sky ([frontend] cut, sky_edges, sky_blend), looked up ONCE for all four places below that
+        // lay it over the picture, and only while one of them is on (in a game none is). Each Sky() is the whole sky
+        // inlined: four of them made the effect take 47 s to build instead of 18, and the game froze while ReShade
+        // rebuilt it (2026-11-17; depth_fog_test allows DepthFogWorld two calls: this one and the world's below).
+        float3 frontSky = float3(0.0, 0.0, 0.0);
+        [branch] if (SkyOn && (SkyCutOn || SkyEdgeFix || SkyBlendDark > 0.0)) frontSky = Sky(dir) + dither;
+        // [frontend] cut_right / cut_left (SkyCut*): another act's scene beside this one's goes to our sky
+        if (SkyCutOn && SkyOn && dPt > 1e-6) {
+            const float3 offC = (eye == 0 ? v.x * CamRight0 + v.y * CamUp0 + v.z * CamBack0
+                                          : v.x * CamRight1 + v.y * CamUp1 + v.z * CamBack1) * (NearPlane / dPt);
+            const float side = dot(offC.xz, SkyCutDir);
+            const float ahead = dot(offC.xz, float2(SkyCutDir.y, -SkyCutDir.x));
+            const float kC = SkyCutAt(side, ahead);
+            if (kC > 0.0) return lerp(colour, frontSky, kC);
+            // In front of the wall, at an edge of what is behind it: the game blended the leaves' and branches' edges
+            // with the bright card they stood against - the treetops glowed where nothing was any more (2026-11-14).
+            // Two pixels round: the cut ones give the card's colour, the others the tree's own (the darkest); how
+            // much of this pixel is card follows from its brightness between the two, and that much is sky.
+            // (A neighbour's point: the same ray, nearly, at its own depth - side and ahead scale by dPt / its depth.)
+            const float3 lw = float3(0.2126, 0.7152, 0.0722);
+            const float cy = UpsideDown ? -px.y : px.y;
+            float3 cardC = float3(0.0, 0.0, 0.0), ownC = colour;
+            bool nearCut = false;
+            [unroll] for (int cutN = 0; cutN < 8; ++cutN) {
+                const float2 o = (cutN < 4 ? 1.0 : 2.0) * float2((cutN % 4) == 0 ? px.x : (cutN % 4) == 1 ? -px.x : 0.0,
+                                                             (cutN % 4) == 2 ? px.y : (cutN % 4) == 3 ? -px.y : 0.0);
+                const float dn = DepthAt(duv + o).x;
+                const float3 cn = tex2D(FogColorSmp, uv + float2(o.x, UpsideDown ? -o.y : o.y)).rgb;
+                const float r = dn > 1e-6 ? dPt / dn : 0.0;
+                if (dn > 1e-6 && SkyCutAt(side * r, ahead * r) > 0.5) {
+                    nearCut = true;
+                    if (dot(cn, lw) > dot(cardC, lw)) cardC = cn;
+                } else if (dn > 1e-6 && dot(cn, lw) < dot(ownC, lw)) ownC = cn;
+            }
+            if (nearCut) {
+                const float lc = dot(cardC, lw), lo = dot(ownC, lw);
+                const float card = lc > lo + 1e-3 ? saturate((dot(colour, lw) - lo) / (lc - lo)) : 0.0;
+                return max(colour - cardC * card, 0.0) + frontSky * card;
+            }
+        }
         // What the ceiling is wanted for here, and as far along the ray as: 1 a cut point, 2 a point
         // behind a wall at the floor's edge, 3 the void. ONE call of Ceiling for all three - three of
         // them inlined made the shader take 164 s to build (2026-10-07).
@@ -92,6 +142,24 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
         bool rim = false;
         if (ceilMode == 0 && dNear > 1e-6 && d <= 1e-6 && SkyOn && SkyOverRims)
             rim = (d1 > 1e-6 ? 1 : 0) + (d2 > 1e-6 ? 1 : 0) + (d3 > 1e-6 ? 1 : 0) + (d4 > 1e-6 ? 1 : 0) <= 2;
+        // [frontend] sky_edges (SkyEdgeFix): at an edge between what is drawn and the void, the game's pixel is
+        // the thing's colour times how much of the pixel it covers, over black - against our sky that stood as a
+        // dark outline, or, where the sky was added under it whole, as a glowing one round the tower and the
+        // treetops (2026-11-13). How much it covers: its brightness against the brightest drawn neighbour's
+        // (the thing's own colour); the rest of the pixel is sky.
+        if (SkyEdgeFix && SkyOn && ceilMode == 0 && dNear > 1e-6 &&
+            (d <= 1e-6 || d1 <= 1e-6 || d2 <= 1e-6 || d3 <= 1e-6 || d4 <= 1e-6)) {
+            const float3 lw = float3(0.2126, 0.7152, 0.0722);
+            const float cy = UpsideDown ? -px.y : px.y;
+            float3 obj = d > 1e-6 ? colour : float3(0.0, 0.0, 0.0);
+            float3 c;
+            c = tex2D(FogColorSmp, uv + float2(px.x, 0.0)).rgb; if (d1 > 1e-6 && dot(c, lw) > dot(obj, lw)) obj = c;
+            c = tex2D(FogColorSmp, uv - float2(px.x, 0.0)).rgb; if (d2 > 1e-6 && dot(c, lw) > dot(obj, lw)) obj = c;
+            c = tex2D(FogColorSmp, uv + float2(0.0, cy)).rgb;   if (d3 > 1e-6 && dot(c, lw) > dot(obj, lw)) obj = c;
+            c = tex2D(FogColorSmp, uv - float2(0.0, cy)).rgb;   if (d4 > 1e-6 && dot(c, lw) > dot(obj, lw)) obj = c;
+            const float cover = saturate(dot(colour, lw) / max(dot(obj, lw), 1e-3));
+            return colour + frontSky * (1.0 - cover);
+        }
         if (ceilMode == 0 && (dNear <= 1e-6 || rim)) {
             if (SkyOn) {
                 sky = Sky(dir);
@@ -119,7 +187,19 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
             }
             if (ceilMode == 3) { back = got; sky = cc; }
         }
+        // [frontend] sky_blend (SkyBlendDark): the painted sky's dark edge, far off, fades into our sky
+        if (!back && ceilMode == 0 && SkyOn && SkyBlendDark > 0.0 && d > 1e-6 && NearPlane / d > SkyBlendFar) {
+            const float lumaB = dot(colour, float3(0.2126, 0.7152, 0.0722));
+            const float kB = (1.0 - smoothstep(SkyBlendLo, SkyBlendHi, lumaB)) * saturate(SkyBlendDark) * smoothstep(-0.02, 0.06, dir.y);
+            return lerp(colour, frontSky, kB);
+        }
         if (back) {
+            // [frontend] cut: what another act's scene draws with no depth (its painted sky card) is known only by
+            // its direction - toward that scene's side it is our sky, not laid over it (2026-11-14)
+            if (SkyCutOn) {
+                const float sideV = dot(normalize(dir.xz + float2(1e-6, 0.0)), SkyCutDir);
+                if (sideV > SkyCutVoidRight || -sideV > SkyCutVoidLeft) return sky + dither;
+            }
             const float luma = dot(colour, float3(0.2126, 0.7152, 0.0722));
             // A rim is dim as what it rims (about 0.1): the sky takes it unless it is clearly
             // light - a glow's edge beside a brazier stays, laid over the sky as below.
@@ -162,7 +242,7 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
         if (SkyOn && !FogFixed) fogColour = (SkyTex > 0.5 ? PaintedSky(fogDir) : SkyGradient(fogDir.y)) * SkyBrightness + dither;
     }
     float3 litColour = colour;
-    if ((GameLightsOn || HeroLightOn) && d > 1e-6) {
+    if ((GameLightsOn || HeroLightOn || WispOn) && d > 1e-6) {
         const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
         const float4 sp = eye == 0 ? SkyProj0 : SkyProj1;
         if (sp.x != 0.0 && sp.y != 0.0) {
@@ -182,7 +262,9 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
 
             float3 lit = GameLightsOn ? SceneLight(worldP, N) : float3(0.0, 0.0, 0.0);
             if (HeroLightOn) lit += HeroLight(worldP, N, eP);   // the hero's own, by his Light Radius
+            if (WispOn) lit += WispLight(worldP, eP, eye);   // [frontend] wisps
             litColour += colour * lit * 1.2 + lit * 0.05;
+            if (WispOn) litColour += WispGlow(eP, normalize(off), length(off));
         }
     }
     if (!FogOn) return litColour;

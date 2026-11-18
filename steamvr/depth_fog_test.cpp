@@ -4,7 +4,9 @@
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -61,6 +63,13 @@ static const float3 CamBack0=float3(0,0,1), CamBack1=float3(0,0,1);
 static const float3 CeilEye0=0, CeilEye1=0;
 static const float2 CeilHero0=0, CeilHero1=0;
 static const float CeilScale=10, CeilHeight=20, CeilHalo=1, HudTop=0, SkyTex=0, SkyBrightness=1;
+static const float SkyBlendDark=0, SkyBlendFar=300, SkyBlendLo=0.03, SkyBlendHi=0.22;   // [frontend] sky_blend: off here
+static const bool WispOn=false;   // [frontend] wisps: off here
+static const bool SkyEdgeFix=false;   // [frontend] sky_edges: off here
+static const bool SkyCutOn=false; static const float2 SkyCutDir=float2(0,1); static const float SkyCutRight=1e9, SkyCutLeft=1e9, SkyCutVoidRight=2, SkyCutVoidLeft=2, SkyCutFarRight=1e9, SkyCutFarAhead=1e9;   // [frontend] cut: off here
+float SkyCutAt(float side, float ahead) { return 0; }
+float3 WispLight(float3 p, float3 eyeP, int eye) { return 0; }
+float3 WispGlow(float3 e, float3 dir, float reach) { return 0; }
 static const bool GameLightsOn=false, HeroLightOn=false;
 // The projection unknown: the fog is measured along the view, as these fixtures' expected values were worked out.
 static const float4 FogProj0=0, FogProj1=0;
@@ -105,6 +114,25 @@ int main(int argc,char** argv) {try {
     // Optional so running against the pre-fix shader demonstrates the regression.
     if(source.find("float ParticleFog(")!=std::string::npos) shader+=Function(source,"float ParticleFog(");
     shader+=Function(source,"float3 DepthFogWorld(");
+    {   // Each Sky() in DepthFogWorld is the whole sky inlined, seconds of ReShade's build each: the main menu's four
+        // made D2R_DepthFog.fx take 47 s instead of 18, and the game froze while ReShade rebuilt it (2026-11-17).
+        // Two: the world's, and the main menu's one for all of its uses.
+        std::string body;   // the function without its // comments, which name Sky() too
+        {
+            const std::string all=Function(source,"float3 DepthFogWorld(");
+            for(size_t line=0;line<all.size();) {
+                const auto end=std::min(all.find('\n',line),all.size());
+                const auto comment=all.find("//",line);
+                body+=all.substr(line,(comment<end?comment:end)-line)+"\n";
+                line=end+1;
+            }
+        }
+        size_t calls=0;
+        for(auto at=body.find("Sky(");at!=std::string::npos;at=body.find("Sky(",at+4))
+            if(at==0||!(std::isalnum(static_cast<unsigned char>(body[at-1]))||body[at-1]=='_'))++calls;
+        if(calls>2) throw std::runtime_error("DepthFogWorld calls Sky() "+std::to_string(calls)+" times, at most 2: each inlines the whole sky into the build");
+        std::printf("DepthFogWorld calls Sky() %zu times (at most 2)\n",calls);
+    }
     shader+=R"hlsl(
         [numthreads(1,1,1)] void main(uint3 id:SV_DispatchThreadID) {
             fixture=id.x;

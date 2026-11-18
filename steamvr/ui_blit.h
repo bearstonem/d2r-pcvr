@@ -37,7 +37,16 @@ public:
     // the game spreads under a menu is taken out. Its most see-through sample at that band's
     // corners and side middles is the backdrop alone; every pixel loses that one layer, so
     // only what the game drew over it is left (the leather: the hide shows round the menu).
+    // The square map is the target's width square at its top (the target as tall or taller).
+    // copyTop, backAlpha, frameAlpha (square map only; the floating map's own square, transport
+    // CopyMap): with backAlpha or frameAlpha below 1 the map drawn a second time, its square copyTop
+    // rows down (at least its width + 2, so a row lies between them; the target that tall):
+    //   backAlpha: its dark backing, margins and the frame's dark bands (0 see-through); the walls,
+    //   markers, labels, the arrow and the frame's gold line stay solid;
+    //   frameAlpha: its frame (the bevel and the corner cuts) over the map beneath it (0 hidden).
+    // Unassociated alpha, as the quad composes it. The first square is solid and framed as before.
+    // copyTop 0, or both at 1 (NaN counts as 1): only the first.
     bool Render(ID3D12Device*,ID3D12GraphicsCommandList*,ID3D12Resource* source,ID3D12Resource* target,bool blackBackground=false,bool squareMap=false,uint32_t mapFlags=0,float bearing=0,float wallAlpha=1.f,float zoom=1.f,float mapSpan=0.f,
-                float xReach=0.f,float xShiftRight=0.f,float xShiftDown=0.f,const int32_t* undimBand=nullptr);
+                float xReach=0.f,float xShiftRight=0.f,float xShiftDown=0.f,const int32_t* undimBand=nullptr,uint32_t copyTop=0,float backAlpha=1.f,float frameAlpha=1.f);
 };
 }

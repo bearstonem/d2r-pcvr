@@ -8,9 +8,9 @@ int main() {
     // Every region inside its image, each pair a gap apart.
     const Region statics[]={Gameplay,Pointer,Compass,Leather,Stats,StatsLit,
         Respec(0),Respec(1),Respec(2),Respec(3),Respec(4),Respec(5),Respec(6),Respec(7),Stash(0),Stash(1),Stash(2),Stash(3),
-        Keyboard,KeyboardLit,KeyboardCaps,KeyboardCapsLit};
+        Keyboard,KeyboardLit,KeyboardCaps,KeyboardCapsLit,GrabHint};
     constexpr int Statics=int(sizeof statics/sizeof statics[0]);
-    static_assert(Statics==14+RespecPictures,"every static picture checked");
+    static_assert(Statics==15+RespecPictures,"every static picture checked");
     const Region shared[]={Settings,Blood,Strain,Notice,BowLaser,ArcaneDecay,Glyph};
     constexpr int Shared=int(sizeof shared/sizeof shared[0]);
     for(const auto& r:statics)assert(Inside(r,StaticWidth,StaticHeight));
@@ -20,6 +20,8 @@ int main() {
     // The sizes the panels paint at, and the regions the transport's quads read.
     assert(Settings.w==1280&&Settings.h==1024&&Blood.w==1024&&Strain.w==256&&Notice.w==512&&Notice.h==112&&BowLaser.w==64&&BowLaser.h==160&&ArcaneDecay.w==512&&ArcaneDecay.h==512&&Glyph.w==512&&Glyph.h==512);
     assert(Pointer.w==64&&Pointer.h==96&&Compass.w==1536&&Compass.h==112);
+    // The grab hint: the column right of the pointer, above the compass, inside the image's width.
+    assert(GrabHint.x==Pointer.x+Pointer.w+Gap&&GrabHint.y==0&&GrabHint.x+GrabHint.w<=StaticWidth&&GrabHint.y+GrabHint.h+Gap<=Compass.y);
     // The leather region holds the largest art the cache may carry, and the stand-in.
     assert(Leather.w==framevr::leather::MaxArtWidth&&Leather.h==framevr::leather::MaxArtHeight);
     assert(framevr::leather::PlaceholderWidth<=Leather.w&&framevr::leather::PlaceholderHeight<=Leather.h);

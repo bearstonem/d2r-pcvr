@@ -68,6 +68,7 @@
 #include "atlas_dirty.h"
 #include "map_zoom.h"
 #include "floating_map.h"
+#include "grab_hint.h"
 #include "wrist_full_map.h"
 #include "interaction_paint.h"
 #include "latest_worker.h"
@@ -143,6 +144,7 @@
 #include "hit_reactions.h"
 
 namespace gamestate {bool CinemaPlaying();}
+namespace gamestate {bool FrontSettingsOpen();bool FrontOverlayOpen();bool CloseFrontSettings();}
 namespace gamestate {bool MenuOpen();uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();int AttackWsm(int hand);}
 namespace gamecmd {void RequestPotion(int slot);void CancelPotion();}
 namespace gamestate {void MenuMap(bool wanted);uint32_t QuestNotices();bool NoticePanelOpen();bool NoticeText(int kind,char* out,uint32_t size);}
@@ -920,6 +922,12 @@ bool MapFullOn(){return settings::MapViewFull(vrsettings::Read().values[settings
 bool MapTurnOn(){return vrsettings::Read().values[settings::MapRotate]>.5f;}
 bool mapSupported=false;
 constexpr uint32_t mapSide=512;
+// The floating map's own square (a copy out, its picture not the wrist's: VR Settings > Interface > Wrist > Floating map
+// background below 100%, or its frame not fully shown, floating_map.h FrameStep): a second square on the map's surface,
+// panelatlas::Gap rows under the first, so no swapchain more and the wrist's own picture stays solid and framed.
+// mapCopyOwn: this frame's copy (mapEye.copied) has it.
+constexpr uint32_t mapCopyTop=mapSide+panelatlas::Gap,mapHeight=mapCopyTop+mapSide;
+bool mapCopyOwn=false;
 // The map's surface is made the first time a map shows. With OFXR Bridge
 // loaded that failed in every session it was tried (frame log, 2026-10-23 to
 // 25): one failure suspended the map for the session, the minimap gone from
@@ -944,6 +952,7 @@ math::Vec wristMapCenter{},menuMapCenter{};
 // points at a map with a copy out, so the stick zooms it as a look would; both false each frame before its step.
 // floatMapWrist / floatMapWristMs: the wrist map quad as last drawn, where a copy is pulled from and put away at.
 bool floatMapWant=false,floatMapPointed=false;
+float floatMapFrame=0;   // the copy's frame, 0 hidden .. 1 shown (floating_map.h Output::frame)
 bool wristMapLookedOnly=false;   // wristMapLooked from the look alone (its hold to LookOut), before floatMapPointed is ORed in
 interaction::Pose floatMapWrist{};uint64_t floatMapWristMs=0;
 mapzoom::View mapZoomView=mapzoom::View::None;   // the map the stick zoomed last frame, for the log
@@ -1101,6 +1110,8 @@ bool leatherMode=false;
 // image; shown and lit this frame (MenuPointer); its press sends the game one View.
 bool statsIconReady=false,statsShown=false,statsLit=false;
 statsbutton::Press statsPress;
+// The floating map's grab hint (grab_hint.h): its glows painted into the static image this session; its sign too.
+bool grabHintReady=false,grabHintSigns=false;
 // An item let go outside the tabbed menu drops (menu_drop.h): the pad's X, the controller
 // menu's Drop for the item held, while menuDrop is down.
 menudrop::Drop menuDrop;
@@ -1389,7 +1400,7 @@ void ClearInput() {
     lootlabels::display.Clear();
     rightStickGestures.Reset();
     meleeImpactAt[0]=meleeImpactAt[1]=shieldImpactAt=parryMissAt=heldClankAt=0;
-    wristHeading.Reset();compassFrame=false;mapZoom.Reset();wristMapLooked=wristMapLookedOnly=false;floatMapWant=floatMapPointed=false;
+    wristHeading.Reset();compassFrame=false;mapZoom.Reset();wristMapLooked=wristMapLookedOnly=false;floatMapWant=floatMapPointed=false;floatMapFrame=0;
     panelinput::WorldInput(false);
     gamestate::MenuMap(false);
     menuControls.Suspend();menuNavigation.Reset();nativeMenuPad={};laserClick={};panelinput::UseController();
@@ -2235,7 +2246,16 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
         }
         return ok;
     }();
+    // The floating map's grab hint (grab_hint.h): its sign's frames, the glow reaching out and the border's strips,
+    // premultiplied (in linear light when the image is sRGB). Its border corners are painted for the wrist map's size.
+    static_assert(grabhint::MapSideM==interaction::WristMapSize,"the grab hint's border corners fit the wrist map");
+    const auto hintArt=interaction::GrabHintArt(grabhint::SignTile*grabhint::Frames,grabhint::SignTile);
+    const bool hintPainted=put(grabhint::Paint(hintArt.empty()?nullptr:hintArt.data(),
+        eyeFormat==DXGI_FORMAT_R8G8B8A8_UNORM_SRGB||eyeFormat==DXGI_FORMAT_B8G8R8A8_UNORM_SRGB),GrabHint);
     if(!UploadAtlas(staticChain,eyeFormat,StaticWidth,StaticHeight,pixels))return false;
+    grabHintReady=hintPainted;grabHintSigns=hintPainted&&!hintArt.empty();
+    if(!hintPainted)Say("Frame map hint: its pictures could not be painted; the grab hint stays hidden");
+    else if(hintArt.empty())Say("Frame map hint: its sign could not be decoded; the grab hint shows its glow only");
     stashArtReady=stashPainted;
     statsIconReady=statsPainted;
     keyboardArtReady=keyboardPainted;
@@ -4104,6 +4124,24 @@ void Input() {
     if(!settingsOwned&&(menuPressed||inventoryPressed)&&!focused)focused=FocusGameForUi();
     if(heldKeyScan&&(!focused||GetTickCount64()>=keyReleaseAt))ReleaseUiKey();
     if(!settingsOwned&&!nativeUi&&focused&&menuPressed)PulseUiKey(VK_ESCAPE);
+    {   // The campfire's and the main menu's board (campfirePointer): Right B is Back - Escape to the game, which
+        // closes what is open over the menu (the options behind the cog under Play could not be closed, owner
+        // 2026-11-13). Not while the name keyboard is up nor with VR Settings open; on the press, once.
+        static bool boardBackWas=false;
+        const bool down=(controls.buttons&menus::B)!=0;
+        // The cog's panel is D2RLoader's: Escape left it open and the game asked whether to quit (owner
+        // 2026-11-14) - it is closed by name. With nothing over the menu, nothing: Escape there is Quit.
+        if(campfirePointer.load()&&down&&!boardBackWas&&!settingsOwned&&!settingsChord&&!gamestate::KeyboardShown()) {
+            if(gamestate::FrontSettingsOpen()) {
+                Say(gamestate::CloseFrontSettings()?"Frame campfire: Right B - closing the cog's panel (D2RLoaderSettingsPanel)":
+                                                     "Frame campfire: Right B - the cog's panel could not be asked to close");
+            } else if(gamestate::FrontOverlayOpen()) {
+                const bool f=focused||FocusGameForUi();
+                if(f){PulseUiKey(VK_ESCAPE);Say("Frame campfire: Right B - Escape (Back) to the game");}
+            } else Say("Frame campfire: Right B - nothing open over the menu; no Escape (it would ask to quit)");
+        }
+        boardBackWas=down;
+    }
     if(!settingsOwned&&(!nativeUi||gripMenuPressed)&&inventoryPressed&&inWorld&&inWorld()) {
         // Keyboard shortcuts can be gated after switching input layouts or
         // panels. Queue the game's own panel actions on its UI thread instead.
@@ -4219,7 +4257,7 @@ void Input() {
     handAimAt=GetTickCount64();
     const auto bindingSnapshot=interactionstate::Read();
     {   // Floating map: before the right stick's gestures, the map zoom and the hands' skills read the grips and the stick
-        floatMapWant=floatMapPointed=false;
+        floatMapWant=floatMapPointed=false;floatMapFrame=0;
         const bool gameplay=motionInput.active&&!interactionOutput.wheel&&!interactionOutput.settings&&
             interaction::Fresh(bindingSnapshot,gamestate::LocalPlayer(),GetTickCount64());
         // The map is the wrist HUD's (handrole::System::WristHud): R is the hand whose laser and grip take
@@ -4234,7 +4272,7 @@ void Input() {
             {motionInput.hand[R].p,motionInput.hand[L].p},{motionInput.tracked[R],motionInput.tracked[L]},motionInput.hand[R].q,
             handAim[R].p,handAim[R].q,handAimTracked[R],handAim[L].p,handAim[L].q,handAimTracked[L],
             floatMapWrist.p,floatMapWrist.q,floatMapWristMs,interaction::WristMapSize,
-            motionInput.grip[R],motionInput.grip[L],controls.rx,controls.ry,floatMapWant,floatMapPointed,
+            motionInput.grip[R],motionInput.grip[L],controls.rx,controls.ry,floatMapWant,floatMapPointed,floatMapFrame,
             +[](int h,float s){MotionPulse(UiRole(h,handrole::System::WristHud),haptics::Category::Interaction,s,25000000);},&Say};
         floatmap::StepFrame(f);
     }
@@ -6949,7 +6987,7 @@ bool CopyMap(reshade::api::command_queue* rq) {
         };
         // The UI panel's usage, which OFXR Bridge has always let through.
         XrSwapchainCreateInfo c{XR_TYPE_SWAPCHAIN_CREATE_INFO};c.usageFlags=XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT|XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
-        c.format=DXGI_FORMAT_R16G16B16A16_FLOAT;c.width=c.height=mapSide;c.sampleCount=c.faceCount=c.arraySize=c.mipCount=1;
+        c.format=DXGI_FORMAT_R16G16B16A16_FLOAT;c.width=mapSide;c.height=mapHeight;c.sampleCount=c.faceCount=c.arraySize=c.mipCount=1;
         if(const XrResult r=pCreateSwapchain(session,&c,&e.chain);XR_FAILED(r)) {
             e.chain=XR_NULL_HANDLE;
             if(r!=XR_ERROR_LIMIT_REACHED)return failed("creating its swapchain",long(r));
@@ -7000,14 +7038,34 @@ bool CopyMap(reshade::api::command_queue* rq) {
             Say(line);
         }
     }
+    // A floating copy out whose picture is not the wrist's (Floating map background below 100%, or its frame not fully
+    // shown: it shows only while pointed at): its own square under the solid one, the same pass again (the hero's marker
+    // found once). No copy out, or a solid copy pointed at: the one solid square as before.
+    const float back=vrsettings::Read().values[settings::FloatingMapBackground]*.01f;
+    const float frame=std::clamp(floatMapFrame,0.f,1.f);
+    const bool own=floatMapWant&&(back<1.f||frame<1.f);
+    {   // a line when the value changes (at most one a 2 s), and the first time a run draws the copy's own square
+        static int toldPercent=-1;static ULONGLONG toldAt=0;static bool toldOwn=false;
+        const int percent=int(std::lround(back*100));
+        if((percent!=toldPercent&&GetTickCount64()>=toldAt)||(own&&!toldOwn)) {
+            if(percent!=toldPercent)toldAt=GetTickCount64()+2000;
+            toldPercent=percent;toldOwn=toldOwn||own;
+            char line[220];
+            if(own)std::snprintf(line,sizeof line,"Frame floatmap background: %d%%; the floating copy draws its own square (its frame %.0f%%, shown only while pointed at); the wrist's stays solid and framed",
+                                 percent,double(frame*100));
+            else std::snprintf(line,sizeof line,"Frame floatmap background: %d%%; a floating copy draws its own square, its frame shown only while pointed at (none drawn now)",percent);
+            Say(line);
+        }
+    }
     if(!mapBlit.Render(device.Get(),e.commands.Get(),src,e.images[e.index].texture,true,true,flags,float(wristHeading.bearing),1.f,
-                       fullMap?1.f:std::min(mapZoom.Zoom(),mapzoom::Max),span,search.reach,search.right,search.down)) {
+                       fullMap?1.f:std::min(mapZoom.Zoom(),mapzoom::Max),span,search.reach,search.right,search.down,nullptr,
+                       own?mapCopyTop:0,back,frame)) {
         e.commands->Close();return false;
     }
     if(FAILED(e.commands->Close()))return false;
     ID3D12CommandList* lists[]={e.commands.Get()};queue->ExecuteCommandLists(1,lists);
     if(FAILED(queue->Signal(fence.Get(),++fenceValue)))return false;
-    e.copyFence=fenceValue;e.copied=true;return true;
+    e.copyFence=fenceValue;e.copied=true;mapCopyOwn=own;return true;
 }
 bool CopyUi(reshade::api::command_queue* rq) {
     if(!spatialMode||uiEye.copied)return true;
@@ -7925,9 +7983,26 @@ void EndPair() {
     struct FloatMapDraw {decltype(motionQuad)* quad;XrCompositionLayerQuad* layer;};FloatMapDraw floatMapDraw{&motionQuad,&floatMapQuad};
     floatmap::DrawFrame({interactionVisible&&!interactionOutput.wheel,mapEye.copied,GetTickCount64(),&floatMapDraw,
         +[](void* c,math::Vec p,math::Quat q,float side){const auto& d=*static_cast<FloatMapDraw*>(c);
-            (*d.quad)(*d.layer,XrPose({p,q}),side,side,{{0,0},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);},&Say});
+            (*d.quad)(*d.layer,XrPose({p,q}),side,side,{{0,mapCopyOwn?int32_t(mapCopyTop):0},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);},&Say});
     if(count&&layers[count-1]==reinterpret_cast<const XrCompositionLayerBaseHeader*>(&floatMapQuad)&&floatMapAnchor)
         for(uint32_t i=0;i+1<count;++i)if(layers[i]==floatMapAnchor){std::rotate(layers.data()+i+1,layers.data()+count-1,layers.data()+count);break;}
+    // The grab hint (grab_hint.h): up to six premultiplied quads of the static image at the wrist map, only into the
+    // content slots still free (short of six it drops the border's strips first), then moved together just above
+    // floatMapAnchor, as the copy. No swapchain of its own: it can never leave the runtime short of one.
+    std::array<XrCompositionLayerQuad,grabhint::MaxQuads> hintQuads{};
+    {
+        struct HintDraw {decltype(motionQuad)* quad;XrCompositionLayerQuad* layers;};HintDraw hintDraw{&motionQuad,hintQuads.data()};
+        const uint32_t before=count;
+        floatmap::DrawHint({interactionVisible&&!interactionOutput.wheel&&wristMapShown,grabHintReady&&staticChain,grabHintSigns,
+            floatMapWrist.p,floatMapWrist.q,interaction::WristMapSize,grabhint::SideOf(UiHand(0,handrole::System::WristHud)),
+            count<contentLimit?contentLimit-count:0,&hintDraw,
+            +[](void* c,int slot,math::Vec p,math::Quat q,float w,float h,int x,int y,int rw,int rh){const auto& d=*static_cast<HintDraw*>(c);
+                auto& l=d.layers[std::clamp(slot,0,grabhint::MaxQuads-1)];l={XR_TYPE_COMPOSITION_LAYER_QUAD};
+                (*d.quad)(l,XrPose({p,q}),w,h,At(panelatlas::GrabHint,{{x,y},{rw,rh}}),staticChain);
+                l.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;}});   // premultiplied (SetupStatic)
+        if(count>before&&floatMapAnchor)
+            for(uint32_t i=0;i<before;++i)if(layers[i]==floatMapAnchor){std::rotate(layers.data()+i+1,layers.data()+before,layers.data()+count);break;}
+    }
     XrCompositionLayerQuad winePadding{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(padQuads&&composition::PrependQuadPadding(layers.data(),count,capacity,winePadding,headSpace,pointerChain,{panelatlas::Pointer.x,panelatlas::Pointer.y+32})) {
         static bool reported=false;
@@ -8696,7 +8771,7 @@ void Shutdown(bool preserveResolution) {
     noticeWatch={};noticeCards.Clear();noticeCard={};noticePaintRequest=noticeRequestedSequence=noticePaintedSequence=0;noticeAtlasPending=noticeImageReady=false;
     heartStream.Stop();heartPlaying=false;heartLevel.Reset();heartAt=0;heartHush.Reset();heartHealth=-1;
     guardStrain.Reset();strainOutput={};strainPaintKey=~0ull;strainPaintSession=0;strainPaintAt=0;strainAtlasPending=strainImageReady=strainSlotReported=false;
-    if(staticChain&&pDestroySwapchain)pDestroySwapchain(staticChain);staticChain=pointerChain=leatherChain=XR_NULL_HANDLE;stashArtReady=stashShown=false;stashInput.Reset();stashPad=0;statsIconReady=statsShown=statsLit=false;
+    if(staticChain&&pDestroySwapchain)pDestroySwapchain(staticChain);staticChain=pointerChain=leatherChain=XR_NULL_HANDLE;stashArtReady=stashShown=false;stashInput.Reset();stashPad=0;statsIconReady=statsShown=statsLit=false;grabHintReady=grabHintSigns=false;
     if(aimSpace&&pDestroySpace)pDestroySpace(aimSpace);aimSpace=XR_NULL_HANDLE;
     if(leftAimSpace&&pDestroySpace)pDestroySpace(leftAimSpace);leftAimSpace=XR_NULL_HANDLE;
     if(gazeSpace&&pDestroySpace)pDestroySpace(gazeSpace);gazeSpace=XR_NULL_HANDLE;

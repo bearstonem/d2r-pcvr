@@ -1,7 +1,9 @@
 #include <windows.h>
 #include <wincodec.h>
 #include "interaction_icons.h"
+#include "logging.h"
 #include <atomic>
+#include <cstdio>
 #include <condition_variable>
 #include <deque>
 #include <filesystem>
@@ -20,11 +22,12 @@ std::wstring directory;
 std::deque<std::string> pending;
 std::unordered_map<std::string,std::shared_ptr<const Image>> cache;
 std::atomic<uint64_t> revision{0};
-std::shared_ptr<const Image> Decode(IWICImagingFactory* wic,const std::filesystem::path& path) {
-    IWICBitmapDecoder* decoder=nullptr;IWICBitmapFrameDecode* frame=nullptr;
+// The first frame, its long side at most 160 px, as straight RGBA. The caller keeps and releases decoder.
+std::shared_ptr<const Image> DecodeFrame(IWICImagingFactory* wic,IWICBitmapDecoder* decoder) {
+    IWICBitmapFrameDecode* frame=nullptr;
     IWICBitmapScaler* scaler=nullptr;IWICFormatConverter* converter=nullptr;
     auto result=std::make_shared<Image>();UINT w=0,h=0;
-    if(wic&&SUCCEEDED(wic->CreateDecoderFromFilename(path.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&decoder))&&
+    if(wic&&decoder&&
        SUCCEEDED(decoder->GetFrame(0,&frame))&&SUCCEEDED(frame->GetSize(&w,&h))&&w&&h&&w<=8192&&h<=8192&&
        SUCCEEDED(wic->CreateBitmapScaler(&scaler))) {
         const float scale=std::min(1.f,160.f/std::max(w,h));
@@ -36,8 +39,33 @@ std::shared_ptr<const Image> Decode(IWICImagingFactory* wic,const std::filesyste
             if(FAILED(converter->CopyPixels(nullptr,result->width*4,UINT(result->rgba.size()),result->rgba.data())))result->rgba.clear();
         }
     }
-    for(IUnknown* p:{static_cast<IUnknown*>(converter),static_cast<IUnknown*>(scaler),static_cast<IUnknown*>(frame),static_cast<IUnknown*>(decoder)})if(p)p->Release();
+    for(IUnknown* p:{static_cast<IUnknown*>(converter),static_cast<IUnknown*>(scaler),static_cast<IUnknown*>(frame)})if(p)p->Release();
     return result->rgba.empty()?nullptr:result;
+}
+std::shared_ptr<const Image> Decode(IWICImagingFactory* wic,const std::filesystem::path& path) {
+    IWICBitmapDecoder* decoder=nullptr;
+    if(!wic||FAILED(wic->CreateDecoderFromFilename(path.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&decoder)))return nullptr;
+    auto result=DecodeFrame(wic,decoder);decoder->Release();return result;
+}
+// Generic skill 1, Kick: the game's own icon is an empty plate, so the wheels
+// draw new art embedded with the plugin (assets/kick-icon.png) for this key.
+// Every other key, and Kick if that art is missing, reads the local cache.
+constexpr const char* KickKey="s1";
+std::shared_ptr<const Image> DecodeKick(IWICImagingFactory* wic) {
+    HMODULE module=nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<LPCWSTR>(&Revision),&module);
+    const HRSRC found=module?FindResourceW(module,L"D2RVR_KICK_ICON",MAKEINTRESOURCEW(10)):nullptr;
+    const DWORD bytes=found?SizeofResource(module,found):0;
+    auto* data=found?static_cast<BYTE*>(LockResource(LoadResource(module,found))):nullptr;
+    IWICStream* stream=nullptr;IWICBitmapDecoder* decoder=nullptr;std::shared_ptr<const Image> result;
+    if(wic&&bytes&&data&&SUCCEEDED(wic->CreateStream(&stream))&&SUCCEEDED(stream->InitializeFromMemory(data,bytes))&&
+       SUCCEEDED(wic->CreateDecoderFromStream(stream,nullptr,WICDecodeMetadataCacheOnLoad,&decoder)))result=DecodeFrame(wic,decoder);
+    if(decoder)decoder->Release();if(stream)stream->Release();
+    char line[160];
+    if(result)std::snprintf(line,sizeof line,"Frame kick icon: skill 1 (Kick) uses the built-in art, %ux%u, in place of the game's empty plate",result->width,result->height);
+    else std::snprintf(line,sizeof line,"Frame kick icon: the built-in art is %s; skill 1 (Kick) uses the local icon cache",found?"unreadable":"missing");
+    framevr::logging::Write(line);
+    return result;
 }
 void Run(std::wstring location) {
     const auto co=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
@@ -59,7 +87,10 @@ void Run(std::wstring location) {
         {std::unique_lock lock(mutex);wake.wait(lock,[]{return stop||!pending.empty();});if(stop)break;
          key=std::move(pending.front());pending.pop_front();busy=true;}
         std::shared_ptr<const Image> image;
-        try {auto it=files.find(key);if(it!=files.end())image=Decode(wic,std::filesystem::path(location)/it->second);}catch(...){}
+        try {
+            if(key==KickKey)image=DecodeKick(wic);
+            auto it=files.find(key);if(!image&&it!=files.end())image=Decode(wic,std::filesystem::path(location)/it->second);
+        }catch(...){}
         {std::lock_guard lock(mutex);cache[key]=std::move(image);++revision;busy=false;finished.notify_all();}
     }
     if(wic)wic->Release();if(SUCCEEDED(co))CoUninitialize();

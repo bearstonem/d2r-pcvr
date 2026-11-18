@@ -817,4 +817,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
 std::vector<uint8_t> BloodArt(int width,int height) {
     return width>0&&height>0?DecodeArt(L"D2RVR_BLOOD_VISOR",UINT(width),UINT(height)):std::vector<uint8_t>{};
 }
+std::vector<uint8_t> GrabHintArt(int width,int height) {
+    return width>0&&height>0?DecodeArt(L"D2RVR_GRAB_HINT",UINT(width),UINT(height)):std::vector<uint8_t>{};
+}
 }

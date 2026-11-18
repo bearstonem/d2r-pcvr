@@ -47,3 +47,9 @@ promo/
 **/d2r_vr_icons/
 **/d2r_vr_potions/
 /vkd3d-proton.cache*
+# The main menu's 3D scenes on this machine: which test models hold our floors (prepare_frontend_floor.py writes it
+# from each player's own game), the game models it read, the owner's backups of the scene plans
+/steamvr/frontend_floors.json
+/steamvr/_cut_sources/
+/steamvr/frontend_edits_act* - *.json
+/steamvr/frontend_edits_act* — *.json

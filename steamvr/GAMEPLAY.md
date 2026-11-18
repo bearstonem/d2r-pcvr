@@ -204,7 +204,7 @@ stays with its hand: each hand's wheel opens from its own stick ([Sticks stay ri
 | Show all nearby loot labels (Alt) | Hold the **right stick down** to hold the native Show Items action; let go to restore normal drop/hover labels. Push it **up** to toggle running / walking. Neither while you look at the wrist / palm map, or point the right controller at a floating map: they zoom it instead. Listed in **VR Settings > Guide** |
 | Explored minimap | Hold Left Y ? **MAP** in the bottom tabs; point right laser + trigger. **SPELLS** returns to skills; releasing Left Y closes the menu |
 | Zoom the minimap | Look at the wrist / palm map or the wheel's MAP tab; right stick up zooms in, down zooms out. No run / walk toggle or loot labels meanwhile; left / right still turns, except during a zoom push; looking away returns the stick. Pointing at a floating map zooms it the same way |
-| Floating map | Point the right controller at the raised wrist map (or roughly at it) and squeeze **Right Grip**: a copy of the map comes off the wrist in your hand. Move and turn it any way, push the right stick forward / back to send it out (up to 3 m) or pull it in, then let go: it stays there, facing you. While you hold it, the right stick does not turn you. Grab it again any time by pointing at it. Squeeze both grips (either order) while pointing at it and spread or close your hands to make it bigger or smaller. Let go of it next to the raised wrist map to put it away. It shows while you look toward it; Save and Exit or a new game puts it back on the wrist |
+| Floating map | Point the right controller at the raised wrist map (or roughly at it) and squeeze **Right Grip**: a copy of the map comes off the wrist in your hand. Move and turn it any way, push the right stick forward / back to send it out (up to 3 m) or pull it in, then let go: it stays there, facing you. While you hold it, the right stick does not turn you. Grab it again any time by pointing at it. Squeeze both grips (either order) while pointing at it and spread or close your hands to make it bigger or smaller. Let go of it next to the raised wrist map to put it away. It shows while you look toward it; Save and Exit or a new game puts it back on the wrist. With no copy out, pointing at the raised wrist map shows a small grab sign beside it and a glow on its border (**VR Settings > Interface > Wrist > Map grab hint**) |
 | Zoom a floating map | Point the right controller anywhere on the floating map and push the right stick up to zoom in, down to zoom out; the area grows and shrinks with the map. The wrist map zooms as before, by looking at it; both show the same picture, so they zoom together |
 | Quest journal | Open the native tabbed game menu with Left X / Frame Left A, then select Journal. The duplicate wheel entry is removed |
 | Journal controls | Right laser + trigger uses native page controls/act tabs; Right B follows native back; Left X performs native X |
@@ -310,7 +310,9 @@ to 3 m) or pulls it in, and does not turn you while you hold it. Let go and it s
 face you. Point at it and squeeze Right Grip to move it again. Both grips within a quarter second, either order,
 with either hand pointing at it, size it: spread your hands to grow it, bring them together to shrink it (10 to
 150 cm); it moves with your hands, keeping its place between them. Bring it back to the raised wrist map (a light
-buzz) and let go to put it away. It shows while you look within about 30 degrees of it. While a copy is out, a
+buzz) and let go to put it away. It shows while you look within about 30 degrees of it. **VR Settings > Interface >
+Wrist > Floating map background** (100%, solid, by default) lets the world show through the floating map's background: at 0%
+only the walls, the gold arrow, markers and names show, all still solid. Its border shows only while you point at it (or hold it). The wrist map stays solid and framed. While a copy is out, a
 light buzz tells you when your aim is on a map you can take, and pointing anywhere on the floating map and pushing
 the right stick up / down zooms it (the wrist map zooms as before, by looking at it; both show the same picture).
 Every place you can point at on the floating map grows and shrinks with it: the zoom area is the map itself, and
@@ -318,6 +320,12 @@ a grab takes it a little past its edges: a share of its size, up to about 15 deg
 screen in the same game keeps it where it is; Save and Exit or a new game puts it back on the wrist. With no copy out, the wrist map and the
 stick work as before; a Left Grip pressed while you point at the raised wrist map reaches the game up to a
 quarter second late, in case Right Grip follows.
+
+**Grab hint:** with no copy out, point the right controller at the raised wrist map (within the same 15 degrees
+that a pull takes) and a small controller sign appears beside the map on the pulling hand's side: it squeezes its
+grip and slides away, the map's border glows, a glow reaches out toward your hand while it slides, and the
+controller ticks once. It hides 5 degrees past the band. After three pulls in a game only the glow shows; a new game
+starts over. **VR Settings > Interface > Wrist > Map grab hint** turns it off; the pull works the same either way.
 
 The label above the compass shows your current **act (I-V)** and **area name**,
 including named dungeon floors. It follows the same wrist/palm placement and
@@ -844,8 +852,10 @@ picker title names the chosen native binding. The native controller UI can also
 assign these slots. Names come from the game; unreadable assignments show Unknown. A known
 unassigned slot is disabled. A lit slot indicates a present assignment, not a
 promise that mana, charges or cooldown permit casting. Native spell icons come
-from the local game cache; charge/cooldown counts remain pending. Slots run
-clockwise from the upper-right segment. Equipment icons follow the live weapon
+from the local game cache, except Kick: its game icon is an empty plate, so it
+uses new art embedded in the mod (`assets/kick-icon.png`). Charge/cooldown
+counts remain pending. Slots run clockwise from the upper-right segment.
+Equipment icons follow the live weapon
 sets and next potion in each belt column, including potion tiers. Empty slots
 show no item icon. The generated stone-and-bronze frame supplies background and
 selection highlights; native icons keep their original art. Selecting closes

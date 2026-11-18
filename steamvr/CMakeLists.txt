@@ -309,6 +309,7 @@ target_link_libraries(dev-scenarios-test PRIVATE framevr-runtime)
 add_executable(wrist-hud-test wrist_hud_test.cpp)
 add_executable(map-zoom-test map_zoom_test.cpp)
 add_executable(floating-map-test floating_map_test.cpp)   # Floating map: pull, grab, point, two-hand size, put away, never pulled
+add_executable(grab-hint-test grab_hint_test.cpp)   # Floating map grab hint: when it shows, the loop, the border strips, the pictures, the layer budget
 add_executable(navigation-info-test navigation_info_test.cpp)
 add_executable(dropped-item-labels-test dropped_item_labels_test.cpp)
 add_executable(stick-gestures-test stick_gestures_test.cpp)
@@ -383,10 +384,20 @@ add_executable(panel-atlas-test panel_atlas_test.cpp)
 add_executable(atlas-dirty-test atlas_dirty_test.cpp)   # Partial atlas uploads: changed tiles, and what each swapchain image is behind by
 add_executable(swapchain-color-test swapchain_color_test.cpp)
 target_link_libraries(swapchain-color-test PRIVATE d3d12 dxgi d3dcompiler framevr-runtime)
-add_executable(interaction-preview interaction_preview.cpp interaction_ui.cpp companion_ui.cpp interaction_icons.cpp interaction_assets.rc)
+add_executable(interaction-preview interaction_preview.cpp interaction_ui.cpp companion_ui.cpp interaction_icons.cpp interaction_assets.rc logging.cpp)
 add_executable(skill-categories-test skill_categories_test.cpp)
 target_include_directories(interaction-preview PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(interaction-preview PRIVATE user32 gdi32 framevr-runtime)
+# Kick (skill 1) reads the embedded art through the real icon cache; every other key reads the cache as before.
+add_executable(kick-icon-test kick_icon_test.cpp interaction_icons.cpp interaction_assets.rc)
+target_link_libraries(kick-icon-test PRIVATE windowscodecs ole32 framevr-runtime)
+add_executable(kick-icon-no-art-test kick_icon_test.cpp interaction_icons.cpp)
+target_compile_definitions(kick-icon-no-art-test PRIVATE KICK_ICON_TEST_NO_ART)
+target_link_libraries(kick-icon-no-art-test PRIVATE windowscodecs ole32 framevr-runtime)
+foreach(t kick-icon-test kick-icon-no-art-test)
+  add_test(NAME ${t} COMMAND ${t})
+  set_tests_properties(${t} PROPERTIES TIMEOUT 30)
+endforeach()
 
 add_executable(vr-settings-test vr_settings_test.cpp)
 add_executable(vr-settings-layout-test vr_settings_layout_test.cpp)
@@ -482,7 +493,7 @@ foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test activ
     gameplay-test weapon-skills-test quick-cast-test hand-controls-test hand-role-test hand-swap-mirror-test hand-text-test elemental-hands-test elemental-particles-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test head-skip-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test prop-heft-test limb-rig-test aged-cache-test ecs-storage-test look-at-test limb-physics-test limb-worker-test leather-menu-test stash-buttons-test stats-button-test menu-drop-test arcane-decay-test respec-button-test vr-keyboard-test
     combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test guard-strain-test heartbeat-test haptic-impact-test haptic-heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test logging-test log-rotation-test melee-contact-test bow-bash-test weapon-heft-test hit-reactions-test held-collision-test held-world-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-warlock-test motions-assassin-test motions-paladin-test motions-druid-test bone-graft-test
-    interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test floating-map-test navigation-info-test companions-test summon-commander-test active-effects-test skill-cooldowns-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test sheet-walk-test room-stitch-test ceiling-top-test loot-beams-test
+    interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test floating-map-test grab-hint-test navigation-info-test companions-test summon-commander-test active-effects-test skill-cooldowns-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test sheet-walk-test room-stitch-test ceiling-top-test loot-beams-test
     vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test loot-aim-test telegraph-test aim-reach-test aim-rules-test teleport-arc-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test light-radius-test world-sound-test frame-generation-test late-wait-test turn-capture-test panel-atlas-test atlas-dirty-test far-objects-test)
   # These fixtures use assert for their checks, including in Release builds.
   if(MSVC)
@@ -511,6 +522,14 @@ add_test(NAME ui-blit-typeless-black COMMAND ui-blit-test black --typeless)
 add_test(NAME ui-blit-undim COMMAND ui-blit-test --undim)
 add_test(NAME ui-blit-square-map COMMAND ui-blit-test --square-map --typeless)
 add_test(NAME ui-blit-portrait-map COMMAND ui-blit-test --square-map --portrait)
+# the floating map's see-through copy under the solid square, its backing at 0, 50 and 100% (VR Settings > Interface > Wrist > Floating map background)
+add_test(NAME ui-blit-see-through-0 COMMAND ui-blit-test --see-through 0 --typeless)
+add_test(NAME ui-blit-see-through-50 COMMAND ui-blit-test --see-through 50)
+add_test(NAME ui-blit-see-through-100 COMMAND ui-blit-test --see-through 100)
+# its frame: hidden while not pointed at (solid and see-through), and halfway through its fade
+add_test(NAME ui-blit-frame-hidden COMMAND ui-blit-test --see-through 100 --frame 0)
+add_test(NAME ui-blit-frame-hidden-clear COMMAND ui-blit-test --see-through 0 --frame 0 --typeless)
+add_test(NAME ui-blit-frame-fading COMMAND ui-blit-test --see-through 50 --frame 50)
 add_test(NAME ui-blit-marker-test COMMAND ui-blit-marker-test)
 add_test(NAME turn-warp-typed COMMAND turn-warp-test)
 add_test(NAME turn-warp-typeless COMMAND turn-warp-test --typeless)
