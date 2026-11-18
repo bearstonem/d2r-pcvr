@@ -3112,6 +3112,8 @@ void CollectionPress(const collection::panel::Hit& hit) {
 void CollectionPointer(bool grip) {
     if(!collectionOpen){collectionHover={};return;}
     if(settingsModel.open||bodyCalibration.Active())return;
+    // Right B puts the panel away, like every other panel the mod draws.
+    if(Bool(secondary,0)){collection::TabSetWanted(false);collectionHover={};pointerVisible=pointerHit=false;return;}
     pointerVisible=pointerHit=false;
     float canvasX=-1,canvasY=-1;
     XrSpaceLocation aim{XR_TYPE_SPACE_LOCATION};
@@ -3135,6 +3137,17 @@ void CollectionPointer(bool grip) {
     const auto click=collectionPointer.Step(canvasX,canvasY,layout,collectionTriggerDown,ms);
     collectionHover=collectionPointer.Hover();
     if(click.kind!=collection::panel::HitKind::None)CollectionPress(click);
+    {   // one line a second while the panel is open: a laser that never hits, or a
+        // trigger that never rises, says so here
+        static ULONGLONG reportAt=0;const auto now=GetTickCount64();
+        if(now>=reportAt){
+            char message[208];
+            std::snprintf(message,sizeof message,"Frame collection: pointer hit=%d hover=%d/%d trigger=%d canvas=%.0f,%.0f panel=%.2f,%.2f,%.2f",
+                int(pointerHit),int(collectionHover.kind),collectionHover.index,int(collectionTriggerDown),canvasX,canvasY,
+                collectionPose.position.x,collectionPose.position.y,collectionPose.position.z);
+            Say(message);reportAt=now+1000;
+        }
+    }
 }
 // One frame of the T cross (body_calibration_gesture.h). Runs where the first-load prompt
 // opens, so the prompt owns this frame's input the same way. The hands are last frame's
