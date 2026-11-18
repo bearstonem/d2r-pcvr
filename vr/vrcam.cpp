@@ -11490,16 +11490,23 @@ bool ApplySkyPictures(reshade::api::effect_runtime* rt) {
         snprintf(onName, sizeof onName, "D2R_SKY_FRONT_ON_%d", n);
         const std::string want = "\"" + (mine.empty() ? std::string("D2R_Sky_ours/D2R_Sky_act1.png") : mine) + "\"";
         const char* wantOn = mine.empty() ? "0" : "1";
+        // A name the preset does not have is the effect's own default (D2R_Sky.fxh: acts 2-5 their shipped pictures,
+        // on; act 1 none): equal to it, it is left unset. Set, ReShade rebuilds the effect on the render thread -
+        // 36 s frozen on the first menu after an update (2026-11-17), every name of these new to the player's preset.
+        const std::string def = n >= 2 ? "\"D2R_Sky_ours/D2R_Front_act" + std::to_string(n) + ".png\"" : std::string("\"D2R_Sky_ours/D2R_Sky_act1.png\"");
+        const char* defOn = n >= 2 ? "1" : "0";
         char have[1024] = {};
         size_t size = sizeof have;
-        if (!(rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", name, have, &size) && want == have)) {
+        const bool known = rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", name, have, &size);
+        if (known ? want != have : want != def) {
             rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", name, want.c_str());
             LogF("vrcam: menu act %d's panorama %s = %s", n, name, want.c_str());
             set = true;
         }
         char haveOn[16] = {};
         size = sizeof haveOn;
-        if (!(rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", onName, haveOn, &size) && !strcmp(haveOn, wantOn))) {
+        const bool knownOn = rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", onName, haveOn, &size);
+        if (knownOn ? strcmp(haveOn, wantOn) != 0 : strcmp(defOn, wantOn) != 0) {
             rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", onName, wantOn);
             set = true;
         }
