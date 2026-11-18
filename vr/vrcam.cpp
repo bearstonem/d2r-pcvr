@@ -180,6 +180,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #ifdef D2RVR_NATIVE_OPENXR
 #include "panel_input.h"
 #include "native_belt.h"
+#include "monster_labels.h"
 #endif
 #include "../steamvr/panel_input_mode.h"
 #include "pad_mirror_shared.h"
@@ -13258,6 +13259,7 @@ DWORD WINAPI UpdateThread(void*) {
             projectiles::Install();
             panelinput::Install();
             nativebelt::Install();
+            monsterlabels::Install();
             projectiles::Report();
             combat::Install();
             combat::Report();
