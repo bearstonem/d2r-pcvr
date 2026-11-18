@@ -7674,11 +7674,12 @@ void EndPair() {
     // The shared panels' pictures uploaded this frame, all in one copy (panelatlas).
     if(sharedDirty) {
         const bool flushed=FlushShared();
-        for(auto* p:{&settingsAtlasPending,&bloodAtlasPending,&strainAtlasPending,&bowLaserAtlasPending,&noticeAtlasPending,&arcaneAtlasPending,&glyphAtlasPending})if(*p) {
+        for(auto* p:{&settingsAtlasPending,&bloodAtlasPending,&strainAtlasPending,&bowLaserAtlasPending,&noticeAtlasPending,&arcaneAtlasPending,&glyphAtlasPending,&collectionAtlasPending})if(*p) {
             *p=false;
             if(p==&settingsAtlasPending)settingsImageReady=flushed;else if(p==&bloodAtlasPending)bloodImageReady=flushed;
             else if(p==&strainAtlasPending)strainImageReady=flushed;else if(p==&bowLaserAtlasPending)bowLaserImageReady=flushed;
-            else if(p==&arcaneAtlasPending)arcaneImageReady=flushed;else if(p==&glyphAtlasPending)glyphImageReady=flushed;else noticeImageReady=flushed;
+            else if(p==&arcaneAtlasPending)arcaneImageReady=flushed;else if(p==&glyphAtlasPending)glyphImageReady=flushed;
+            else if(p==&collectionAtlasPending)collectionImageReady=flushed;else noticeImageReady=flushed;
         }
     }
     // The native menus closed short of swapchains: their surface goes back for the map.
