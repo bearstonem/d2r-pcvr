@@ -2,6 +2,7 @@
 D2RVR_WRIST_VITALS RCDATA "assets/wrist-vitals.png"
 D2RVR_WHEEL_FRAME RCDATA "assets/wheel-frame.png"
 D2RVR_HAND_WHEEL_FRAME RCDATA "assets/hand-wheel-frame.png"
+D2RVR_KICK_ICON RCDATA "assets/kick-icon.png"
 D2RVR_BLOOD_VISOR RCDATA "assets/blood-splatters.png"
 D2RVR_RIPOSTE_SOUND RCDATA "assets/riposte-impact.wav"
 D2RVR_HEARTBEAT_SOUND RCDATA "assets/guard-heartbeat.wav"
