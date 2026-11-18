@@ -3078,6 +3078,15 @@ void RequestCollectionPaint(bool force=false) {
     if(!collectionPaintRequest){
         static ULONGLONG reportAt=0;const auto now=GetTickCount64();
         if(now>=reportAt){Say("Frame collection: the background painter did not take the request");reportAt=now+5000;}
+    } else {
+        static ULONGLONG reportAt=0;const auto now=GetTickCount64();
+        if(now>=reportAt){
+            char message[160];
+            std::snprintf(message,sizeof message,"Frame collection: repainting (page %d, %s, size %d, hover %d/%d)",
+                collectionView.page,collection::CategoryName(collectionView.category),int(collectionView.size),
+                int(collectionHover.kind),collectionHover.index);
+            Say(message);reportAt=now+3000;
+        }
     }
 }
 // What a click on the panel does: another tab, another page, another slot size,
@@ -8014,6 +8023,9 @@ void EndPair() {
     // taken into the atlas. Opening places it, then the grip can move it.
     collectionOpen=collection::TabWanted();
     collectionView=collection::TabView();
+    if(collectionOpen!=collectionWasOpen){
+        Say(collectionOpen?"Frame collection: the panel is asked for":"Frame collection: the panel is put away");
+    }
     if(collectionOpen){
         const auto q=math::Yaw(math::Heading(Q(head.orientation)));
         if(!collectionWasOpen){

@@ -13030,7 +13030,10 @@ DWORD WINAPI UpdateThread(void*) {
         const bool focus = GameFocused();
         if (f12.Pressed(focus)) Toggle();
 #ifdef D2RVR_NATIVE_OPENXR
-        if (f7.Pressed(focus)) framevr::collection::TabSetWanted(!framevr::collection::TabWanted());   // the Collection panel
+        if (f7.Pressed(focus)) {
+            framevr::collection::TabSetWanted(!framevr::collection::TabWanted());   // the Collection panel
+            LogF("vrcam: collection panel %s (F7)", framevr::collection::TabWanted() ? "asked for" : "put away");
+        }
 #endif
         {   // the collection's affinity sweep: an item dropped in the stash goes to
             // its collection tab, while the stash is open (collection_store.h)
