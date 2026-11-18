@@ -54,6 +54,43 @@ class DesktopLaunchTests(unittest.TestCase):
             self.assertNotIn('steamoverlaygameid', environment)
             self.assertEqual(dict(os.environ), before)
 
+    def test_explicit_desktop_routes_mod_and_sets_environment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            game = Path(temporary)
+            (game / 'D2RLoader.exe').touch()
+            for args in ([str(game / 'D2R.exe'), '--frame-desktop'],
+                         ['--battlenet-game=' + str(game), '--frame-desktop']):
+                with self.subTest(args=args), patch('game_install.validate_game'):
+                    command, cwd = launch.prepare(args)
+                    self.assertEqual(command, [str(game / 'D2RLoader.exe'), '-mod', 'D2R-PCVR'])
+                    self.assertEqual(cwd, str(game))
+                    env = launch.launch_environment(args)
+                    self.assertEqual(env['D2R_PCVR_DESKTOP'], '1')
+                    self.assertNotIn('XR_RUNTIME_JSON', env)
+
+    def test_frame_modes_conflict_and_vr_clears_inherited_desktop_env(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            game = Path(temporary)
+            (game / 'D2RLoader.exe').touch()
+            with self.assertRaises(SystemExit):
+                launch.prepare([str(game / 'D2R.exe'), '--frame-vr', '--frame-desktop'])
+        with patch.dict(os.environ, {'D2R_PCVR_DESKTOP': '1'}):
+            env = launch.launch_environment(['--frame-vr'])
+            self.assertNotIn('D2R_PCVR_DESKTOP', env)
+
+    def test_desktop_ignores_headset_runtime_and_child_accepts_mode(self):
+        env = launch.launch_environment(['--frame-desktop', '--frame-openxr-runtime=missing-runtime.json'])
+        self.assertEqual(env[launch.DESKTOP_ENV], '1')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            request = root / 'request.json'
+            request.write_text(json.dumps({'arguments': ['D2R.exe', '--frame-desktop']}))
+            process = Mock(pid=456)
+            process.wait.return_value = 0
+            with patch.object(launch, 'prepare', return_value=(['loader'], str(root))), patch.object(launch.subprocess, 'Popen', return_value=process) as popen:
+                self.assertEqual(launch.desktop_child(request), 0)
+                self.assertEqual(popen.call_args.kwargs['env'][launch.DESKTOP_ENV], '1')
+
     def test_stock_uses_original_subprocess_without_desktop_handoff(self):
         with patch.object(launch, 'prepare', return_value=(['D2R.exe', 'argument'], None)), \
                 patch.object(launch, 'launch_from_desktop') as broker, \
@@ -70,6 +107,14 @@ class DesktopLaunchTests(unittest.TestCase):
                 patch.object(launch.subprocess, 'run') as run:
             self.assertEqual(launch.main(['D2R.exe', '--frame-vr']), 1)
             broker.assert_called_once_with(['D2R.exe', '--frame-vr'], 'game', {'SteamAppId': '2536520'})
+            run.assert_not_called()
+
+    @unittest.skipUnless(os.name == 'nt', 'Native Windows launch routing')
+    def test_steam_flat_hands_off_without_direct_fallback(self):
+        args = ['D2R.exe', '--frame-desktop']
+        with patch.object(launch, 'prepare', return_value=(['D2RLoader.exe'], 'game')), patch.object(launch, 'launch_environment', return_value={'D2R_PCVR_DESKTOP':'1'}), patch.object(launch, 'launch_from_desktop', return_value=0) as broker, patch.object(launch.subprocess, 'run') as run:
+            self.assertEqual(launch.main(args), 0)
+            broker.assert_called_once_with(args, 'game', {'D2R_PCVR_DESKTOP':'1'})
             run.assert_not_called()
 
     def test_battlenet_keeps_its_existing_direct_route(self):

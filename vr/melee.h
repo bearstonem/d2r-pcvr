@@ -1,9 +1,17 @@
 #pragma once
 #include "../steamvr/melee_contact.h"
+#include "target_lock.h"
 namespace D2RL {struct PluginContext;}
 namespace melee {
+void InstallRemoteHost();
+void TickNetwork();
+void StopNetwork();
 void Init(const D2RL::PluginContext* context);
 void Install();
+// Read-only lookup observer, including desktop hosts; no VR combat hooks.
+void InstallTargetReader();
+// Game-thread only; validates server player, area, enemies and line of sight.
+bool PlayerTargets(uint32_t playerId,targetlock::Snapshot& out);
 void Submit(const framevr::melee::Sample& sample);
 void Cancel();
 void CancelShield();
@@ -52,6 +60,9 @@ struct ButtonStroke {float recovery=1;bool onHit=true,smite=false;};
 ButtonStroke ButtonHit(uint32_t monster);
 // Owning game thread only; shared with physical arrows. Re-resolves the unit
 // from its session/id rather than passing a native pointer across threads.
+// Host game-thread only, read-only reports. Validates the current host context
+// and exact requested player. Native pointers must not leave that callback.
+bool ReadOnlyPlayer(uint32_t playerId,uintptr_t& game,uintptr_t& player);
 bool LocalServer(uintptr_t& game,uintptr_t& player);
 uintptr_t ServerUnit(uintptr_t game,int type,uint32_t id); // owning game thread only
 // Perfect parry: native hit recovery for this monster on a LATER game update,

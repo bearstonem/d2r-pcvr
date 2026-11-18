@@ -299,8 +299,8 @@ inline constexpr ContentSection SectionTable[]={
     {View::Body,"Play space"},{View::Body,"Potion belt"},
     {View::Hands,"Hands and buttons"},
     {View::Vibration,"Strength"},
-    {View::Wrist,"Life and mana"},{View::Wrist,"Map"},
-    {View::Menus,"Game menus"},
+    {View::Wrist,"Life and mana"},{View::Wrist,"Map"},{View::Wrist,"Allies"},
+    {View::Menus,"Game menus"},{View::Menus,"Controller menus"},
     {View::Labels,"Names and bars"},{View::Labels,"Loot beams"},
     {View::Outlines,"Monster outline"},
     {View::Warnings,"Low life"},{View::Warnings,"Low mana"},
@@ -346,6 +346,10 @@ inline constexpr Option VitalsLocationOptions[]={
     {3,"Off","Not shown on your hand."},
 };
 // map_top_down 0-3 (MapViewTopDown, MapViewFull): the corner minimap or the game's full map.
+inline constexpr Option AllyHealthOptions[]={
+    {0,"Off","Hide ally health bars."},{1,"Wrist","Names and live health beside the wrist map."},
+    {2,"Overhead","Names and live health above located allies."},{3,"Both","Show wrist and overhead bars."},
+};
 inline constexpr Option MapViewOptions[]={
     {0,"Isometric","The game's own slanted minimap, with NPC and exit names."},
     {1,"Top-down","The minimap laid flat like a floor plan. NPC and exit names are hidden."},
@@ -690,6 +694,9 @@ inline constexpr Override Overrides[]={
     {.id="interactions.map_grab_hint",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Map grab hint",
      .help="Point at the raised map: a sign and a glow show that Right Grip pulls a copy off. The sign stops after three pulls a game.",
      .beside=true,.besideLabel="Grab hint"},   // the right half of Floating map background's row: the Wrist page holds at most 8 rows (dev build with #581)
+    {.id="interactions.ally_health_bars",.page=View::Wrist,.section="Allies",.kind=RowKind::Choice,.label="Ally health bars",
+     .help="Party and owned mercenary health. Stale data is hidden. Wrist follows the map gesture; overhead needs a current position.",
+     FRAMEVR_OPTIONS(AllyHealthOptions)},
     // Menus: Game menus
     {.id="hud.menu_distance",.page=View::Menus,.section="Game menus",.kind=RowKind::Choice,.label="Menu distance",
      .help="How far away merchants, the stash and the main menu open, and the inventory with Hold menu Off. Point at one, hold Right Grip and push or pull it.",
@@ -702,6 +709,9 @@ inline constexpr Override Overrides[]={
     {.id="hud.tooltip_timing",.page=View::Menus,.section="Game menus",.kind=RowKind::Choice,.label="Item details delay",
      .help="How soon an item's details pop up when you point the laser at it in a menu.",
      FRAMEVR_OPTIONS(TooltipOptions)},
+    {.id="interactions.controller_menu_size",.page=View::Menus,.section="Controller menus",.kind=RowKind::Slider,.label="Controller menu size",
+     .help="Size of both stick-click menus, including their buttons and map tab. 100% keeps the original size. Apply, then open either hand menu to see the change.",
+     .format={.unit="%"}},
     // Labels: Names and bars
     {.id="hud.labels_size",.page=View::Labels,.section="Names and bars",.kind=RowKind::Slider,.label="Loot name size",
      .help="Size of item names on the ground; 45% is the game's size. Hold the right stick down to show every nearby name.",
