@@ -110,6 +110,8 @@ namespace hud { void SetWorkspaceBand(float top, float bottom); void SetBoardCle
 namespace gamecmd { void Init(const D2RL::PluginContext* ctx); void Tick(); }   // the game's key commands from BodyWalk (gamecmd.cpp)
 namespace spatialaudio { void SetLogger(void (*log)(const char*)); void SetViewYaw(float (*yaw)()); void Configure(bool headFollow, bool listenerTurn, float forwardSign, float depthScale); void Poll(); }   // head-relative sound (spatial_audio.cpp)
 namespace worldsound { void SetLogger(void (*log)(const char*)); void Init(const D2RL::PluginContext* ctx, bool soundLog, float echo, bool headset); void Poll(); }   // the game's reverb raised, sounds counted by channel (world_sound.cpp)
+namespace gamestate { bool StashButtonsShown(); }   // the stash panel is up (stash_buttons.h); the affinity sweep waits for it
+#include "collection_store.h"
 namespace gamestate { bool ToggleMenus(); }
 namespace gamestate { uint32_t MenuEpoch(); }
 namespace gamestate { void Init(const D2RL::PluginContext* ctx); void Tick(); uint32_t WeaponClass(); uint32_t WeaponSet(); uint32_t WeaponType(); uint32_t HandsHeld(); uint32_t TwoHanded(); uint32_t WeaponHand(); uint32_t HandsKey(); bool MenuOpen(); int ObjectLight(uint32_t txt, uint32_t mode, float rgb[3]); uint64_t LocalPlayer(); void SetViewMode(uint32_t mode); bool AutoMapOpen(); bool SetAutoMap(bool open); void PollPlate(); bool PlateRect(int32_t out[4]); }
@@ -13030,6 +13032,14 @@ DWORD WINAPI UpdateThread(void*) {
 #ifdef D2RVR_NATIVE_OPENXR
         if (f7.Pressed(focus)) framevr::collection::TabSetWanted(!framevr::collection::TabWanted());   // the Collection panel
 #endif
+        {   // the collection's affinity sweep: an item dropped in the stash goes to
+            // its collection tab, while the stash is open (collection_store.h)
+            static ULONGLONG nextCollection = 0;
+            if (nowMs >= nextCollection) {
+                nextCollection = nowMs + 250;
+                framevr::collection::TickStore(gamestate::StashButtonsShown());
+            }
+        }
         {   // the same from BodyWalk's mapping: the bridge's view actions, at the press
             static uint32_t was = 0;
             const uint32_t held = ActionsHeld(), pressed = held & ~was;
@@ -13502,6 +13512,9 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     gamecmd::Init(ctx);
     framevr::collection::Init(ctx);        // collection tabs: the read-only catalog report (`collection scan`)
     framevr::collection::InitTab(ctx);     // collection tabs: the catalog and what the shared stash holds
+    framevr::collection::InitStore(ctx, IniB(L"collection", L"affinity", false),
+                                   int(IniF(L"collection", L"first_tab", 5.0f)),
+                                   int(IniF(L"collection", L"tabs", 24.0f)));   // collection tabs: affinity
 #ifdef D2RVR_NATIVE_OPENXR
     enemysight::Init(ctx);
     companionai::Init(ctx);
@@ -13534,6 +13547,7 @@ D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
 #endif
     framevr::collection::Shutdown();
     framevr::collection::ShutdownTab();
+    framevr::collection::ShutdownStore();
     g_enabled.store(false);
     d2rcam::SetEnabled(false);
 #ifdef D2RVR_NATIVE_OPENXR

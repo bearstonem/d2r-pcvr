@@ -47,6 +47,13 @@ public:
     void     ClearFound();
     bool     IsFound(Category category, uint32_t slot) const;
 
+    // The slot of the entry with this record id, or UINT32_MAX when it is not in
+    // that category.
+    uint32_t SlotOf(Category category, uint32_t recordId) const;
+    // The slot of the entry with this base item code (materials are base items,
+    // so they carry no record id), or UINT32_MAX.
+    uint32_t SlotOfCode(Category category, uint32_t code) const;
+
     // Four ASCII bytes packed the way Items::MakeItemCode does (first byte low),
     // shorter text padded with spaces.
     static uint32_t CodeOf(std::string_view text);
@@ -232,5 +239,19 @@ inline uint32_t Library::MarkFound(Category category, uint32_t recordId) {
 }
 
 inline void Library::ClearFound() { std::fill(found_.begin(), found_.end(), uint8_t(0)); }
+
+inline uint32_t Library::SlotOf(Category category, uint32_t recordId) const {
+    if (!finished_) return UINT32_MAX;
+    for (uint32_t slot = 0; slot < Size(category); ++slot)
+        if (entries_[start_[static_cast<std::size_t>(category)] + slot].recordId == recordId) return slot;
+    return UINT32_MAX;
+}
+
+inline uint32_t Library::SlotOfCode(Category category, uint32_t code) const {
+    if (!finished_) return UINT32_MAX;
+    for (uint32_t slot = 0; slot < Size(category); ++slot)
+        if (entries_[start_[static_cast<std::size_t>(category)] + slot].code == code) return slot;
+    return UINT32_MAX;
+}
 
 }   // namespace framevr::collection

@@ -115,6 +115,31 @@ void TabSetShow(panel::Show show) {
     g_view.SelectShow(g_library, show);
 }
 
+void TabShowEntry(Category category, uint32_t recordId) {
+    std::lock_guard lock(g_lock);
+    if (!g_loaded) return;
+    // The entry's slot inside its category, then its position in the filtered
+    // list: the page is where that position lands at the current slot size.
+    uint32_t slot = UINT32_MAX;
+    for (uint32_t at = 0; at < g_library.Size(category); ++at) {
+        const Entry* entry = g_library.At(category, at);
+        if (entry != nullptr && entry->recordId == recordId) { slot = at; break; }
+    }
+    if (slot == UINT32_MAX) return;
+    g_view.SelectCategory(g_library, category);
+    if (g_view.show != panel::Show::All) {
+        int position = 0;
+        for (uint32_t at = 0; at < slot; ++at) {
+            const bool found = g_library.IsFound(category, at);
+            if ((g_view.show == panel::Show::Missing && !found) || (g_view.show == panel::Show::Found && found)) ++position;
+        }
+        g_view.page = position / panel::SlotsFor(g_view.size);
+    } else {
+        g_view.page = int(slot) / panel::SlotsFor(g_view.size);
+    }
+    g_view.Clamp(g_library);
+}
+
 bool TabWanted() { return g_wanted.load(); }
 
 void TabSetWanted(bool wanted) { g_wanted.store(wanted); }
