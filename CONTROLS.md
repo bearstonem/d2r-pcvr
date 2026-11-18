@@ -765,8 +765,10 @@ trigger to type it into the name box.
 D2RLoader's multiplayer panel (Host Game, Browse Games, Direct join, a game's
 password) gets the same keyboard with a digit row, `.`, `:` and a Space bar, so
 you can type a game's name, password and description, the list's filter, or
-an address and port. It shows for as long as the panel is open: click a box
-with the laser, then type. In the main menu's 3D scene it stands above the
+an address and port. Click a box with the laser and the keyboard comes up;
+it goes away when the box loses the focus. While the panel is open, the
+laser lets the game use its keyboard and mouse layout, the only one in
+which these boxes take typed letters. In the main menu's 3D scene it stands above the
 menu board, facing you; with the flat menu it sits under the menu. Shift on a
 digit types its symbol (`!` for `1`). Close hides it until you pick another
 view (Host Game, Browse Games, Direct join) or open the panel again. Right B

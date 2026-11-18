@@ -2559,7 +2559,8 @@ void MenuPointer(const menus::Pad& controls) {
     // and a pull on a key types it into the box the laser last clicked. Close hides it until the
     // box comes up anew (another hero picked, creation or the multiplayer panel opened again,
     // another of the panel's views).
-    const uint32_t keyboardEpoch=gamestate::KeyboardEpoch();
+    // A text box taking the focus anew brings a closed multiplayer keyboard back too (panelinput::TextFocusOns).
+    const uint32_t keyboardEpoch=gamestate::KeyboardEpoch()+panelinput::TextFocusOns();
     if(keyboardClosed&&keyboardEpoch!=keyboardClosedEpoch)keyboardClosed=false;
     const bool keyboardDigits=gamestate::KeyboardText();
     // The campfire's menu board: the name keyboard comes up only once the name box itself is pulled
@@ -2571,12 +2572,18 @@ void MenuPointer(const menus::Pad& controls) {
     else if(pressed&&!triggerWasDown&&pointerHit&&hit.u>.36f&&hit.u<.64f){campfireKeyboardOpen=true;keyboardClosed=false;}
     const bool keyboardWas=keyboardShown,keyboardTextWas=keyboardText;
     keyboardText=keyboardDigits;
+    // The multiplayer panel's keyboard: up while one of its boxes has the game's focus (the game window's
+    // input method on, panels::TextKeyboardUp; owner 2026-11-17: "keyboard is always up anyway"), or with the
+    // panel while the game has said nothing of it this session.
     keyboardShown=keyboardArtReady&&uiActive&&!journalMode&&!leatherMode&&gamestate::KeyboardShown()&&!keyboardClosed&&
-        (!campfirePointer.load()||campfireKeyboardOpen||keyboardText);
+        (!campfirePointer.load()||campfireKeyboardOpen||keyboardText)&&
+        (!keyboardText||panels::TextKeyboardUp(panels::TextFocus(panelinput::TextFocusState())));
     if(keyboardShown!=keyboardWas||(keyboardShown&&keyboardText!=keyboardTextWas)) {
         keyboardTypist.Reset();keyboardPress.Reset();
         Say(!keyboardShown?"Frame panels: VR keyboard hidden":
-            keyboardText?"Frame panels: VR keyboard shown (the multiplayer panel's boxes, with digits)":"Frame panels: VR keyboard shown (the name box is up)");
+            !keyboardText?"Frame panels: VR keyboard shown (the name box is up)":
+            panels::TextFocus(panelinput::TextFocusState())==panels::TextFocus::On?"Frame panels: VR keyboard shown (a multiplayer box has the focus, with digits)":
+                                                                                   "Frame panels: VR keyboard shown (the multiplayer panel, with digits; the game has not said which box has the focus)");
     }
     bool onKeyboard=false;keyboardLit=-1;
     if(keyboardShown&&aimTracked&&!(mouseDown||rightMouseDown)) {
@@ -2641,7 +2648,7 @@ void MenuPointer(const menus::Pad& controls) {
         const auto typed=keyboardTypist.Press(KeyboardLayout(),keyboardLit);
         if(typed.close) {
             keyboardClosed=true;keyboardClosedEpoch=keyboardEpoch;
-            Say(keyboardText?"Frame panels: VR keyboard closed until the multiplayer panel's next view or its reopening":
+            Say(keyboardText?"Frame panels: VR keyboard closed until a box takes the focus again, the panel's next view or its reopening":
                              "Frame panels: VR keyboard closed until the name box comes up anew");
         } else if(typed.send!=keyboard::Send::None) {
             if(!focused)Say("Frame panels: VR keyboard key not sent - the game window is not focused");
