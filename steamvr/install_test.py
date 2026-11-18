@@ -132,6 +132,9 @@ class InstallationTests(unittest.TestCase):
             sewers = {name: b'local sewer fixture' for name in install.prepare_sewer_backdrop.install_names('D2R-PCVR')}
             sewers[install.prepare_sewer_backdrop.INSTALL_RECEIPT] = json.dumps({'version': 1, 'sha256': {
                 name: hashlib.sha256(data).hexdigest() for name, data in sewers.items()}}).encode()
+            collection = {f'D2R-PCVR.mpq/{install.prepare_collection_tab.LAYOUT}': b'local stash layout fixture'}
+            collection[install.prepare_collection_tab.RECEIPT] = json.dumps({'version': 1, 'sha256': {
+                name: hashlib.sha256(data).hexdigest() for name, data in collection.items()}}).encode()
             with patch.object(install, 'require_game_closed'), contextlib.redirect_stdout(io.StringIO()), \
                     patch.object(install, 'COMPILER_HASH', hashlib.sha256(compiler.read_bytes()).hexdigest()), \
                     patch.object(install, 'OFXR_HASH', ofxr_hash), \
@@ -139,7 +142,8 @@ class InstallationTests(unittest.TestCase):
                     patch.object(install, 'prepare_potions', side_effect=potions), \
                     patch.object(install, 'prepare_spell_sprites', side_effect=spell_sprites),                     patch.object(install, 'prepare_props', side_effect=prop_catalog), \
                     patch.object(install.prepare_arcane_sky, 'prepare', return_value=arcane), \
-                    patch.object(install.prepare_sewer_backdrop, 'prepare', return_value=sewers):
+                    patch.object(install.prepare_sewer_backdrop, 'prepare', return_value=sewers), \
+                    patch.object(install.prepare_collection_tab, 'prepare', return_value=collection):
                 unapproved_hashes = ('0' * 64, '1' * 64)
                 with patch.object(sys, 'argv', common), patch.object(install, 'LOADER_HASHES', unapproved_hashes):
                     with self.assertRaises(SystemExit) as caught:
@@ -181,6 +185,8 @@ class InstallationTests(unittest.TestCase):
                 for name, data in arcane.items():
                     self.assertEqual((mod / name).read_bytes(), data)
                 for name, data in sewers.items():
+                    self.assertEqual((mod / name).read_bytes(), data)
+                for name, data in collection.items():
                     self.assertEqual((mod / name).read_bytes(), data)
                 journal = json.loads((snapshot / 'manifest.json').read_text())
                 for name in sewers:
@@ -462,6 +468,7 @@ class RenameMigrationTests(unittest.TestCase):
                 patch.object(install, 'prepare_spell_sprites', side_effect=ValueError('fixture: no game archives')),                 patch.object(install, 'prepare_props', side_effect=ValueError('fixture: no game archives')), \
                 patch.object(install.prepare_arcane_sky, 'prepare', side_effect=ValueError('fixture: no game archives')), \
                 patch.object(install.prepare_sewer_backdrop, 'prepare', side_effect=ValueError('fixture: no game archives')), \
+                patch.object(install.prepare_collection_tab, 'prepare', side_effect=ValueError('fixture: no game archives')), \
                 patch.object(sys, 'argv', self.argv + list(extra)), contextlib.redirect_stdout(output):
             install.main()
         return output.getvalue()

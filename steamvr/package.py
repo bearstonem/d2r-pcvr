@@ -54,7 +54,8 @@ def main():
               'steamvr/prepare_arcane_sky.py', 'steamvr/prepare_monster_immunity.py', 'steamvr/prepare_sewer_backdrop.py', 'steamvr/prepare_kurast_dock.py',
               'steamvr/prepare_game_ceiling.py', 'steamvr/granny_write.py', 'steamvr/prepare_campfire_sky.py',
               'steamvr/prepare_props.py', 'steamvr/prepare_leather.py',
-              'steamvr/prepare_frontend_floor.py', 'steamvr/prepare_frontend_scene.py', 'steamvr/podglad_modeli.py']
+              'steamvr/prepare_frontend_floor.py', 'steamvr/prepare_frontend_scene.py', 'steamvr/podglad_modeli.py',
+              'steamvr/prepare_collection_tab.py']
     # the scene editors' changes the menu's 3D scenes are built with at install
     paths += sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / 'steamvr').glob('frontend_edits_act[0-9].json'))
     files = {path: ROOT / path for path in paths}

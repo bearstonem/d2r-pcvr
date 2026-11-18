@@ -8,6 +8,12 @@
 //
 // The catalog is the list; the stash only holds what was found, so a missing
 // entry costs no room.
+//
+// The panel opens three ways: the Collection plaque beside the stash's own tab
+// pair, F7, and the Collection tab the mod adds to the stash bar itself
+// (prepare_collection_tab.py writes that layout from the player's game). The tab
+// sends the game's own PanelManager:TogglePanel message, and gamestate.cpp turns
+// it into TabSetWanted(true) here.
 #include "collection_model.h"
 #include "collection_panel.h"
 

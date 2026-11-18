@@ -31,6 +31,7 @@ import prepare_game_ceiling
 import prepare_campfire_sky
 import prepare_frontend_floor
 import prepare_frontend_scene
+import prepare_collection_tab
 from game_install import validate_game
 import mod_identity
 
@@ -643,6 +644,14 @@ def main():
     else:
         payload.update({mod_identity.MOD_DIR / name: data for name, data in front.items()})
         print('Prepared the main menu\'s act scenes in 3D from your installed game.')
+    try:
+        collection_tab = prepare_collection_tab.prepare(game, casclib=args.casclib)
+        prepare_collection_tab.check_existing(game / mod_identity.MOD_DIR, collection_tab)
+    except (OSError, ValueError, KeyError, IndexError) as error:
+        print(f'Collection tab on the stash bar unavailable; the stash keeps its five tabs: {error}')
+    else:
+        payload.update({mod_identity.MOD_DIR / name: data for name, data in collection_tab.items()})
+        print('Prepared the Collection tab on the stash bar from your installed game.')
     require_game_closed()
     check_launcher_icon(game, payload[mod_identity.MOD_DIR / 'launcher_icon.png'])
     snapshot = args.backup_dir / datetime.now().strftime('%Y%m%d-%H%M%S-%f')

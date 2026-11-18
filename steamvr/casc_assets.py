@@ -73,7 +73,10 @@ class CascAssets:
                 if entry.name_type == 0:
                     original = bytes(entry.name)
                     name = canonical(original.decode('utf-8'))
-                    if name.startswith(('data/hd/', 'data/global/excel/')):
+                    # Only what this mod reads: the game's own art and tables. The UI layouts are
+                    # here too - a mod overrides one by shipping its path, so the prepared stash
+                    # layout is built from this copy (see prepare_collection_tab).
+                    if name.startswith(('data/hd/', 'data/global/excel/', 'data/global/ui/layouts/')):
                         self.files[name] = original
                 if not self.dll.CascFindNextFile(search, C.byref(entry)):
                     if self.dll.GetCascError() not in (0, 18):  # end of index

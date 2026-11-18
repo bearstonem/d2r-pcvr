@@ -33,6 +33,7 @@
 #include <D2RLPlugin/api.h>
 
 #include "d2r_vr_state.h"
+#include "collection_tab.h"
 #include "interactionstate.h"
 #include "target_lock.h"
 #include "journal_ui.h"
@@ -974,8 +975,18 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         if (!strcmp(command, "OpenPanel") || !strcmp(command, "OpenExclusivePanel")) { if (*text) g_panels.insert(text); }
         else if (!strcmp(command, "ClosePanel") || !strcmp(command, "UnloadPanel")) g_panels.erase(text);
         else if (!strcmp(command, "UnloadAll") || !strcmp(command, "CloseAll")) g_panels.clear();
+        // The Collection tab on the mod's own stash layout asks for this one (prepare_collection_tab):
+        // the panel it names goes the other way from what the open list holds.
+        else if (!strcmp(command, "TogglePanel") && *text) { if (!g_panels.erase(text)) g_panels.insert(text); }
+        // That tab closes the stash so the Collection panel takes its place, which is what choosing
+        // it means; the game never sends this for the stash itself.
+        if (!strcmp(command, "TogglePanel") && !strcmp(text, "BankExpansionLayout")) {
+            framevr::collection::TabSetWanted(true);
+            Log("gamestate: the Collection tab on the stash bar was chosen");
+        }
         if (!strcmp(command, "OpenPanel") || !strcmp(command, "OpenExclusivePanel") || !strcmp(command, "ClosePanel") ||
-            !strcmp(command, "UnloadPanel") || !strcmp(command, "UnloadAll") || !strcmp(command, "CloseAll")) g_panelChanges.fetch_add(1);
+            !strcmp(command, "UnloadPanel") || !strcmp(command, "UnloadAll") || !strcmp(command, "CloseAll") ||
+            !strcmp(command, "TogglePanel")) g_panelChanges.fetch_add(1);
         g_autoMap.store(g_panels.count("AutoMap") ? 1 : 0);
         framevr::fullmap::g_panel.store(g_panels.count("AutoMap") != 0);
         g_noticePanel.store(g_panels.count("NotificationPanel") != 0);
