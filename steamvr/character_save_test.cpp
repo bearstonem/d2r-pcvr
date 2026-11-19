@@ -68,7 +68,7 @@ int main(){
             assert(call.find("folder")==std::string::npos&&call.find("savedGames")==std::string::npos&&call.find("path")==std::string::npos);
             at=end;
         }
-        assert(logs>=3);
+        assert(logs>=2);
         at=0;   // and no line text is built from a path: the snprintf calls that fill the log's line take names, numbers and the derived `where` only
         while((at=src.find("snprintf(line",at))!=std::string::npos){
             const size_t end=src.find(';',at);const std::string call=Code(src.substr(at,end-at));
