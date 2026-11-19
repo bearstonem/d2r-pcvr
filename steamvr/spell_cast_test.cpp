@@ -146,6 +146,50 @@ int main() {
         const math::Vec emitter={matrix[12]+4*matrix[4]-3*matrix[8],matrix[13]+4*matrix[5]-3*matrix[9],matrix[14]+4*matrix[6]-3*matrix[10]};
         assert(bowflight::Length(emitter-spear.shot.origin*spear.shot.unitsPerMetre)<.0001f);
     }
+    // The Warlock's Miasma Bolt (a player, 2026-11: it left beside his body, not his hand): the game's own row
+    // (skills.txt: no start function, server function 0, srvmissile miasmabolt 697; the headset log's
+    // "skill 395 flags 0xc0020400 server function 0 missile 697") is a hand spell for the Warlock only.
+    {
+        constexpr unsigned flags=0xc0020400u;
+        assert(spellcast::Supported(395)&&!spellcast::NativePath(395)&&spellcast::LaunchCapacity(395)==1);
+        assert(spellcast::Candidate(7,395,0,0,697,flags));
+        for(unsigned character:{0u,1u,2u,3u,4u,5u,6u,8u})assert(!spellcast::Candidate(character,395,0,0,697,flags));
+        assert(!spellcast::Candidate(7,395,0,0,698,flags)&&!spellcast::Candidate(7,395,0,0,-1,flags));   // another missile: native
+        assert(!spellcast::Candidate(7,395,1,0,697,flags)&&!spellcast::Candidate(7,395,0,166,697,flags));   // a start or server function: native
+        assert(!spellcast::Candidate(7,395,0,0,697,flags|1u)&&!spellcast::Candidate(7,395,0,0,697,flags|2u));
+        // Nothing else of his, nor another class's bolt for him.
+        for(int id=373;id<=402;++id)if(id!=395)assert(!spellcast::Supported(id));
+        for(int id:{36,39,45,47,49,84,101})assert(!spellcast::Candidate(7,id,0,0,id==84?192:id==101?55:58,flags));
+        // Fire Bolt and Bone Spear keep their classes.
+        assert(spellcast::Candidate(1,36,0,0,58,0)&&!spellcast::Candidate(7,36,0,0,58,0)&&spellcast::Candidate(2,84,0,0,192,flags));
+        // His cast is the Necromancer's length: 15 frames at 0% Faster Cast Rate, 14 to 9 at 9/18/30/48/75/125%.
+        constexpr int breaks[]={0,9,18,30,48,75,125};
+        for(unsigned i=0;i<7;++i) {
+            assert(spellcast::CastFrames(breaks[i],7)==15-i);
+            if(i)assert(spellcast::CastFrames(breaks[i]-1,7)==16-i);
+        }
+        assert(spellcast::CastFrames(100000,7)==9&&spellcast::CastFrames(-1,7)==15);
+        // The shot is a valid hand spell, and its effect's root is placed so its +4 emitter sits on the hand.
+        bowflight::Flight bolt;bolt.shot.kind=bowflight::Kind::Spell;bolt.shot.skill=395;bolt.shot.missile=697;
+        bolt.shot.origin={10.3f,1.3f,10.2f};bolt.shot.player={10,0,10};bolt.shot.direction=math::Normalized(math::Vec{.6f,-.1f,.8f});
+        bolt.shot.unitsPerMetre=4;bolt.shot.session=bolt.shot.sequence=1;bolt.shot.slot=0;bolt.shot.hand=0;
+        assert(bowflight::Valid(bolt.shot)&&!bolt.NativePath()&&bowflight::MissileId(bolt.shot)==697);
+        float matrix[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+        bowflight::SpellMatrix(bolt,0,matrix);
+        const math::Vec emitter={matrix[12]+4*matrix[4],matrix[13]+4*matrix[5],matrix[14]+4*matrix[6]};
+        assert(bowflight::Length(emitter-bolt.shot.origin*bolt.shot.unitsPerMetre)<.0001f);
+        // Its forward axis is the shot's own 3D heading, not the hero's.
+        const math::Vec forward={matrix[8],matrix[9],matrix[10]};
+        assert(bowflight::Length(forward-bolt.shot.direction)<.0001f);
+        // Held on either trigger, it casts from that hand with no native cast slot (no casting animation or walk lock).
+        for(int hand:{0,1}) {
+            Sim s;s.input.independentSlots=0;
+            if(spellcast::Candidate(7,395,0,0,697,flags))s.input.independentSlots|=1u<<skills::TriggerSlot(hand);
+            s.Step(3);s.input.trigger[hand]=1;s.Step();
+            assert(s.output.spells[hand]==skills::TriggerSlot(hand)&&s.output.slot<0);
+            s.input.trigger[hand]=0;s.Step();assert(s.output.spells[hand]<0);
+        }
+    }
     spellcast::Cadence cadence;
     assert(cadence.Ready(1,0,0)&&cadence.Ready(1,1,0));
     cadence.Fired(1,0,100,13);

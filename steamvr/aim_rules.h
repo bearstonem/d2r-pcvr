@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include "aim_reach.h"
+#include "spell_cast.h"
 
 // How each skill uses the aimed monster, and which hand's target it takes
 // (Jeff, 2026-10-20). One table, so
@@ -17,7 +18,12 @@ enum class Use {
 };
 // The Warlock's skills (373-402, class 7, new in D2R) keep upstream's aim, with no
 // target, rule or placement, until he is tested (Jeff, 2026-10-20: too buggy).
-inline bool Stable(int skill){return skill>=373&&skill<=402;}
+// Miasma Bolt is the exception (a player, 2026-11: it left from beside his body,
+// not the hand): its Skills row is Fire Bolt's - the one Warlock row with a
+// straight missile of its own (srvmissile) - and it is a hand spell now
+// (spellcast::MiasmaBolt), so it takes Fire Bolt's rule as well: the aimed
+// monster, Skills go to the aimed monster's lock, a staff aimed along the arm.
+inline bool Stable(int skill){return skill>=373&&skill<=402&&skill!=spellcast::MiasmaBolt;}
 // directed: the game's own "aimed" flag for the skill (spellaim::Directed).
 inline Use Of(int skill,bool directed) {
     if(Stable(skill))return Use::Native;
