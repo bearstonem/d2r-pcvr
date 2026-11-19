@@ -699,6 +699,9 @@ inline constexpr Override Overrides[]={
     {.id="interactions.leather_menu",.page=View::Menus,.section="Game menus",.kind=RowKind::Stepper,.label="Hold menu",
      .help="Leather: the inventory and other tabs on a hide in your left hand; reach over your left shoulder and grip. Menu only: no hide. Off: in front of you.",
      FRAMEVR_NAMES(LeatherNames),.beside=true,.besideLabel=""},   // the value alone: "Hold: Menu only" squeezed Menu distance's label
+    // The Ring skill menu (vr/ring_wheel.cpp): the skill wheel as rings. On by default; Off is the game's wheel exactly.
+    {.id="interactions.ring_skill_menu",.page=View::Menus,.section="Game menus",.kind=RowKind::Toggle,.label="Ring skill menu",
+     .help="The skill wheel as rings of skills round a center that shows the pointed skill. Off: the game's own wheel, and Quick cast is off too."},
     {.id="hud.tooltip_timing",.page=View::Menus,.section="Game menus",.kind=RowKind::Choice,.label="Item details delay",
      .help="How soon an item's details pop up when you point the laser at it in a menu.",
      FRAMEVR_OPTIONS(TooltipOptions)},

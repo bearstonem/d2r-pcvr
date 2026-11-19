@@ -6,6 +6,7 @@
 #include "memory.h"
 #include "sigscan.h"
 #include "logging.h"
+#include "quick_radial.h"
 #include <string>
 #include <cstdio>
 #include <cstdlib>
@@ -127,8 +128,9 @@ bool Assign(const Request& r,const Snapshot& s) {
     assigned=uint32_t(r.index);return true;
 }
 bool Use(const Request& r,const Snapshot& s) {
+    const uint32_t allowed=framevr::quickradial::rt::QuickUse(&r,assigned);   // the item this call may use: the assigned one, or Quick cast's own in-flight request (the global is never changed)
     Items::ItemInfo info{};ClientItems client;
-    if(r.action!=Action::UseItem||!assigned||uint32_t(r.index)!=assigned||!Validate(r,s,info)||
+    if(r.action!=Action::UseItem||!allowed||uint32_t(r.index)!=allowed||!Validate(r,s,info)||
        Quantity(info)<=0||!client.Load(r.session))return false;
     auto unit=client.Find(info);if(!unit)return false;
     if(info.code==Code('i','s','c')||info.code==Code('i','b','k')) {

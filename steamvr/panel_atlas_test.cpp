@@ -11,7 +11,7 @@ int main() {
         Keyboard,KeyboardLit,KeyboardCaps,KeyboardCapsLit,GrabHint};
     constexpr int Statics=int(sizeof statics/sizeof statics[0]);
     static_assert(Statics==15+RespecPictures,"every static picture checked");
-    const Region shared[]={Settings,Blood,Strain,Notice,BowLaser,ArcaneDecay,Glyph};
+    const Region shared[]={Settings,Blood,Strain,Notice,BowLaser,ArcaneDecay,Glyph,QuickRingA,QuickRingB};
     constexpr int Shared=int(sizeof shared/sizeof shared[0]);
     for(const auto& r:statics)assert(Inside(r,StaticWidth,StaticHeight));
     for(const auto& r:shared)assert(Inside(r,SharedWidth,SharedHeight));
