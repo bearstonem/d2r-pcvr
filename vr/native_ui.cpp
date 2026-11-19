@@ -463,6 +463,15 @@ void Capture(framevr::interaction::Snapshot& s) {
             if(Read(row+0x4c,start)&&Read(row+0x68,secondary)&&Read(row+0x231,los))skill.physical=skill.owner==-1&&los==0&&
                 framevr::spellcast::Candidate(h[1],skillId,start,serverFunction,missile,flags,secondary)&&
                 (skillId!=101||bowvr::HolyReady());
+            // Telemetry: "Frame hand spells:" when a slot's hand spell is first seen and whenever that changes:
+            // from the hand, or from the hero natively because the game's row is not the one checked for (the
+            // Warlock's Miasma Bolt first: a player saw it leave beside his body, not his hand).
+            if(static uint8_t told[512]{};framevr::spellcast::Supported(skillId)&&skill.owner==-1&&skillId<512&&told[skillId]!=(skill.physical?1:2)) {
+                told[skillId]=skill.physical?1:2;char line[240];
+                std::snprintf(line,sizeof line,"Frame hand spells: skill %d (class %u) %s; its row: start function %d, server function %d, missile %d, line of sight %u",
+                    skillId,h[1],skill.physical?"casts from the hand":"casts natively from the hero",int(start),int(serverFunction),int(missile),unsigned(los));
+                framevr::logging::Write(line);
+            }
         }
         const auto name=Name(skillId);std::snprintf(skill.name,sizeof skill.name,"%s",name.c_str());
     }

@@ -40,13 +40,23 @@ public:
 // heads moves to the hand (bowvr::SpellParams), the rest is the game's (owner, 2026-11-09: Chain Lightning out of
 // the arm she points, "similar to how things like firebolt work"). Lightning flies like Fire Bolt.
 inline bool NativePath(int id) {return id==38||id==53;}
-inline bool Supported(int id) {return id==36||id==38||id==39||id==45||id==47||id==49||id==53||id==84||id==101;}
+// The Warlock's Miasma Bolt (class 7): cast natively it left from the hero, its visual from the game's own animated
+// release point beside his body on the right, and flew along a line from his middle, not the hand (a player, 2026-11:
+// "spells seem to come out from the right beside the player body instead of out of the player hand"). The game's
+// Skills row is Fire Bolt's shape - no start function, server function 0, one straight missile (697, miasmabolt) -
+// so it flies from the hand as Fire Bolt does. Its missile leaves its miasma cloud where it hits or ends
+// (Missiles.txt AlwaysExplode, hit function 41), and the hand flight leaves that hit to the game at the contact.
+constexpr int MiasmaBolt=395,MiasmaBoltMissile=697;
+constexpr unsigned WarlockClass=7;
+inline bool Supported(int id) {return id==36||id==38||id==39||id==45||id==47||id==49||id==53||id==84||id==101||id==MiasmaBolt;}
 // Charged Bolt's cast throws up to 24 bolts at once; Chain Lightning's one (its leaps come later, on its hits).
 inline unsigned LaunchCapacity(int id) {return id==38?24:1;}
 inline bool Candidate(unsigned character,int id,int start,int action,int missile,unsigned flags,int secondary=-1) {
-    if(!Supported(id)||(id==84?character!=2:id==101?character!=3:character!=1)||start!=0||(flags&3u))return false;
+    const unsigned owner=id==84?2u:id==101?3u:id==MiasmaBolt?WarlockClass:1u;
+    if(!Supported(id)||character!=owner||start!=0||(flags&3u))return false;
     if(id==84)return action==0&&missile==192;
     if(id==101)return action==0&&missile==55;
+    if(id==MiasmaBolt)return action==0&&missile==MiasmaBoltMissile;
     if(id==38)return action==17&&missile==-1&&secondary==56;
     if(id==53)return action==26&&missile>1&&missile<4096;   // its server function 26 throws its srvmissile
     return action==0&&missile>1&&missile<4096;
@@ -54,11 +64,14 @@ inline bool Candidate(unsigned character,int id,int start,int action,int missile
 // Owned AnimData: Sorceress SC has 14 frames, Necromancer/Paladin SC have 16,
 // both at 256 base animation speed. Preserve class timing when adding spells.
 // diminishing returns capped at 75 effective FCR, minus the terminal frame.
+// The Warlock's cast is the Necromancer's length: his published Faster Cast Rate
+// table (15 frames at 0%, then 9/18/30/48/75/125% for 14 down to 9) is theirs.
+// That is the guides' table, not read from the game's own AnimData: check it in the headset.
 inline unsigned CastFrames(int fcr,unsigned character=1) {
     fcr=std::clamp(fcr,0,100000);
     const int effective=std::min(75,120*fcr/(120+fcr));
     const int speed=256*(100+effective)/100;
-    const int frames=character==2||character==3?16:14;
+    const int frames=character==2||character==3||character==WarlockClass?16:14;
     return unsigned((frames*256+speed-1)/speed-1);
 }
 class Cadence {
