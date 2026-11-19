@@ -13,6 +13,7 @@
 #include "../steamvr/callback_ticket.h"
 #include "../steamvr/logging.h"
 #include "army_x_orders.h"
+#include "../steamvr/army_face.h"
 #include "bow.h"
 #include "bow_signatures.h"
 #include "companion_ai_signatures.h"
@@ -1078,6 +1079,10 @@ void StepSummonArmyServer(
         if (anchorActive) {
             centerPos = g_summonCoordinator.anchorPos;
         }
+        // The army forms where you face: the tick's heading, in place of the model's forward (army_face.h).
+        float faceFx = fx, faceFy = fy;
+        armyface::Heading(armyface::HeadingFrame{faceFx, faceFy, plyrPos.x, plyrPos.y, nowMs, false, g_summonCoordinator.headingFilter, &framevr::logging::Write});
+        const float fx = faceFx, fy = faceFy;
         (void)g_summonCoordinator.UpdateCorridorState(centerPos, { fx, fy }, walkablePred);
         curStance = g_summonCoordinator.activeStance;
         curFormation = g_summonCoordinator.corridorActive
@@ -1162,6 +1167,9 @@ void StepSummonArmyServer(
     size_t leftToFight = 0;
     {
         AcquireSRWLockExclusive(&g_tacticalLock);
+        float faceFx = fx, faceFy = fy;   // the same heading for Step, the coordinator's filter seeded with it
+        armyface::Heading(armyface::HeadingFrame{faceFx, faceFy, plyrPos.x, plyrPos.y, nowMs, true, g_summonCoordinator.headingFilter, &framevr::logging::Write});
+        const float fx = faceFx, fy = faceFy;
         emitted = g_summonCoordinator.Step(
             std::span(samples.data(), validCount),
             plyrPos, fx, fy, nowMs, moves);

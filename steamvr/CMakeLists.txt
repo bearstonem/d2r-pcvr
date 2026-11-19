@@ -409,7 +409,11 @@ set_property(SOURCE interaction_assets.rc APPEND PROPERTY OBJECT_DEPENDS ${CMAKE
 add_executable(army-x-menu-test army_x_menu_test.cpp)
 add_executable(army-x-hunt-test army_x_hunt_test.cpp ${ROOT}/vr/army_x_hunt.cpp)
 target_link_libraries(army-x-hunt-test PRIVATE framevr-runtime)
-foreach(t army-x-menu-test army-x-hunt-test)
+# The summon army forms where you face (army_face.h; glue vr/army_face.cpp).
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/army_face.cpp)
+add_executable(army-face-test army_face_test.cpp ${ROOT}/vr/army_face.cpp)
+target_link_libraries(army-face-test PRIVATE framevr-runtime)
+foreach(t army-x-menu-test army-x-hunt-test army-face-test)
   add_test(NAME ${t} COMMAND ${t})
   set_tests_properties(${t} PROPERTIES TIMEOUT 30)
 endforeach()

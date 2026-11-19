@@ -24,6 +24,7 @@
 #include <windows.h>
 #include "pcvr_identity.h"
 #include "army_x_orders.h"
+#include "../steamvr/army_face.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "summon_range.h"
 #endif
@@ -13289,6 +13290,14 @@ DWORD WINAPI UpdateThread(void*) {
                 const auto& compView = g_skyView[g_eye.load() & 1];
                 if (compView.axes_ok) { compFx = -compView.axes[6]; compFy = -compView.axes[8]; }
                 ReleaseSRWLockShared(&g_skyLock);
+            }
+            {   // the summon army forms where you face: the view's forward on the ground plane (army_face.h)
+                AcquireSRWLockShared(&g_skyLock);
+                const auto& faceView = g_skyView[g_eye.load() & 1];
+                const bool faceOk = faceView.axes_ok;
+                const float faceX = faceOk ? -faceView.axes[6] : 0.0f, faceY = faceOk ? -faceView.axes[8] : 0.0f;
+                ReleaseSRWLockShared(&g_skyLock);
+                armyface::Facing(faceOk, faceX, faceY);
             }
             companionai::Install();
             companionai::Tick(compFx, compFy);

@@ -905,3 +905,6 @@ For a class with summons (Necromancer, Druid, Amazon's Valkyrie, Assassin's Shad
 
 While the menu is on a button, your summons also walk (or run, if they can) all the way to a marked monster, keep a held
 spot clear of nearby monsters, and a summon that is hit goes for its attacker. With the menu on no button nothing changes.
+
+For every summoner, menu or not: the army forms where you face (the headset's view), so walking backward from a monster
+keeps your summons in front of you. A quick glance does not move them; turning your head past 22.5 degrees for 0.4 s does.
