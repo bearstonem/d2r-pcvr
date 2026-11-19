@@ -1,7 +1,7 @@
 #pragma once
 // Lab Ring wheel (T025, feedback 1 items 3 and 5; build-plan L4 rows 16-18): the bound-button badge beside each skill, as
-// plain data. Pure and Windows-free (ring-wheel-test). One badge per bound slot, in Jeff's button style (feedback-1-plan.md
-// item 3; the kit's badges=quest, Design\ring-wheel\kit\wheel.js drawQuestBadge): a dark disc with the face letter (A / B
+// plain data. Pure and Windows-free (ring-wheel-test). One badge per bound slot, in Jeff's button style (the design notes
+// item 3; the kit's badges=quest, drawQuestBadge): a dark disc with the face letter (A / B
 // right, X / Y left on Quest), a gold coin with a dark letter for the grip layer, a dark rounded square R / L for the
 // trigger; a free skill has none. Placed by the kit's badgePlaces search, once per layout, bind or row change, never per
 // frame (BadgeBoard); ring_wheel_draw.h Build draws them on the main page only (never on the glyph chooser or a page).

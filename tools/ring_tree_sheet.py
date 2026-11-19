@@ -4,7 +4,7 @@ on one sheet, and steamvr/ring_wheel_tree_sheet.h, the mask of which cells are p
 Jeff 2026-11-17: "change these to be sizable and have gpt draw them (the icons for the skill tree like fire, lightning, ice) ...
 the rust background square we use for normal skills ... a color instead of the silver". One square per skill tree, 24 in all, our
 own art: tools/ring_tree_squares/tree-<class>-<tree>.png (384 px, borderless full-bleed rust (no frame, bevel or rivets; motif in the middle 80%), trimmed to its alpha box in case of a margin, straight alpha; the 1024 px masters
-stay in the vault, Design\\ring-wheel\\tree-icons).
+stay with the artist).
 
 Sheet: 6 columns x 4 rows of 144 px cells (the ring's atlas art square at 150%), SLOT = the cell, row-major, SLOT = class * 3 +
 the tree's skillcategories page; the class and tree names, in slot order, are READ from steamvr/ring_wheel_tree_art.h (Names), so
@@ -17,7 +17,7 @@ shade, the dark line, the rim) from the whole square (nothing to crop: no bevel 
 and adds the plate's frame in code (RecipeSquare: a bevel, a dark line, the accent rim). Nothing here is hand-painted round art.
 
     python tools/ring_tree_sheet.py [--squares tools/ring_tree_squares] [--out <png>] [--mask <h>] [--preview <png>]
-    python tools/ring_tree_sheet.py --import <Design\\ring-wheel\\tree-icons>   (trim + downscale the vault's squares into --squares)
+    python tools/ring_tree_sheet.py --import <folder of squares>   (trim + downscale the squares into --squares)
 """
 import argparse, os, re, sys
 from PIL import Image
@@ -43,7 +43,7 @@ def file_name(cls, tree):
 
 
 def trim(im):
-    """The plate's own square: the alpha's bounding box (the vault master has an empty margin outside x = 31..994), cut square."""
+    """The plate's own square: the alpha's bounding box (the master has an empty margin outside x = 31..994), cut square."""
     im = im.convert("RGBA")
     box = im.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
     if not box:
@@ -96,7 +96,7 @@ def main():
     ap.add_argument("--out", default=os.path.join(REPO, "steamvr", "assets", "lab", "ring-tree-sheet.png"))
     ap.add_argument("--mask", default=os.path.join(REPO, "steamvr", "ring_wheel_tree_sheet.h"))
     ap.add_argument("--preview", help="also write a check sheet (the sheet on a dark ground with the slot numbers' empties marked)")
-    ap.add_argument("--import", dest="imp", help="trim and downscale the vault's painted squares into --squares, then exit")
+    ap.add_argument("--import", dest="imp", help="trim and downscale the painted squares into --squares, then exit")
     a = ap.parse_args()
     if a.imp:
         import_squares(a.imp, a.squares)

@@ -1,6 +1,6 @@
 #pragma once
 // Lab Ring wheel (T036, Jeff 2026-11-16: "the Gestures, Glyphs and Quick cast icons show gold; they must match the Diablo
-// silver-on-rust set"): the three sub-menus' own pictures, our ChatGPT art (vault Design\ring-wheel\t036\art, icon-glyphs-v3b,
+// silver-on-rust set"): the three sub-menus' own pictures, our ChatGPT art (the design kit, icon-glyphs-v3b,
 // icon-gestures-v2, icon-quick-cast-v2), made offline the way the ring shows a game icon after the T036 key: the silver motif
 // keyed out of its rust plate, its tint pulled to gray, on transparent, 144 px (the atlas art square at 150%), framed so the motif
 // fills the disc like a game glyph (make-ring-menu-icons.py there). Embedded by steamvr/ring_wheel_menu_art.rc

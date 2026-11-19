@@ -1,14 +1,14 @@
 // Lab Ring wheel (Lab > Experiment: Ring wheel; exp.ring_wheel, Dev only; ticket T025, 2026-11-07). Jeff: "let's also add a
 // new lab item for turn on the new skill menu ... the class skills are broken into 3 sections on the screen. When you mouse
 // over one areas the other two tree skills fade away ... The center of the skill tree menu would give the helper text for the
-// mouse over skill ... One side to open glyphs and the other gestures". Plan: vault build-plan.md in
-// Tickets\025-ring-skill-wheel-lab (E1 seams, E9 build order); frame budget: frame-budget.md in the same folder.
+// mouse over skill ... One side to open glyphs and the other gestures". Plan: the design notes
+// (E1 seams, E9 build order).
 //
 // The ring is a skin over upstream's wheel engine (interaction::Engine), not a second engine: upstream keeps open and close,
 // pages, the footer, editors and every request; this Lab moves the panel, turns laser hits into upstream cells or ring-only
 // events, queues BindSkill requests upstream's dispatch already takes, and swaps the wheel quad's picture.
 //
-// T036 (ring tree cleanup, vault Tickets\036-ring-tree-cleanup, mockup Design\ring-wheel\t036): each skill circle in layers, each
+// T036 (ring tree cleanup): each skill circle in layers, each
 // its own row on Ring wheel > Layers (Icon: the clean icon, keyed on the atlas worker; Color ring; Element frame; Float;
 // Animation: the old rest glows, over-face passes and crawl); the center in thirds (Glyphs, Gestures, Quick cast; ring_wheel.h
 // ThirdAt), each third a pseudo seat (a tap opens it, a hold puts that sub-menu on the button); Glyphs and Gestures on the General
@@ -61,7 +61,7 @@
 //  - OnClearInput        transport ClearInput (the headset unfocused, the session ending, a failed sync or copy): the open
 //                        wheel's close line, written there (audit 2026-11-10 bug 2). No new seam: upstream's own hook.
 // Cost with the master Off: each seam is one relaxed load, an AND and a not-taken branch, its arguments never built.
-// Telemetry "Frame ring wheel:" (vault Findings\Telemetry tags.md, plan E8): On / Off each edge; setup; "upstream: <reason>"
+// Telemetry "Frame ring wheel:": On / Off each edge; setup; "upstream: <reason>"
 // once a session; placed at most once a 10 s; a Placement change at most once a second; "10 s:" while the ring is open; each bind.
 #include <windows.h>
 #include <d3d12.h>
@@ -321,7 +321,7 @@ int EntryOf(int id, int owner) {
     return -1;
 }
 bool IsEntry(int id, int owner) { return EntryOf(id, owner) >= 0; }
-// ---- T036 (vault Tickets\036-ring-tree-cleanup): the layers, the center's thirds, each sub-menu on a button ----
+// ---- T036: the layers, the center's thirds, each sub-menu on a button ----
 struct WantMenu { int third = -1, hand = -1; double since = 0; };
 WantMenu wantMenu;                // a sub-menu asked for (its button, a tap on its shelf entry) until upstream's page is there
 constexpr double WantMenuMs = 1000;   // a wheel that never got there (busy hands, an editor, clicks ignored): given up this long after the ask or the last page change, or after FireGate::MaxFires clicks on one page (S-B)
@@ -938,7 +938,7 @@ void Setup(host::LayerFrame& f) {
 }
 }  // namespace
 
-// ---- Job B: pointing with either hand (steamvr/ring_wheel_pointing.h; feedback-1-plan.md item 1, critic FB1 / FS1) ----
+// ---- Job B: pointing with either hand (steamvr/ring_wheel_pointing.h; the design notes item 1, critic FB1 / FS1) ----
 namespace pt = framevr::ringwheel::pointing;
 pt::Owner pointing;
 int pointerOwner = -1;   // this frame's pointing owner (-1 none): Input's trigger and cancel, pulses
@@ -1128,7 +1128,7 @@ void Pointer(host::PointerFrame f) {
     if (f.pointerHit) Write(f.dotPose, {r.h.point + math::Rotate(pose.q, {0, 0, .003f}), pose.q});
 }
 
-// ---- Bug 9 (bug-autoclose.md): the world-locked ring keeps the wheel open while the resting wheel hand is out of view;
+// ---- Bug 9: the world-locked ring keeps the wheel open while the resting wheel hand is out of view;
 // every open and close is logged with its reason (Jeff: "why did it close?") ----
 int pageWas = -1;                         // last frame's upstream page (the Input seam's)
 ULONGLONG openedAt = 0, trackSaidAt = 0;

@@ -7,7 +7,7 @@
 // exited, the way upstream destroys its own swapchains, so no API layer (VDXR, OpenXR bridges with frame generation) sees
 // xrDestroySwapchain from a second thread while the frame thread is in xrWaitFrame / xrEndFrame.
 //
-// Perf (frame-budget.md "Watch X1 check"): the Off edge's drain is the hook's last call before it goes dark, so a swapchain
+// Perf: the Off edge's drain is the hook's last call before it goes dark, so a swapchain
 // left for Reap would live (about 24 MB) until the next On or OnUiReset. Off() therefore destroys it in that drain call, on
 // the frame thread, once the Lab's last compose is done on the GPU (a wait of at most `waitMs`, normally 0: the last compose
 // was a frame ago); only a GPU still busy past that keeps it for Reap (said in the log).

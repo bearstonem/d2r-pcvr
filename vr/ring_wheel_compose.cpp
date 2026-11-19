@@ -64,7 +64,7 @@ float Bolt(float2 p, float2 a, float2 b, float seed, float rough) {
 // faster than 3 a second, phases seeded per icon; glints and charge orbs only in their rest event (ev: its age in ms, -1 none).
 // Under the face: halos, tongues, motes, blobs, rings; over it (kit: after the rim): the lightning arcs and the steel glint.
 // Per kind (RestKind order), tuned so each kind's band light stays at or under the reference's (Design/ring-wheel/r8-match/
-// rest-brightness.md; the preview prints the band luma per kind and checks it per class and tree on real icons).
+// the design notes; the preview prints the band luma per kind and checks it per class and tree on real icons).
 static const float RestGain[12] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 // The kit's 'lighter' (additive) layers: light added, no alpha (the ring's layer is premultiplied, so the runtime adds it to
 // the world as the kit's canvas adds it to the scene); normal-blend layers (AddN) cover.
@@ -750,7 +750,7 @@ float4 PSFx(V i) : SV_Target {
     clip(max(c.a, max(c.r, max(c.g, c.b))) - 1.0 / 255);
     return c;
 }
-// Perf (frame-budget.md "R8 stage 1b check" finding 1): with no offline blob, the effects draw nothing until the worker has
+// Perf (the design notes "R8 stage 1b check" finding 1): with no offline blob, the effects draw nothing until the worker has
 // compiled PSFx (the slow one); icons, rims and text (PS) show at once.
 float4 PSFxNone(V i) : SV_Target { clip(-1); return 0; }
 )";
@@ -911,7 +911,7 @@ std::string ShaderConstants() {
     return "static const float PointedReachPx = " + std::to_string(int(PointedReachPx)) + ", PointedEdgePx = " + std::to_string(int(PointedEdgePx)) + ";\n";
 }
 std::string ComposeShaderSource() { return ShaderConstants() + RestLayersHlsl + Source; }
-// Perf (frame-budget.md "R8 stage 1b check" finding 2): one tiny draw with each pipeline into a 1 x 1 target on the worker,
+// Perf (the design notes "R8 stage 1b check" finding 2): one tiny draw with each pipeline into a 1 x 1 target on the worker,
 // waited on its fence, so a driver's lazy compile at first use lands here and not on the frame thread's first compose.
 // Uses slot 0 before Setup publishes (no Draw can run yet). The ms, or -1 when it could not run (the first compose pays).
 double Warm(Compose::Impl& p);
@@ -933,7 +933,7 @@ bool Compose::Setup(ID3D12Device* device, ID3D12CommandQueue* queue, int format,
         Require(compile && serialize, "shader compiler unavailable");
         ComPtr<ID3DBlob> vs, ps, psFx, errors;
         const std::string source = ComposeShaderSource();   // the constants (N1), then the class recipes' layer table (stage 1b)
-        // Perf (frame-budget.md "R8 stage 1a check"): the bytecode compiled offline (tools/gen_ring_wheel_shader.py) when it
+        // Perf: the bytecode compiled offline (tools/gen_ring_wheel_shader.py) when it
         // was made from this exact source: no compile on the On edge. A stale blob: compile here (15-20 s) and say so.
         const auto t0 = std::chrono::steady_clock::now();
         p->stats.embedded = ShaderBlobOk && ShaderSourceHash(source) == ShaderBlobHash && !ComposeForceCompile;

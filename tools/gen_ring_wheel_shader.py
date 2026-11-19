@@ -1,7 +1,7 @@
 """Lab Ring wheel (T025, R8 match stage 1a perf fix): compiles the compose pass's shaders once, at build time.
 
 The compose shader (vr/ring_wheel_compose.cpp `Source`, after steamvr/ring_wheel_skill_fx.h `RestLayersHlsl`) takes
-15-20 s to compile at /O3 since R8 match stage 1a (frame-budget.md "R8 stage 1a check"); at run time that was the wait on
+15-20 s to compile at /O3 since R8 match stage 1a; at run time that was the wait on
 every Lab On edge. The build runs this (steamvr/lab.cmake) and writes <build>/generated/ring_wheel_shader_blob.h: the
 FNV-1a 64 hash of the exact source the Lab compiles, the VS and PS bytecode (fxc /O3, the same d3dcompiler as D3DCompile)
 and the PS instruction-slot count; nothing binary goes into git. At run time a matching hash uses the bytecode (no compile).

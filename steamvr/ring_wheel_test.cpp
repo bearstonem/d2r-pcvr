@@ -279,7 +279,7 @@ int main() {
         o = h.Step(At(ms, a.x, a.y, false), set);
         Check(o.event == rw::Event::None, "a trigger held through a page change: its release is not a click, even after the lockout");
     }
-    // ---- eval.md "Unit-test list, R2-R6", R2 items (numbered as there); the blocks above stay ----
+    // ---- the design notes "Unit-test list, R2-R6", R2 items (numbered as there); the blocks above stay ----
     {   // #1 every learned class skill has a seat, all 8 classes, both layouts; count == input; angles inside the sector minus
         // 0.08 rad; radii 184-274 (Trees shown) / 198-286 (Tree orbs)
         const int full[3] = {10, 10, 10};
@@ -592,7 +592,7 @@ int main() {
         rw::HapticGate g3; int all = 0; for (int k = 0; k < 30; ++k) all += g3.Hover(0, k * 10.0, 0);
         Check(all == 30, "#10 P12 0: no limit");
     }
-    // ---- R3 (eval.md items 11-13): placement ----
+    // ---- R3 (the design notes items 11-13): placement ----
     {   // #11 sizes: 768 px is 48 deg at 0.80 m and 0.90 m; 15 px a degree at the center; an icon 2.9 deg; the quads
         Check(std::fabs(rw::DegOf(768, .8f, .9f) - 48.0f) < .15f, "#11 the 768 px wheel region is 48 deg wide at 0.80 m, 0.90 m away");
         Check(std::fabs(rw::PxPerDeg(.8f, .9f) - 15) <= .5f, "#11 15 +- 0.5 px a degree at the center");
@@ -2960,7 +2960,7 @@ int main() {
             Check(!(rw::KeyOf(sm) == k0) && rw::KeyOf(sc) == k0, "draw key: a new placement redraws, the same one does not");
         }
     }
-    {   // Job B (feedback-1-plan.md item 1, critic FB1 / FS1): pointing with either hand. 90 Hz frames; a hand's ray as a yaw.
+    {   // Job B (the design notes item 1, critic FB1 / FS1): pointing with either hand. 90 Hz frames; a hand's ray as a yaw.
         namespace pt = framevr::ringwheel::pointing;
         struct Hand { bool tracked = true, onPanel = true, onTarget = false, trigger = false, anyDown = false; float yaw = 0; };
         struct Sim {
@@ -3757,7 +3757,7 @@ int main() {
         Check(a.size() < 400 && a.rfind("Frame ring wheel: On", 0) == 0 && std::string(rw::OffLine()).rfind("Frame ring wheel: Off", 0) == 0,
               "On / Off lines keep the tag and fit the buffer");
     }
-    // ---- T036 (vault Tickets\036-ring-tree-cleanup; mockup Design\ring-wheel\t036): the center in thirds, the sub-menus, the Quick
+    // ---- T036: the center in thirds, the sub-menus, the Quick
     // cast page and its stick select, the clean icon's key, the layers ----
     {   // The thirds' hit test: by angle, Glyphs upper left, Gestures upper right, Quick cast at the bottom; 6 px dead bands on the spokes
         auto at = [](float deg, float r) { const float a = deg * rw::Pi / 180; return std::array<float, 2>{r * std::cos(a), r * std::sin(a)}; };
@@ -3939,7 +3939,7 @@ int main() {
             Check(!rw::MenuButtonAllowed(0) && rw::MenuButtonAllowed(1), "review F1: a sub-menu never goes on the trigger");
         }
     }
-    {   // Headset fixes 2026-11-16 (Jeff's test 1:06-1:29 PM; vault Tickets\035-quick-cast-radial log)
+    {   // Headset fixes 2026-11-16 
         // Bug 1: a sub-menu's button with a seat or a third under the open ring's laser is the ring's press (a hold rebinds that button)
         Check(!rw::MenuPressOpens(true, true, rw::Kind::Seat) && !rw::MenuPressOpens(true, true, rw::Kind::Quick) && !rw::MenuPressOpens(true, true, rw::Kind::Glyphs) &&
               !rw::MenuPressOpens(true, true, rw::Kind::Gestures), "bug 1: a seat or a third under the laser takes the menu button's press (tap casts, hold rebinds)");

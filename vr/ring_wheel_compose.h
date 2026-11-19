@@ -1,7 +1,7 @@
 #pragma once
 // Lab Ring wheel (T025, build steps R4-R5): the compose pass. It draws steamvr/ring_wheel_draw.h's instance list into a
 // target (the Lab's own layer swapchain in the game from R6, a WARP texture in ring-wheel-preview). Plan E3, E4,
-// frame-budget.md sections 2, 3 and 6:
+// the design notes sections 2, 3 and 6:
 //  - Setup runs on the Lab's worker (vr/ring_wheel_atlas.h), never on the frame thread: shader compile (about 20 ms),
 //    root signature, pipeline, three slots, both atlases twice (front and back), one upload staging, the query heap and a
 //    persistently mapped readback. Ready() is its release store; the frame thread reads it with acquire.
@@ -78,7 +78,7 @@ public:
     bool HasAtlas(AtlasKind k) const;
     unsigned Flips(AtlasKind k) const;   // atlases flipped in so far
     size_t MaxSliceBytes() const;        // the largest Pump so far
-    // R8 match stage 1a perf check (frame-budget.md): Setup's shader compile time and the pixel shader's instruction count
+    // R8 match stage 1a perf check (the design notes): Setup's shader compile time and the pixel shader's instruction count
     // (D3DReflect; 0 when unavailable). The preview holds both under a budget.
     // compileMs: the shaders' load or compile and both pipelines' creation; warmMs: the warm-up draws (-1: not run).
     struct ShaderStats { double compileMs = 0, warmMs = 0; unsigned psInstructions = 0, fxInstructions = 0; bool embedded = false; };   // fx: PSFx (the effects); embedded: the offline blob, no compile

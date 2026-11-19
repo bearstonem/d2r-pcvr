@@ -638,7 +638,7 @@ add_executable(effect-visibility-test effect_visibility_test.cpp)
 target_compile_options(effect-visibility-test PRIVATE -UNDEBUG)
 add_test(NAME effect-visibility-test COMMAND effect-visibility-test)
 
-# Ring skill menu (vault Design\ring-wheel): the ring-shaped skill wheel, drawn by its own compose pass (vr/ring_wheel*.cpp).
+# Ring skill menu: the ring-shaped skill wheel, drawn by its own compose pass (vr/ring_wheel*.cpp).
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/ring_wheel.cpp ${ROOT}/vr/ring_wheel_compose.cpp ${ROOT}/vr/ring_wheel_atlas.cpp ring_wheel_menu_art.rc)
 # Its engine: the seats, the hit test, tree dwell and hold, fire on release, lockout, pick and bind, the draw lists, the pages, the badges.
 add_executable(ring-wheel-test ring_wheel_test.cpp)

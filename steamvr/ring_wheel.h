@@ -1,9 +1,8 @@
 #pragma once
 // Lab Ring wheel (T025; Lab > Experiment: Ring wheel, exp.ring_wheel): the wheel's geometry, hit test and input state,
-// pure and Windows-free so every number is unit-tested (ring_wheel_test.cpp). Build step R2 (vault Tickets\025-ring-
-// skill-wheel-lab\build-plan.md E2, E5; look L1, L2).
+// pure and Windows-free so every number is unit-tested (ring_wheel_test.cpp). Build step R2 (E2, E5; look L1, L2).
 //
-// Coordinates: "wheel px" are the design kit's (Design\ring-wheel\kit\wheel.js): the 768 x 800 wheel region, its center
+// Coordinates: "wheel px" are the design kit's (the design kit's wheel.js): the 768 x 800 wheel region, its center
 // C = (384, 384), the shelf row at y 760. "Canvas px" are the 1024 x 1024 canvas the region sits in, at (128, 112); the
 // footer is in canvas px (upstream's FooterBounds, v = y / 1024). 960 canvas px a meter, so 15 px a degree at 0.9 m.
 //
@@ -190,7 +189,7 @@ inline int FooterAt(float cx, float cy, bool developer, bool fullWidth, interact
     for (int i = 0; i < tabs; ++i) if (interaction::FooterBounds(i, page, developer).Contains(u, v)) return interaction::FooterCell(i, page);
     return -1;
 }
-// ---- T036: the center in thirds (Jeff, 2026-11-15; vault Design\ring-wheel\t036) ----
+// ---- T036: the center in thirds (Jeff, 2026-11-15) ----
 // Glyphs upper left, Gestures upper right, Quick cast at the bottom: three 120 deg slices split by spokes at 12, 4 and 8
 // o'clock, each spoke a 6 px dead band (CenterDeadBand on each side) that keeps the slice pointed last. The pointed slice
 // reaches its grow past the center's edge (11%: 151 px grown), so the laser keeps it there; the other two dim (draw only).
@@ -635,7 +634,7 @@ public:
         return out;
     }
 };
-// ---- Placement (R3; plan E3, L1; vr-numbers.md must-fix 1-3) ----
+// ---- Placement (R3; plan E3, L1; the design notes must-fix 1-3) ----
 // On open the wheel spawns ahead of the eyes along the heading (yaw only), its center below eye level, its face turned to
 // the eyes; then it stays in the room while open (world-locked). A hand switch or a Placement change respawns it.
 // widthM is the 768 px wheel region's width: 960 canvas px a meter at 0.80 m, 15 px a degree at 0.90 m.
@@ -928,7 +927,7 @@ inline MenuPress MenuPressed(const MenuButtons& b, const bool down[2][3], const 
     return p;
 }
 
-// ---- T035/T036 headset fixes (2026-11-16, Jeff's test 1:06-1:29 PM; vault Tickets-quick-cast-radial log) ----
+// ---- T035/T036 headset fixes (2026-11-16, headset test) ----
 // Bug 1: a sub-menu's button pressed while the open ring's main page has a seat or a center third under the laser is the ring's
 // press, as every other button's (a tap casts that seat; a hold of Hold to assign, about 1 s, puts the seat on this button, so the
 // menu's own button can always be rebound). Anywhere else (the wheel shut, another page, the laser off the seats) it opens its

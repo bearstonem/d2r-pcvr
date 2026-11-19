@@ -5,7 +5,7 @@
 // pull in one hold), hand roll ignored, tilt clamped, the distance kept 0.40-1.50 m from the head. The result is an offset
 // from the Placer's spawn pose, so a remembered place follows the player when they walk or turn.
 //
-// The ring's rules on top (feedback-1-plan.md item 2 and the critic's FS3, FS4 as accepted by gameplay-dev):
+// The ring's rules on top (the design notes item 2 and the critic's FS3, FS4 as accepted by gameplay-dev):
 //  - Only the pointing (laser) hand grabs; its grip with a face button or trigger down never starts a move (FS3: the grip
 //    layer's binds and holds keep working); once moving, the ring takes no presses until the grip is up (the caller drops
 //    its events while Moving() is true).

@@ -1,8 +1,8 @@
 #pragma once
 // Lab Ring wheel (T025, build steps R4-R5): what the compose pass draws, as plain data (plan E3, E4; look L1-L3;
-// frame-budget.md sections 2-3). Pure and Windows-free: the instance list a frame draws (shapes, icons, glyphs), when a
+// the design notes sections 2-3). Pure and Windows-free: the instance list a frame draws (shapes, icons, glyphs), when a
 // frame composes at all, the 3-slot ring that never waits on the GPU, the atlas cell grid and the content rectangle inside
-// the swapchain. vr/ring_wheel_compose.cpp draws the list; ring-wheel-preview renders it on WARP (eval.md 14-16).
+// the swapchain. vr/ring_wheel_compose.cpp draws the list; ring-wheel-preview renders it on WARP (the design notes 14-16).
 //
 // Every instance is one quad in canvas px (steamvr/ring_wheel.h); its recipe draws only inside its own quad, with no loop
 // that grows with the input. Colors are premultiplied by the shader. A closed wheel builds no instance at all.
@@ -478,7 +478,7 @@ inline void PushSigil(Instance* out, int& n, int max, Sigil s, float x, float y,
         for (int i = 0; i < k; ++i)
             PushLine(out, n, max, x + p[i][0] * scale, y + p[i][1] * scale, x + p[i][2] * scale, y + p[i][3] * scale, (pass ? 2.f : 4.f) * w, pass ? c : Rgb{0, 0, 0}, pass ? a : .6f * a);
 }
-// ---- T036: the center in thirds (Design\ring-wheel\t036: rest, each third pointed) ----
+// ---- T036: the center in thirds (the design kit: rest, each third pointed) ----
 // Each third's mark (36 px at rest, on r 44 at its middle angle; grown, 40 px in the middle of its ring 80..136, r 110); the
 // pointed one 11% larger, lit and in the middle of its grown slice, the other two at the dim row's opacity; a class with no
 // gestures: that third at 35%. MarkScale: 36 px of a 20 px sigil. out: the pointed slice's half grow (its ring's middle moves out).
@@ -614,7 +614,7 @@ inline int DrawRuns(const Instance* list, int n) {
     return runs;
 }
 // The instance list: shapes and icons first (at most MaxInstances), then glyphs (at most MaxText); 0 when closed or faded.
-// Perf (frame-budget.md "R8 stage 2 check"): the effects go in two passes, the rest glows and the pointed effect first
+// Perf: the effects go in two passes, the rest glows and the pointed effect first
 // (under every icon), the over-face glows after the shapes (the text stays on top), so a compose is 4 draws. Safe
 // because no effect under a face reaches another icon: the rest cap 33 px (43 pointed) against 70 - 22 = 48 px from a
 // neighbor's center to its face (ring-wheel-test checks it); the pointed effect is meant to lie under its neighbors.

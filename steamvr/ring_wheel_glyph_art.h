@@ -1,7 +1,7 @@
 #pragma once
 // Lab Ring wheel > Center > Glyph icon (Jeff 2026-11-18 5:49 PM: "glyph icons are claude drawings, lets see what gpt can do to make them
 // look d2 style with the rust and silver, we need the square as the basic, and then we need to make a circle version for our ring
-// menu"): the pictures that replace the ring wheel's code-drawn glyphs, 12 of them, our own art (vault Design\ring-wheel\glyph-icons):
+// menu"): the pictures that replace the ring wheel's code-drawn glyphs, 12 of them, our own art:
 //   - slots 0-7 the Glyphs page's shape faces, in glyphs::Shape order (circle, triangle, square, lightning bolt, spiral, V, star, wave);
 //   - slots 8-11 the center split's sigils (Sigil::Back, Cross = "clear", Star, Hand).
 // Same plan as the tree icons (steamvr/ring_wheel_tree_art.h): the sheet steamvr/assets/ring-wheel/ring-glyph-sheet.png, 4 x 3 cells of CellPx,

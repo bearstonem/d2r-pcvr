@@ -1,7 +1,7 @@
 // Lab Ring wheel (T025, build steps R4-R5): ring-wheel-preview [--out <folder>] [--icons <icon cache folder>] [--kit <kit folder>] [--badges <folder>] [--t036 <folder>].
 // By hand, never in ctest: --shot-ms <folder> [--adapter hardware] times a screenshot of the full ring at 150% (1296 x 1320), the
 // frame's half and the worker's, beside the old all-on-the-frame save (round 2026-11-12 Job B); its PNGs go into <folder>.
-// The compose pass (vr/ring_wheel_compose.cpp) and the atlases (vr/ring_wheel_atlas.cpp) on WARP, plus eval.md
+// The compose pass (vr/ring_wheel_compose.cpp) and the atlases (vr/ring_wheel_atlas.cpp) on WARP, plus the design notes
 // items 14-16. With no arguments (the test): synthetic icons (numbered colored discs, no game art), upstream's menu fonts
 // from the source tree, made-up text. Local only, never in a test or a commit: --icons reads the player's own icon cache
 // (d2r_vr_icons), --kit runs the blurb check over every skill of the design kit's data, --out writes the pictures at 100%
@@ -226,7 +226,7 @@ void Save(const std::filesystem::path& folder, const std::string& name, const st
     framevr::ringwheel::png::Save((folder / (name + ".png")).c_str(), straight, UINT(w), UINT(h));
     framevr::ringwheel::png::Save((folder / (name + "-on-dark.png")).c_str(), dark, UINT(w), UINT(h));
 }
-// R8 match stage 1b (rest-brightness.md): the kit's busy stand-in ground (r8-match/busy-plate-1x.png, its grout transparent),
+// R8 match stage 1b (the design notes): the kit's busy stand-in ground (r8-match/busy-plate-1x.png, its grout transparent),
 // put on black and premultiplied, 768 x 800 wheel px; empty when the file is missing.
 std::vector<uint8_t> ReadPng(const std::filesystem::path& file, int& w, int& h);
 std::vector<uint8_t> LoadPlate(const std::filesystem::path& file, int& w, int& h) {
@@ -788,7 +788,7 @@ int main(int argc, char** argv) {
             }
             (void)compose.TakeWindow();   // these pictures are not in the cost window the R4 check below reads
         }
-        {   // T025 (Lab > Ring wheel > Layers > Tree icon; vault Design\ring-wheel\tree-icons): a Sorceress page with the tree marks painted, circle
+        {   // T025 (Lab > Ring wheel > Layers > Tree icon): a Sorceress page with the tree marks painted, circle
             // and square, at 50, 100 and 200%, then Drawn at 100% and Hidden, at the panel's real size. Checked every run; saved with --tree <folder>.
             // The squares: the built sheet's (tools/ring_tree_sheet.py) when it holds any; else a stand-in sheet of three flat-colored plates
             // (the proof of the drawing, not of the art: its file names say stand-in).
@@ -855,7 +855,7 @@ int main(int argc, char** argv) {
             }
             if (standIn) { ta::SetMask(0); ta::SetSheet(nullptr); }
         }
-        {   // Glyph icon (Lab > Ring wheel > Center > Glyph icon; vault Design\ring-wheel\glyph-icons): the Glyphs page's eight shapes and the main
+        {   // Glyph icon (Lab > Ring wheel > Center > Glyph icon): the Glyphs page's eight shapes and the main
             // page's center sigils (star, hand) drawn, painted circle at 50 / 100 / 200 / 300% and painted square. Checked every run; saved with
             // --glyph <folder>. The squares: the built sheet's (tools/ring_glyph_sheet.py) when it holds any; else a stand-in sheet of twelve
             // flat rust plates with a silver disc (the proof of the drawing, not of the art: its file names say stand-in).
@@ -936,7 +936,7 @@ int main(int argc, char** argv) {
             }
             if (standIn) { ga::SetMask(0); ga::SetSheet(nullptr); }
         }
-        {   // T036 (vault Tickets\036-ring-tree-cleanup; mockup Design\ring-wheel\t036): the five layers one at a time, the center in
+        {   // T036: the five layers one at a time, the center in
             // thirds (rest, each third pointed, grow Off, dim Off and Hidden, a bound Quick cast badge, Quick cast Off; the Quick cast page
             // went 2026-11-16). A Sorceress with the three sub-menu entries on the General row. Checked every run; saved with --t036 <folder>
             // (with --icons the player's own icons: keep those pictures private).
@@ -1067,7 +1067,7 @@ int main(int argc, char** argv) {
             }
             (void)compose.TakeWindow();
         }
-        {   // R8 match stage 1a perf fix (frame-budget.md "R8 stage 1a check"): the On edge loads the build's bytecode, no compile
+        {   // R8 match stage 1a perf fix: the On edge loads the build's bytecode, no compile
             const auto st = compose.Stats();
             std::printf("compose shaders: %s, %.0f ms, pixel shaders %u + effects %u instructions, %u + %u slots (budget %u each)\n", st.embedded ? "built offline" : "compiled",
                 st.compileMs, st.psInstructions, st.fxInstructions, rw::ShaderBlobPsSlots, rw::ShaderBlobPsFxSlots, rw::ShaderBlobSlotBudget);
@@ -1320,7 +1320,7 @@ int main(int argc, char** argv) {
         // R8 match stage 1 (r8-match-spec 7.3, B2): the rest cap in pixels. Every rest kind, under and over the face, on one
         // canvas at 100% (1 px = 1 canvas px), 10 s at 250 ms with its rest event cycling: no pixel over 2% alpha farther than
         // 28.6 px from its icon's center, premultiplied (rgb <= alpha). Each kind's mean added luma in the 1.0-1.3 r band
-        // over black under the seat's rings (the reference's measure, rest-brightness.md; black is its upper bound) printed.
+        // over black under the seat's rings (the reference's measure, the design notes; black is its upper bound) printed.
         {
             const int kinds = rw::RestKindCount;
             const auto c = rw::Content(rw::FooterWidth(false, 5), 100);
@@ -1845,11 +1845,11 @@ int main(int argc, char** argv) {
             }
             Check(runeRead == 8 * 36 && runeMiss == 0, "R7c: every rest rune drawn as ringwheel::RuneOf says (" + std::to_string(runeRead - runeMiss) + " of " + std::to_string(runeRead) + ")");
         }
-        // R8 match spec (r8-match-spec.md sections 6 and 7; B1: judged on the real skill icons, --icons: a local icon cache in
+        // R8 match spec (sections 6 and 7; B1: judged on the real skill icons, --icons: a local icon cache in
         // upstream's format, never in git). Stage 1: every class with its per-skill rest glow, seated where the design kit seats
         // it (r8-match/kit-seats.json beside the --match folder's parent, its active skills only: the game's catalog holds no
         // passives), at 1x like the kit's clips: Trees shown at rest, each tree open in Tree orbs, the Assassin's Traps tree
-        // over 2 s at 0.2 s. Then the S1 check (rest-brightness.md): per class and tree, the mean added luma in the
+        // over 2 s at 0.2 s. Then the S1 check (the design notes): per class and tree, the mean added luma in the
         // 1.0-1.3 r band around the open tree's icons, with vs without the rest glow, 1 to 11 s at 250 ms, over the kit's busy
         // ground (r8-match/busy-plate-1x.png on black, as the reference), at most the reference's x 1.10, no frame over its highest x 1.10.
         if (real && !matchOut.empty()) {
@@ -1888,7 +1888,7 @@ int main(int argc, char** argv) {
                 }
                 return out;
             };
-            // The reference (rest-brightness.md): mean and highest frame per class (classNames order) and page; -1: no icons.
+            // The reference (the design notes): mean and highest frame per class (classNames order) and page; -1: no icons.
             const float refMean[8][3] = {{18.0f, 15.4f, 22.0f}, {17.1f, 38.0f, 30.2f}, {12.1f, 17.2f, 12.5f}, {12.4f, 20.6f, 16.4f},
                                          {10.6f, -1, 21.5f}, {14.9f, 10.1f, 18.0f}, {22.4f, 22.5f, 27.3f}, {12.2f, 20.3f, 6.9f}};
             const float refHigh[8][3] = {{18.8f, 17.7f, 23.0f}, {19.2f, 41.0f, 33.8f}, {12.3f, 17.8f, 13.6f}, {14.3f, 21.1f, 16.9f},
@@ -1955,7 +1955,7 @@ int main(int argc, char** argv) {
                     return f.Read(c.w, c.h);
                 };
                 Save(stageDir, cname + "-rest", render(scene(shown, -1, 2000, rest.data())), c.w, c.h);
-                // S1 (rest-brightness.md): the mean added luma in the 1.0-1.3 r band (the reference's band, whatever the rest cap)
+                // S1 (the design notes): the mean added luma in the 1.0-1.3 r band (the reference's band, whatever the rest cap)
                 // around the icons of tree `pos`, with vs without the rest glow, over the busy plate, 1 to 11 s at 250 ms.
                 struct Measured { double mean, high; int seats; };
                 auto measure = [&](const Seats& st, int openTree, int pos) {

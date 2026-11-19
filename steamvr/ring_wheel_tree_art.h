@@ -1,6 +1,6 @@
 #pragma once
 // Lab Ring wheel > Layers > Tree icon (T025, Jeff 2026-11-17 late: "change these to be sizable and have gpt draw them"): the tree
-// mark's picture, one painted rust square per skill tree (24: 8 classes x 3 trees), our own art (vault Design\ring-wheel\tree-icons),
+// mark's picture, one painted rust square per skill tree (24: 8 classes x 3 trees), our own art,
 // in full color. Today's mark is the kit's drawn glyph (TreeGlyphOf, RecipeTreeGlyph); this header is the painted picture's side:
 //   - the slot of a (class, position): class x 3 + the tree's skillcategories page (PageAt), -1 for an unknown class;
 //   - the sheet: steamvr/assets/ring-wheel/ring-tree-sheet.png, 6 x 4 cells of CellPx, cell = slot (row-major), built by
@@ -11,7 +11,7 @@
 //   - the atlas id of a slot (ArtId, 9200 up: our art, never keyed, ring_wheel_unbake.h) and the slice that serves it;
 //   - the Lab rows' reading: Mode (Drawn / Painted circle / Painted square) and the size (25..300%, 0 hides the mark).
 // A slot with no painted square keeps the drawn glyph (the fallback is the draw path's: no cell, no picture).
-// The file names the script and the vault use are FileName(slot): tree-<class>-<tree>.png in kebab case.
+// The file names the script and the use are FileName(slot): tree-<class>-<tree>.png in kebab case.
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -44,7 +44,7 @@ inline int SizePct(float v) {
 }
 inline float SizeScale(float v) { return float(SizePct(v)) / 100.f; }
 
-// The trees, in skillcategories page order per class (the kit's trees[i], Design\ring-wheel\tree-icons\BRIEF.md): class, tree.
+// The trees, in skillcategories page order per class (the kit's trees[i]): class, tree.
 struct TreeName { const char* cls; const char* tree; };
 inline constexpr std::array<TreeName, Count> Names{{
     {"amazon", "bow-and-crossbow"}, {"amazon", "passive-and-magic"}, {"amazon", "javelin-and-spear"},

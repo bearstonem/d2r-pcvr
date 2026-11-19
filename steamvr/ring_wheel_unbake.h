@@ -4,7 +4,7 @@
 // frame. Pure and Windows-free (ring-wheel-test).
 //
 // The game's skill picture is one opaque cell: a rusted iron plate (bevel, rivets) with the silver glyph stamped in; no layer
-// of its own (vault Design\ring-wheel\t036 README, "Where the element art is baked today"). The plate is a saturated rust
+// of its own. The plate is a saturated rust
 // brown, the glyph near-gray silver, so the key is the mockup's (mock.js unbake): alpha = (saturation under 0.18 to 0.32) x
 // (value over 0.14 to 0.24), soft edges, and the glyph's leftover rust tint pulled 65% toward gray. The compose shader draws
 // our own dark disc under it. A per-class median plate was tried as the key and kept too much rust.

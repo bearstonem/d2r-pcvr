@@ -1,5 +1,5 @@
 #pragma once
-// Lab Ring wheel: pointing with either hand (T025 job B; feedback-1-plan.md item 1; Jeff 2026-11-07: "laser from either
+// Lab Ring wheel: pointing with either hand (T025 job B; the design notes item 1; Jeff 2026-11-07: "laser from either
 // hand, go"). Either hand's laser can point at the ring; one hand owns it at a time:
 //  - With no owner, a hand claims it by moving its ray 1.5 deg within 300 ms, or by pressing its trigger, with its ray on the
 //    panel. A trigger press also takes the wheel at once from an owner with no button down (a held button pins its owner until

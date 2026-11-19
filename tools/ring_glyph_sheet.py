@@ -4,7 +4,7 @@ on one sheet, and steamvr/ring_wheel_glyph_sheet.h, the mask of which cells are 
 Jeff 2026-11-18: "glyph icons are claude drawings, lets see what gpt can do to make them look d2 style with the rust and silver, we
 need the square as the basic, and then we need to make a circle version for our ring menu". Twelve squares, our own art:
 tools/ring_glyph_squares/<kind>-<name>.png (384 px, borderless full-bleed desaturated rust, silver motif in the middle 80%, trimmed to
-its alpha box in case of a margin, straight alpha; the 1024 px masters stay in the vault, Design\\ring-wheel\\glyph-icons): the eight
+its alpha box in case of a margin, straight alpha; the 1024 px masters stay with the artist): the eight
 Glyphs-page shapes glyph-{circle,triangle,square,lightning,spiral,v,star,wave} and the four center sigils sigil-{back,clear,star,hand}.
 
 Sheet: 4 columns x 3 rows of 144 px cells, SLOT = the cell, row-major; the names, in slot order, are READ from
@@ -14,7 +14,7 @@ keeps that slot's drawn shape or sigil. The sheet and the mask work with 0, 3 or
 squares land. The compose pass cuts the circle (RecipeSeat) or draws the plate with a frame in code (RecipeSquare) at draw time.
 
     python tools/ring_glyph_sheet.py [--squares tools/ring_glyph_squares] [--out <png>] [--mask <h>] [--preview <png>]
-    python tools/ring_glyph_sheet.py --import <Design\\ring-wheel\\glyph-icons>   (trim + downscale the vault's squares into --squares)
+    python tools/ring_glyph_sheet.py --import <folder of squares>   (trim + downscale the squares into --squares)
 """
 import argparse, os, re, sys
 from PIL import Image
@@ -92,7 +92,7 @@ def main():
     ap.add_argument("--out", default=os.path.join(REPO, "steamvr", "assets", "lab", "ring-glyph-sheet.png"))
     ap.add_argument("--mask", default=os.path.join(REPO, "steamvr", "ring_wheel_glyph_sheet.h"))
     ap.add_argument("--preview", help="also write a check sheet (the sheet on a dark ground)")
-    ap.add_argument("--import", dest="imp", help="trim and downscale the vault's painted squares into --squares, then exit")
+    ap.add_argument("--import", dest="imp", help="trim and downscale the painted squares into --squares, then exit")
     a = ap.parse_args()
     if a.imp:
         import_squares(a.imp, a.squares)
