@@ -22,7 +22,7 @@
 #include "ring_wheel_reply.h"
 #include "ring_wheel_log.h"
 #include "ring_wheel_unbake.h"
-#include "lab_stick_select.h"
+#include "stick_select.h"
 #include <atomic>
 #include <fstream>
 #include <sstream>
@@ -3924,7 +3924,7 @@ int main() {
     }
     {   // 2026-11-16: the Quick cast page went (one quick cast: Lab Quick cast radial); its shared pieces stay tested here
         constexpr int Eight = 8;
-        {   // T035/T036 one stick-select rule (steamvr/lab_stick_select.h) over eight items, with the shared feel's defaults
+        {   // T035/T036 one stick-select rule (steamvr/stick_select.h) over eight items, with the shared feel's defaults
             namespace ss = framevr::stickselect;
             const ss::Feel feel;
             auto pick = [&](float x, float y) { ss::Selector s; s.Step(x, y, Eight, 0, feel); return s.pick; };

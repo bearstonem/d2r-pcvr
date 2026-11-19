@@ -12,11 +12,11 @@
 #include "ring_wheel_draw.h"
 #include "ring_wheel_orders.h"
 #include "glyph_recognizer.h"
-#include "lab_quick_radial.h"   // HasTiers: which kinds have a "best" (Healing, Mana, Rejuvenation)
+#include "quick_radial.h"   // HasTiers: which kinds have a "best" (Healing, Mana, Rejuvenation)
 #include "spell_motion.h"
 
 namespace framevr::ringwheel {
-// A kind whose entry means "the best one carried": only one with tiers (lab_quick_radial.h HasTiers). Antidote, Thawing and Stamina
+// A kind whose entry means "the best one carried": only one with tiers (quick_radial.h HasTiers). Antidote, Thawing and Stamina
 // have one potion each, so no "Best" pill and no "best one" line (Jeff's headset 2026-11-17).
 inline bool BestSeat(int id) { return KindSeat(id) && framevr::quickradial::HasTiers(id & 0xffff); }
 // T035/T036 (2026-11-16, Jeff: "ring menu > quick cast / ring menu > gestures / ring menu > glyph"; "the edit mode is when the user
@@ -29,7 +29,7 @@ inline bool BestSeat(int id) { return KindSeat(id) && framevr::quickradial::HasT
 enum class RingPage { Main, Glyphs, GlyphChoose, Gestures, Quick, QuickChoose, QuickKind };
 inline bool QuickPage(RingPage p) { return p == RingPage::Quick || p == RingPage::QuickChoose || p == RingPage::QuickKind; }
 inline bool QuickRing(RingPage p) { return p == RingPage::Quick || p == RingPage::QuickKind; }   // drawn and hit as Quick's 12 places, one Back
-constexpr int QuickPlaces = 12;   // lab_quick_radial.h MaxItems
+constexpr int QuickPlaces = 12;   // quick_radial.h MaxItems
 constexpr float QuickR = 205, QuickIconPx = 56, QuickHitR = 34;   // 12 places 107 px apart on r 205: 68 px hit circles clear of each other
 constexpr float GlyphR = 200, GlyphIconPx = 64, GlyphHitR = 40, GlyphSkillR = 262, GlyphSkillPx = 36;
 constexpr float GestureR = 210, GestureIconPx = 52, GestureHitR = 35, NoPointsDim = .45f;
@@ -145,7 +145,7 @@ inline Layout ChooserLayout(const Layout& main, const std::vector<interaction::S
     return ChooserRow(main, list, row);
 }
 // Quick cast's chooser list (2026-11-16): every known skill the radial casts (a skill id under 4096: the class's, the general and
-// item skills; lab_quick_radial.h IsSkillId), never a Lab entry (Draw glyph 9000, the Labs' 9001 on) or a Commander order (the
+// item skills; quick_radial.h IsSkillId), never a Lab entry (Draw glyph 9000, the Labs' 9001 on) or a Commander order (the
 // radial casts the catalog's skills only). Built when a place is chosen, never per frame.
 inline bool QuickPickable(const interaction::Skill& k) { return k.known && k.id >= 0 && k.id < 4096 && !orders::Is(k.id); }
 inline std::vector<interaction::Skill> QuickChoices(const interaction::Snapshot& s) {
@@ -361,7 +361,7 @@ inline void FillGlyphs(PageView& v, const interaction::GlyphSets& sets, int hand
 }
 // Quick cast's page (2026-11-16): its 12 places, place k holding the radial's item k (ids, in the ring's order; n of them), the
 // rest empty. nameOf(id) and cellOf(id) are the caller's (a skill's or an item's name; the atlas cell, -1 none). fixed (Quick cast
-// layout Fixed places, 2026-11-17): ids[k] is place k's item, -1 an empty one, each place named as a clock's hour (lab_quick_radial.h
+// layout Fixed places, 2026-11-17): ids[k] is place k's item, -1 an empty one, each place named as a clock's hour (quick_radial.h
 // PlaceNumber: 12 at the top, 3 to the right); an empty place fills exactly there.
 template <class NameOf, class CellOf>
 inline void FillQuick(PageView& v, const int* ids, int n, NameOf nameOf, CellOf cellOf, bool fixed = false) {
@@ -427,7 +427,7 @@ inline void MarkQuick(PageView& v, QuickRingState state) {
     }
     v.below = "Reading its ring"; v.bottomCount = "Reading its ring"; v.bottomHelp = "A moment";
 }
-// One kind's page (QuickKind): ids[0] the kind, then every tier the game has, strongest first (lab_quick_radial.h TiersOf); n of
+// One kind's page (QuickKind): ids[0] the kind, then every tier the game has, strongest first (quick_radial.h TiersOf); n of
 // them (at most 12). dimOf(i): item i is a tier not carried (dim, still choosable). place: the Quick cast place it fills
 // (0-based); title: the kind's name.
 template <class NameOf, class CellOf, class DimOf>

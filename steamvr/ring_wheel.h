@@ -884,10 +884,10 @@ public:
 // Draw glyph is 9000, Lab Army X menu 9001). A hold there, or on the sub-menu's third (Gestures, Quick cast), sends upstream's
 // own clear of that button's game skill (BindSkill, skill -1, as Draw glyph's pick does); on its Applied the Lab keeps the slot.
 constexpr int MenuEntryFirst = 9101;
-// Quick cast's potions and scrolls on its chooser's row (2026-11-16): Lab Quick cast radial's item ids (lab_quick_radial.h: exact
+// Quick cast's potions and scrolls on its chooser's row (2026-11-16): Lab Quick cast radial's item ids (quick_radial.h: exact
 // 1 << 28, family 2 << 28), never a skill or a Lab entry.
 inline bool ItemSeat(int id) { return id >= (1 << 28); }
-inline bool KindSeat(int id) { return (id >> 28) == 2; }   // a kind (lab_quick_radial.h IsFamilyId): the best one carried when cast
+inline bool KindSeat(int id) { return (id >> 28) == 2; }   // a kind (quick_radial.h IsFamilyId): the best one carried when cast
 inline int MenuEntryId(int third) { return third >= 0 && third < ThirdCount ? MenuEntryFirst + third : -1; }
 inline int MenuOfEntry(int id) { return id >= MenuEntryFirst && id < MenuEntryFirst + ThirdCount ? id - MenuEntryFirst : -1; }
 constexpr const char* MenuEntryName[ThirdCount] = {"Glyphs menu", "Gestures menu", "Quick cast"};   // Quick cast's entry is Lab Quick cast radial's own (2026-11-16)
@@ -1063,7 +1063,7 @@ public:
 inline const char* FooterCloseName(int cell, bool developer) {
     if (cell == 11) return "footer-inventory";
     if (cell == 10) return "footer-vr-settings";
-    if (cell == (developer ? interaction::LabCell : 13)) return "footer-lab";
+    if (cell == 13) return "footer-developer";
     return nullptr;
 }
 class FooterClick {

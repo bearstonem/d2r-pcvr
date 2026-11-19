@@ -271,7 +271,7 @@ int quickChoose = -1;
 // (link::Edit from); Back or Move again stops it.
 int quickMoveFrom = -1;
 bool quickMovePick = false;
-// Quick cast's places as the page names them (lab_quick_radial.h PlaceNumber; Fixed places: the clock's hours), from the radial's view.
+// Quick cast's places as the page names them (quick_radial.h PlaceNumber; Fixed places: the clock's hours), from the radial's view.
 bool quickClock = false;
 int PlaceNo(int place) { return qr::PlaceNumber(place, quickClock); }
 bool QuickPlaceFilled(int place) { const auto qv = framevr::quickradial::link::Read(); return place >= 0 && place < qv.n && place < int(qv.ids.size()) && qv.ids[size_t(place)] >= 0; }
@@ -1163,7 +1163,7 @@ const char* CellWhy(int cell) {
     if (cell == CenterCell) return "center";
     if (cell == ia::GlyphsCell) return "glyphs";
     if (cell == ia::MotionsCell) return "gestures";
-    if (cell == ia::LabCell) return "footer-lab";
+    if (cell == 13) return "footer-developer";
     switch (cell) {
     case 9: return "footer-equipment";
     case 10: return "footer-vr-settings";

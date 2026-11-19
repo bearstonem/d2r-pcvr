@@ -266,7 +266,7 @@ inline const char* FooterLabel(int i, interaction::MenuPage page, bool developer
     case 1: return "MAP";
     case 2: return "VR SETTINGS";
     case 3: return handWheel ? "INVENTORY" : "EDIT SKILLS";
-    case 4: return interaction::FifthFooterLabel(developer);
+    case 4: return "DEV";
     case 5: return "LAB";
     default: return "";
     }
