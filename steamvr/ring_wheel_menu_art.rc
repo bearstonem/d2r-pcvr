@@ -4,7 +4,7 @@
 D2RVR_RING_MENU_GLYPHS RCDATA "assets/ring-wheel/ring-menu-glyphs.png"
 D2RVR_RING_MENU_GESTURES RCDATA "assets/ring-wheel/ring-menu-gestures.png"
 D2RVR_RING_MENU_QUICK_CAST RCDATA "assets/ring-wheel/ring-menu-quick-cast.png"
-// Ring skill menu > Layers > Tree icon (steamvr/ring_wheel_tree_art.h): the 24 painted tree squares on one sheet (tools/ring_tree_sheet.py).
+// Ring skill menu tree icons (steamvr/ring_wheel_tree_art.h): the 24 painted tree squares on one sheet (tools/ring_tree_sheet.py).
 D2RVR_RING_TREE_SHEET RCDATA "assets/ring-wheel/ring-tree-sheet.png"
-// Ring skill menu > Center > Glyph icon (steamvr/ring_wheel_glyph_art.h): the 12 painted glyph and sigil squares on one sheet (tools/ring_glyph_sheet.py).
+// Ring skill menu glyph icons (steamvr/ring_wheel_glyph_art.h): the 12 painted glyph and sigil squares on one sheet (tools/ring_glyph_sheet.py).
 D2RVR_RING_GLYPH_SHEET RCDATA "assets/ring-wheel/ring-glyph-sheet.png"

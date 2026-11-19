@@ -1,10 +1,10 @@
 #pragma once
-// Ring skill menu > Layers > Tree icon (the player late: "change these to be sizable and have gpt draw them"): the tree
+// Ring skill menu tree icons: the tree
 // mark's picture, one painted rust square per skill tree (24: 8 classes x 3 trees), our own art,
 // in full color. Today's mark is the kit's drawn glyph (TreeGlyphOf, RecipeTreeGlyph); this header is the painted picture's side:
 //   - the slot of a (class, position): class x 3 + the tree's skillcategories page (PageAt), -1 for an unknown class;
 //   - the sheet: steamvr/assets/ring-wheel/ring-tree-sheet.png, 6 x 4 cells of CellPx, cell = slot (row-major), built by
-//     tools/ring_tree_sheet.py from tools/ring_tree_squares (borderless full-bleed rust, motif in the middle 80%: no frame, bevel or
+//     tools/ring_tree_sheet.py from 24 source squares (borderless full-bleed rust, motif in the middle 80%: no frame, bevel or
 //     rivets of its own, so the square mode's plate frame is drawn in code, RecipeSquare); an unpainted slot's
 //     cell is left fully transparent, and PaintedMask (steamvr/ring_wheel_tree_sheet.h, written by the same script) names the
 //     painted ones, so the sheet works with 0, 3 or 24 squares and nothing decodes it on the frame thread to know;

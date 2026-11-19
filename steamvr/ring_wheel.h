@@ -2,7 +2,7 @@
 // Ring skill menu: the wheel's geometry, hit test and input state,
 // pure and Windows-free so every number is unit-tested (ring_wheel_test.cpp).
 //
-// Coordinates: "wheel px" are the design kit's (the design kit's wheel.js): the 768 x 800 wheel region, its center
+// Coordinates: "wheel px" are the reference design's (the reference design's wheel layout): the 768 x 800 wheel region, its center
 // C = (384, 384), the shelf row at y 760. "Canvas px" are the 1024 x 1024 canvas the region sits in, at (128, 112); the
 // footer is in canvas px (upstream's FooterBounds, v = y / 1024). 960 canvas px a meter, so 15 px a degree at 0.9 m.
 //
@@ -33,7 +33,7 @@
 
 namespace framevr::ringwheel {
 constexpr float Pi = 3.14159265358979323846f, Tau = 2 * Pi;
-// The design kit's numbers (wheel px).
+// The reference design's numbers (wheel px).
 constexpr float WheelW = 768, WheelH = 800, C = 384, ContentR = 320;
 constexpr float IconPx = 44, HitPx = 54, HitR = HitPx / 2;
 constexpr float CenterR = 80, CenterGrownR = 136, CenterDeadBand = 3;   // the split's hairline: 6 px dead band

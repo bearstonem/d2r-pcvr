@@ -4,7 +4,7 @@
 // The compose pass (vr/ring_wheel_compose.cpp) and the atlases (vr/ring_wheel_atlas.cpp) on WARP, plus the design notes
 // items 14-16. With no arguments (the test): synthetic icons (numbered colored discs, no game art), upstream's menu fonts
 // from the source tree, made-up text. Local only, never in a test or a commit: --icons reads the player's own icon cache
-// (d2r_vr_icons), --kit runs the blurb check over every skill of the design kit's data, --out writes the pictures at 100%
+// (d2r_vr_icons), --kit runs the blurb check over every skill of the reference design's data, --out writes the pictures at 100%
 // and 150% (straight alpha and over a dark backdrop). No game or headset needed.
 #include "ring_wheel_draw.h"
 #include "ring_wheel_skill_names.h"
@@ -297,7 +297,7 @@ template <class F> bool PumpUntil(rw::Compose& c, F done, int ms) {
     return true;
 }
 std::string ReadAll(const std::filesystem::path& p) { std::ifstream f(p, std::ios::binary); return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()}; }
-// The design kit's data (local only): every skill's name and tree, and its short description and level.
+// The reference design's data (local only): every skill's name and tree, and its short description and level.
 struct KitSkill { std::string name, desc, req, tree; };
 std::vector<KitSkill> ReadKit(const std::filesystem::path& kit) {
     std::map<std::string, std::pair<std::string, std::string>> tips;
@@ -1846,7 +1846,7 @@ int main(int argc, char** argv) {
             Check(runeRead == 8 * 36 && runeMiss == 0, "every rest rune drawn as ringwheel::RuneOf says (" + std::to_string(runeRead - runeMiss) + " of " + std::to_string(runeRead) + ")");
         }
         // match spec (sections 6 and 7; B1: judged on the real skill icons, --icons: a local icon cache in
-        // upstream's format, never in git). Stage 1: every class with its per-skill rest glow, seated where the design kit seats
+        // upstream's format, never in git). Stage 1: every class with its per-skill rest glow, seated where the reference design seats
         // it (r8-match/kit-seats.json beside the --match folder's parent, its active skills only: the game's catalog holds no
         // passives), at 1x like the kit's clips: Trees shown at rest, each tree open in Tree orbs, the Assassin's Traps tree
         // over 2 s at 0.2 s. Then the check (the design notes): per class and tree, the mean added luma in the

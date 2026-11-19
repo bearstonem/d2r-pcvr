@@ -158,7 +158,7 @@ int main() {
                 const auto t = e.HitTest(x0 + (b.left + b.right) / 2 * w, (b.top + b.bottom) / 2 * rw::CanvasPx, f);
                 all = all && t.kind == rw::Kind::Footer && t.index == ia::FooterCell(i, page);
             }
-            Check(all, dev ? "developer mode's six tabs, each upstream's cell " : "the five tabs, each upstream's cell (LAB the fifth)");
+            Check(all, dev ? "developer mode's six tabs, each upstream's cell " : "the five tabs, each upstream's cell");
             if (!fullWidth) Check(e.HitTest(x0 - 10, .93f * rw::CanvasPx, f).kind != rw::Kind::Footer, "left of the narrowed footer: no tab");
         }
         Check(rw::FooterWidth(false, 5) == 768 && rw::FooterWidth(false, 6) == 864 && rw::FooterWidth(true, 5) == 1024, "768, 864 with six tabs, 1024 full");
@@ -2362,8 +2362,8 @@ int main() {
         }
         { auto e = opened(); e.Wrote("center"); Check(e.Cleared("xr-sync-failed", false).reason == "xr-sync-failed" && opened().Cleared("copy-failed", false).reason == "copy-failed", "N1: the same for a failed sync; a clear with no write is unchanged"); }
         Check(rw::ClosedLine("headset-focus", 12.34, "Spells") == "Frame ring wheel: closed reason=headset-focus after 12.3 s, page Spells", "bug 2: the close line's words are unchanged (" + rw::ClosedLine("headset-focus", 12.34, "Spells") + ")");
-        {   // the ring's two handlers in transport's order, 11 ms frames: the headset off at 5 s for 1.5 s (Nov 10 4:45 PM), or for
-            // good (Nov 8 11:04 AM, the game ended unfocused). Blip: FocusBlip, then the name; Cleared: OnClearInput in ClearInput.
+        {   // the ring's two handlers in transport's order, 11 ms frames: the headset off at 5 s for 1.5 s, or for
+            // good (the game ended unfocused). Blip: FocusBlip, then the name; Cleared: OnClearInput in ClearInput.
             auto run = [&](double backAtMs, bool sessionStops, std::vector<std::string>& lines, const char* ignoredWrite = nullptr) {
                 rw::WheelEdges e; rw::closing::FocusBlip blip; const char* why = nullptr; bool shut = false;
                 int wheel = 1; const double openAt = 1000, offAt = 6000;
@@ -2443,7 +2443,7 @@ int main() {
         }
         Check(rw::WasText(rw::Held::DrawGlyph, nullptr) == "Draw glyph" && rw::WasText(rw::Held::None, nullptr) == "none" && rw::WasText(rw::Held::Skill, "Hydra") == "Hydra" && rw::WasText(rw::Held::Skill, nullptr) == "?",
               "bug 1: the log's (was ...): Draw glyph, none, the skill, ? for a skill not in the list");
-        {   // through the real hold: Frozen Armor held on X while X draws glyphs (Nov 8 11:18:34 AM)
+        {   // through the real hold: Frozen Armor held on X while X draws glyphs
             const int per[3] = {10, 10, 10};
             const auto l = ClassLayout(1, per, rw::TreeLayout::Shown);
             auto assign = [&](int seatKind, int boundSkill, const std::array<int, 2>& slots) {

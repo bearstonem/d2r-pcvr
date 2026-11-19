@@ -1,11 +1,10 @@
 #pragma once
-// Ring skill menu > Center > Glyph icon (the player 5:49 PM: "glyph icons are claude drawings, lets see what gpt can do to make them
-// look d2 style with the rust and silver, we need the square as the basic, and then we need to make a circle version for our ring
-// menu"): the pictures that replace the ring wheel's code-drawn glyphs, 12 of them, our own art:
+// Ring skill menu glyph icons: the painted pictures that replace the ring wheel's code-drawn glyphs, 12 of them, original art
+// in the game's rust and silver look:
 //   - slots 0-7 the Glyphs page's shape faces, in glyphs::Shape order (circle, triangle, square, lightning bolt, spiral, V, star, wave);
 //   - slots 8-11 the center split's sigils (Sigil::Back, Cross = "clear", Star, Hand).
 // Same plan as the tree icons (steamvr/ring_wheel_tree_art.h): the sheet steamvr/assets/ring-wheel/ring-glyph-sheet.png, 4 x 3 cells of CellPx,
-// cell = slot (row-major), built by tools/ring_glyph_sheet.py from tools/ring_glyph_squares (borderless full-bleed rust squares with a
+// cell = slot (row-major), built by tools/ring_glyph_sheet.py from twelve source squares (borderless full-bleed rust squares with a
 // silver motif in the middle 80%); an unpainted slot's cell is fully transparent and its bit in PaintedMask
 // (steamvr/ring_wheel_glyph_sheet.h, written by the same script) is clear, so the sheet works with 0, 3 or 12 squares and the engine
 // keeps the drawn shape or sigil for every slot with no square. The atlas ids are 9300 up (our art: never keyed, ring_wheel_unbake.h).

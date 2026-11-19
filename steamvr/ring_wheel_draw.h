@@ -477,7 +477,7 @@ inline void PushSigil(Instance* out, int& n, int max, Sigil s, float x, float y,
         for (int i = 0; i < k; ++i)
             PushLine(out, n, max, x + p[i][0] * scale, y + p[i][1] * scale, x + p[i][2] * scale, y + p[i][3] * scale, (pass ? 2.f : 4.f) * w, pass ? c : Rgb{0, 0, 0}, pass ? a : .6f * a);
 }
-// ---- the center in thirds (the design kit: rest, each third pointed) ----
+// ---- the center in thirds (the reference design: rest, each third pointed) ----
 // Each third's mark (36 px at rest, on r 44 at its middle angle; grown, 40 px in the middle of its ring 80..136, r 110); the
 // pointed one 11% larger, lit and in the middle of its grown slice, the other two at the dim row's opacity; a class with no
 // gestures: that third at 35%. MarkScale: 36 px of a 20 px sigil. out: the pointed slice's half grow (its ring's middle moves out).
