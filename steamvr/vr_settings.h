@@ -269,7 +269,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     // Wrist skill cooldowns (skill_cooldowns.h; Vin, Discord ideas, 2026-11-05): a recharging skill's icon between the
     // orbs, and glyph and motion casts of it refused until it is ready. On by default. Beside the orbs' own rows.
     {"Skill cooldowns", "Recharging skills dimmed between the orbs; glyph and motion casts of them refused", L"interactions",L"skill_cooldowns",1,0,1,1},
-    {"Summon range", "Target search and owner-follow ranges; requires restart", L"gameplay",L"summon_range_multiplier",1,1,5,.25f},
+    {"Summon range", "Target search and owner-follow ranges; applies at once", L"gameplay",L"summon_range_multiplier",1,1,5,.1f},
     // The T cross opens body calibration with no menu (body_calibration_gesture.h). VR Settings > Comfort > Body, its own row
     // under Height and arm span (Room follows you has Seated play's right half).
     {"T cross to calibrate", "Stand in a T cross for 2 seconds to open body calibration", L"interactions",L"t_cross_calibrate",1,0,1,1},
@@ -377,6 +377,7 @@ inline float Normalize(Key key,float value){
     if(key==ShieldFollow||key==ShieldRoll)return std::clamp(std::round(value/d.step)*d.step,d.min,d.max)+0.f;   // whole steps, as skel::shield::FollowSetting / RollSetting
     if(HighlightKey(key))return std::clamp(std::round(value/15)*15,d.min,d.max);   // 0 = By range, else a hue in 15-degree steps
     if(key==EnemySight)return float(enemysight::NormalizePercent(value));
+    if(key==SummonRangeMultiplier)return std::clamp(std::round(value*100.f)/100.f,d.min,d.max);   // 1 to 5 in hundredths: a 10% step adds no float drift, and an older 1.25 stays 1.25
     if(key==RunSpeed)return float(runspeed::NormalizePercent(value));
     if(key==ReverbEcho)return float(worldsound::NormalizeEcho(value));   // a whole 0 - 2, else More
     if(key==VitalsTilt)return vitals::NormalizeTilt(value);

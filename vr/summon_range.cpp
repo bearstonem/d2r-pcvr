@@ -14,11 +14,11 @@ bool configured=false;
 }
 void Configure(float multiplier,bool enableVr) {
     vrEnabled.store(enableVr,std::memory_order_release);
-    // Native comparisons and patches cannot be changed by a live Apply.
+    const float value=framevr::settings::Normalize(framevr::settings::SummonRangeMultiplier,multiplier);
     if(!initialized.load(std::memory_order_acquire)) {
-        startupRangeMultiplier=framevr::settings::Normalize(framevr::settings::SummonRangeMultiplier,multiplier);
+        startupRangeMultiplier=value;
         configured=true;
-    }
+    } else framevr::summonrange::native::live::mailbox.Post(value);   // the next pet AI hook applies it; ignored where the adapter is not installed
 }
 bool Init(const D2RL::PluginContext* context) {
     if(!context)return false;
@@ -43,6 +43,7 @@ bool Init(const D2RL::PluginContext* context) {
     return true;
 }
 void Shutdown() {
+    framevr::summonrange::native::live::mailbox.Disarm();   // a post still waiting must not make the adapter ready again
     framevr::summonrange::native::ready.store(false,std::memory_order_release);
     initialized.store(false,std::memory_order_release);
     vrEnabled.store(false,std::memory_order_release);

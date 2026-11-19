@@ -555,7 +555,8 @@ inline constexpr Override Overrides[]={
      .help="On: thrown potions feed your living mercenary wherever they land. Off: land within 4 m of its feet; misses keep the potion. Slow releases return it."},
     // Monsters: Summons (#426, RobinHeggelund)
     {.id="gameplay.summon_range_multiplier",.page=View::Monsters,.section="Summons",.kind=RowKind::Slider,.label="Summon range",
-     .help="Multiplies summon target search and owner-follow ranges together. Mercenaries and attack reach stay native. Apply, then restart the game.",.warn="Requires restart",.format={.unit="x",.decimals=2}},
+     .help="How far summons look for monsters and stray from you. 100% is the game's range; 300% is three times as far. Offline only; applies at once.",
+     .format={.unit="%",.iniScale=.01f}},
     // Physics: Props
     {.id="interactions.bottle_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Roll and break bottles",
      .help="Empty bottles drop and roll. Potions thrown at your mercenary break where they hit; thrown traps and gas or oil potions stop at walls."},
