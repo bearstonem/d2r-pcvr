@@ -3148,7 +3148,7 @@ int main() {
             Check(pt::BeamFor(true, true, true, 16, 16) == B::NoSlot && pt::BeamFor(true, true, true, 0, 0) == B::NoSlot && pt::BeamFor(true, true, true, 0, 2) == B::NoSlot,
                   "job B beam: full, a zero limit, a limit of 2: skipped");
             Check(pt::BeamFor(true, true, true, 0xFFFFFFFFu, 0xFFFFFFFFu) == B::NoSlot, "job B beam: no overflow at the top of the range");
-            Check(pt::BeamFor(false, true, true, 0, 32) == B::LabOff && pt::BeamFor(false, false, false, 0, 32) == B::LabOff,
+            Check(pt::BeamFor(false, true, true, 0, 32) == B::MenuOff && pt::BeamFor(false, false, false, 0, 32) == B::MenuOff,
                   "job B beam: the ring's Off edge never draws, even with a beam written this frame (should-fix 2)");
             Check(pt::BeamFor(true, false, true, 0, 32) == B::Closed && pt::BeamFor(true, true, false, 0, 32) == B::None,
                   "job B beam: the wheel's laser not showing, or no beam written: none");
@@ -3742,7 +3742,7 @@ int main() {
         }
     }
     {   // The On edge's log line: the ring's state, never a build step
-        rw::LabState st;
+        rw::MenuState st;
         const std::string a = rw::OnLine(st);
         Check(a.find("build step") == std::string::npos && a.find("R7") == std::string::npos, "On line: no build step named");
         Check(a.find("Trees shown") != std::string::npos && a.find("90 cm ahead") != std::string::npos && a.find("80 cm wide") != std::string::npos &&

@@ -6,7 +6,7 @@
 #include <string>
 
 namespace framevr::ringwheel {
-struct LabState {
+struct MenuState {
     bool orbs = false;           // Tree layout: Tree orbs (else Trees shown)
     bool worldLock = true;       // Placement: stays in the room (else upstream's hand anchor, the ring never drawn)
     float distanceCm = 90, widthCm = 80, belowDeg = 8;
@@ -14,7 +14,7 @@ struct LabState {
     int renderPct = 150;
     const char* animation = "Effect on hover";   // the Animation row's name (Custom when a row was changed by hand)
 };
-inline std::string OnLine(const LabState& s) {
+inline std::string OnLine(const MenuState& s) {
     char hold[24];
     if (s.holdMs <= 0) std::snprintf(hold, sizeof hold, "Off");
     else std::snprintf(hold, sizeof hold, "%.1f s", s.holdMs / 1000.0);

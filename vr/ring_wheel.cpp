@@ -1846,7 +1846,7 @@ void Layer(host::LayerFrame f) {
             else {
                 static constexpr const char* anims[5] = {"Off", "Floating icons", "Effect on hover", "All effects", "Custom"};
                 const rw::Placement p = Read();
-                rw::LabState st;
+                rw::MenuState st;
                 st.orbs = LayoutNow() == rw::TreeLayout::Orbs; st.worldLock = p.worldLock;
                 st.distanceCm = p.distanceM * 100; st.widthCm = p.widthM * 100; st.belowDeg = p.belowDeg;
                 st.holdMs = int(std::lround(cfg::Value(cfg::HoldMs))); st.tapMs = int(std::lround(cfg::Value(cfg::TapMs)));
@@ -2130,7 +2130,7 @@ void Layer(host::LayerFrame f) {
 // Job B: the non-owner's beam, after upstream's laser and dot (Pointer wrote it this frame; nothing when only one hand points).
 void Beam(host::BeamFrame f) {
     const auto b = pt::BeamFor(EnabledNow(), f.open, beam2, f.count, f.limit);
-    if (b == pt::Beam::LabOff) beam2 = false;   // the Off edge (perf should-fix 2): never a beam after the ring went Off
+    if (b == pt::Beam::MenuOff) beam2 = false;   // the Off edge (perf should-fix 2): never a beam after the ring went Off
     {   // a beam skipped for want of a layer slot: said once on each change
         const bool noSlot = b == pt::Beam::NoSlot;
         if (noSlot != beamNoSlotSaid && f.say) {

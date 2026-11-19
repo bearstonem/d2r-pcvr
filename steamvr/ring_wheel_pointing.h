@@ -56,9 +56,9 @@ struct Out { int owner = -1; bool changed = false; Why why = Why::None; };
 // beam written this frame, and at least SpareSlots composition layers left after it (perf 'Pointing check' must-fix: the
 // blood visor and the guard strain quads go in after it and need their slots). Off at the ring's Off edge (TabOn false).
 constexpr uint32_t SpareSlots = 2;
-enum class Beam { Draw, LabOff, Closed, None, NoSlot };
+enum class Beam { Draw, MenuOff, Closed, None, NoSlot };
 inline Beam BeamFor(bool tabOn, bool open, bool written, uint32_t count, uint32_t limit) {
-    if (!tabOn) return Beam::LabOff;
+    if (!tabOn) return Beam::MenuOff;
     if (!open) return Beam::Closed;
     if (!written) return Beam::None;
     if (uint64_t(count) + 1 + SpareSlots > uint64_t(limit)) return Beam::NoSlot;
