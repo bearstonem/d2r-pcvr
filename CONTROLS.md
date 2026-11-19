@@ -188,6 +188,7 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Wipe blood off the visor | Scrub either hand side to side in front of your face, trigger released. About six strokes clear a full visor. **Interface > Warnings > Wipe blood by hand** turns this off |
 | Recenter / stereo capture | PC F11 / F8 |
 | Walk where the controller points | **VR Settings > Controls > Hands > Walk direction**: **Look** (default) walks where you look; **Controller** walks where the walk stick's own controller points: the left one (the right one with Left-handed on, unless [Sticks stay right-handed](#sticks-stay-right-handed)) |
+| Steer Whirlwind | Push the walk stick as a Whirlwind starts: it whirls 10 cells the way that push would walk you (**Walk direction** and Left-handed apply), ahead of any aimed monster. A whirl cannot turn once it has begun, so the stick steers between whirls: hold Whirlwind's button or trigger and the game chains them, each one heading where the stick points as it starts, as the mouse does on desktop. The T (both arms out, a moment) casts one whirl, toward the stick if it is pushed then. Each whirl costs its mana. With the stick at rest Whirlwind aims as before: the aimed monster, else where you aim, and the T straight ahead |
 | Room-scale | **VR Settings > Comfort > Body > Room follows you** (beside Seated play; On by default): as you move in your room your hero's spot follows you, so monsters attack where you stand. Grips, triggers, swings, casting, the left stick and menus pause it |
 | Recenter position, keep view direction | PC F13 (native OpenXR, gameplay only) |
 
@@ -672,7 +673,8 @@ animation. So far:
 
 A weapon's left-trigger skill rides the left weapon of a dual-wield pair.
 Skills that hit several times a cast with their own native sequence (Jab,
-Fend, Frenzy, Double Swing, Whirlwind) and Charge stay trigger buttons. The skill wheel's lower-left box, **Left claw strikes** (Druid
+Fend, Frenzy, Double Swing, Whirlwind) and Charge stay trigger buttons. Whirlwind follows the walk stick
+(**Steer Whirlwind**, above). The skill wheel's lower-left box, **Left claw strikes** (Druid
 only), picks the left claw's skill with one click: its own trigger's
 (default) or the right trigger's (a skill sits on one trigger only, so this
 puts it on both claws). For plain left-claw strikes, leave the left trigger

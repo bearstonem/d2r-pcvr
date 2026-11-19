@@ -45,6 +45,7 @@
 #include "panel_input_mode.h"
 #include "gameplay.h"
 #include "walk_direction.h"
+#include "whirl_steer.h"
 #include "room_scale.h"
 #include "room_steps.h"
 #include "strike_skills.h"
@@ -739,6 +740,15 @@ struct StageWorld {bool valid=false;math::Vec origin{},hero{};math::Quat base{0,
 // when the punch came then (MotionLanding).
 struct MotionSpot {int skill=-1;float x=0,y=0;uint64_t at=0,session=0;} motionLanding;
 bool teleportShown=false;
+// The walk stick as walking reads it (walkLx / walkLy, after Walk direction's turn; the view's frame: x right,
+// y ahead), each input frame, for Whirlwind's steering (whirl_steer.h). Never Room follows you's push.
+struct WalkStick {float x=0,y=0;uint64_t at=0;} whirlStick;
+// That stick while pushed past the game's dead zone and fresh; false at rest.
+bool WhirlStickNow(float& x,float& y) {
+    const auto now=GetTickCount64();
+    if(!whirlStick.at||now<whirlStick.at||now-whirlStick.at>100||!whirlsteer::Pushed(whirlStick.x,whirlStick.y))return false;
+    x=whirlStick.x;y=whirlStick.y;return true;
+}
 // A room point on the floor under the player, in grid cells, within the game's reach of the player.
 bool FloorCell(math::Vec at,float& x,float& y) {
     const auto& stage=interactionInput.stage;
@@ -5581,6 +5591,12 @@ void Input() {
                 const int skill=spellmotion::CastSkillOf(skillOf[done],[&](int id){return interaction::GlyphSkill(quickSnapshot,id).known;});
                 const auto spot=arcKnown?spellmotion::Spot{-arcWay.z,arcWay.x}:spellmotion::PointSpot(donePoint,punchTuning);
                 if(doneLanding&&landKnown)doneAim={spot.right,0,-spot.ahead};
+                // Whirlwind's T with the walk stick pushed as it casts (whirl_steer.h): its whirl goes where that push
+                // would walk, at the T's own length, instead of straight ahead. Still one whirl a T: nothing more is
+                // pressed, and the game takes no new spot while it whirls.
+                float steerX=0,steerY=0;
+                const bool whirlSteered=doneMotion==spellmotion::Motion::Whirlwind&&doneLand==spellmotion::Land::Spot&&!doneLanding&&
+                    WhirlStickNow(steerX,steerY)&&whirlsteer::MotionSpot(steerX,steerY,spellmotion::barbarian::tuning.whirlAhead,doneSpot.ahead,doneSpot.right);
                 // A summon on a spot of its own: Decoy and the golems ahead (spellmotion::Engine::LandAt), the
                 // Valkyrie where the right hand points (LandPointed); its way toward it too.
                 float summonX=0,summonY=0;math::Vec pointed{};
@@ -5608,7 +5624,10 @@ void Input() {
                     char line[200];
                     if(summonKnown) {
                         motionLanding={skill,summonX,summonY,GetTickCount64(),gamestate::LocalPlayer()};
-                        if(doneLand==spellmotion::Land::Spot)
+                        if(whirlSteered)
+                            std::snprintf(line,sizeof line,"Frame whirlwind: steered by the walk stick - the T's whirl goes %.0f cells where it points (%.0f ahead, %+.0f across; stick %.2f, %.2f; cell %.1f,%.1f)",
+                                std::hypot(doneSpot.ahead,doneSpot.right),doneSpot.ahead,doneSpot.right,steerX,steerY,summonX,summonY);
+                        else if(doneLand==spellmotion::Land::Spot)
                             std::snprintf(line,sizeof line,"Frame spell motion: %s on its spot, %.0f cells ahead, %+.0f across (cell %.1f,%.1f)",
                                 motionName(skill).c_str(),doneSpot.ahead,doneSpot.right,summonX,summonY);
                         else std::snprintf(line,sizeof line,"Frame spell motion: %s where the %s hand points (cell %.1f,%.1f)",motionName(skill).c_str(),handRoles.map.left?"left":"right",summonX,summonY);
@@ -6184,6 +6203,8 @@ void Input() {
             walkLx=int16_t(std::clamp(x,-1.f,1.f)*32767);walkLy=int16_t(std::clamp(y,-1.f,1.f)*32767);
         }
     }
+    // Whirlwind steers by this same stick (whirl_steer.h): the motions above read last frame's, vrcam's aim the newest.
+    whirlStick={walkLx/32767.f,walkLy/32767.f,GetTickCount64()};
     {   // Room follows you (room_steps.h): toward the player's real step while the left stick is idle.
         const auto config=vrsettings::Read().values;
         roomsteps::Input in;in.time=Milliseconds()/1000.0;
@@ -8426,6 +8447,11 @@ bool MotionLanding(int skill,float& x,float& y,int* landed) {
     if(l.skill<0||now<l.at||now-l.at>700||l.session!=gamestate::LocalPlayer()||(skill>=0&&skill!=l.skill))return false;
     x=l.x;y=l.y;if(landed)*landed=l.skill;return true;
 }
+// Whirlwind's steering (whirl_steer.h): the walk stick while pushed, in the world with the motion controls live.
+bool WhirlStick(float& x,float& y) {
+    std::lock_guard lock(mutex);
+    return motionControls.load()&&motionInput.active&&WhirlStickNow(x,y);
+}
 int AimRulesSkill() {
     std::lock_guard lock(mutex);
     const auto* skill=CastSkillRow();return skill?skill->id:-1;
@@ -8820,7 +8846,7 @@ void Shutdown(bool preserveResolution) {
     arcaneController.Reset();arcaneOutput={};arcanePaintKey=~0ull;arcanePaintSession=0;arcanePaintAt=0;arcaneAtlasPending=arcaneImageReady=false;
     glyphStroke={};glyphHand=-1;glyphCast={};glyphPaintKey=glyphShownStroke=0;glyphBeganAt=0;glyphEndedAt=-1;glyphPaintAt=0;glyphLook=glyphtrail::Look::Drawing;glyphPressRt=glyphTrailShown=false;glyphAtlasPending=glyphImageReady=false;
     glyphPress={};glyphRecordAt.store(0);
-    motionLanding={};teleportArc={};teleportarc::Current().Clear();
+    motionLanding={};whirlStick={};teleportArc={};teleportarc::Current().Clear();
     if(teleportShown){telegraph::Current().ClearSkill(telegraph::TeleportMark);teleportShown=false;}
     spellTrigger=0;for(auto& e:spellFree)e.Reset();spellFreeAt=-1;spellGripSince=-1;spellGripCast=false;spellGripsArmed.store(false);spellGate.Reset();
     bowLaserHue=-1;bowLaserAtlasPending=bowLaserImageReady=false;

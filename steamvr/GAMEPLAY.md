@@ -3261,8 +3261,10 @@ there.
   sides then up past the head, fast (arms only, so seated too); Leap Attack, the same swing from both
   arms pulled well back (30 cm behind the eyes), at the monster that way; Find Item, the right hand
   held out at the corpse a moment, then snatched back to the shoulder; Whirlwind, both arms held
-  straight out to the sides (a T) a moment, whirling 10 cells ahead: once for a T, the arms let down
-  before the next; Find Potion, Find Item's snatch by the left hand; Grim Ward, the right hand held out at the
+  straight out to the sides (a T) a moment, whirling 10 cells ahead, or 10 cells where the walk stick
+  points if it is pushed as the T casts: once for a T, the arms let down before the next (a whirl
+  cannot turn once begun; held, Whirlwind's button chains whirls, each toward the stick as it starts
+  and each at its own mana: `whirl_steer.h`); Find Potion, Find Item's snatch by the left hand; Grim Ward, the right hand held out at the
   corpse a moment, then driven straight down; Taunt, both hands held out in front a moment, then pulled in
   to the chest, at the highlighted monster.
 - Necromancer: Bone Armor, both fists crossed on the chest, held; Raise Skeleton, both arms swept up

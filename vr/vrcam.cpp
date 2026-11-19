@@ -50,6 +50,7 @@
 #include "../steamvr/leather_menu.h"
 #include "../steamvr/head_shadow.h"
 #include "../steamvr/head_skip.h"
+#include "../steamvr/whirl_steer.h"   // Whirlwind aimed along the walk stick; walkdir::OnGround for the walk too
 #include <tlhelp32.h>
 #include <intrin.h>
 #include <xinput.h>
@@ -5202,6 +5203,29 @@ bool MotionAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& ca
     }
     return true;
 }
+// Whirlwind steered by the walk stick (whirl_steer.h): while the stick is pushed past its dead zone, a Whirlwind
+// cast from a button and each repeat of the held button go whirlsteer::Ahead cells where the same push would walk,
+// before the aimed monster and whatever the Aim options. At rest: false, and the cast aims as before. Nothing is
+// pressed here: the game's own commands carry the spot, and a whirl already under way keeps its own (the game
+// takes no new spot until it ends), so holding the button turns the chain from one whirl to the next. The T's
+// whirl takes its stick at the cast, in the transport (its landing, MotionAim above).
+bool WhirlSteerAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& cast) {
+    namespace ws=framevr::whirlsteer;
+    float sx=0,sy=0,gx=0,gy=0,x=0,y=0;
+    if(skill!=ws::Whirlwind||!g_spellAimReady.load()||!g_enabled.load()||gamestate::MenuOpen()||!framevr::WhirlStick(sx,sy))return false;
+    AcquireSRWLockShared(&g_stickLock);const StickFrame f=g_stickFrame;ReleaseSRWLockShared(&g_stickLock);
+    if(!f.valid||!ws::GridWay(sx,sy,{f.camR[0],f.camR[1],f.camR[2]},{f.camF[0],f.camF[1],f.camF[2]},gx,gy)||
+       !ws::Spot(playerX,playerY,gx,gy,ws::Ahead,x,y))return false;
+    cast.x=x;cast.y=y;cast.directed=cast.contactPoint=true;
+    g_note.by="walk stick";g_note.distance=std::hypot(x-playerX,y-playerY);
+    static ULONGLONG lastLog=0;
+    if(GetTickCount64()-lastLog>500) {
+        lastLog=GetTickCount64();
+        LogF("Frame whirlwind: steered by the walk stick - aimed %.1f cells where it points (stick %.2f, %.2f in the view; grid way %.2f, %.2f; hero at cell %.1f, %.1f)",
+             g_note.distance,sx,sy,gx,gy,playerX,playerY);
+    }
+    return true;
+}
 // Telemetry: "Frame aim cast:" - every cast the aim rules see, at most one line
 // per skill per 250 ms: the rule, the button, the target and where it came
 // from, a unit hand-off, and the point or heading sent to the game.
@@ -5232,10 +5256,10 @@ bool NativeSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast) {
         leapglide::g_cast.store(GetTickCount64());
         framevr::HeroCarried(kCarriedTakeOffMs);
     }
-    // Teleport on its shown landing or a thrown trap first; then the aim rules
-    // only with this kind of cast's Aim option On; Off, as before them - except
+    // Teleport on its shown landing, a thrown trap or Whirlwind along the pushed walk stick first; then the aim
+    // rules only with this kind of cast's Aim option On; Off, as before them - except
     // Guided Arrow and Charge, handed the aimed monster whatever the option (aimrules::AlwaysHomes).
-    bool directed=MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast);
+    bool directed=MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast)||WhirlSteerAim(c.skill,playerX,playerY,cast);
     if(!directed) {
         if(aimtargets::RulesOn(c))directed=NativeSpellAimDecide(playerX,playerY,cast);
         else if(c.skill>=0&&framevr::aimrules::AlwaysHomes(c.skill)&&HandOffUnit(c)){g_note.by=c.skill==107?"unit (Charge always goes to the aimed monster)":"unit (Guided Arrow always homes)";cast.directed=false;}
@@ -5590,11 +5614,12 @@ bool ViewStickToGame(float* px, float* py) {
     const float mag = sqrtf(x*x + y*y);
     if (mag < 1e-4f) return false;
     if (g_set.stickExact.load()) {
-        // Stick in our view -> direction on the ground -> that direction on the game's screen.
+        // Stick in our view -> direction on the ground -> that direction on the game's screen. The ground
+        // step is walkdir::OnGround, which Whirlwind's steering takes too (WhirlSteerAim).
         AcquireSRWLockShared(&g_stickLock); const StickFrame f = g_stickFrame; ReleaseSRWLockShared(&g_stickLock);
         if (!f.valid) return false;
-        float w[3];
-        for (int i = 0; i < 3; ++i) w[i] = x * f.camR[i] + y * f.camF[i];
+        const auto ground = framevr::walkdir::OnGround(x, y, {f.camR[0], f.camR[1], f.camR[2]}, {f.camF[0], f.camF[1], f.camF[2]});
+        const float w[3] = {ground.x, ground.y, ground.z};
         float sx = w[0]*f.scrR[0] + w[1]*f.scrR[1] + w[2]*f.scrR[2];
         float sy = w[0]*f.scrU[0] + w[1]*f.scrU[1] + w[2]*f.scrU[2];
         const float sm = sqrtf(sx*sx + sy*sy);
