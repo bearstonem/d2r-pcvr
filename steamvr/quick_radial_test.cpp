@@ -19,7 +19,7 @@ static bool Near(float a, float b, float e = 1e-3f) { return std::fabs(a - b) <=
 // A press's frames: the radial on slot 2 (a right-hand button), upstream's slot while it is down, the stick.
 struct Sim {
     Controller c; Ring ring; Tuning t; FrameIn in; double now = 1000;
-    int heldSlot = -2;   // review N7: upstream's held slot when it is not the bound one (the same button's grip layer); -2: from in.down
+    int heldSlot = -2;   // upstream's held slot when it is not the bound one (the same button's grip layer); -2: from in.down
     // Open by: Hold here (sections 3-5b test the hold ring); section 3b tests Toggle, the default. Quick cast
     // layout: Growing here (the packed ring these sections were written for); section 3d tests Fixed places, the default
     Sim() { in.on = true; in.bound = 2; in.hand = 0; in.slotFree = true; in.classOk = true; in.tracked = true; t.centerMs = 120; t.toggle = false; t.fixed = false; }
@@ -170,30 +170,30 @@ int main() {
         o = w.Step(); CHECK(o.event == Event::Canceled && o.why == Why::Wheel && !w.c.Open());
         // the trigger stays the game's while it is open
         Sim g; g.t.toggle = true; g.Fill(3); g.Press(); g.Release(); o = g.Step(); CHECK(o.event == Event::None && !o.mute && g.c.Open());   // its press only
-        // review F1: cast while its button is still held (a Hold habit): shut, and that press stays muted until it comes up
+        // cast while its button is still held (a Hold habit): shut, and that press stays muted until it comes up
         Sim f; f.t.toggle = true; f.Fill(4); o = f.Press(); CHECK(o.event == Event::Opened);
         f.Stick(-1, 0); f.Step(); f.Stick(0, 0); f.Step(); o = f.Step(130);
         CHECK(o.event == Event::Cast && o.index == 3 && !f.c.Open() && o.mute);
         o = f.Step(); CHECK(o.mute && !f.c.Open()); o = f.Step(400); CHECK(o.mute && o.event == Event::None && !f.c.Open());
         o = f.Release(); CHECK(!o.mute && !f.c.Open());
         o = f.Press(); CHECK(o.event == Event::Opened);                                    // a fresh press opens again
-        // review S1: the same face button's other layer (a game skill on grip + it) is the game's: no tap, never muted
+        // the same face button's other layer (a game skill on grip + it) is the game's: no tap, never muted
         Sim a; a.t.toggle = true; a.Fill(4); a.Press(); a.Release();
         a.heldSlot = 5; o = a.Press(); CHECK(o.event == Event::None && a.c.Open() && !o.mute);
         o = a.Step(200); CHECK(!o.mute && a.c.Open()); a.Release(); a.heldSlot = -2;
         o = a.Press(); CHECK(o.event == Event::Canceled && o.why == Why::Closed && o.mute);   // its own slot: the tap
         a.heldSlot = 5; o = a.Step(); CHECK(!o.mute);                                     // closed, still down, grip added: the game's
         a.heldSlot = -2; a.Release();
-        // review S2: opened with the stick pushed (a trigger-bound ring mid-walk): no pick until the stick is back in the middle once
+        // opened with the stick pushed (a trigger-bound ring mid-walk): no pick until the stick is back in the middle once
         Sim b; b.t.toggle = true; b.Fill(4); b.Stick(0, 1); o = b.Press(); CHECK(o.event == Event::Opened && b.c.stickWait); b.Release();
         o = b.Step(); CHECK(b.c.sel.pick == -1 && !o.tick);
         b.Stick(0, 0); b.Step(); o = b.Step(300); CHECK(o.event == Event::None && b.c.Open() && !b.c.stickWait);
         b.Stick(0, 1); o = b.Step(); CHECK(o.tick && b.c.sel.pick == 0);
         b.Stick(0, 0); b.Step(); o = b.Step(130); CHECK(o.event == Event::Cast && o.index == 0);
-        // review N5: Dead zone 0, a stick that drifts at rest still reaches the middle
+        // Dead zone 0, a stick that drifts at rest still reaches the middle
         Sim d; d.t.toggle = true; d.t.deadZone = 0; d.Fill(4); d.Press(); d.Release();
         d.Stick(-1, 0); d.Step(); d.Stick(.02f, .01f); d.Step(); o = d.Step(130); CHECK(o.event == Event::Cast && o.index == 3);
-        // review N6: Open by switched to Hold while open: the open ring keeps Toggle (no cast on the button being up)
+        // Open by switched to Hold while open: the open ring keeps Toggle (no cast on the button being up)
         Sim l; l.t.toggle = true; l.Fill(4); l.Press(); l.Release(); l.Stick(-1, 0); l.Step();
         l.t.toggle = false; o = l.Step(); CHECK(o.event == Event::None && l.c.Open());
         o = l.Press(); CHECK(o.event == Event::Canceled && o.why == Why::Closed); l.Release();
@@ -258,7 +258,7 @@ int main() {
         CHECK(EntriesFor(Mode::Cast, back).n == 2 && EntriesFor(Mode::Cast, back).e[0].index == 3 && EntriesFor(Mode::Cast, back).e[1].index == 9);
         Ring gp = back; CHECK(PutAt(gp, 5, {70, -1}) && Encode(gp) == "54,f:1,70");
         Ring gc = back; CHECK(ClearAt(gc, 0) && Encode(gc) == "f:1");
-        // review F2: Growing's page numbers over the gaps (page place 1 is real place 3, 2 is 9), so an edit that keeps the order is
+        // Growing's page numbers over the gaps (page place 1 is real place 3, 2 is 9), so an edit that keeps the order is
         // made on the real places and Fixed's places survive (the glue's ApplyEdits; only a move to the end packs)
         CHECK(RealPlace(back, 0) == 3 && RealPlace(back, 1) == 9 && RealPlace(back, 2) == -1 && PackedIndex(back, 9) == 1 && PackedIndex(back, 3) == 0);
         Ring gk = back; CHECK(PutAt(gk, RealPlace(gk, 1), {70, -1}, true) && Encode(gk) == "-,-,-,54,-,-,-,-,-,70");          // a put in a filled place
@@ -346,7 +346,7 @@ int main() {
         CHECK(s.c.mode == Mode::Cast && s.c.shown.n == 3 && EntriesFor(Mode::Cast, s.ring).n == 3 && EntriesFor(Mode::Closed, s.ring).n == 0);
         const auto o = s.Release(); CHECK(o.event == Event::Cast && Encode(s.ring) == "100,101,102");   // casting never changes the ring
     }
-    // 6b. Evening review S-C: the save starts from a copy of the ini; only "no ini yet" starts fresh; any other copy failure
+    // 6b. Save: the save starts from a copy of the ini; only "no ini yet" starts fresh; any other copy failure
     // keeps the lines and tries again, ahead of what was queued since (the newer text of a key written last, so it wins).
     {
         CHECK(SaveStartOf(true, false) == SaveStart::Use && SaveStartOf(true, true) == SaveStart::Use);
@@ -455,7 +455,7 @@ int main() {
         // none left: dim, count 0
         p = PickFor(FamilyId(FamStamina), belt, inv, 3, true);
         CHECK(!p.ok && p.count == 0 && std::strstr(p.why, "none left"));
-        // review N5: a family with nothing carried still has its kind's picture (dim): the weakest potion, the scroll
+        // a family with nothing carried still has its kind's picture (dim): the weakest potion, the scroll
         CHECK(Code3(p.code) == Code3(vps));
         p = PickFor(FamilyId(FamAntidote), belt, inv, 3, true);
         CHECK(!p.ok && p.count == 0 && Code3(p.code) == Code3(Code('y', 'p', 's')));
@@ -482,7 +482,7 @@ int main() {
         CHECK(!Decode("i:", back) && !Decode("f:9", back) && !Decode("64,i:rvs,i:rvs", back));
         // (2026-11-16) items reach the ring from the ring menu's Quick cast chooser, its potions and scrolls row (a family id each)
         Ring viaMenu; CHECK(PutAt(viaMenu, 0, {FamilyId(FamHealth), -1}) && viaMenu.items[0].skill == FamilyId(FamHealth));
-        // Review 2026-11-16 (exact items): the kind page offers each exact one the hero carries, belt and inventory, each code
+        // exact items: the kind page offers each exact one the hero carries, belt and inventory, each code
         // once, strongest first; a plain Rejuvenation put exactly never drinks the Full one.
         int got[12] = {};
         int n = CarriedOf(FamRejuv, belt, inv, 3, got, 12);

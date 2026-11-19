@@ -474,6 +474,23 @@ Native duplicate-assignment rules still apply: assigning a skill may clear its
 previous native slot. Native menus show their usual gamepad prompts. The mod
 does not directly edit saves or invent extra game-owned skill records.
 
+### Quick cast ring
+
+Part of the Ring skill menu (VR Settings > Menus > Ring skill menu). It is a ring of up to 12 of your
+skills and items on one hand button; Warlock and unknown classes keep the game's own buttons.
+
+- **Set it up:** open the ring menu and hold a hand button on the center's **Quick cast** (the trigger
+  cannot be used). That button's own skill is cleared. Then tap **Quick cast** in the ring menu to fill
+  its 12 places, one at a time, from your class's skills and the potions, Town Portal and Identify
+  scrolls and tomes you carry. It is saved per character.
+- **Use it:** tap the button and the ring opens about 1 m ahead. Push that hand's thumbstick toward
+  an item and let it come back to the middle: the item is cast at your aim (a potion is drunk from the
+  belt, else the inventory) and the ring shuts. Tap the button again to shut it with nothing cast.
+- **Healing, Mana and Rejuvenation** can be put as a kind (the best one you carry is used) or as one
+  exact potion, which never drinks a stronger or weaker one.
+- **Hold instead of tap:** set `open_by=1` under `[quick_radial]` in `d2r_vr_quick_radial.ini` beside
+  the plugin: the ring is open while the button is held and the release casts.
+- Upstream's eight quick-cast slots (Left Trigger + a face button) are unchanged.
 ### Glyph casting
 
 Draw a shape in the air to cast a buff, an aura or another skill that needs no

@@ -20,6 +20,7 @@
 #include <vector>
 #include "interactions.h"
 #include "stick_select.h"
+#include "quick_radial_size.h"
 
 namespace framevr::quickradial {
 
@@ -86,8 +87,8 @@ struct Item {
     bool operator==(const Item&) const = default;
 };
 // Quick cast layout: a set 12 places and an item can sit out of order (at number 9 and 3, not locked in as item 1 and 2): Fixed places (the default) or Growing (the packed ring,
-// as before). The ring is one list for both: items[0, n) are its places up to the last filled one; Growing keeps every one of them
-// filled (no gaps, as before), Fixed may leave a place empty (skill -1) before n. Places past n are always empty.
+//). The ring is one list for both: items[0, n) are its places up to the last filled one; Growing keeps every one of them
+// filled (no gaps), Fixed may leave a place empty (skill -1) before n. Places past n are always empty.
 struct Ring {
     std::array<Item, MaxItems> items{};
     int n = 0;
@@ -135,7 +136,7 @@ struct Ring {
 };
 // The ring menu's Quick cast page: `it` put in place
 // `place` (0-11). Growing: a place past the last item fills the next one (the ring has no gaps); an item already on the ring trades
-// places with what is there (the same item twice never). Fixed (2026-11-17): exactly that place, the others stay where they are;
+// places with what is there (the same item twice never). Fixed: exactly that place, the others stay where they are;
 // an item already on the ring moves there (what was there, if anything, takes its old place). True when the ring changed.
 inline bool PutAt(Ring& r, int place, Item it, bool fixed = false) noexcept {
     if (place < 0 || place >= MaxItems || it.skill < 0) return false;
@@ -171,7 +172,7 @@ inline bool ClearAt(Ring& r, int place, bool fixed = false) noexcept {
     if (!r.Packed()) r.Pack();
     return r.Remove(place);
 }
-// Move on the chooser (2026-11-17): the item in place `from` to place `to`. A filled `to`: the two swap. An empty `to`: Fixed, it
+// Move on the chooser: the item in place `from` to place `to`. A filled `to`: the two swap. An empty `to`: Fixed, it
 // goes exactly there and `from` is empty; Growing, it goes last (the ring has no gaps). False: `from` empty, or nothing changed.
 inline bool MoveTo(Ring& r, int from, int to, bool fixed = false) noexcept {
     if (to < 0 || to >= MaxItems || from == to) return false;
@@ -185,18 +186,18 @@ inline bool MoveTo(Ring& r, int from, int to, bool fixed = false) noexcept {
     return true;
 }
 // A real place as Growing's packed page counts it (the filled places before it), and back: the k-th filled place (-1: none).
-// Growing over a ring Fixed left with gaps (review F2, 2026-11-17) edits the real places through these, so the gaps survive.
+// Growing over a ring Fixed left with gaps edits the real places through these, so the gaps survive.
 inline int PackedIndex(const Ring& r, int real) noexcept { int k = 0; for (int i = 0; i < real && i < r.n; ++i) k += r.Filled(i); return k; }
 inline int RealPlace(const Ring& r, int k) noexcept { for (int i = 0; i < r.n; ++i) if (r.Filled(i) && k-- == 0) return i; return -1; }
 // Fixed places are named as a clock's hours (the place at the top is 12, the one at 3 o'clock is 3); Growing's are numbered from 1
-// round the ring (as before). place: 0 at the top, clockwise.
+// round the ring. place: 0 at the top, clockwise.
 constexpr int PlaceNumber(int place, bool fixed) noexcept { return fixed ? (place == 0 ? 12 : place) : place + 1; }
 // ---- Items on the ring (potions, Town Portal and Identify too, from the belt and the inventory) ----
 // A ring item's id is a skill id (0-4095), an exact item (ExactBit | its code's three letters: "hp3", "rvs": that potion and
 // no other), or a family (FamilyBit | Family: "Healing (best)", Town Portal, Identify: the first of its kind by Potion order).
 // Families are upstream's own potion kinds (interaction::PotionType, the codes the game gives each potion) plus the two
 // scroll-and-tome pairs upstream's quick use names (vr/quick_items.cpp). Rank within a family: the game's own code order
-// (hp1 < hp2 < ... < hp5, rvs < rvl; the Boss's rule 2026-11-15: no restore-amount trace yet).
+// (hp1 < hp2 < ... < hp5, rvs < rvl; the game's own codes and table order, no restore-amount read).
 constexpr int ExactBit = 1 << 28, FamilyBit = 2 << 28;
 enum Family : int { FamNone = 0, FamHealth = 1, FamMana = 2, FamRejuv = 3, FamAntidote = 4, FamThawing = 5, FamStamina = 6,
                     FamPortal = 16, FamIdentify = 17 };
@@ -258,7 +259,7 @@ inline std::string CodeName(uint32_t code) {
     std::string s; for (int k = 0; k < 3; ++k) { const char ch = char((c >> (8 * k)) & 0xff); if (ch > ' ') s += ch; }
     return s.empty() ? std::string("Item") : s;
 }
-// Review N5 (2026-11-16): a family entry with nothing carried still shows its kind: the weakest of its potions, the scroll.
+// a family entry with nothing carried still shows its kind: the weakest of its potions, the scroll.
 inline uint32_t FamilyPictureCode(int family) noexcept {
     uint32_t c = 0;
     switch (family) {
@@ -268,7 +269,7 @@ inline uint32_t FamilyPictureCode(int family) noexcept {
     }
     return c | (uint32_t(' ') << 24);
 }
-// The ring menu's letters for a family with no picture (2026-11-16): two, as a skill's initials.
+// The ring menu's letters for a family with no picture: two, as a skill's initials.
 inline const char* FamilyInitials(int family) noexcept {
     switch (family) {
         case FamHealth: return "HP"; case FamMana: return "MP"; case FamRejuv: return "RJ"; case FamAntidote: return "AN";
@@ -313,7 +314,7 @@ inline ItemPick PickFor(int id, const std::array<BeltCol, 4>& belt, const InvIte
         // the icon still shows what it would use: the first matching anywhere
         for (const auto& b : belt) for (int k = 0; k < b.n && k < 4 && !p.code; ++k) if (Matches(id, b.codes[size_t(k)])) p.code = b.codes[size_t(k)];
         if (!p.code && IsExactId(id)) p.code = CodeOfExact(id);
-        if (!p.code && IsFamilyId(id)) p.code = FamilyPictureCode(id & 0xffff);   // review N5: its kind's picture, dim
+        if (!p.code && IsFamilyId(id)) p.code = FamilyPictureCode(id & 0xffff);   // its kind's picture, dim
         return p;
     }
     p.ok = true; p.code = best;
@@ -340,7 +341,7 @@ inline int InvOf(const interaction::Snapshot& s, InvItem* out, int cap) noexcept
     return n;
 }
 // A plain Rejuvenation put exactly never drinks a Full one. The exact items of `family` the hero carries (belt and inventory,
-// each code once), strongest first, as exact ids into out (at most cap): the ring menu's kind page (2026-11-16 review).
+// each code once), strongest first, as exact ids into out (at most cap): the ring menu's kind page.
 inline int CarriedOf(int family, const std::array<BeltCol, 4>& belt, const InvItem* inv, int invN, int* out, int cap) noexcept {
     std::array<uint32_t, 32> codes{}; int n = 0;
     const auto add = [&](uint32_t c) {
@@ -377,7 +378,7 @@ inline int TiersOf(int family, int* out, int cap) noexcept {
 }
 inline bool HasTiers(int family) noexcept { int ids[4]; return family != FamPortal && family != FamIdentify && TiersOf(family, ids, 4) >= 2; }
 // What a family entry is called: "Healing (best)" / "(weakest)" for a kind with tiers (the Potion order), the potion's own name for
-// the others ("Antidote Potion"), Town Portal and Identify as before.
+// the others ("Antidote Potion"), Town Portal and Identify by their names.
 inline std::string FamilyEntryName(int family, bool strongest) {
     if (HasTiers(family)) return std::string(FamilyName(family)) + (strongest ? " (best)" : " (weakest)");
     if (family == FamPortal || family == FamIdentify) return FamilyName(family);
@@ -387,11 +388,11 @@ inline std::string FamilyEntryName(int family, bool strongest) {
 
 // Saved per character in d2r_vr_quick_radial.ini beside the plugin, [quick_radial] <Key> = the entries in ring order: skill
 // ids, "i:<code>" for an exact item, "f:<family>" for a family, e.g. "54,i:rvs,f:1" (empty: an empty ring). An empty place before
-// the last filled one (Fixed places, 2026-11-17) is "-", e.g. "-,-,-,54,-,-,-,-,-,f:1" (54 at 3 o'clock, Healing at 9): a ring
-// with no gaps is written exactly as before, and a save from before loads into places 1..n as it was. Decode refuses anything
+// the last filled one (Fixed places) is "-", e.g. "-,-,-,54,-,-,-,-,-,f:1" (54 at 3 o'clock, Healing at 9): a ring
+// with no gaps is written as the plain list of its items, and a list without gaps loads into places 1..n. Decode refuses anything
 // else (a bad id, a duplicate, more than 12 places): nothing loaded.
 //
-// The save (review N1, evening review S-C): the lines go into a copy of the ini, flushed, then moved over it. The copy starts
+// The save : the lines go into a copy of the ini, flushed, then moved over it. The copy starts
 // from the ini (Use); from nothing only when there is no ini yet (Fresh); any other failure to copy (a sharing violation while a
 // sync tool or a scanner holds it) waits and tries again (Retry): a fresh copy then would drop every other character's ring.
 enum class SaveStart { Use, Fresh, Retry };
@@ -475,8 +476,8 @@ struct Tuning {
     // closes it with nothing cast. false (Hold): open while the button is held, its release casts.
     bool toggle = true;
     bool closeAfterCast = true;  // Toggle only: the ring shuts after a cast (On); false: it stays open for more casts
-    // Quick cast layout (2026-11-17): true, Fixed places: 12 clock places, each item where it was put, the empty ones skipped by the
-    // stick; false, Growing: the ring is its N items split into N equal parts (as before).
+    // Quick cast layout: true, Fixed places: 12 clock places, each item where it was put, the empty ones skipped by the
+    // stick; false, Growing: the ring is its N items split into N equal parts.
     bool fixed = true;
 };
 
@@ -576,7 +577,7 @@ inline float Meters(const Plane& p, float deg) noexcept { return 2 * p.dist * st
 // a hint. Both regions are free in the shared image (the glue's static_asserts).
 namespace atlas {
 struct Rect { int x, y, w, h; };
-constexpr int AW = 480, AH = 848, BW = 512, BH = 232, Gap = 8;
+constexpr int AW = quickradialsize::AW, AH = quickradialsize::AH, BW = quickradialsize::BW, BH = quickradialsize::BH, Gap = 8;
 constexpr int RingPx = 448, RimPx = 112, LabelW = 232, LabelH = 40;
 constexpr Rect RingRect{0, 0, RingPx, RingPx};
 constexpr Rect RimRect{0, RingPx + Gap, RimPx, RimPx};
@@ -630,7 +631,7 @@ inline DrawList Draw(const Plane& p, Mode m, const Entries& es, int pick, const 
 }
 
 // ---- The press's whole life, one call a frame (vr/quick_radial.cpp is glue around it) ----
-// Toggle's smallest middle (review N5, 2026-11-16): with Dead zone 0 a resting stick's drift still counts as back in the middle.
+// Toggle's smallest middle: with Dead zone 0 a resting stick's drift still counts as back in the middle.
 constexpr float ToggleMiddle = .05f;
 struct FrameIn {
     double nowMs = 0;
@@ -669,8 +670,8 @@ struct Controller {
     bool stickHold = false;     // closed with the stick pushed: it stays the ring's until it comes back to the middle
     bool pressHold = false;     // Toggle: closed (a tap, a cast) with its button down: that press stays muted until the button comes up
     bool pushedEmpty = false;   // Toggle: the stick is out of the middle with no item picked (an empty ring)
-    bool stickWait = false;     // Toggle (review 2026-11-16 S2): opened with the stick pushed: no pick until it is back in the middle once
-    bool toggle = true;         // Open by, latched at open (review N6: switched while open, the open ring keeps its own)
+    bool stickWait = false;     // Toggle: opened with the stick pushed: no pick until it is back in the middle once
+    bool toggle = true;         // Open by, latched at open (switched while open, the open ring keeps its own)
     double openedMs = 0;
     Entries shown;              // the entries this frame (the glue paints them)
     bool Open() const noexcept { return mode != Mode::Closed; }
@@ -682,7 +683,7 @@ struct Controller {
         FrameOut out; out.hand = hand;
         const bool owns = in.on && in.classOk && in.bound >= 0 && in.slotFree;
         if (mode == Mode::Closed) {
-            // the closing press never reaches the game; another slot on the same button (its grip layer, review S1) is the game's
+            // the closing press never reaches the game; another slot on the same button (its grip layer) is the game's
             if (pressHold) { if (!in.down) pressHold = false; else if (in.held == in.bound) out.mute = true; }
             if (stickHold && !(std::hypot(in.stick[0], in.stick[1]) > .25f)) stickHold = false;
             out.ownStick = stickHold && in.on;
@@ -699,7 +700,7 @@ struct Controller {
         }
         out.mute = out.ownStick = true;
         // Toggle's open ring: only its own slot's press is muted (the hand's other buttons, its trigger and the same button's other
-        // layer stay the game's, review S1), and the opening press until it comes up
+        // layer stay the game's), and the opening press until it comes up
         if (toggle) out.mute = in.held == in.bound || (in.down && !armed);
         if (!owns || in.wheelOpen || in.occupied) {   // switched Off, unbound, the button taken, a wheel, a potion or holster: nothing cast
             out.event = Event::Canceled;
@@ -710,18 +711,18 @@ struct Controller {
         }
         const Entries before = shown;
         shown = EntriesFor(mode, ring, t.fixed);
-        if (shown.n != before.n || shown.filled != before.filled) sel.Reset();   // Growing: filled is all n, so as before
+        if (shown.n != before.n || shown.filled != before.filled) sel.Reset();   // Growing: filled is all n
         const int pickWas = sel.pick;
         const float r = std::hypot(in.stick[0], in.stick[1]);
         Tuning feel = t;
-        if (toggle) feel.deadZone = std::max(t.deadZone, ToggleMiddle);   // review N5: a drifting stick still reaches the middle
+        if (toggle) feel.deadZone = std::max(t.deadZone, ToggleMiddle);   // a drifting stick still reaches the middle
         if (toggle && stickWait && !(r > feel.deadZone * .8f)) stickWait = false;
-        // Fixed places: only a filled place is picked (the nearest by angle); Growing: the shared rule over its N items, as before
+        // Fixed places: only a filled place is picked (the nearest by angle); Growing: the shared rule over its N items
         if (!(toggle && stickWait)) out.tick = (shown.fixed ? sel.StepFilled(in.stick[0], in.stick[1], shown.n, shown.filled, in.nowMs, feel)
                                                            : sel.Step(in.stick[0], in.stick[1], shown.n, in.nowMs, feel)) && sel.pick >= 0;
         if (toggle) {   // Toggle: the stick picks round the clock; back in the middle: cast
             if (!in.down) armed = true;
-            const bool tap = armed && in.down && !downWas && in.held == in.bound;   // review S1: its own slot, not the grip layer's
+            const bool tap = armed && in.down && !downWas && in.held == in.bound;   // its own slot, not the grip layer's
             downWas = in.down;
             if (tap) {   // its button again: shut, nothing cast; that press stays muted until it comes up
                 out.event = Event::Canceled; out.why = Why::Closed;
@@ -733,7 +734,7 @@ struct Controller {
             const bool middle = !(r > feel.deadZone * .8f);
             if (pickWas >= 0 && sel.pick < 0 && middle && shown.Holds(pickWas)) {
                 out.event = Event::Cast; out.index = shown.e[size_t(pickWas)].index;
-                // review F1: shut with its button still down: that press stays muted until it comes up (no swing after the cast)
+                // shut with its button still down: that press stays muted until it comes up (no swing after the cast)
                 if (t.closeAfterCast) { Close(out, in.down); stickHold = r > .25f; pressHold = in.down; out.mute = out.mute || in.down; }
                 else sel.Reset();
                 pushedEmpty = false;

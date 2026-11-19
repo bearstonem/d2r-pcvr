@@ -128,9 +128,9 @@ bool Assign(const Request& r,const Snapshot& s) {
     assigned=uint32_t(r.index);return true;
 }
 bool Use(const Request& r,const Snapshot& s) {
-    struct Keep{uint32_t& a;uint32_t v;~Keep(){a=v;}} keep{assigned,assigned};framevr::quickradial::rt::QuickUse(&r,assigned);   // Quick cast: its own in-flight use may name its item code for this call
+    const uint32_t allowed=framevr::quickradial::rt::QuickUse(&r,assigned);   // the item this call may use: the assigned one, or Quick cast's own in-flight request (the global is never changed)
     Items::ItemInfo info{};ClientItems client;
-    if(r.action!=Action::UseItem||!assigned||uint32_t(r.index)!=assigned||!Validate(r,s,info)||
+    if(r.action!=Action::UseItem||!allowed||uint32_t(r.index)!=allowed||!Validate(r,s,info)||
        Quantity(info)<=0||!client.Load(r.session))return false;
     auto unit=client.Find(info);if(!unit)return false;
     if(info.code==Code('i','s','c')||info.code==Code('i','b','k')) {
