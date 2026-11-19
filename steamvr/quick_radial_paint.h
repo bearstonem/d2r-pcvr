@@ -18,7 +18,7 @@ struct PEntry {
     bool dim = false;      // the game refuses it now (not learned, not usable): drawn faint, never cast
     int count = -1;        // an item entry: how many it can use (belt and inventory), shown on its plate and after its name; -1: a skill
     std::string why;       // dim: why, after the name ("none left"); empty: "not now"
-    bool empty = false;    // Fixed places (2026-11-17): an empty place, drawn as a faint socket, no plate, no name
+    bool empty = false;    // Fixed places: an empty place, drawn as a faint socket, no plate, no name
 };
 struct Job {
     std::vector<PEntry> entries;   // the ring's items, in its order

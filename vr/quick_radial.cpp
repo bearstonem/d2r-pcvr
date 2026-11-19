@@ -61,7 +61,7 @@ qr::Tuning ReadTuning() {
     t.toggle = openByToggle.load(std::memory_order_relaxed);
     return t;
 }// A skill or item onto the ring from outside the page (a menu moved it in; a put made before the save was read): Fixed, the
-// first empty place; Growing, the end of the packed ring (as before).
+// first empty place; Growing, the end of the packed ring.
 bool AddToRing(qr::Ring& r, qr::Item it, bool fixed) {
     if (fixed) return r.AddFree(it);
     if (!r.Packed()) r.Pack();
@@ -69,7 +69,7 @@ bool AddToRing(qr::Ring& r, qr::Item it, bool fixed) {
 }
 int PlaceOf(const qr::Ring& r, int id) { for (int i = 0; i < r.n; ++i) if (r.items[size_t(i)].skill == id) return i; return -1; }
 using qr::PackedIndex; using qr::RealPlace;   // Growing's packed page numbers (steamvr/quick_radial.h)
-// The log's words for a ring item: Growing "item 2 of 3" (as before; review F5: its place among the filled ones, never the real
+// The log's words for a ring item: Growing "item 2 of 3" (its place among the filled ones, never the real
 // place of a ring Fixed left with gaps); Fixed "place 9, 2 filled" (the place's clock name). index: the item's real place.
 std::string ItemWords(int index, int n, bool fixed) {
     char w[48];
@@ -124,7 +124,7 @@ struct Worker {
                 lock.unlock();
                 const auto file = IniFile();
                 const char* failed = nullptr; DWORD err = 0;
-                if (!file.empty()) {   // review N1: written to a copy, flushed, then moved over the ini (an exit mid-write never cuts it short)
+                if (!file.empty()) {   // written to a copy, flushed, then moved over the ini (an exit mid-write never cuts it short)
                     const std::wstring tmp = file + L".tmp";
                     const bool copied = CopyFileW(file.c_str(), tmp.c_str(), FALSE) != 0;
                     err = copied ? 0 : GetLastError();
@@ -139,7 +139,7 @@ struct Worker {
                 }
                 std::lock_guard back(m);
                 char line[200]{};
-                if (failed) {   // evening review S-C: kept and tried again in 2 s; said once a streak
+                if (failed) {   // kept and tried again in 2 s; said once a streak
                     qr::Requeue(saves, std::move(s));
                     retryAt = std::chrono::steady_clock::now() + std::chrono::seconds(2);
                     if (!failing) std::snprintf(line, sizeof line, "Frame quick radial: ring not saved yet: %s (error %lu); trying again every 2 s", failed, err);
@@ -155,7 +155,7 @@ struct Worker {
                 lock.unlock();
                 Ident r; r.session = session; r.cls = cls; r.level = level;
                 const auto save = charsave::Read(cls);
-                // review S4: the newest save of the class at the live level, and the only save of that class at that level (two at one
+                // the newest save of the class at the live level, and the only save of that class at that level (two at one
                 // level: the newest is no proof of who is played; the ring stays this game's, never saved under the other's name)
                 const bool match = save.valid && save.problem == framevr::charsave::Problem::None && save.name[0] && save.heroClass == cls && level > 0 && save.level == level;
                 r.twins = match && charsave::SameLevel(cls, level) > 1;
@@ -214,7 +214,7 @@ struct Shared {
     std::atomic<uint32_t> open{0};
     std::atomic<uint64_t> drawKey{0};   // the picture the list was built for
     std::atomic<uint64_t> liveKey{0};   // the picture in the shared image now (two frames after its upload)
-    std::atomic<bool> rebuilt{false};   // review S2: the shared image was made again (a session rebuild): paint and upload again
+    std::atomic<bool> rebuilt{false};   // the shared image was made again (a session rebuild): paint and upload again
     qr::DrawList list;
 };
 Shared ringShared;
@@ -237,18 +237,18 @@ struct State {
                  double heldS = 0; char name[80] = ""; char from[48] = ""; } use;
     uint64_t useNumber = 0;
     int buzzHand = -1, buzzCount = 0; float buzzAmp = 0; double buzzMs = 0;   // a buzz the press gives next (the request seam has no pulse)
-    bool buzzShort = true;        // review N3: short pulses (every one 60 ms), or the one Cast buzz
+    bool buzzShort = true;        // short pulses (every one 60 ms), or the one Cast buzz
     int bound = -1;
     bool busy = false;            // open, or holding the stick or trigger after a close: the press runs every frame
     double nextTickS = 0;
     // The character: the snapshot's session and class; its save name once read (key), the ring loaded from it.
     uint64_t session = 0; int cls = -2; bool identified = false, answered = false; double identRetryS = 0; std::string key, name;
-    // Review S2: skills a menu moved in before the save was read (on the live ring too), and (review S3) the ring
+    // skills a menu moved in before the save was read (on the live ring too), and the ring
     // menu's puts made then: added to the stored ring once read (those still on the live ring), never saved over it.
     struct Moved { qr::Item it; int from = -1; std::string where; bool page = false; };
     std::vector<Moved> movedBefore;
     int toldClass = -3;           // the last "class keeps upstream" line
-    int noSaveTold = 0;           // the last "no save" / "two saves" line (review N4: once, not every 10 s)
+    int noSaveTold = 0;           // the last "no save" / "two saves" line (once, not every 10 s)
     // The pictures: what the ring shows now (want), what was asked of the worker, what was uploaded and when (Input frames).
     uint64_t wantKey = 0, askedKey = 0, uploadedKey = 0, frame = 0, uploadFrame = 0;
     bool srgb = false;
@@ -311,8 +311,8 @@ uint64_t KeyOf(const qr::Entries& es, const ia::Snapshot& s, const qr::Tuning& t
     uint64_t h = 1469598103934665603ull;
     const auto mix = [&](uint64_t v) { h ^= v; h *= 1099511628211ull; };
     mix(t.strongest); mix(t.toggle); mix(uint64_t(es.n)); mix(uint64_t(std::lround(t.radiusDeg * 10))); mix(uint64_t(std::lround(t.iconDeg * 10))); mix(st.srgb);
-    if (es.fixed) { mix(0xF1ED); mix(es.filled); }   // Growing's key as before
-    // evening review NIT 5: the belt and the inventory read once a call, and only the pick (no name strings) on these open frames
+    if (es.fixed) { mix(0xF1ED); mix(es.filled); }   // Growing's key has no mask
+    // the belt and the inventory read once a call, and only the pick (no name strings) on these open frames
     std::array<qr::BeltCol, 4> belt{}; qr::InvItem inv[128]; int invN = -1;
     for (int i = 0; i < es.n; ++i) {
         const auto& e = es.e[size_t(i)];
@@ -360,7 +360,7 @@ void AskPaint(const qr::Entries& es, const ia::Snapshot& s, const qr::Tuning& t,
     st.askedKey = key;
 }
 void Pulses(int hand, int count) { st.buzzHand = hand; st.buzzAmp = .25f; st.buzzCount = count; st.buzzShort = true; st.buzzMs = 0; }
-// An edit of the live ring: saved when the character's save is read (identified); before that (review S3) kept for this game,
+// An edit of the live ring: saved when the character's save is read (identified); before that kept for this game,
 // its puts added to the stored ring once read (st.movedBefore, page), never over it.
 void AskSave(void (*)(const char*), const char*, const qr::Item* put = nullptr) {
     if (st.identified && !st.key.empty()) {
@@ -369,7 +369,7 @@ void AskSave(void (*)(const char*), const char*, const qr::Item* put = nullptr) 
         w.cv.notify_one();
     } else if (put) st.movedBefore.push_back({*put, -1, "the ring menu", true});
 }
-// Review S1: a moved skill the ring could not take: said taken off its button, three short pulses on that button's hand.
+// a moved skill the ring could not take: said taken off its button, three short pulses on that button's hand.
 void TakenOff(const ia::Snapshot& s, int id, int from, const char* where, const char* why, void (*say)(const char*)) {
     Pulses(from >= 0 ? framevr::skills::Hand(from) : 0, 3);
     if (!say) return;
@@ -407,8 +407,8 @@ void Tick(const rt::PressFrame& f, const ia::Snapshot& s, bool on, const qr::Tun
         { std::lock_guard lock(w.m); r = std::move(w.ident); w.hasIdent.store(false, std::memory_order_relaxed); }
         if (r.session == st.session && r.cls == st.cls) {
             char line[260];
-            st.answered = true;   // the page: Saved or This game, no longer Reading (review S3)
-            if (!r.ok) {   // review N4: said once per reason and level, not every 10 s
+            st.answered = true;   // the page: Saved or This game, no longer Reading
+            if (!r.ok) {   // said once per reason and level, not every 10 s
                 if (r.twins) std::snprintf(line, sizeof line, "Frame quick radial: two or more class %d saves at level %d: not sure which is played; the ring is kept for this game only", r.cls, r.level);
                 else std::snprintf(line, sizeof line, "Frame quick radial: no save of class %d at level %d yet; the ring is kept for this game, read again every 10 s", r.cls, r.level);
                 const int said = (r.twins ? 1 : 2) + r.level * 4;
@@ -422,7 +422,7 @@ void Tick(const rt::PressFrame& f, const ia::Snapshot& s, bool on, const qr::Tun
                     std::snprintf(line, sizeof line, "Frame quick radial: character (class %d, level %d): %s", r.cls, r.level,
                                   keep ? "no ring stored yet: this game's ring saved" : "no ring stored yet (empty: fill it from the ring menu's Quick cast)");
                     if (keep) { std::lock_guard lock(w.m); w.saves.emplace_back(st.key, qr::Encode(st.ring)); }
-                } else {   // reviews S2, S3: the stored ring wins; what was put on the live ring before (still there) is added to it, never over it
+                } else {   // the stored ring wins; what was put on the live ring before (still there) is added to it, never over it
                     const qr::Ring live = st.ring;
                     st.ring = r.ring;
                     int added = 0;
@@ -457,8 +457,8 @@ void Tick(const rt::PressFrame& f, const ia::Snapshot& s, bool on, const qr::Tun
 }
 // A menu (Glyphs, Gestures, Quick cast) put on a button and no free button could take that button's game skill back: it goes
 // on this character's ring (appended last, saved as an edit), or it is said taken off that button with three short pulses on its
-// hand (review S1: Off, another class, the ring full); on the ring already, it is kept there (no pulses). Before the character's
-// save is read it goes on the live ring and is merged into the stored one once read (review S2), never saved over it.
+// hand (Off, another class, the ring full); on the ring already, it is kept there (no pulses). Before the character's
+// save is read it goes on the live ring and is merged into the stored one once read, never saved over it.
 void MoveIn(const ia::Snapshot& s, bool on, bool fixed, void (*say)(const char*)) {
     namespace lk = framevr::quickradial::link;
     const int code = lk::moveAsk.exchange(-1, std::memory_order_acq_rel);
@@ -478,7 +478,7 @@ void MoveIn(const ia::Snapshot& s, bool on, bool fixed, void (*say)(const char*)
     if (fixed) std::snprintf(what, sizeof what, "added %s (a menu took %s; place %d, the first empty one)", NameOf(s, id).c_str(), where, qr::PlaceNumber(at, true));
     else std::snprintf(what, sizeof what, "added %s (a menu took %s; item %d)", NameOf(s, id).c_str(), where, st.ring.n);
     if (st.identified) { AskSave(say, what); return; }
-    st.movedBefore.push_back({{id, k->owner}, from, where});   // review S2: not an edit over the stored ring; merged into it once read
+    st.movedBefore.push_back({{id, k->owner}, from, where});   // not an edit over the stored ring; merged into it once read
     (void)what;   // kept for this game until the save is read, then merged (st.movedBefore)
 }
 // The ring menu's Quick cast page reads this character's ring (link::view), published
@@ -488,7 +488,7 @@ void PublishView(bool on) {
     static_assert(std::tuple_size_v<decltype(lk::View::ids)> == size_t(qr::MaxItems), "the view holds every place");
     const bool ready = on && qr::ClassKnown(st.cls);
     const lk::Save save = st.identified ? lk::Save::Saved : st.answered ? lk::Save::ThisGame : lk::Save::Reading;
-    // 2026-11-17: Fixed places shows each place as it is (an empty one -1); Growing the packed ring (a ring Fixed left with gaps
+    // Fixed places shows each place as it is (an empty one -1); Growing the packed ring (a ring Fixed left with gaps
     // closes up, as Growing's edits do)
     const bool fixed = true;   // Fixed places
     qr::Ring shown = st.ring;
@@ -503,12 +503,12 @@ void PublishView(bool on) {
     ++v.rev;
 }
 // The ring menu's place edits (link::Ask), applied on the press frame after them: put an item in a place (qr::PutAt), clear one
-// (qr::ClearAt) or move a place's item to another (qr::MoveTo, 2026-11-17), each by Quick cast layout (Fixed places or Growing);
+// (qr::ClearAt) or move a place's item to another (qr::MoveTo), each by Quick cast layout (Fixed places or Growing);
 // saved as edits (AskSave) and published. Another game's, Off or another class: dropped, said. Places in the log by the page's
 // names (Fixed: the clock's hours).
 void ApplyEdits(const ia::Snapshot& s, bool on, bool fixed, void (*say)(const char*)) {
     namespace lk = framevr::quickradial::link;
-    // review S3: while this character's save is being read (the page asks nothing then; a race only) the edits wait for it
+    // while this character's save is being read (the page asks nothing then; a race only) the edits wait for it
     if (on && qr::ClassKnown(st.cls) && st.session == s.session && !st.identified && !st.answered) return;
     std::array<lk::Edit, lk::MaxEdits> got{}; int n = 0;
     { std::lock_guard lock(lk::m); n = std::min(lk::editN, lk::MaxEdits); got = lk::edits; lk::editN = 0; lk::editWaiting.store(false, std::memory_order_relaxed); }
@@ -518,7 +518,7 @@ void ApplyEdits(const ia::Snapshot& s, bool on, bool fixed, void (*say)(const ch
     const auto shown = [&](int real) { return fixed ? qr::PlaceNumber(real, true) : PackedIndex(st.ring, real) + 1; };   // where an item is now, as the page shows it
     for (int i = 0; i < n; ++i) {
         const auto& e = got[size_t(i)];
-        // Growing over a ring Fixed left with gaps (review F2): the page shows it packed (its places 1..n). An edit that keeps the
+        // Growing over a ring Fixed left with gaps: the page shows it packed (its places 1..n). An edit that keeps the
         // order (a put in a filled place or past the last, a clear, a swap) is made on the real places, so Fixed's places survive;
         // only a move to past the last item reorders, and that packs the ring (said).
         int at = e.place, from = e.from;
@@ -531,12 +531,12 @@ void ApplyEdits(const ia::Snapshot& s, bool on, bool fixed, void (*say)(const ch
         }
         const char* no = !on ? "switched Off" : !qr::ClassKnown(st.cls) ? "this class keeps upstream" : e.session != st.session ? "another game" :
                          e.place < 0 || e.place >= qr::MaxItems || e.from >= qr::MaxItems ? "no such place" : nullptr;
-        if (no) {   // review S4: the ring menu said "asked"; the drop is said here, three short pulses on the pointing hand
+        if (no) {   // the ring menu said "asked"; the drop is said here, three short pulses on the pointing hand
             if (e.hand >= 0) Pulses(e.hand, 3);
             if (say) { std::snprintf(line, sizeof line, "Frame quick radial: a ring menu edit of place %d dropped: %s", place(e.place), no); say(line); }
             continue;
         }
-        if (e.from >= 0) {   // Move (2026-11-17): place from's item to place; a filled place: the two swap
+        if (e.from >= 0) {   // Move: place from's item to place; a filled place: the two swap
             const bool swap = st.ring.Filled(at);
             const int movedId = st.ring.Filled(from) ? st.ring.items[size_t(from)].skill : -1;
             const std::string was = movedId >= 0 ? NameOf(s, movedId) : std::string();
@@ -596,7 +596,7 @@ void Input(InputFrame f) {
     st.srgb = f.srgb;
     if (st.ownStick) { if (st.stickHand == walk) f.lx = f.ly = 0; else f.rx = f.ry = 0; }
     ++st.frame;
-    if (ringShared.rebuilt.exchange(false, std::memory_order_acq_rel)) {   // review S2: everything painted again (the next tick or frame asks)
+    if (ringShared.rebuilt.exchange(false, std::memory_order_acq_rel)) {   // everything painted again (the next tick or frame asks)
         st.uploadedKey = st.askedKey = 0;
     }
     if (worker && worker->hasDone.load(std::memory_order_acquire)) {
@@ -743,7 +743,7 @@ void Press(PressFrame f) {
         Publish(qr::DrawList{}, 0);
         st.drawn = false;
     }
-    if (!on) {   // the Off call: nothing fires after Off; the ring menu's asks are dropped (review N7: none waits for the next On)
+    if (!on) {   // the Off call: nothing fires after Off; the ring menu's asks are dropped (none waits for the next On)
         st.pending = {}; st.ownStick = false; st.bind.Forget();
         namespace lk = framevr::quickradial::link;
         lk::moveAsk.store(-1, std::memory_order_relaxed);
@@ -780,7 +780,7 @@ void Cast(CastFrame f) {
 void Layer(const LayerFrame& f) {
     static XrCompositionLayerQuad quads[qr::MaxQuads];   // lives until xrEndFrame (the submit keeps a pointer)
     static uint64_t chainWas = 0;
-    if (f.chain && f.chain != chainWas) {   // review S2: a new shared image (session rebuilt): its regions are empty until painted again
+    if (f.chain && f.chain != chainWas) {   // a new shared image (session rebuilt): its regions are empty until painted again
         if (chainWas) { ringShared.liveKey.store(0, std::memory_order_release); ringShared.rebuilt.store(true, std::memory_order_release); }
         chainWas = f.chain;
     }

@@ -29,7 +29,7 @@ inline int NearestItem(float clockDeg, int n) noexcept {
     const int k = int(std::floor(clockDeg / StepDeg(n) + .5f));
     return ((k % n) + n) % n;
 }
-// The nearest of the items whose bit is set in `filled` (bit i: item i; -1: none of them): Quick cast's Fixed places (2026-11-17),
+// The nearest of the items whose bit is set in `filled` (bit i: item i; -1: none of them): Quick cast's Fixed places,
 // where an empty place is never picked. Ties: the lower item.
 inline int NearestFilled(float clockDeg, int n, unsigned filled) noexcept {
     int best = -1; float bestD = 1e9f;
@@ -72,7 +72,7 @@ struct Selector {
         pick = nearest;
         return was != pick;
     }
-    // Step over the items whose bit is set in `filled` only (Quick cast's Fixed places, 2026-11-17): the same dead zone and center
+    // Step over the items whose bit is set in `filled` only (Quick cast's Fixed places): the same dead zone and center
     // hold; out of it the nearest filled item, a pick held until the stick is the hysteresis past the half-way line to the filled
     // item now nearest (with every item filled and the nearest a neighbor, Step's rule).
     bool StepFilled(float x, float y, int n, unsigned filled, double nowMs, const Feel& f) noexcept {
@@ -97,7 +97,7 @@ struct Selector {
     }
 };
 // After a pick is used (a cast, Back, the menu shut) the selecting stick stays out of the game's hands until the thumb
-// comes back to the middle, so a still-pushed stick neither walks nor turns (review S3).
+// comes back to the middle, so a still-pushed stick neither walks nor turns.
 constexpr float ReleaseR = .25f;
 struct Hold {
     bool on = false;

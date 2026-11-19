@@ -22,7 +22,7 @@ inline char moveFrom[48] = "";          // that button's words ("Right B"), set 
 constexpr int MoveCode(int skill, int slot) noexcept { return (skill & 0xfff) | ((slot + 1) & 0xff) << 12; }
 constexpr int MoveSkill(int code) noexcept { return code & 0xfff; }
 constexpr int MoveSlot(int code) noexcept { return (code >> 12) - 1; }   // -1: not known
-// save (review S3): Reading: the character's save is not read yet (the page shows no places and asks nothing);
+// save: Reading: the character's save is not read yet (the page shows no places and asks nothing);
 // Saved: the ring is this character's stored one (edits are saved); ThisGame: no save to tell it by (two saves of its class and
 // level, or none yet): edits are kept for this game and added to the stored ring once it is read, never over it.
 enum class Save : uint8_t { Reading, Saved, ThisGame };
