@@ -2040,7 +2040,7 @@ void Layer(host::LayerFrame f) {
         if (step.blurb >= 0 && step.blurb < view.count) {
             const uint64_t key = (1ull << 63) | (uint64_t(ringPage) << 56) | (uint64_t(step.blurb) << 40) | viewRevision;
             const size_t i = size_t(step.blurb);
-            if (key != blurbKey) { blurbKey = key; blurbs.Get(built->metrics, key, {view.name[i], "", view.line[i], view.help[i]}); }
+            if (key != blurbKey) { blurbKey = key; blurbs.Get(built->metrics, key, tx::PageBlurb(built->metrics, view.name[i], view.sub[i], view.line[i], view.help[i])); }
             scene.blurb = &blurbs.Get(built->metrics, key, {});
         }
     } else {

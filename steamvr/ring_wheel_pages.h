@@ -319,6 +319,7 @@ struct PageView {
     std::string bottomCount;                    // Glyphs: the hand half's count line when pointed ("8 shapes, left hand"; design RS4); Quick cast: Move's line
     std::string bottomHelp;                     // Quick cast: Move's trigger line when pointed
     std::array<std::string, MaxItems> name, line, help;   // the pointed item's blurb: name, its line, the trigger's help
+    std::array<std::string, MaxItems> sub;               // an optional line under the name (a note that gives way first when the card's line needs the room)
     bool clock = false;                         // Quick cast, Fixed places: the places named as a clock's hours (12 at the top)
     int moveFrom = -1;                          // Quick cast's Move: the place whose item is being moved (ringed), -1 none
     bool operator==(const PageView&) const = default;
@@ -465,9 +466,10 @@ inline void FillGestures(PageView& v, int skillClass, int off, NameOf nameOf, Ce
         v.skill[k] = shown; v.on[k] = spellmotion::On(skillClass, id, off); v.has[k] = have; onCount += v.on[k];
         v.cell[k] = int16_t(cellOf(shown));
         v.name[k] = std::string(have ? nameOf(shown) : spellmotion::SpellName(shown)) + spellmotion::CardArm(id);
-        std::string cue = std::string(spellmotion::CueOf(id)) + (have ? "." : " (no points yet).");
+        std::string cue = std::string(spellmotion::CueOf(id)) + ".";
         cue[0] = char(std::toupper(uint8_t(cue[0])));
-        v.line[k] = cue;
+        v.line[k] = cue;   // the how-to, whole; "No points yet" is a note under the name, which gives way when the how-to needs the room
+        if (!have) v.sub[k] = "No points yet";
         v.help[k] = v.on[k] ? "On: trigger to turn off" : "Off: trigger to turn on";
     }
     v.title = "Gestures"; v.top = "Back";
@@ -565,7 +567,7 @@ inline int BuildPage(const Scene& s, const PageView& v, Instance* out, int maxSh
             if (i == v.moveFrom) Push(out, n, maxShapes, {x, y, size + 22, size + 22, 0, 0, 0, 0, 0, GoldLight.r, GoldLight.g, GoldLight.b, A, RecipeRing, 2.5f});   // Move: the place being moved, an outer gold ring
             if (pointed) Push(out, n, maxShapes, {x, y, size + 12, size + 12, 0, 0, 0, 0, 0, HoverRing.r, HoverRing.g, HoverRing.b, A, RecipeRing, 3});
         } else {   // a gesture: its skill's icon; Off: dimmed with an "Off" pill (never color alone); no points (
-            // item 6): gray at upstream's 45% brightness (interaction_ui.cpp icon) over a black disc, no pill (its line says "no points yet")
+            // item 6): gray at upstream's 45% brightness (interaction_ui.cpp icon) over a black disc, no pill (its note says "No points yet")
             const bool noPoints = !v.has[k] && v.on[k], lit = v.on[k] && !noPoints;
             const float size = GestureIconPx * (pointed ? 1.3f : 1.f), a = A * (noPoints ? NoPointsDim : v.on[k] ? 1.f : .5f);
             const Rgb rim = lit ? GoldLight : Muted;

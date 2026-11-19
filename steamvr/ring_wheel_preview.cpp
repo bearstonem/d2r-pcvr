@@ -595,6 +595,46 @@ int main(int argc, char** argv) {
             Check(skills.size() > 200 && bad == 0, "#16 the kit's every skill fits the r 124 circle");
         }
     }
+    // ---- The pages' card blurbs: every card's how-to shows whole, in the real font at the real box (no ellipsis, no clipped line) ----
+    {
+        int cards = 0, bad = 0; size_t widest = 0; std::string worst;
+        auto check = [&](const std::string& what, const std::string& name, const std::string& line, const std::string& help, const std::string& sub = "") {
+            ++cards;
+            const auto b = tx::LayBlurb(m100, tx::PageBlurb(m100, name, sub, line, help));
+            bool ellipsis = false;
+            for (const auto& l : b.lines) ellipsis = ellipsis || l.text.find("\xE2\x80\xA6") != std::string::npos;
+            const bool whole = tx::Clean(line) == [&] { std::string d; for (const auto& l : b.lines) if (l.kind == tx::KDesc) d += (d.empty() ? "" : " ") + l.text; return d; }();
+            if (ellipsis || !whole || !b.over.empty() || int(b.lines.size()) > b.maxLines) {
+                if (bad++ < 6) std::printf("  cut: %s: \"%s\" -> %s\n", what.c_str(), line.c_str(), ellipsis ? "ellipsis" : !whole ? "words dropped" : b.over.empty() ? "too many lines" : b.over[0].c_str());
+                if (line.size() > widest) { widest = line.size(); worst = what; }
+            }
+        };
+        // Gestures: every class's cards, a skill the hero knows ("." ending) and one not yet learned (a "No points yet" note under the name)
+        for (int cls = 0; cls < 8; ++cls) {
+            if (!framevr::spellmotion::HasMotions(cls)) continue;
+            for (const bool known : {true, false}) {
+                rw::PageView v;
+                rw::FillGestures(v, cls, 0, [](int id) { return std::string(framevr::spellmotion::SpellName(id)); }, [](int) { return -1; }, [&](int) { return known; });
+                for (int i = 0; i < v.count; ++i) check("Gestures class " + std::to_string(cls) + (known ? " " : " unlearned ") + v.name[size_t(i)], v.name[size_t(i)], v.line[size_t(i)], v.help[size_t(i)], v.sub[size_t(i)]);
+            }
+        }
+        // Glyphs: the longest skill names after "Casts the right hand's "
+        std::vector<std::string> names;
+        for (int id = 0; id < 400; ++id) if (const char* n = framevr::spellmotion::SpellName(id); n && n[0]) names.push_back(n);
+        std::sort(names.begin(), names.end(), [](const std::string& a, const std::string& b) { return a.size() > b.size(); });
+        for (size_t i = 0; i < names.size() && i < 12; ++i) {
+            check("Glyphs follows " + names[i], "Spiral", "Casts the right hand's " + names[i], "Trigger to choose a skill");
+            check("Glyphs " + names[i], "Lightning bolt", "Casts " + names[i], "Trigger to choose a skill");
+        }
+        // Quick cast: the fixed lines of its page, Move, the kind page, with the longest names
+        for (const char* l : {"Place 12 (12 o'clock)", "Empty: fills exactly here", "Empty (fills place 12)", "Reading this character's ring", "Moves this one", "Empty: nothing to move", "Swaps with place 12",
+                              "Empty: it goes exactly here", "Moving this one", "The best one you carry, when cast", "Exactly this one; none carried now", "Exactly this one, never a stronger one"})
+            for (const char* h : {"Trigger to change it", "Trigger to fill it", "Trigger to move this one", "Pick a filled place", "Trigger to leave it here", "Trigger to swap them", "Trigger to move it here",
+                                  "Trigger puts it in place 12", "A moment: its places show once read"})
+                check(std::string("Quick cast \"") + l + "\"", names.empty() ? "Place 12" : names[0], l, h);
+        std::printf("page blurbs: %d cards, %d cut\n", cards, bad);
+        Check(cards > 100 && bad == 0, "every page card's description shows whole in the circle: no ellipsis, no dropped word, no clipped line (" + std::to_string(bad) + " of " + std::to_string(cards) + " cut)");
+    }
     // ---- WARP: the atlas worker, the slices and the compose pass ----
     try {
         Fixture f;
@@ -1467,7 +1507,7 @@ int main(int argc, char** argv) {
                     s.step.under = {rw::Kind::Seat, 2};   // the third item pointed, its lines shown
                     s.step.blurb = 2; s.step.centerGrown = true;
                     tx::BlurbCache b;
-                    s.blurb = &b.Get(built->metrics, 1, {v.name[2], "", v.line[2], v.help[2]});
+                    s.blurb = &b.Get(built->metrics, 1, tx::PageBlurb(built->metrics, v.name[2], v.sub[2], v.line[2], v.help[2]));
                     rw::Instance list[rw::MaxDraw];
                     const int n = rw::BuildPage(s, v, list);
                     const auto c = rw::Content(rw::FooterWidth(false, 5), 150);
@@ -1609,7 +1649,7 @@ int main(int argc, char** argv) {
                     rw::Scene s; s.open = true; s.anim = rw::PresetAnim(rw::Preset::Off); s.atlasPct = built->icons.scalePct; s.metrics = &built->metrics;
                     s.step.under = under;
                     tx::BlurbCache b;
-                    if (lines) { s.step.blurb = under.index; s.step.centerGrown = true; s.blurb = &b.Get(built->metrics, 1, {v.name[size_t(under.index)], "", v.line[size_t(under.index)], v.help[size_t(under.index)]}); }
+                    if (lines) { s.step.blurb = under.index; s.step.centerGrown = true; s.blurb = &b.Get(built->metrics, 1, tx::PageBlurb(built->metrics, v.name[size_t(under.index)], v.sub[size_t(under.index)], v.line[size_t(under.index)], v.help[size_t(under.index)])); }
                     rw::Instance list[rw::MaxDraw];
                     const int n = rw::BuildPage(s, v, list);
                     const auto c = rw::Content(rw::FooterWidth(false, 5), 150);

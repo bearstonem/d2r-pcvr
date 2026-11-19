@@ -174,6 +174,13 @@ inline BlurbText WholeBlurb(const Metrics& m, BlurbText in, const std::string& s
     BlurbText bare = in; bare.sub.clear();
     return LayBlurb(m, bare).over.empty() ? bare : in;
 }
+// A page card's blurb (Glyphs, Gestures, Quick cast): the name, the card's line (what it does or how to use it) and the trigger's help.
+inline BlurbText PageBlurb(const Metrics& m, const std::string& name, const std::string& sub, const std::string& line, const std::string& help) {
+    BlurbText in{name, sub, line, help};
+    in.whole = true;   // the card's line is the how-to: never cut to two lines and an ellipsis; it takes the lines it needs (up to the circle's 8)
+    const size_t paren = name.find(" (");   // a trailing "(right arm)" gives way first: the how-to already names the arm
+    return WholeBlurb(m, in, paren == std::string::npos ? name : name.substr(0, paren));
+}
 // Lays a blurb out only when its key (the pointed seat, its help line) changes: a 1000-frame hover is one layout.
 class BlurbCache {
     uint64_t key = ~0ull;
