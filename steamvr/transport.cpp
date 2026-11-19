@@ -52,6 +52,7 @@
 #include "bow_laser.h"
 #include "hand_controls.h"
 #include "ring_wheel_host.h"
+#include "../vr/quick_radial.h"
 #include "hand_role.h"
 #include "interaction_ui.h"
 #include "sewer_prompt_art.h"
@@ -4364,6 +4365,7 @@ void Input() {
     // either way, so it never turns); down, held, shows the loot labels
     // (Show items, Alt). Not while a wheel is open, nor while the wrist map is
     // looked at: its zoom has the stick then (map_zoom.h). A vertical push turns nothing.
+    framevr::quickradial::rt::Input(framevr::quickradial::rt::InputFrame{controls.lx,controls.ly,controls.rx,controls.ry,handRoles.sticks.walk,SrgbAtlas(atlasFormat),+[](int x,int y,int w,int h,const void* px){static bool pending=false;return UploadShared({x,y,w,h},*static_cast<const std::vector<uint8_t>*>(px),&pending);},&Say});
     const auto rightStick=rightStickGestures.Step(mapzoom::WorldGestures(lootWorld&&handControls.Wheel()<0,wristMapLooked),
         controls.rx/32767.f,controls.ry/32767.f);
     if(rightStick.owned)controls.rx=controls.ry=0;
@@ -4540,6 +4542,7 @@ void Input() {
     framevr::ringwheel::host::Input(framevr::ringwheel::host::InputFrame{interactionInput.wheelHand,int(interactions.Page()),interactionInput.hover,interactionInput.trigger,&Say,&handInput,&interactionInput.snapshot,int(controllerLabels.hands[interactionInput.wheelHand==1?1:0]),&interactionInput});
     interactionOutput=interactions.Step(interactionInput);
     framevr::ringwheel::host::Request(framevr::ringwheel::host::RequestFrame{interactionOutput.wheelHand,&interactionOutput.request,&interactionInput.reply,&Say,&interactionInput.snapshot,interactionInput.session,GetTickCount64(),&interactionInput});
+    framevr::quickradial::rt::Request(framevr::quickradial::rt::RequestFrame{interactionOutput.wheelHand,&interactionOutput.request,&interactionInput.reply,&Say,&interactionInput.snapshot,interactionInput.session,GetTickCount64()});
     {   // Each wheel hand reopens on its own last page: one line per open that reopens a kept page or tree (hand, page, skill tree filter),
         // and per direct switch to the other hand (its stick click while a wheel is open never closes it)
         static bool wheelWas=false;static int handWas=-2;
@@ -5075,6 +5078,7 @@ void Input() {
         }
         (void)::companionai::GetPlayerWorldSubtilePos(outX,outY);
     };
+    framevr::quickradial::rt::Press(framevr::quickradial::rt::PressFrame{handOutput.slot,handOutput.hand,handOutput.wheel>=0||interactionOutput.wheel,handInput.occupied,&quickSnapshot,quickFresh,glyphDrawSlots.data(),&handInput,{motionInput.head.p.x,motionInput.head.p.y,motionInput.head.p.z,motionInput.head.q.x,motionInput.head.q.y,motionInput.head.q.z,motionInput.head.q.w},motionHeadTracked,motionInput.time,requested,handOutput.interact,+[](int h,float a,uint64_t ns){MotionPulse(h,haptics::Category::Interaction,a,XrDuration(ns));},&Say});
     {
         static int commanderSlotWas=-1;
         const int curSlot=handOutput.wheel<0&&!handInput.occupied?handOutput.slot:-1;
@@ -5667,6 +5671,7 @@ void Input() {
             Say(line);
         }
         framevr::ringwheel::host::Cast(framevr::ringwheel::host::CastFrame{&glyphCast,&quickSnapshot,quickFresh,motionInput.active,interactionOutput.wheel,interactionOutput.block,interactionInput.session,now,+[](uint64_t s,int k,int o){return interactionstate::Park(s,k,o);},+[](const void* k){glyphPress={};glyphPress.skill=*static_cast<const interaction::Skill*>(k);},+[](int h,float a,uint64_t ns){MotionPulse(h,haptics::Category::Interaction,a,XrDuration(ns));},&Say});
+        framevr::quickradial::rt::Cast(framevr::quickradial::rt::CastFrame{&glyphCast,&quickSnapshot,quickFresh,motionInput.active,interactionOutput.wheel,interactionOutput.block,interactionInput.session,now,+[](uint64_t s,int k,int o){return interactionstate::Park(s,k,o);},+[](const void* k){glyphPress={};glyphPress.skill=*static_cast<const interaction::Skill*>(k);},+[](int h,float a,uint64_t ns){MotionPulse(h,haptics::Category::Interaction,a,XrDuration(ns));},&Say});
         glyphPressRt=false;
         if(!quickFresh||!motionInput.active)glyphCast.Cancel();
         if(glyphCast.Busy()) {
@@ -8073,6 +8078,7 @@ void EndPair() {
         if(count>before&&floatMapAnchor)
             for(uint32_t i=0;i<before;++i)if(layers[i]==floatMapAnchor){std::rotate(layers.data()+i+1,layers.data()+before,layers.data()+count);break;}
     }
+    framevr::quickradial::rt::Layer(framevr::quickradial::rt::LayerFrame{layer&&!panelMode,uint64_t(sharedChain),&motionQuad,+[](void* c,void* q,const float* p,float w,float h,const int* r,uint64_t chain,bool pm){(*static_cast<decltype(motionQuad)*>(c))(*static_cast<XrCompositionLayerQuad*>(q),XrPosef{{p[3],p[4],p[5],p[6]},{p[0],p[1],p[2]}},w,h,{{r[0],r[1]},{r[2],r[3]}},XrSwapchain(chain),pm);},count,contentLimit,&Say});
     XrCompositionLayerQuad winePadding{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(padQuads&&composition::PrependQuadPadding(layers.data(),count,capacity,winePadding,headSpace,pointerChain,{panelatlas::Pointer.x,panelatlas::Pointer.y+32})) {
         static bool reported=false;

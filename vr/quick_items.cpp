@@ -6,6 +6,7 @@
 #include "memory.h"
 #include "sigscan.h"
 #include "logging.h"
+#include "quick_radial.h"
 #include <string>
 #include <cstdio>
 #include <cstdlib>
@@ -127,6 +128,7 @@ bool Assign(const Request& r,const Snapshot& s) {
     assigned=uint32_t(r.index);return true;
 }
 bool Use(const Request& r,const Snapshot& s) {
+    struct Keep{uint32_t& a;uint32_t v;~Keep(){a=v;}} keep{assigned,assigned};framevr::quickradial::rt::QuickUse(&r,assigned);   // Quick cast: its own in-flight use may name its item code for this call
     Items::ItemInfo info{};ClientItems client;
     if(r.action!=Action::UseItem||!assigned||uint32_t(r.index)!=assigned||!Validate(r,s,info)||
        Quantity(info)<=0||!client.Load(r.session))return false;

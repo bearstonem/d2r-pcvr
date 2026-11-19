@@ -43,6 +43,7 @@
 #include "../steamvr/stash_buttons.h"
 #include "../steamvr/vr_keyboard.h"
 #include "respec.h"
+#include "character_save.h"
 #include "../steamvr/notice_card.h"
 #include "../steamvr/weapon_skills.h"
 #include "../steamvr/callback_ticket.h"
@@ -1117,6 +1118,7 @@ void Init(const PluginContext* ctx) {
     interactionstate::Init(ctx);
     targetlock::Init(ctx);
     respec::Init(ctx);
+    charsave::Init(ctx);   // Quick cast keeps each character's ring under its save name (reads the save header from disk)
 #endif
     g_threads = Query<ThreadService>(ctx);
     g_widgets = Query<WidgetService>(ctx);
