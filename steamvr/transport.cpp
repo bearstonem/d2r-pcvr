@@ -100,7 +100,6 @@
 #include "../vr/companion_ai.h"
 #include "telegraph.h"
 #include "teleport_arc.h"
-f
 #include "tactical_chord.h"
 #include "../vr/target_lock.h" 
 #include "vr_settings_ui.h"
@@ -4365,7 +4364,7 @@ void Input() {
     // either way, so it never turns); down, held, shows the loot labels
     // (Show items, Alt). Not while a wheel is open, nor while the wrist map is
     // looked at: its zoom has the stick then (map_zoom.h). A vertical push turns nothing.
-    framevr::quickradial::rt::Input(framevr::quickradial::rt::InputFrame{controls.lx,controls.ly,controls.rx,controls.ry,handRoles.sticks.walk,SrgbAtlas(atlasFormat),+[](int x,int y,int w,int h,const void* px){static bool pending=false;return UploadShared({x,y,w,h},*static_cast<const std::vector<uint8_t>*>(px),&pending);},&Say});
+    framevr::quickradial::rt::Input(framevr::quickradial::rt::InputFrame{controls.lx,controls.ly,controls.rx,controls.ry,handRoles.sticks.walk,(atlasFormat==DXGI_FORMAT_R8G8B8A8_UNORM_SRGB||atlasFormat==DXGI_FORMAT_B8G8R8A8_UNORM_SRGB),+[](int x,int y,int w,int h,const void* px){static bool pending=false;return UploadShared({x,y,w,h},*static_cast<const std::vector<uint8_t>*>(px),&pending);},&Say});
     const auto rightStick=rightStickGestures.Step(mapzoom::WorldGestures(lootWorld&&handControls.Wheel()<0,wristMapLooked),
         controls.rx/32767.f,controls.ry/32767.f);
     if(rightStick.owned)controls.rx=controls.ry=0;
@@ -7645,13 +7644,13 @@ void EndPair() {
     XrCompositionLayerQuad bowLaser{XR_TYPE_COMPOSITION_LAYER_QUAD},bowLaserEnd{XR_TYPE_COMPOSITION_LAYER_QUAD};
     XrCompositionLayerQuad nock{XR_TYPE_COMPOSITION_LAYER_QUAD},activeSkill{XR_TYPE_COMPOSITION_LAYER_QUAD},leftActiveSkill{XR_TYPE_COMPOSITION_LAYER_QUAD};
     const bool gameplayVisible=layer&&!panelMode&&motionControls.load()&&motionInput.active&&gameplayChain&&motionOutput.rayValid;
-    auto motionQuad=[&](XrCompositionLayerQuad& q,XrPosef pose,float w,float h,XrRect2Di rect,XrSwapchain chain) {
+    auto motionQuad=[&](XrCompositionLayerQuad& q,XrPosef pose,float w,float h,XrRect2Di rect,XrSwapchain chain,bool premultiplied=false) {   // premultiplied: the ring menu's picture (its compose pass writes premultiplied color)
         if(count>=contentLimit||!gameplay::Valid(MotionPose(pose))||!std::isfinite(w)||!std::isfinite(h)||w<=0||h<=0)return;
         // Normalize generated billboards before submission; a bad optional
         // guide must not invalidate the headset's entire projection layer.
         const auto r=pose.orientation;const float len=std::sqrt(r.x*r.x+r.y*r.y+r.z*r.z+r.w*r.w);
         pose.orientation={r.x/len,r.y/len,r.z/len,r.w/len};
-        q.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT|XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+        q.layerFlags=premultiplied?XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT:XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT|XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
         q.space=space;q.eyeVisibility=XR_EYE_VISIBILITY_BOTH;q.pose=pose;q.size={w,h};
         q.subImage.swapchain=chain;q.subImage.imageRect=rect;
         layers[count++]=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q);
@@ -7974,7 +7973,7 @@ void EndPair() {
         motionQuad(laser,beamPose,.003f,beamLength,At(panelatlas::Pointer,{{0,0},{64,32}}),pointerChain);
         if(pointerHit||keyboardPointer)motionQuad(dot,dotPose,.018f,.018f,At(panelatlas::Pointer,{{0,32},{64,64}}),pointerChain);
     }
-    framevr::ringwheel::host::Beam(framevr::ringwheel::host::BeamFrame{layer&&interactionVisible&&interactionOutput.wheel&&pointerChain!=XR_NULL_HANDLE,&motionQuad,+[](void* c,void* q,const float* p,float w,float h,const int* r,uint64_t chain,bool pm){(*static_cast<decltype(motionQuad)*>(c))(*static_cast<XrCompositionLayerQuad*>(q),XrPosef{{p[3],p[4],p[5],p[6]},{p[0],p[1],p[2]}},w,h,{{r[0],r[1]},{r[2],r[3]}},XrSwapchain(chain),pm);},uint64_t(pointerChain),pointerPremultiplied,{pointerRegion.x,pointerRegion.y,64,32},count,contentLimit,&Say});
+    framevr::ringwheel::host::Beam(framevr::ringwheel::host::BeamFrame{layer&&interactionVisible&&interactionOutput.wheel&&pointerChain!=XR_NULL_HANDLE,&motionQuad,+[](void* c,void* q,const float* p,float w,float h,const int* r,uint64_t chain,bool pm){(*static_cast<decltype(motionQuad)*>(c))(*static_cast<XrCompositionLayerQuad*>(q),XrPosef{{p[3],p[4],p[5],p[6]},{p[0],p[1],p[2]}},w,h,{{r[0],r[1]},{r[2],r[3]}},XrSwapchain(chain),pm);},uint64_t(pointerChain),false,{At(panelatlas::Pointer,{{0,0},{64,32}}).offset.x,At(panelatlas::Pointer,{{0,0},{64,32}}).offset.y,64,32},count,contentLimit,&Say});
     // Head-locked blood: VIEW space, with a bounded angular size so large render
 
     // frusta cannot push the rim out of sight. It goes directly above

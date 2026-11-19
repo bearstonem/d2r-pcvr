@@ -38,7 +38,7 @@
 // binds it through upstream's BindSkill. Every other page (Glyphs, Gestures, editors, Equipment, Developer) and the time
 // before the ring is ready: upstream's picture and hit test at the Lab's pose, as R3. The Map page: exactly upstream's.
 //
-// Rows (vr/lab_hooks_table.h), all on TabRingWheel with no key gate, so its master is the gate and the Off edge drains:
+// Doors (steamvr/ring_wheel_host.h): each is called every frame; with the Ring skill menu setting Off the Off edge drains and upstream runs:
 //  - FilterWheelPointer  transport Input, after MotionPointer: the spawn pose, the ray, the hit (ring: canvas px; else upstream's cell).
 //  - FilterWheelInput    transport Input, before interactions.Step: the ring's engine step; upstream's hover / trigger = -1 / 0,
 //                        or the released upstream cell for one frame; a bind queued.
@@ -297,9 +297,8 @@ bool chooseStale = false;   // the army answer changed: the chooser's seats are 
 std::string chooseTitle, clearLine, topCount, bottomCount;
 uint64_t countKey = ~0ull;
 int wheelHandNow = 0, glyphHandNow = 0, motionsOffNow = 0;
-// ---- Other Labs' parts of the ring (headset fixes 2026-11-15), asked through Lab-to-Lab seams (vr/lab_hooks.h), never their
-// keys (Dev structure rule 6). Both seams are key-gated on the other Lab's switch: with it Off, one branch and the defaults. ----
-// FilterRingEntry: Lab Army X menu's entry on the General shelf (Jeff assigns skills here, hold to assign, and never saw it
+// ---- Extra entries on the General shelf (headset fixes 2026-11-15) ----
+// Entries: an entry on the General shelf (Jeff assigns skills here, hold to assign, and never saw it
 // in upstream's Edit Slots). Its id joins the seats' key (a change rebuilds the layout); dim and slot are draw-only.
 // T035 (2026-11-15): a second Lab's entry, Lab Quick cast radial's, beside the Army X menu's (FilterRingEntry): slot 0 Army X
 // menu through its key-gated seam, slot 1 Quick cast radial read from its pure header while its switch is On (no row free).
@@ -367,7 +366,6 @@ const ia::Skill* MenuSkill(int third) {
     if (k.id < 0) {
         k.id = rw::MenuEntryId(third); k.owner = -1; k.level = 1; k.known = k.available = true; k.directed = true;   // never on the glyph chooser's list
         std::snprintf(k.name, sizeof k.name, "%s", rw::MenuEntryName[third]);
-        std::snprintf(k.description, sizeof k.description, "%s", help[third]);
     }
     return &k;
 }
@@ -385,7 +383,6 @@ void AskOtherLabs(const ia::Snapshot& s, void (*say)(const char*)) {
             entrySkill = {}; entrySkill.id = e.id; entrySkill.owner = -1; entrySkill.level = 1; entrySkill.known = entrySkill.available = true;
             entrySkill.directed = true;   // never on the glyph chooser's list (it needs no target, and is no skill)
             std::snprintf(entrySkill.name, sizeof entrySkill.name, "%s", e.name ? e.name : "?");
-            std::snprintf(entrySkill.description, sizeof entrySkill.description, "%s", e.help ? e.help : "");
         }
         if (e.id != entrySaid[size_t(k)] && say) {   // its arrival and its going, once each (the switch's edges)
             char line[220];
@@ -2067,10 +2064,10 @@ void Layer(host::LayerFrame f) {
                 const bool listed = choosing ? size_t(step.blurb) < chooseDim.size() && !chooseDim[size_t(step.blurb)] : rw::GlyphPickable(*k);   // the chooser: the ring's one glyph list
                 // An order (designer gate D3): every line whole, the short title when the long one does not fit.
                 if (order) blurbs.Get(built->metrics, key, tx::WholeBlurb(built->metrics, {k->name, sub, rw::orders::Help(seat.id), rw::orders::ChooserAction()}, rw::orders::Short(seat.id)));
-                else if (other) blurbs.Get(built->metrics, key, {k->name, otherDim ? EntryDimBlurb[ek] : "General (Lab)", k->description, chooser ? "Not for glyphs" : "Hold a button on it to assign"});
-                else if (rw::MenuOfEntry(seat.id) >= 0 && seat.owner == -1) blurbs.Get(built->metrics, key, {k->name, "Sub-menu (Lab)", k->description, "Tap opens, hold assigns"});   // T036
-                else if (quickChooser) blurbs.Get(built->metrics, key, {k->name, sub, k->description, listed ? "Trigger puts it in " + chooseTitle : std::string("Not one Quick cast casts")});   // 2026-11-16
-                else blurbs.Get(built->metrics, key, {k->name, sub, k->description, !chooser ? "Tap casts, hold assigns" : listed ? "Trigger puts it on the glyph" : "Needs a target: not for glyphs"});
+                else if (other) blurbs.Get(built->metrics, key, {k->name, otherDim ? EntryDimBlurb[ek] : "General", "", chooser ? "Not for glyphs" : "Hold a button on it to assign"});
+                else if (rw::MenuOfEntry(seat.id) >= 0 && seat.owner == -1) blurbs.Get(built->metrics, key, {k->name, "Sub-menu", "", "Tap opens, hold assigns"});   // T036
+                else if (quickChooser) blurbs.Get(built->metrics, key, {k->name, sub, "", listed ? "Trigger puts it in " + chooseTitle : std::string("Not one Quick cast casts")});   // 2026-11-16
+                else blurbs.Get(built->metrics, key, {k->name, sub, "", !chooser ? "Tap casts, hold assigns" : listed ? "Trigger puts it on the glyph" : "Needs a target: not for glyphs"});
             }
             scene.blurb = &blurbs.Get(built->metrics, key, {});
         }

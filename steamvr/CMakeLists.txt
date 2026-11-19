@@ -662,7 +662,7 @@ add_custom_target(ring-wheel-shader-blob DEPENDS "${RING_WHEEL_SHADER_BLOB}")
 add_dependencies(d2rl-pcvr ring-wheel-shader-blob)
 # The compose pass and atlases on WARP with synthetic icons and the menu fonts: closed draws nothing, premultiplied, caps, the slot
 # ring, the safe free, 1 MB slices, the blurb's shaped box. ring-wheel-preview --out <folder> [--icons <cache>] writes the pictures.
-add_executable(ring-wheel-preview ring_wheel_preview.cpp ${ROOT}/vr/ring_wheel_compose.cpp ${ROOT}/vr/ring_wheel_atlas.cpp interaction_icons.cpp ring_wheel_menu_art.rc)
+add_executable(ring-wheel-preview ring_wheel_preview.cpp ${ROOT}/vr/ring_wheel_compose.cpp ${ROOT}/vr/ring_wheel_atlas.cpp interaction_icons.cpp logging.cpp ring_wheel_menu_art.rc)
 target_compile_definitions(ring-wheel-preview PRIVATE RING_WHEEL_FONTS=L"${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/fonts")
 target_link_libraries(ring-wheel-preview PRIVATE d3d12 dxgi dwrite windowscodecs ole32 framevr-runtime)
 target_include_directories(ring-wheel-preview PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -673,7 +673,7 @@ set_tests_properties(ring-wheel-preview-test PROPERTIES TIMEOUT 120)  # WARP: ab
 add_test(NAME ring-wheel-preview-match-needs-icons COMMAND ring-wheel-preview --match match-out)
 set_tests_properties(ring-wheel-preview-match-needs-icons PROPERTIES TIMEOUT 10 PASS_REGULAR_EXPRESSION "--match needs --icons" FAIL_REGULAR_EXPRESSION "all passed")
 # Tree orbs' open-tree state (steamvr/ring_wheel_orbs.h; kept for the Tree orbs layout, off by default and not offered in the menu).
-add_executable(ring-wheel-orbs-test ring_wheel_orbs_test.cpp ${ROOT}/vr/ring_wheel_compose.cpp ${ROOT}/vr/ring_wheel_atlas.cpp interaction_icons.cpp)
+add_executable(ring-wheel-orbs-test ring_wheel_orbs_test.cpp ${ROOT}/vr/ring_wheel_compose.cpp ${ROOT}/vr/ring_wheel_atlas.cpp interaction_icons.cpp logging.cpp)
 target_compile_definitions(ring-wheel-orbs-test PRIVATE RING_WHEEL_FONTS=L"${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/fonts")
 target_link_libraries(ring-wheel-orbs-test PRIVATE d3d12 dxgi dwrite windowscodecs ole32 framevr-runtime)
 target_include_directories(ring-wheel-orbs-test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")

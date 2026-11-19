@@ -83,6 +83,6 @@ void Beam(BeamFrame f);
 void Cast(CastFrame f);
 void Hands(HandsFrame f);
 void Cleared();      // transport's ClearInput: the open wheel's close line when the input is cleared
-void Session(const void* xrSessionInfo);   // transport's session start (what the ring reads of the session)
+void Session();      // transport's session start (a new OpenXR session: the ring forgets what it said about upstream)
 void Reset();        // shutdown: frees what the ring holds, enabled or not
 }  // namespace framevr::ringwheel::host
