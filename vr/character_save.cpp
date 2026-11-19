@@ -55,8 +55,6 @@ void Look(int heroClass){
             const auto stem=files[i].name.substr(0,files[i].name.size()-4);
             if(!s.name[0])std::snprintf(s.name,sizeof s.name,"%s",Narrow(stem).c_str());
             cached=parsed.insert_or_assign(files[i].name,Parsed{files[i].time,s}).first;
-            char line[200];std::snprintf(line,sizeof line,"Frame character save: %s (class %d, version %d, level %d)",s.name,s.heroClass,s.version,s.level);
-            framevr::logging::Write(line);
         }
         if(heroClass<0||cached->second.status.heroClass==heroClass){shown=cached->second.status;return;}
     }

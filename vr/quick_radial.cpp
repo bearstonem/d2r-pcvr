@@ -1,4 +1,4 @@
-// Quick cast radial (vault Tickets\035-quick-cast-radial). Glue around the pure engine steamvr/quick_radial.h, called from
+// Quick cast radial. Glue around the pure engine steamvr/quick_radial.h, called from
 // transport (vr/quick_radial.h lists the frames):
 //   - Input (before the right stick's gestures): both pad sticks read (the ring's clock hand), the held hand's zeroed while the
 //     ring owns it (no walk, turn, run toggle or loot names), and a finished picture uploaded into its two regions of upstream's
@@ -360,21 +360,12 @@ void AskPaint(const qr::Entries& es, const ia::Snapshot& s, const qr::Tuning& t,
 void Pulses(int hand, int count) { st.buzzHand = hand; st.buzzAmp = .25f; st.buzzCount = count; st.buzzShort = true; st.buzzMs = 0; }
 // An edit of the live ring: saved when the character's save is read (identified); before that (review S3) kept for this game,
 // its puts added to the stored ring once read (st.movedBefore, page), never over it.
-void AskSave(void (*say)(const char*), const char* what, const qr::Item* put = nullptr) {
-    char line[260];
+void AskSave(void (*)(const char*), const char*, const qr::Item* put = nullptr) {
     if (st.identified && !st.key.empty()) {
         auto& w = W();
         { std::lock_guard lock(w.m); w.saves.emplace_back(st.key, qr::Encode(st.ring)); }
         w.cv.notify_one();
-        const int n = st.ring.Count();
-        std::snprintf(line, sizeof line, "Frame quick radial: edit: %s (%d item%s), saved for %s", what, n, n == 1 ? "" : "s", st.name.c_str());
-    } else {
-        if (put) st.movedBefore.push_back({*put, -1, "the ring menu", true});
-        const int n = st.ring.Count();
-        std::snprintf(line, sizeof line, "Frame quick radial: edit: %s (%d item%s), kept for this game (the character's save is not read yet: %s)", what, n, n == 1 ? "" : "s",
-                      put ? "added to its stored ring once it is" : "the stored ring is kept as it is");
-    }
-    if (say) say(line);
+    } else if (put) st.movedBefore.push_back({*put, -1, "the ring menu", true});
 }
 // Review S1: a moved skill the ring could not take: said taken off its button, three short pulses on that button's hand.
 void TakenOff(const ia::Snapshot& s, int id, int from, const char* where, const char* why, void (*say)(const char*)) {
@@ -393,7 +384,7 @@ void Tick(const rt::PressFrame& f, const ia::Snapshot& s, bool on, const qr::Tun
         const bool had = st.cls != -2;
         st.session = s.session; st.cls = s.skillClass; st.identified = false; st.answered = false; st.identRetryS = 0; st.movedBefore.clear();
         st.key.clear(); st.name.clear(); st.ring = {};
-        if (had && f.say) f.say("Frame quick radial: another character: its ring is read from its save");
+        (void)had;
     }
     if (!qr::ClassKnown(s.skillClass)) {
         if (st.toldClass != s.skillClass && f.say) {
@@ -440,8 +431,8 @@ void Tick(const rt::PressFrame& f, const ia::Snapshot& s, bool on, const qr::Tun
                         else if (f.say) { char full[240]; std::snprintf(full, sizeof full, "Frame quick radial: %s (put in the ring menu before the save was read) not added: the stored ring is full (12)", NameOf(s, m.it.skill).c_str()); f.say(full); }
                     }
                     const int count = st.ring.Count();
-                    std::snprintf(line, sizeof line, "Frame quick radial: character %s (class %d, level %d): %d item%s loaded%s (%s: %s)", r.name.c_str(), r.cls, r.level, count, count == 1 ? "" : "s",
-                                  added ? " (with what this game put on it before, saved)" : "", t.fixed ? "Fixed places" : "Growing", qr::Encode(st.ring).c_str());
+                    std::snprintf(line, sizeof line, "Frame quick radial: character %s (class %d, level %d): %d item%s loaded%s", r.name.c_str(), r.cls, r.level, count, count == 1 ? "" : "s",
+                                  added ? " (with what this game put on it before, saved)" : "");
                     if (added) { std::lock_guard lock(w.m); w.saves.emplace_back(st.key, qr::Encode(st.ring)); }
                 }
                 st.movedBefore.clear();
@@ -474,7 +465,7 @@ void MoveIn(const ia::Snapshot& s, bool on, bool fixed, void (*say)(const char*)
     const char* where = lk::moveFrom[0] ? lk::moveFrom : "its button";
     const auto* k = Find(s, id);
     if (on && k && st.ring.Has(id)) {
-        if (say) { char line[240]; std::snprintf(line, sizeof line, "Frame quick radial: %s left %s (a menu took it) and is on the ring already: kept there", NameOf(s, id).c_str(), where); say(line); }
+        (void)where;   // on the ring already: kept there, nothing to say
         return;
     }
     const char* no = !on ? "Quick cast is Off" : !qr::ClassKnown(st.cls) ? "this class keeps upstream" : !k ? "not this character's skill" :
@@ -486,7 +477,7 @@ void MoveIn(const ia::Snapshot& s, bool on, bool fixed, void (*say)(const char*)
     else std::snprintf(what, sizeof what, "added %s (a menu took %s; item %d)", NameOf(s, id).c_str(), where, st.ring.n);
     if (st.identified) { AskSave(say, what); return; }
     st.movedBefore.push_back({{id, k->owner}, from, where});   // review S2: not an edit over the stored ring; merged into it once read
-    if (say) { char line[300]; std::snprintf(line, sizeof line, "Frame quick radial: edit: %s, kept for this game (the character's save is not read yet; added to its stored ring once it is)", what); say(line); }
+    (void)what;   // kept for this game until the save is read, then merged (st.movedBefore)
 }
 // The ring menu's Quick cast page reads this character's ring (link::view), published
 // here on a change (a copy of 12 ids under the link's lock; the 0.5 s tick, an edit, a moved skill).
@@ -533,8 +524,7 @@ void ApplyEdits(const ia::Snapshot& s, bool on, bool fixed, void (*say)(const ch
         if (!fixed && !st.ring.Packed() && e.place >= 0 && e.place < qr::MaxItems) {
             const bool pastEnd = e.place >= st.ring.Count();
             if ((pastEnd && (e.from >= 0 || (e.id >= 0 && st.ring.Has(e.id)))) || (pastEnd && st.ring.n >= qr::MaxItems)) {
-                st.ring.Pack();
-                if (say) say("Frame quick radial: ring menu: a Growing move to the end closes the empty places Fixed places left (the ring is packed now)");
+                st.ring.Pack();   // a move to the end closes the gaps (Growing)
             } else { at = pastEnd ? st.ring.n : RealPlace(st.ring, e.place); from = e.from >= 0 ? RealPlace(st.ring, e.from) : -1; opFixed = true; }
         }
         const char* no = !on ? "switched Off" : !qr::ClassKnown(st.cls) ? "this class keeps upstream" : e.session != st.session ? "another game" :
@@ -553,13 +543,12 @@ void ApplyEdits(const ia::Snapshot& s, bool on, bool fixed, void (*say)(const ch
                 if (swap) std::snprintf(what, sizeof what, "moved %s from place %d to place %d, %s to place %d (swapped; the ring menu, %s)", was.c_str(), place(e.from), place(e.place), other.c_str(), place(e.from), layout);
                 else std::snprintf(what, sizeof what, "moved %s from place %d to place %d (the ring menu, %s)", was.c_str(), place(e.from), shown(PlaceOf(st.ring, movedId)), layout);   // Growing: last
                 AskSave(say, what);
-            } else if (say) { std::snprintf(line, sizeof line, "Frame quick radial: ring menu: move from place %d to place %d: nothing changed (%s)", place(e.from), place(e.place), was.empty() ? "that place is empty" : "it is there already"); say(line); }
+            }
             continue;
         }
         if (e.id < 0) {
             const std::string was = st.ring.Filled(at) ? NameOf(s, st.ring.items[size_t(at)].skill) : std::string();
             if (qr::ClearAt(st.ring, at, opFixed)) { std::snprintf(what, sizeof what, "took %s out of place %d (the ring menu%s)", was.c_str(), place(e.place), fixed ? ", Fixed places: nothing else moved" : ""); AskSave(say, what); }
-            else if (say) { std::snprintf(line, sizeof line, "Frame quick radial: ring menu: place %d is empty already", place(e.place)); say(line); }
             continue;
         }
         const bool item = qr::IsItemId(e.id);
@@ -572,21 +561,9 @@ void ApplyEdits(const ia::Snapshot& s, bool on, bool fixed, void (*say)(const ch
         if (const qr::Item it{e.id, item ? -1 : k->owner}; qr::PutAt(st.ring, at, it, opFixed)) {
             std::snprintf(what, sizeof what, "put %s in place %d (the ring menu%s)", NameOf(s, e.id).c_str(), shown(PlaceOf(st.ring, e.id)), fixed ? ", Fixed places" : "");
             AskSave(say, what, &it);
-        } else if (say) { std::snprintf(line, sizeof line, "Frame quick radial: ring menu: %s is there already (nothing changed)", NameOf(s, e.id).c_str()); say(line); }
+        }
     }
     PublishView(on);
-}
-const char* WhyText(qr::Why w) {
-    switch (w) {
-        case qr::Why::Center: return "let go in the middle";
-        case qr::Why::Empty: return "the ring is empty";
-        case qr::Why::Closed: return "closed by its button";
-        case qr::Why::Off: return "switched Off";
-        case qr::Why::Wheel: return "a wheel opened";
-        case qr::Why::Taken: return "the button was taken";
-        case qr::Why::Occupied: return "the hand took a potion or holster";
-        default: return "";
-    }
 }
 // The button and Open by from the plugin's ini, once, on the first press frame (a few microseconds; the worker is not needed for
 // a read this small). The button is the ring menu's to change afterwards (SetButton), saved by the glue when it changes.
@@ -619,7 +596,6 @@ void Input(InputFrame f) {
     ++st.frame;
     if (ringShared.rebuilt.exchange(false, std::memory_order_acq_rel)) {   // review S2: everything painted again (the next tick or frame asks)
         st.uploadedKey = st.askedKey = 0;
-        if (f.say) f.say("Frame quick radial: the shared image was made again (a session rebuild): its pictures are painted and uploaded again");
     }
     if (worker && worker->hasDone.load(std::memory_order_acquire)) {
         std::shared_ptr<paint::Picture> pic;
@@ -628,12 +604,7 @@ void Input(InputFrame f) {
             const auto A = qr::shared::A, B = qr::shared::B;
             const bool ok = f.upload(A.x, A.y, A.w, A.h, &pic->a) && f.upload(B.x, B.y, B.w, B.h, &pic->b);
             if (ok) { st.uploadedKey = pic->key; st.uploadFrame = st.frame; }
-            if (f.say) {
-                char line[220];
-                std::snprintf(line, sizeof line, "Frame quick radial: picture painted in %.1f ms (%s) and %s", pic->ms, pic->fontOk ? "Cinzel" : "Georgia, the menu font missing",
-                              ok ? "uploaded into the shared image" : "NOT uploaded (the shared image refused it)");
-                f.say(line);
-            }
+            if (!ok && f.say) f.say("Frame quick radial: a picture was NOT uploaded (the shared image refused it)");
         }
     }
     if (st.uploadedKey && st.frame >= st.uploadFrame + 2 && ringShared.liveKey.load(std::memory_order_relaxed) != st.uploadedKey)
@@ -680,14 +651,8 @@ void Press(PressFrame f) {
         f.pulse(st.buzzHand, st.buzzAmp, st.buzzShort ? 60000000 : uint64_t(std::max(1.f, t.castMs) * 1e6));
         if (--st.buzzCount > 0) st.buzzMs = in.nowMs + 140;
     }
-    if (st.bound >= 0 && f.fresh) {   // one line when the button is taken by a game skill or a Draw glyph, and when it is free again
+    if (st.bound >= 0 && f.fresh) {   // which of a game skill, a Draw glyph or nothing holds the bound button (ownerTold)
         const int owner = skillThere ? 1 : glyphThere ? 2 : 0;
-        if (owner != st.ownerTold && (st.ownerTold != -2 || owner != 0) && f.say) {
-            char line[160];
-            std::snprintf(line, sizeof line, "Frame quick radial: slot %d %s", st.bound,
-                          owner == 1 ? "has a game skill now: that skill wins, the ring stays shut" : owner == 2 ? "is a Draw glyph button now: the glyph wins" : "is free: the ring again");
-            f.say(line);
-        }
         st.ownerTold = owner;
     }
     const bool wasOpen = st.ctl.Open();
@@ -707,13 +672,6 @@ void Press(PressFrame f) {
         case qr::Event::Opened:
             st.openedMs = in.nowMs; st.picks = 0;
             ringShared.open.fetch_add(1, std::memory_order_relaxed);
-            if (f.say) {   // one line an open (each is a press of the player's)
-                const int count = st.ring.Count();
-                std::snprintf(line, sizeof line, "Frame quick radial: %s hand, slot %d: opened (%s, %d item%s%s)", bh ? "left" : "right", st.bound,
-                              !t.toggle ? "Hold: its release casts" : t.closeAfterCast ? "Toggle: stick to an item and back casts it and shuts; a tap shuts" : "Toggle: stick to an item and back casts it, stays open; a tap shuts",
-                              count, count == 1 ? "" : "s", t.fixed ? " in 12 fixed places, the empty ones skipped" : "");
-                f.say(line);
-            }
             break;
         case qr::Event::Cast: {
             const int id = st.ring.items[size_t(out.index)].skill;
@@ -724,6 +682,7 @@ void Press(PressFrame f) {
                     std::snprintf(line + std::strlen(line), sizeof line - std::strlen(line), ": %s (%s) not used: %s", v.name.c_str(), ItemWords(st.ring, out.index, t.fixed).c_str(),
                                   st.use.want ? "the last item is still on its way" : v.pick.why);
                     if (f.say) f.say(line);
+
                     Pulses(bh, 3); st.buzzMs = in.nowMs;
                     break;
                 }
@@ -752,6 +711,7 @@ void Press(PressFrame f) {
                 std::snprintf(line + std::strlen(line), sizeof line - std::strlen(line), ": %s (%s) not cast: %s", NameOf(snap, id).c_str(), ItemWords(st.ring, out.index, t.fixed).c_str(),
                               !k ? "not this character's skill now" : "the game refuses it now (shown dim)");
                 if (f.say) f.say(line);
+
                 if (f.pulse) f.pulse(bh, .25f, 60000000);
             } else {   // the Cast row starts it through upstream's glyph press this frame, then logs and buzzes
                 auto& p = st.pending;
@@ -764,13 +724,7 @@ void Press(PressFrame f) {
         case qr::Event::None:
             if (out.emptyBack) {   // Toggle: the stick back from a place with no item: nothing cast, two pulses, still open
                 Pulses(bh, 2); st.buzzMs = in.nowMs;
-                if (f.say) { head(line, sizeof line); std::snprintf(line + std::strlen(line), sizeof line - std::strlen(line), ": the stick came back with no item there: nothing cast, still open"); f.say(line); }
             }
-            break;
-        case qr::Event::Canceled:
-            head(line, sizeof line);
-            std::snprintf(line + std::strlen(line), sizeof line - std::strlen(line), ": nothing cast (%s)", WhyText(out.why));
-            if (f.say) f.say(line);
             break;
         default: break;
     }
@@ -818,9 +772,6 @@ void Cast(CastFrame f) {
     if (const auto* k = Find(s, p.skill); f.press && k) f.press(k);   // the aim queries see the cast (glyphPress.skill; the aim stays the player's)
     const qr::Tuning t = ReadTuning();
     if (t.castMs > 0 && t.castAmp > 0 && f.pulse) f.pulse(p.hand, t.castAmp, uint64_t(t.castMs * 1e6));
-    std::snprintf(line + std::strlen(line), sizeof line - std::strlen(line), "cast via %s (upstream's glyph press)",
-                  r.how == framevr::glyphcast::How::Slot ? "its hand slot" : r.how == framevr::glyphcast::How::Record ? "the right trigger's record" : "the right trigger, put on it first");
-    if (f.say) f.say(line);
 }
 // transport EndPair: the ring's quads from the shared image, all of them or none.
 void Layer(const LayerFrame& f) {
@@ -874,7 +825,8 @@ void Request(RequestFrame f) {
                 std::snprintf(line, sizeof line, "Frame quick radial: %s hand, slot %d, %.2f s, %d pick%s: %s (%s) %s from %s%s", u.hand ? "left" : "right", u.slot, u.heldS,
                               u.picks, u.picks == 1 ? "" : "s", u.name, ItemWords(u.index, u.n, u.fixed).c_str(), ok ? (u.r.action == ia::Action::Potion ? "drunk (upstream confirmed it gone)" : "used (upstream's inventory use dispatched)") : "not used",
                               u.from, ok ? "" : mine ? (rep.result == ia::Result::Cancelled ? ": cancelled (a new game)" : ": refused by upstream") : ": no answer in 2.5 s");
-                if (f.say) f.say(line);
+                if (!ok && f.say) f.say(line);   // only a failed use is logged
+
                 const qr::Tuning t = ReadTuning();
                 if (ok) { if (t.castMs > 0 && t.castAmp > 0) { st.buzzHand = u.hand; st.buzzMs = 0; st.buzzAmp = t.castAmp; st.buzzCount = 1; st.buzzShort = false; } }
                 else Pulses(u.hand, 3);
@@ -888,11 +840,7 @@ void Request(RequestFrame f) {
             r = q; u.seq = q.sequence; u.sent = true; u.sentMs = nowMs;
         }
     }
-    if (st.bind.Take(r) && f.say) {
-        char line[180];
-        std::snprintf(line, sizeof line, "Frame quick radial: the ring wheel's hold to assign put it on slot %d (its game skill %d cleared first)", r.index, r.previousSkill);
-        f.say(line);
-    }
+    st.bind.Take(r);
     int slot = -1;
     const auto done = st.bind.Reply(*static_cast<const ia::Reply*>(f.reply), slot);
     if (done == qr::BindWatch::Done::None) return;
