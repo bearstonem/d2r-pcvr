@@ -335,7 +335,7 @@ int main() {
             CHECK(s.Step().event == Event::None && !s.c.Open());          // still held: stays shut (waitUp)
             s.Release(); CHECK(s.Press().event == Event::Opened);         // a fresh press opens
         }
-        // another slot's press never opens it (upstream's one press at a time: the Army X menu's button held)
+        // another slot's press never opens it (upstream's one press at a time: another menu's button held)
         Sim s; s.Fill(3); s.in.down = true; s.now += 11; s.in.nowMs = s.now; s.in.held = 5;
         CHECK(s.c.Step(s.in, s.ring, s.t).event == Event::None && !s.c.Open());
     }
@@ -379,14 +379,14 @@ int main() {
         BindWatch w;
         CHECK(w.Take(r) && r.skill == -1 && r.skillOwner == -1 && r.index == 2);
         CHECK(!w.Take(r));
-        ia::Request other; other.action = ia::Action::BindSkill; other.skill = 9001;   // the Army X menu's
+        ia::Request other; other.action = ia::Action::BindSkill; other.skill = 9001;   // another menu's bind id
         CHECK(!w.Take(other) && other.skill == 9001);
         int slot = -1; ia::Reply rep; rep.sequence = r.sequence; rep.result = ia::Result::Pending;
         CHECK(w.Reply(rep, slot) == BindWatch::Done::None);
         rep.result = ia::Result::Applied;
         CHECK(w.Reply(rep, slot) == BindWatch::Done::Applied && slot == 2 && w.Reply(rep, slot) == BindWatch::Done::None);
         CHECK(SlotOfButton(3, framevr::skills::Count) == 2 && SlotOfButton(0, framevr::skills::Count) == -1 && SlotOfButton(11, framevr::skills::Count) == -1);
-        CHECK(ItemId != 9001 && ItemId != 9002 && ItemId > 4095);   // never a game skill, never the Army X menu's ids
+        CHECK(ItemId != 9001 && ItemId != 9002 && ItemId > 4095);   // never a game skill, never another menu's ids
     }
     // 8. The draw list: the ring, the pick's rim at its item, the middle's label; three quads at most; labels in their cells.
     {

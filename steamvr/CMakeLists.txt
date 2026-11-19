@@ -589,6 +589,25 @@ target_include_directories(quick-items-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} 
 target_link_libraries(quick-items-test PRIVATE framevr-runtime)
 add_test(NAME quick-items-test COMMAND quick-items-test)
 add_test(NAME quick-items-signature-test COMMAND quick-items-test --mismatch)
+# Quick cast: a ring of up to 12 skills and items on one hand button (vr/quick_radial.cpp the glue, steamvr/quick_radial.h the engine,
+# vr/quick_radial_paint.cpp the painter). The character's save header (name, class, level) keys each character's ring.
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/quick_radial.cpp ${ROOT}/vr/quick_radial_paint.cpp ${ROOT}/vr/character_save.cpp)
+# vr/quick_items.cpp calls the radial's QuickUse; quick-items-test stands in for it.
+target_sources(quick-items-test PRIVATE quick_items_radial_stub.cpp)
+# Layout for 1..12, the stick clock, cast and cancel, the places, the saved text, the bind, the draw list, the shared state.
+add_executable(quick-radial-test quick_radial_test.cpp)
+add_test(NAME quick-radial-test COMMAND quick-radial-test)
+set_tests_properties(quick-radial-test PROPERTIES TIMEOUT 30)
+# Its render sheet (--icons <dir> --out <dir>); with no --out it only checks that every case paints.
+add_executable(quick-radial-preview quick_radial_preview.cpp ${ROOT}/vr/quick_radial_paint.cpp interaction_icons.cpp logging.cpp)
+target_compile_definitions(quick-radial-preview PRIVATE "QUICK_RADIAL_FONT=L\"${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/fonts/Cinzel-wght.ttf\"")
+target_link_libraries(quick-radial-preview PRIVATE gdi32 windowscodecs ole32 framevr-runtime)
+add_test(NAME quick-radial-preview-test COMMAND quick-radial-preview)
+set_tests_properties(quick-radial-preview-test PROPERTIES TIMEOUT 60)
+# The save header parse and its folder rules; pins that the save is opened read-only with shared access and no log line prints a path.
+add_executable(character-save-test character_save_test.cpp)
+target_compile_options(character-save-test PRIVATE -UNDEBUG)
+add_test(NAME character-save-test COMMAND character-save-test)
 add_executable(respec-test respec_test.cpp ${ROOT}/vr/respec.cpp)
 target_include_directories(respec-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${D2RL_SDK}/include)
 target_link_libraries(respec-test PRIVATE framevr-runtime)

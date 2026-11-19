@@ -530,7 +530,7 @@ inline Entries EntriesFor(Mode m, const Ring& r, bool fixed = false) noexcept {
     return out;
 }
 
-// ---- Placement: a body-locked plane, fixed in the room while open (as the Army X menu's) ----
+// ---- Placement: a body-locked plane, fixed in the room while open ----
 struct Quat { float x = 0, y = 0, z = 0, w = 1; };
 struct Vec3 { float x = 0, y = 0, z = 0; };
 inline Quat Mul(Quat a, Quat b) noexcept {
