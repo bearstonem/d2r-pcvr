@@ -31,6 +31,7 @@
 #include "transport.h"
 #include "../vr/bow.h"
 #include "../vr/crossbow.h"
+ 
 #include "../vr/melee.h"
 #include "../vr/billboards.h"
 #include "frame_math.h"
@@ -50,6 +51,7 @@
 #include "strike_skills.h"
 #include "bow_laser.h"
 #include "hand_controls.h"
+#include "ring_wheel_host.h"
 #include "hand_role.h"
 #include "interaction_ui.h"
 #include "sewer_prompt_art.h"
@@ -97,6 +99,7 @@
 #include "../vr/companion_ai.h"
 #include "telegraph.h"
 #include "teleport_arc.h"
+f
 #include "tactical_chord.h"
 #include "../vr/target_lock.h" 
 #include "vr_settings_ui.h"
@@ -1404,6 +1407,7 @@ void ClearInput() {
     spellHaptics.Clear();
     lootlabels::display.Clear();
     rightStickGestures.Reset();
+    framevr::ringwheel::host::Cleared();
     meleeImpactAt[0]=meleeImpactAt[1]=shieldImpactAt=parryMissAt=heldClankAt=0;
     wristHeading.Reset();compassFrame=false;mapZoom.Reset();wristMapLooked=wristMapLookedOnly=false;floatMapWant=floatMapPointed=false;floatMapFrame=0;
     panelinput::WorldInput(false);
@@ -2306,6 +2310,7 @@ bool Initialize(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     XrGraphicsBindingD3D12KHR binding{XR_TYPE_GRAPHICS_BINDING_D3D12_KHR};binding.device=device.Get();binding.queue=queue.Get();
     XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};ci.systemId=system;ci.next=&binding;
     if(!Check(pCreateSession(instance,&ci,&session),"create D3D12 session")) return false;
+    framevr::ringwheel::host::Session();
     XrViewConfigurationView resolutionViews[2]{{XR_TYPE_VIEW_CONFIGURATION_VIEW},{XR_TYPE_VIEW_CONFIGURATION_VIEW}};
     uint32_t resolutionCount=0;recommendedResolution=maximumResolution={};
     if(XR_SUCCEEDED(pEnumerateViewConfigurationViews(instance,system,XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,2,&resolutionCount,resolutionViews))&&resolutionCount==2){
@@ -4046,13 +4051,14 @@ void UpdateHandRoles(bool sticksRight) {
 void Input() {
     gazeValid=false;
     if(!tracking.data) return;
+    if((!valid||state!=XR_SESSION_STATE_FOCUSED)&&framevr::ringwheel::host::Blip(framevr::ringwheel::host::BlipFrame{handControls.Wheel(),state==XR_SESSION_STATE_STOPPING||state==XR_SESSION_STATE_LOSS_PENDING||state==XR_SESSION_STATE_EXITING,GetTickCount64()}))return;
     if(!valid||state!=XR_SESSION_STATE_FOCUSED) {gazeStability.Reset();ClearInput();return; }
     if(motionControls.load())vrGameplayAt.store(GetTickCount64());
     const auto frameConfig=vrsettings::Read();
     hapticPulses.Configure(settings::HapticLevels(frameConfig.values));
     XrActiveActionSet active{actionSet,XR_NULL_PATH};
     XrActionsSyncInfo si{XR_TYPE_ACTIONS_SYNC_INFO};si.countActiveActionSets=1;si.activeActionSets=&active;
-    if(pSyncActions(session,&si)!=XR_SUCCESS) {gazeStability.Reset();ClearInput();return;}
+    if(pSyncActions(session,&si)!=XR_SUCCESS) {if(framevr::ringwheel::host::Blip(framevr::ringwheel::host::BlipFrame{handControls.Wheel(),false,GetTickCount64(),"xr-sync-failed"}))return;gazeStability.Reset();ClearInput();return;}
     controllerRumbleLease.Update(GetTickCount64(),motionControls.load());
     UpdateHandRoles(frameConfig.values[settings::LeftHandedSticks]>.5f);
     UpdateControllerLabels();
@@ -4350,6 +4356,7 @@ void Input() {
     if(crossbowAttack)handInput.independentSlots&=~(1u<<skills::TriggerSlot(0));   // the crossbow's, not a hand spell's
     handInput.layout^=uint64_t(handInput.independentSlots)<<48;
     handInput.active=motionInput.active&&motionInput.tracked[0]&&motionInput.tracked[1]&&handAimTracked[0]&&handAimTracked[1]&&gamestate::LocalPlayer();
+    framevr::ringwheel::host::Tracking(framevr::ringwheel::host::TrackingFrame{handControls.Wheel(),motionInput.active&&gamestate::LocalPlayer()!=0,motionInput.tracked,handAimTracked,&handInput.active,&Say,&handInput.time,&handInput.context,bindingSnapshot.session,meleeEpoch,lootGate,gamestate::LocalPlayer()!=0});
     handInput.occupied=interactionOutput.bottle>=0||interactionOutput.owner[0]==interaction::Owner::Holster||interactionOutput.owner[1]==interaction::Owner::Holster;
     const auto lootNow=GetTickCount64(),lootSession=gamestate::LocalPlayer();
     const bool lootWorld=motionHeadTracked&&!nativeUi&&!settingsOwned&&!settingsChord&&inWorld&&inWorld()&&lootSession;
@@ -4395,6 +4402,7 @@ void Input() {
         handInput.face[h][0]=(controls.buttons&(h?menus::X:menus::A))!=0;
         handInput.face[h][1]=(controls.buttons&(h?menus::Y:menus::B))!=0;
     }
+    framevr::ringwheel::host::Hands(framevr::ringwheel::host::HandsFrame{&handInput,handControls.Wheel(),controls.lx,controls.ly,controls.rx,controls.ry,&Say});
     handOutput=handControls.Step(handInput);
     {
         // Diagnostics: a bow face press that never became a hand slot was
@@ -4414,6 +4422,7 @@ void Input() {
     motionInput.palette=handOutput.wheel>=0;
     motionInput.aim=handAim[0];motionInput.aimTracked=handAimTracked[0];
     MotionPointer();
+    framevr::ringwheel::host::Pointer(framevr::ringwheel::host::PointerFrame{handControls.Wheel(),int(interactions.Page()),motionInput.time,&palettePose,&beamPose,&dotPose,beamLength,pointerHit,motionInput.hover,{motionInput.head.p.x,motionInput.head.p.y,motionInput.head.p.z,motionInput.head.q.x,motionInput.head.q.y,motionInput.head.q.z,motionInput.head.q.w},{handAim[handControls.Wheel()==0?1:0].p.x,handAim[handControls.Wheel()==0?1:0].p.y,handAim[handControls.Wheel()==0?1:0].p.z,handAim[handControls.Wheel()==0?1:0].q.x,handAim[handControls.Wheel()==0?1:0].q.y,handAim[handControls.Wheel()==0?1:0].q.z,handAim[handControls.Wheel()==0?1:0].q.w},handAimTracked[handControls.Wheel()==0?1:0],pointerVisible,+[](float u,float v){return interaction::WheelCell(u,v,interactionOutput.hover,interactions.Page(),handControls.Wheel(),interactionInput.snapshot.developer,interactions.DeveloperPage(),interactionOutput.leftStrikes>=0,interactionOutput.motionsBox);},&Say,handAim,handAimTracked,&handInput});
     interactionInput={};interactionInput.time=motionInput.time;interactionInput.session=gamestate::LocalPlayer();
     interactionInput.at=GetTickCount64();interactionInput.epoch=meleeEpoch;interactionInput.active=motionInput.active;
     interactionInput.head={motionInput.head.p,motionInput.head.q};
@@ -4528,7 +4537,9 @@ void Input() {
         interactionInput.tossed=droppedBottles&&droppedBottles->Tossed(thrown)?
             interaction::Input::Tossed{thrown.id,thrown.landed,thrown.p,thrown.q}:interaction::Input::Tossed{};
     }
+    framevr::ringwheel::host::Input(framevr::ringwheel::host::InputFrame{interactionInput.wheelHand,int(interactions.Page()),interactionInput.hover,interactionInput.trigger,&Say,&handInput,&interactionInput.snapshot,int(controllerLabels.hands[interactionInput.wheelHand==1?1:0]),&interactionInput});
     interactionOutput=interactions.Step(interactionInput);
+    framevr::ringwheel::host::Request(framevr::ringwheel::host::RequestFrame{interactionOutput.wheelHand,&interactionOutput.request,&interactionInput.reply,&Say,&interactionInput.snapshot,interactionInput.session,GetTickCount64(),&interactionInput});
     {   // Each wheel hand reopens on its own last page: one line per open that reopens a kept page or tree (hand, page, skill tree filter),
         // and per direct switch to the other hand (its stick click while a wheel is open never closes it)
         static bool wheelWas=false;static int handWas=-2;
@@ -5655,6 +5666,7 @@ void Input() {
                 motionName(due.skill).c_str(),due.hand?"left":"right",double(GetTickCount64()-due.since)/1000.0);
             Say(line);
         }
+        framevr::ringwheel::host::Cast(framevr::ringwheel::host::CastFrame{&glyphCast,&quickSnapshot,quickFresh,motionInput.active,interactionOutput.wheel,interactionOutput.block,interactionInput.session,now,+[](uint64_t s,int k,int o){return interactionstate::Park(s,k,o);},+[](const void* k){glyphPress={};glyphPress.skill=*static_cast<const interaction::Skill*>(k);},+[](int h,float a,uint64_t ns){MotionPulse(h,haptics::Category::Interaction,a,XrDuration(ns));},&Say});
         glyphPressRt=false;
         if(!quickFresh||!motionInput.active)glyphCast.Cancel();
         if(glyphCast.Busy()) {
@@ -7244,7 +7256,7 @@ void Capture(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
             EndPair();return;
         }
         Say("Frame OpenXR: an eye's or the menu's copy failed; the headset stays off until the game window is recreated");
-        failed=true;EndPair();ClearInput();return;
+        failed=true;EndPair();(void)framevr::ringwheel::host::Blip(framevr::ringwheel::host::BlipFrame{handControls.Wheel(),true,GetTickCount64(),"copy-failed"});ClearInput();return;
     }
     if(!stereo) {
         PlaceMainMenu();
@@ -7643,6 +7655,7 @@ void EndPair() {
     if(interactionVisible&&interactionOutput.wheel&&interactionPaintValid&&interactionPaintContext==interaction::Context(
         interactionInput.snapshot,interactionOutput,interaction::Fresh(interactionInput.snapshot,interactionInput.session,interactionInput.at),controllerLabels))
         motionQuad(palette,palettePose,paletteWidth,paletteHeight,{{0,0},{768,768}},interactionChain);
+    framevr::ringwheel::host::Layer(framevr::ringwheel::host::LayerFrame{interactionVisible&&interactionOutput.wheel,&palette,GetTickCount64(),&Say,&session,(const void*)pCreateSwapchain,(const void*)pDestroySwapchain,(const void*)&EnumeratePanelImages,(const void*)pAcquireSwapchainImage,(const void*)pWaitSwapchainImage,(const void*)pReleaseSwapchainImage,device.Get(),queue.Get(),int(atlasFormat),&palettePose,&interactionOutput,&interactionInput.snapshot,&motionQuad,+[](void* c,void* q,const float* p,float w,float h,const int* r,uint64_t chain){(*static_cast<decltype(motionQuad)*>(c))(*static_cast<XrCompositionLayerQuad*>(q),XrPosef{{p[3],p[4],p[5],p[6]},{p[0],p[1],p[2]}},w,h,{{r[0],r[1]},{r[2],r[3]}},XrSwapchain(chain),true);}});
     XrCompositionLayerQuad menuMap{XR_TYPE_COMPOSITION_LAYER_QUAD};
     wristMapShown=menuMapShown=false;
     if(palette.subImage.swapchain&&mapEye.copied&&interaction::MenuMapWanted(interactionInput,interactionOutput,GetTickCount64())) {
@@ -7956,7 +7969,9 @@ void EndPair() {
         motionQuad(laser,beamPose,.003f,beamLength,At(panelatlas::Pointer,{{0,0},{64,32}}),pointerChain);
         if(pointerHit||keyboardPointer)motionQuad(dot,dotPose,.018f,.018f,At(panelatlas::Pointer,{{0,32},{64,64}}),pointerChain);
     }
+    framevr::ringwheel::host::Beam(framevr::ringwheel::host::BeamFrame{layer&&interactionVisible&&interactionOutput.wheel&&pointerChain!=XR_NULL_HANDLE,&motionQuad,+[](void* c,void* q,const float* p,float w,float h,const int* r,uint64_t chain,bool pm){(*static_cast<decltype(motionQuad)*>(c))(*static_cast<XrCompositionLayerQuad*>(q),XrPosef{{p[3],p[4],p[5],p[6]},{p[0],p[1],p[2]}},w,h,{{r[0],r[1]},{r[2],r[3]}},XrSwapchain(chain),pm);},uint64_t(pointerChain),pointerPremultiplied,{pointerRegion.x,pointerRegion.y,64,32},count,contentLimit,&Say});
     // Head-locked blood: VIEW space, with a bounded angular size so large render
+
     // frusta cannot push the rim out of sight. It goes directly above
     // the world and below every HUD quad, and only into a spare layer slot.
     XrCompositionLayerQuad bloodQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
@@ -8802,6 +8817,7 @@ void Shutdown(bool preserveResolution) {
     // when ordinary frame submission uses queue ordering without a CPU wait.
     if(fence&&!WaitGpu())failed=true;
     if(uiEye.chain&&pDestroySwapchain)pDestroySwapchain(uiEye.chain);uiEye={};journalMode=spatialMode=workspacePlaced=leatherMode=false;leatherShown=false;uiworld::ShowWorldBehindMenu(false);hud::UiFrame(false,false,0);uiSupported=false;uiBlit={};potionModels.Reset();potionScene={};
+    framevr::ringwheel::host::Reset();
     elementalRenderer.Reset();elementalState.Reset();elementalScene={};elementalEffects.Reset();
     if(mapEye.chain&&pDestroySwapchain)pDestroySwapchain(mapEye.chain);mapEye={};mapSupported=false;mapBlit={};gamestate::MenuMap(false);hud::MenuMapCapture(false);
     settingsModel.Close();settingsOpen=false;settingsInputGate.Suspend();settingsPainted={};settingsAtlasPending=settingsImageReady=false;

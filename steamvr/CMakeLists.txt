@@ -618,3 +618,48 @@ add_test(NAME aura-filter-test COMMAND aura-filter-test)
 add_executable(effect-visibility-test effect_visibility_test.cpp)
 target_compile_options(effect-visibility-test PRIVATE -UNDEBUG)
 add_test(NAME effect-visibility-test COMMAND effect-visibility-test)
+
+# Ring skill menu (vault Design\ring-wheel): the ring-shaped skill wheel, drawn by its own compose pass (vr/ring_wheel*.cpp).
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/ring_wheel.cpp ${ROOT}/vr/ring_wheel_compose.cpp ${ROOT}/vr/ring_wheel_atlas.cpp ring_wheel_menu_art.rc)
+# Its engine: the seats, the hit test, tree dwell and hold, fire on release, lockout, pick and bind, the draw lists, the pages, the badges.
+add_executable(ring-wheel-test ring_wheel_test.cpp)
+add_test(NAME ring-wheel-test COMMAND ring-wheel-test)
+set_tests_properties(ring-wheel-test PROPERTIES TIMEOUT 30)
+# The compose shaders compiled at build time (fxc /O3; 15-20 s at run time otherwise), with a PS slot budget; no fxc: an empty blob
+# and the menu compiles at run time (tools/gen_ring_wheel_shader.py).
+set(RING_WHEEL_SHADER_BLOB "${CMAKE_CURRENT_BINARY_DIR}/generated/ring_wheel_shader_blob.h")
+file(GLOB RING_WHEEL_FXC_FOUND "C:/Program Files (x86)/Windows Kits/10/bin/10.*/x64/fxc.exe")
+list(SORT RING_WHEEL_FXC_FOUND)
+list(LENGTH RING_WHEEL_FXC_FOUND RING_WHEEL_FXC_COUNT)
+set(RING_WHEEL_FXC "none")
+if(RING_WHEEL_FXC_COUNT GREATER 0)
+  list(GET RING_WHEEL_FXC_FOUND -1 RING_WHEEL_FXC)
+endif()
+add_custom_command(OUTPUT "${RING_WHEEL_SHADER_BLOB}"
+  COMMAND "${PCVR_PYTHON}" "${ROOT}/tools/gen_ring_wheel_shader.py" --out "${RING_WHEEL_SHADER_BLOB}" --fxc "${RING_WHEEL_FXC}"
+  DEPENDS "${ROOT}/tools/gen_ring_wheel_shader.py" "${ROOT}/vr/ring_wheel_compose.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/ring_wheel_skill_fx.h" "${CMAKE_CURRENT_SOURCE_DIR}/ring_wheel_draw.h"
+  VERBATIM)
+add_custom_target(ring-wheel-shader-blob DEPENDS "${RING_WHEEL_SHADER_BLOB}")
+add_dependencies(d2rl-pcvr ring-wheel-shader-blob)
+# The compose pass and atlases on WARP with synthetic icons and the menu fonts: closed draws nothing, premultiplied, caps, the slot
+# ring, the safe free, 1 MB slices, the blurb's shaped box. ring-wheel-preview --out <folder> [--icons <cache>] writes the pictures.
+add_executable(ring-wheel-preview ring_wheel_preview.cpp ${ROOT}/vr/ring_wheel_compose.cpp ${ROOT}/vr/ring_wheel_atlas.cpp interaction_icons.cpp ring_wheel_menu_art.rc)
+target_compile_definitions(ring-wheel-preview PRIVATE RING_WHEEL_FONTS=L"${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/fonts")
+target_link_libraries(ring-wheel-preview PRIVATE d3d12 dxgi dwrite windowscodecs ole32 framevr-runtime)
+target_include_directories(ring-wheel-preview PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+add_dependencies(ring-wheel-preview ring-wheel-shader-blob)
+add_test(NAME ring-wheel-preview-test COMMAND ring-wheel-preview)
+add_test(NAME ring-wheel-shader-gen-test COMMAND "${PCVR_PYTHON}" "${ROOT}/tools/gen_ring_wheel_shader.py" --self-test)
+set_tests_properties(ring-wheel-preview-test PROPERTIES TIMEOUT 120)  # WARP: about 50-70 s on a loaded machine
+add_test(NAME ring-wheel-preview-match-needs-icons COMMAND ring-wheel-preview --match match-out)
+set_tests_properties(ring-wheel-preview-match-needs-icons PROPERTIES TIMEOUT 10 PASS_REGULAR_EXPRESSION "--match needs --icons" FAIL_REGULAR_EXPRESSION "all passed")
+# Tree orbs' open-tree state (steamvr/ring_wheel_orbs.h; kept for the Tree orbs layout, off by default and not offered in the menu).
+add_executable(ring-wheel-orbs-test ring_wheel_orbs_test.cpp ${ROOT}/vr/ring_wheel_compose.cpp ${ROOT}/vr/ring_wheel_atlas.cpp interaction_icons.cpp)
+target_compile_definitions(ring-wheel-orbs-test PRIVATE RING_WHEEL_FONTS=L"${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/fonts")
+target_link_libraries(ring-wheel-orbs-test PRIVATE d3d12 dxgi dwrite windowscodecs ole32 framevr-runtime)
+target_include_directories(ring-wheel-orbs-test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+add_dependencies(ring-wheel-orbs-test ring-wheel-shader-blob)
+add_test(NAME ring-wheel-orbs-test COMMAND ring-wheel-orbs-test)
+set_tests_properties(ring-wheel-orbs-test PROPERTIES TIMEOUT 30)
+# windres reports no dependencies, so a changed picture never rebuilt its .res: the .rc depends on its pictures.
+set_property(SOURCE ring_wheel_menu_art.rc APPEND PROPERTY OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/ring-wheel/ring-menu-glyphs.png ${CMAKE_CURRENT_SOURCE_DIR}/assets/ring-wheel/ring-menu-gestures.png ${CMAKE_CURRENT_SOURCE_DIR}/assets/ring-wheel/ring-menu-quick-cast.png ${CMAKE_CURRENT_SOURCE_DIR}/assets/ring-wheel/ring-tree-sheet.png ${CMAKE_CURRENT_SOURCE_DIR}/assets/ring-wheel/ring-glyph-sheet.png)

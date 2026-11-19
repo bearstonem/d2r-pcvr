@@ -4,7 +4,7 @@
 #include <windows.h>
 #include <wincodec.h>
 #include <mutex>
-#include "lab_kick_icon.h"   // kickicon::DecodePng: the WIC decode as upstream's icon worker does it
+#include "ring_wheel_png.h"   // png::Decode: the WIC decode as upstream's icon worker does it
 #include "ring_wheel_tree_art.h"
 
 namespace framevr::ringwheel::treeart {
@@ -36,7 +36,7 @@ inline Decoded Get(HMODULE module) {
     const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     IWICImagingFactory* wic = nullptr;
     if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic)))) {
-        try { cache.image = kickicon::DecodePng(wic, data, cache.bytes, unsigned(SheetW)); } catch (...) { cache.image = nullptr; }
+        try { cache.image = png::Decode(wic, data, cache.bytes, unsigned(SheetW)); } catch (...) { cache.image = nullptr; }
         wic->Release();
     }
     if (SUCCEEDED(co)) CoUninitialize();

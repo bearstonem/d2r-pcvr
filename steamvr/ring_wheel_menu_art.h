@@ -14,7 +14,7 @@
 #include <array>
 #include <memory>
 #include <mutex>
-#include "lab_kick_icon.h"   // kickicon::DecodePng / the WIC decode as upstream's icon worker does it (long side <= 160 px)
+#include "ring_wheel_png.h"   // png::Decode / the WIC decode as upstream's icon worker does it (long side <= 160 px)
 #include "ring_wheel.h"
 
 namespace framevr::ringwheel::menuart {
@@ -54,7 +54,7 @@ inline Decoded Get(HMODULE module, int third) {
     const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     IWICImagingFactory* wic = nullptr;
     if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic)))) {
-        try { d.image = kickicon::DecodePng(wic, data, d.bytes); } catch (...) { d.image = nullptr; }
+        try { d.image = png::Decode(wic, data, d.bytes); } catch (...) { d.image = nullptr; }
         wic->Release();
     }
     if (SUCCEEDED(co)) CoUninitialize();
