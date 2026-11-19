@@ -277,6 +277,14 @@ void __cdecl Gear(const PluginContext*,void* callbackToken) noexcept {
         }
         // Item-fired bows (#432): the three named uniques, forced by their UniqueItems rows.
         if(r.index==framevr::dev::ItemBowsChoice&&i<framevr::dev::ItemBowUniques.size())spec.qualityRecordId=framevr::dev::ItemBowUniques[i];
+        // Flails + steal: the two named uniques forced by their UniqueItems rows, the two flails normal (FlailKit).
+        if(r.index==framevr::dev::FlailsChoice&&i<framevr::dev::FlailKit.size()) {
+            const bool unique=framevr::dev::FlailKit[i].quality==framevr::dev::KitQuality::Unique;
+            spec.quality=unique?Items::Quality::Unique:Items::Quality::Normal;
+            spec.qualityRecordId=unique&&i<framevr::dev::FlailKitUniques.size()?framevr::dev::FlailKitUniques[i]:Items::RandomQualityRecord;
+            spec.flags=unique?Items::ItemCreateFlagBit(Items::ItemCreateFlag::AllowDuplicateUnique):0;
+            spec.itemLevel=uint32_t(framevr::dev::FlailKit[i].itemLevel);
+        }
         if(r.index==framevr::dev::LootBeamsChoice&&i<framevr::dev::LootBeamKit.size()) {
             using framevr::dev::KitQuality;
             const auto& item=framevr::dev::LootBeamKit[i];
