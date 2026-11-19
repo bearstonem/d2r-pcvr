@@ -119,7 +119,8 @@ namespace gamestate { void Init(const D2RL::PluginContext* ctx); void Tick(); ui
 namespace gamestate {bool LeftShield();}
 #ifdef D2RVR_NATIVE_OPENXR
 #include "dual_wield.h"
-namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();}   // the two hands' weapons (held items collide)
+#include "weapon_reach.h"
+namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();uint32_t Flails();}   // the two hands' weapons (held items collide), their flails
 #endif
 namespace gamestate {bool OpaqueMenuOpen();}
 namespace gamestate {bool CinemaPlaying();void SetCinemaEnabled(bool on);void CinemaWorldDrawn(uint64_t now);void CinemaTick(uint64_t now);}
@@ -538,6 +539,7 @@ struct Settings {
     std::atomic<float> fistClose[8] = {100.0f, 100.0f, 100.0f, 65.0f, 100.0f, 100.0f, 100.0f, 100.0f};
     std::atomic<float> fistOpen[8] = {20.0f, 20.0f, 20.0f, 20.0f, 20.0f, 20.0f, 20.0f, 20.0f};
     std::atomic<bool>  fist{true};          // [hands] fist: a free hand closes with its controller's grip, relaxes when let go
+    std::atomic<bool>  flailChain{true};    // [hands] flail_chain: a flail's chain and ball swing with the hand (steamvr/flail_chain.h)
     std::atomic<float> staffOffset[3] = {0.0f, 0.0f, 0.0f};   // [hands] staff_x/y/z: cm, the staff past the right hand, its axes
     std::atomic<float> staffGrabCm{15.0f};  // [hands] staff_grab_cm: the left grip takes the staff only this near it
     std::atomic<float> leftStaffOffset[3] = {0.0f, 0.0f, 0.0f};
@@ -2024,6 +2026,7 @@ void LoadSettings() {
     g_set.staffHands.store(IniB(L"hands", L"follow_staff", true));
     g_set.staffFreeLeft.store(IniB(L"hands", L"staff_free_left", true));
     g_set.fist.store(IniB(L"hands", L"fist", true));
+    g_set.flailChain.store(IniB(L"hands", L"flail_chain", true));
 #if D2RVR_FIRST_PERSON
     for (int c = 0; c < 8; ++c) {
         wchar_t close[32], open[32];
@@ -9581,14 +9584,15 @@ void MeleeContactHand(int hand) {
     // Conservative category-sized collision capsules on the final posed
     // attachment (+Y is blade/shaft, -Y is hilt). Mesh-specific bounds remain
     // a refinement; no class-specific animation or targeting is involved.
-    float length=.65f,radius=.065f;
-    switch(pose.weaponType) {
-        case D2RVR_TYPE_UNARMED:length=.04f;radius=.08f;break;
-        case D2RVR_TYPE_DAGGER:case D2RVR_TYPE_CLAW:case D2RVR_TYPE_ORB:length=.28f;break;
-        case D2RVR_TYPE_WAND:length=.38f;break;
-        case D2RVR_TYPE_STAFF:length=1.2f;break;
-        case D2RVR_TYPE_SPEAR:case D2RVR_TYPE_POLEARM:length=1.5f;break;
-        default:if(gamestate::TwoHanded()&D2RVR_TWO_HANDS_ON)length=1.1f;break;
+    // A flail's capsule reaches its head, each hand's by the item in it (weapon_reach.h).
+    const auto capsule=framevr::reach::Contact(pose.weaponType,(gamestate::TwoHanded()&D2RVR_TWO_HANDS_ON)!=0,pose.flail);
+    float length=capsule.length,radius=capsule.radius;
+    {   // a hand's flail reaching its head, told when it is taken up and when it is put away
+        static std::atomic<int> told[2]={-1,-1};
+        const int flail=pose.flail?1:0,before=told[hand&1].exchange(flail);
+        if(before!=flail&&(flail||before==1))
+            LogF("Frame flail reach: the %s hand's %s strikes %.2f m out%s",hand?"off":"main",flail?"flail":"weapon",length,
+                 flail?" to its head (the chain held straight along the handle)":"");
     }
     // A shapeshift form's claw: the capsule the skeleton hook measured on the drawn paw,
     // at least 0.22 m long (a claw weapon is 0.28) and 25% thicker, floor 0.06 m: the bare
@@ -9988,6 +9992,17 @@ void PushArms() {
         in.held.why |= blocks & hc::Untracked;   // the headset lost the head: no gameplay hands this frame
         in.heldWorld = hc::DecideWorld(h);
         in.heldWorld.why |= blocks & hc::Untracked;
+    }
+    {   // A flail's chain swings (steamvr/flail_chain.h; [hands] flail_chain): a flail in a hand, first person, the arms
+        // on the controllers. The game's own animation of the chain stays in every other view.
+        const bool setting = g_set.flailChain.load();
+        static int told = -1;
+        if (int(setting) != told) {
+            told = int(setting);
+            LogF("Frame flail chain: %s", setting ? "on - a held flail's chain and ball swing with the hand and hang from the handle ([hands] flail_chain=1)"
+                                                  : "off - the game's own animation moves a flail's chain ([hands] flail_chain=0)");
+        }
+        in.flailChain = setting && own && in.mode == 2 && !in.shapeForm && (gamestate::Flails() & 3u) != 0;
     }
 #endif
     skel::Set(in);
