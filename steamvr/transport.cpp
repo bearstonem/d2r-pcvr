@@ -67,6 +67,7 @@
 #include "campfire_audio.h"
 #include "wrist_compass.h"
 #include "panel_atlas.h"
+#include "../vr/army_x_orders.h"
 #include "atlas_dirty.h"
 #include "map_zoom.h"
 #include "floating_map.h"
@@ -2257,6 +2258,7 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
     const auto hintArt=interaction::GrabHintArt(grabhint::SignTile*grabhint::Frames,grabhint::SignTile);
     const bool hintPainted=put(grabhint::Paint(hintArt.empty()?nullptr:hintArt.data(),
         eyeFormat==DXGI_FORMAT_R8G8B8A8_UNORM_SRGB||eyeFormat==DXGI_FORMAT_B8G8R8A8_UNORM_SRGB),GrabHint);
+    ::armyxmenu::Paint(armyseam::StaticAtlasFrame{pixels.data(),StaticWidth,StaticHeight,eyeFormat==DXGI_FORMAT_R8G8B8A8_UNORM_SRGB||eyeFormat==DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,&Say});   // the Army X menu's pictures
     if(!UploadAtlas(staticChain,eyeFormat,StaticWidth,StaticHeight,pixels))return false;
     grabHintReady=hintPainted;grabHintSigns=hintPainted&&!hintArt.empty();
     if(!hintPainted)Say("Frame map hint: its pictures could not be painted; the grab hint stays hidden");
@@ -4528,7 +4530,9 @@ void Input() {
         interactionInput.tossed=droppedBottles&&droppedBottles->Tossed(thrown)?
             interaction::Input::Tossed{thrown.id,thrown.landed,thrown.p,thrown.q}:interaction::Input::Tossed{};
     }
+    ::armyxmenu::Input(armyseam::WheelInputFrame{interactionInput.wheelHand,&interactionInput});   // Edit Slots lists "Army X menu" with an army out
     interactionOutput=interactions.Step(interactionInput);
+    ::armyxmenu::Request(armyseam::WheelRequestFrame{&interactionOutput.request,&interactionInput.reply,&Say,&interactionInput});   // its pick: the button's bind
     {   // Each wheel hand reopens on its own last page: one line per open that reopens a kept page or tree (hand, page, skill tree filter),
         // and per direct switch to the other hand (its stick click while a wheel is open never closes it)
         static bool wheelWas=false;static int handWas=-2;
@@ -5064,6 +5068,8 @@ void Input() {
         }
         (void)::companionai::GetPlayerWorldSubtilePos(outX,outY);
     };
+    // The Army X menu's button, held: the cross, and on the let go its order through the commander path below.
+    ::armyxmenu::Press(armyseam::ArmyXPressFrame{handOutput.slot,handOutput.hand,handOutput.wheel>=0||interactionOutput.wheel,handInput.occupied,&quickSnapshot,quickFresh,glyphDrawSlots.data(),&handInput,handAim,handAimTracked,{motionInput.head.p.x,motionInput.head.p.y,motionInput.head.p.z,motionInput.head.q.x,motionInput.head.q.y,motionInput.head.q.z,motionInput.head.q.w},motionHeadTracked,motionInput.time,requested,handOutput.interact,&resolveHandSubtile,+[](const void* c,int h,float* xy){(*static_cast<const decltype(resolveHandSubtile)*>(c))(h,xy[0],xy[1]);},+[](int k,float x,float y){return ::companionai::ExecuteCommanderSkill(k,x,y);},+[](int h,float a,uint64_t ns){MotionPulse(h,haptics::Category::Interaction,a,XrDuration(ns));},&Say,&interactionInput,stageWorld.upm});
     {
         static int commanderSlotWas=-1;
         const int curSlot=handOutput.wheel<0&&!handInput.occupied?handOutput.slot:-1;
@@ -8058,6 +8064,8 @@ void EndPair() {
         if(count>before&&floatMapAnchor)
             for(uint32_t i=0;i<before;++i)if(layers[i]==floatMapAnchor){std::rotate(layers.data()+i+1,layers.data()+before,layers.data()+count);break;}
     }
+    // The Army X menu's quads, from its regions of the static image (premultiplied), into the content slots still free.
+    ::armyxmenu::Layer(armyseam::ArmyXLayerFrame{layer&&!panelMode,uint64_t(staticChain),&motionQuad,+[](void* c,void* q,const float* p,float w,float h,const int* r,uint64_t chain,bool pm){auto& l=*static_cast<XrCompositionLayerQuad*>(q);(*static_cast<decltype(motionQuad)*>(c))(l,XrPosef{{p[3],p[4],p[5],p[6]},{p[0],p[1],p[2]}},w,h,{{r[0],r[1]},{r[2],r[3]}},XrSwapchain(chain));if(pm)l.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;},count,contentLimit,&Say});
     XrCompositionLayerQuad winePadding{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(padQuads&&composition::PrependQuadPadding(layers.data(),count,capacity,winePadding,headSpace,pointerChain,{panelatlas::Pointer.x,panelatlas::Pointer.y+32})) {
         static bool reported=false;

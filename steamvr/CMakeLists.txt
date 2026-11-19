@@ -402,6 +402,17 @@ target_include_directories(interaction-preview PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_link_libraries(interaction-preview PRIVATE user32 gdi32 framevr-runtime)
 # Kick (skill 1) reads the embedded art through the real icon cache; every other key reads the cache as before.
 add_executable(kick-icon-test kick_icon_test.cpp interaction_icons.cpp interaction_assets.rc)
+# Army X menu: a held hand button opens a cross of summon orders (army_x_menu.h), and the summons hunt a marked monster
+# (army_x_hunt.h). The glue is vr/army_x_menu.cpp and vr/army_x_hunt.cpp.
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/army_x_menu.cpp ${ROOT}/vr/army_x_hunt.cpp)
+set_property(SOURCE interaction_assets.rc APPEND PROPERTY OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/army-x-menu-sheet.png ${CMAKE_CURRENT_SOURCE_DIR}/assets/army-x-target-mark.png)
+add_executable(army-x-menu-test army_x_menu_test.cpp)
+add_executable(army-x-hunt-test army_x_hunt_test.cpp ${ROOT}/vr/army_x_hunt.cpp)
+target_link_libraries(army-x-hunt-test PRIVATE framevr-runtime)
+foreach(t army-x-menu-test army-x-hunt-test)
+  add_test(NAME ${t} COMMAND ${t})
+  set_tests_properties(${t} PROPERTIES TIMEOUT 30)
+endforeach()
 target_link_libraries(kick-icon-test PRIVATE windowscodecs ole32 framevr-runtime)
 add_executable(kick-icon-no-art-test kick_icon_test.cpp interaction_icons.cpp)
 target_compile_definitions(kick-icon-no-art-test PRIVATE KICK_ICON_TEST_NO_ART)

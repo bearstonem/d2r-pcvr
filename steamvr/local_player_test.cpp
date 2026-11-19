@@ -1,5 +1,6 @@
 #include "../vr/combat.h"
 #include "../vr/melee.h"
+#include "../vr/army_x_orders.h"
 #include <windows.h>
 #include <atomic>
 #include <cassert>
@@ -21,6 +22,7 @@ namespace framevr {void ShieldParryMiss(){}bool GuardBroken(){return false;}void
 namespace melee {bool QueueParry(uint32_t,int){return false;}uint64_t AttackStart(uint32_t){return 0;}uint64_t ParryOpens(uint32_t){return 0;}void QueueBlockSound(){}void QueueClientDurability(uint32_t,int){}void NoteAttackRolled(uint32_t){}void QueueParrySwing(){}ButtonStroke ButtonHit(uint32_t){return {};}}
 namespace gamestate {int32_t LeftDurability(){return -1;}}
 namespace projectiles {void CombatWalk(int){}}
+namespace armyxhunt {void Roll(framevr::armyseam::HitRollFrame){}}   // the Army X menu's to-hit handler (vr/army_x_hunt.cpp, not linked here)
 int main() {
     uint32_t outdoors[]={0,3,0},cave[]={0,3,0},monster[]={1,3,0};
     uintptr_t unit=0;uint32_t id=99;

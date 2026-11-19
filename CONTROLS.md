@@ -887,3 +887,21 @@ that a pull takes) and a small controller sign appears beside the map on the pul
 grip and slides away, the map's border glows, a glow reaches out toward your hand while it slides, and the
 controller ticks once. It hides 5 degrees past the band. After three pulls in a game only the glow shows; a new game
 starts over. **VR Settings > Interface > Wrist > Map grab hint** turns it off; the pull works the same either way.
+
+## Army X menu (summon orders on one button)
+
+For a class with summons (Necromancer, Druid, Amazon's Valkyrie, Assassin's Shadow).
+
+1. With a summon out, open a hand's skill wheel, choose **Edit Slots** on a button and pick **Army X menu** (last under
+   **General / Items**). That button now opens the menu; putting a skill or Draw glyph on it later takes the button back.
+2. Hold the button: four circles appear in front of you. Move your hand toward one and let go.
+   - **Up, Attack my target:** the summons go for the monster your hand (or your eyes) points at. With none pointed, aim
+     the hand's ray at one and pull the trigger; the grip cancels. Beside it: Spearhead wedge, Marching crescent.
+   - **Down, Defend me:** Protective ring. Beside it: Phalanx.
+   - **Left, Regroup.**
+   - **Right, Hold here:** Hold ground. Beside it: Fall out, and Move and hold (point the laser at the ground within 40
+     sub-tiles and pull the trigger).
+3. Let go in the center to give nothing. To change to another circle, come back through the center first.
+
+While the menu is on a button, your summons also walk (or run, if they can) all the way to a marked monster, keep a held
+spot clear of nearby monsters, and a summon that is hit goes for its attacker. With the menu on no button nothing changes.

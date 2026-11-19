@@ -51,6 +51,7 @@ std::shared_ptr<const Image> Decode(IWICImagingFactory* wic,const std::filesyste
 // draw new art embedded with the plugin (assets/kick-icon.png) for this key.
 // Every other key, and Kick if that art is missing, reads the local cache.
 constexpr const char* KickKey="s1";
+std::atomic<BuiltIn> builtIn{nullptr};
 std::shared_ptr<const Image> DecodeKick(IWICImagingFactory* wic) {
     HMODULE module=nullptr;
     GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<LPCWSTR>(&Revision),&module);
@@ -89,6 +90,7 @@ void Run(std::wstring location) {
         std::shared_ptr<const Image> image;
         try {
             if(key==KickKey)image=DecodeKick(wic);
+            if(!image)if(const auto made=builtIn.load(std::memory_order_acquire))image=made(key,wic);
             auto it=files.find(key);if(!image&&it!=files.end())image=Decode(wic,std::filesystem::path(location)/it->second);
         }catch(...){}
         {std::lock_guard lock(mutex);cache[key]=std::move(image);++revision;busy=false;finished.notify_all();}
@@ -127,6 +129,7 @@ std::shared_ptr<const Image> Get(Item item) {
     return Get(base);
 }
 uint64_t Revision(){return revision.load();}
+void SetBuiltIn(BuiltIn decode){builtIn.store(decode,std::memory_order_release);}
 void Prefetch(const Snapshot& s) {
     for(unsigned i=0;i<s.quick.count&&i<s.quick.items.size();++i)Get(s.quick.items[i].item);
     for(const auto& d:companions::Definitions)if(d.skill>=0&&(s.companions.relevant&companions::Bit(d.type)))Get("s"+std::to_string(d.skill));

@@ -23,6 +23,7 @@
 #endif
 #include <windows.h>
 #include "pcvr_identity.h"
+#include "army_x_orders.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "summon_range.h"
 #endif
@@ -5027,6 +5028,8 @@ void Tick() {
     const auto s = targetlock::Get();
     const bool fresh = wanted && !gamestate::MenuOpen() && s.at && GetTickCount64() - s.at <= 500;
     aimtargets::Tick(fresh ? &s : nullptr);
+    // The Army X menu's Attack my target: the monster each hand aims at, and the eyes' while the outline would show it.
+    if (::armyxmenu::On()) ::armyxmenu::Picks(framevr::armyseam::HandPicksFrame{fresh ? &s : nullptr, {aimtargets::g_pick[0].id.load(), aimtargets::g_pick[1].id.load()}, framevr::aimrules::EyesOutlined(FollowsView(), aimtargets::Pointing(aimtargets::OutlineDominant())) ? aimtargets::g_pick[2].id.load() : 0u});
     // A Fist of the Heavens call (motions_paladin.h): the monster nearest the
     // weapon arm's line, in the same cone and reach as the hands' picks, is
     // handed to the game's target query for the skill (RulesUnit). None: no

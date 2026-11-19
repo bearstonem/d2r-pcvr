@@ -11,6 +11,7 @@
 #include <cstring>
 #include <mutex>
 #include "combat.h"
+#include "army_x_orders.h"
 #include "../steamvr/shield_debug.h"
 #include "combat_rules.h"
 #include "sigscan.h"
@@ -995,6 +996,7 @@ thread_local RollContext roll;
 thread_local Seed acceptedRoll;
 void IncomingRoll(uintptr_t attacker,uintptr_t defender,bool hit);
 int Hit(uintptr_t attacker,uintptr_t defender,int accuracy,int missile) {
+    ::armyxhunt::Roll(framevr::armyseam::HitRollFrame{attacker,defender,missile});   // Army X menu: a summon that is hit fights back
     const auto saved=roll;const bool savedMelee=meleeHit;
     roll={};
     const bool local=Qualifies(attacker,defender);
