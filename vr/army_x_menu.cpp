@@ -2,7 +2,7 @@
 //   - Input / Request (transport Input, around interactions.Step): while a hand wheel is open and an army is out, "Army X
 //     menu" is one more entry in the engine's catalog, so Edit Slots on a hand button lists it (as it lists Draw glyph); it
 //     is taken out again right after the Step. Picking it becomes the game's own clear of that button's skill (as Draw
-//     glyph's pick does); on the reply's Applied the slot is kept in d2r_pcvr.ini, [wheel] army_x_menu_button.
+//     glyph's pick does); on the reply's Applied the slot is kept in d2r_pcvr.ini, [wheel] army_x_menu_button (one a weapon set).
 //   - Press (transport Input, before the commander button block): the held button opens the cross, the hand's movement
 //     points, the let go gives the order through the commander path (companionai::ExecuteCommanderSkill): one call site,
 //     Give() below. A game skill or a Draw glyph put on that button takes it back: the menu is on no button again.
@@ -20,7 +20,6 @@
 #include <wincodec.h>
 #include <openxr/openxr.h>
 #include <atomic>
-#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -50,10 +49,14 @@ namespace cfg = framevr::armyseam::cfg;
 namespace xm = framevr::xmenu;
 namespace ia = framevr::interaction;
 
-// The hand button the menu is on: its slot, -1 none. Kept in d2r_pcvr.ini beside the plugin, [wheel] army_x_menu_button
-// (the slot + 1; 0 none), as the quick item is. Read once; written when Edit Slots puts the menu on a button and when a
-// game skill or a Draw glyph takes that button.
-std::atomic<int> g_button{-2};   // -2: not read yet
+// The hand buttons the menu is on, one a weapon set (xm::Buttons), -1 none. Kept in d2r_pcvr.ini beside the plugin, [wheel]
+// army_x_menu_button (set I) and army_x_menu_button_2 (set II), each the slot + 1 (0 none), as the quick item is. Read
+// once; written when Edit Slots puts the menu on a button and when a game skill or a Draw glyph takes that button. One
+// atomic for both, so "is it on a button" is one load on any thread: (set I's slot + 1) | (set II's slot + 1) << 8.
+std::atomic<int> g_buttons{-1};   // -1: not read yet
+constexpr const wchar_t* ButtonKey[2] = {L"army_x_menu_button", L"army_x_menu_button_2"};
+int Pack(const xm::Buttons& b) { return (b.slot[0] + 1) | ((b.slot[1] + 1) << 8); }
+xm::Buttons Unpack(int v) { xm::Buttons b; b.slot[0] = (v & 255) - 1; b.slot[1] = ((v >> 8) & 255) - 1; return b; }
 std::wstring IniPath() {
     HMODULE module = nullptr; wchar_t path[32768]{};
     if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(&IniPath), &module) ||
@@ -64,31 +67,34 @@ std::wstring IniPath() {
     ini.resize(slash + 1); ini += L"d2r_pcvr.ini";
     return ini;
 }
-int ReadButton() {
-    int b = g_button.load(std::memory_order_relaxed);
-    if (b != -2) return b;
-    const std::wstring ini = IniPath();
-    b = ini.empty() ? -1 : xm::SlotOfButton(float(GetPrivateProfileIntW(L"wheel", L"army_x_menu_button", 0, ini.c_str())), framevr::skills::Count);
-    int unread = -2;
-    g_button.compare_exchange_strong(unread, b, std::memory_order_relaxed);
-    return g_button.load(std::memory_order_relaxed);
+int ReadButtons() {
+    int v = g_buttons.load(std::memory_order_relaxed);
+    if (v >= 0) return v;
+    xm::Buttons b;
+    if (const std::wstring ini = IniPath(); !ini.empty())
+        for (int set = 0; set < 2; ++set) b.slot[set] = xm::SlotOfButton(float(GetPrivateProfileIntW(L"wheel", ButtonKey[set], 0, ini.c_str())), framevr::skills::Count);
+    int unread = -1;
+    g_buttons.compare_exchange_strong(unread, Pack(b), std::memory_order_relaxed);
+    return g_buttons.load(std::memory_order_relaxed);
 }
-void SaveButton(int slot) {
-    g_button.store(slot, std::memory_order_relaxed);
+xm::Buttons Stored() { return Unpack(ReadButtons()); }
+void SaveButton(int set, int slot) {
+    if (set < 0 || set > 1) return;
+    xm::Buttons b = Stored();
+    b.slot[set] = slot;
+    g_buttons.store(Pack(b), std::memory_order_relaxed);
     const std::wstring ini = IniPath();
     if (ini.empty()) return;
     wchar_t value[16]; swprintf_s(value, L"%d", slot + 1);
-    WritePrivateProfileStringW(L"wheel", L"army_x_menu_button", value, ini.c_str());
+    WritePrivateProfileStringW(L"wheel", ButtonKey[set], value, ini.c_str());
 }
 
 // The cross's quads, handed from the Input thread's Press to EndPair's Layer without a lock (a sequence counter: odd while
 // written; a reader that sees it change keeps the last list it read).
-// n and open are published beside it, so Layer returns before copying when there is nothing to draw; open counts
-// the opens, so the no-room line is said once an open.
+// n is published beside it, so Layer returns before copying when there is nothing to draw.
 struct Shared {
     std::atomic<uint32_t> seq{0};
     std::atomic<int> n{0};
-    std::atomic<uint32_t> open{0};
     xm::DrawList list;
 };
 Shared shared;
@@ -106,27 +112,20 @@ struct State {
     float aim[2]{};               // the hand's aimed floor cell at the press (Hold ground's spot)
     xm::Aimed target;             // the monster the hand (else the eyes) aimed at the press (Attack my target's), and when (GetTickCount64)
     double targetAtMs = 0;
-    double openedMs = 0;
-    // Attack my target out on the game thread (g_focus): its log line's start and the hand to buzz.
-    char pendingHead[400] = "";
+    // Attack my target or Move and hold out on the game thread (g_focus): a failure line's start, and the hand to buzz.
+    char pendingHead[120] = "";
     int pendingHand = 0;
     bool drawn = false;           // the last published list was not empty
-    // The bind (the hand wheel's Edit Slots pick): its request while the reply is awaited.
-    xm::BindWatch bind;
-    bool injected = false;        // the catalog entry is in the engine's snapshot right now
-    uint64_t boundAtMs = 0;       // GetTickCount64 of the last bind (a snapshot from before it may still show the old skill)
+    // The bind (the hand wheel's Edit Slots pick), and the weapon set last seen in hand (0 set I, 1 set II).
+    xm::Binder binder;
+    int set = 0;
     // Attack my target's targeting mode and the mark after it.
     xm::Targeting targeting;
     xm::Mark mark;
-    double aimStartMs = 0, missedToldMs = -1e9;
-    char aimHead[160] = "";       // the let go's line start, for the mode's end line
     // Move and hold's spot pick: the same targeting mode on the ground (candidate 1: a floor cell within reach).
     xm::Targeting ground;
-    double groundStartMs = 0;
     bool ringShown = false;       // our preview ring is on telegraph's CompanionMark (cleared when the pick ends)
     int wasInReach = -1;          // the last frame's reach (-1: no floor), for the chord's boundary click
-    float groundAt[2]{};          // the spot given (for the outcome's line)
-    double groundHeroDist = 0;
 };
 State st;
 // The hands' aimed monsters (Picks, vrcam's UpdateThread, each update while the menu is on a button), read at a press (transport's
@@ -175,23 +174,15 @@ static_assert(pa::Inside(pa::ArmyXMenu, pa::StaticWidth, pa::StaticHeight) && pa
               pa::Apart(pa::ArmyXMark, pa::Pointer) && pa::Apart(pa::ArmyXMark, pa::Compass) && pa::Apart(pa::ArmyXMark, pa::Gameplay) && pa::Apart(pa::ArmyXMark, pa::GrabHint) &&
               pa::Apart(pa::ArmyXMark, pa::ArmyXMenu), "the menu's two regions sit in free space of the static image");
 
-const char* WhyName(xm::Release r) {
-    switch (r) {
-        case xm::Release::Center: return "let go in the center";
-        case xm::Release::Early: return "let go inside the press settle";
-        case xm::Release::NoArmy: return "not a summoner class now";
-        case xm::Release::Past: return "let go past the circle's reach (X menu feel > Parent depth)";
-        default: return "";
-    }
+// A failed or refused order's line: at most one in FailLineMs, so repeating an order that cannot be given adds no more.
+constexpr uint64_t FailLineMs = 5000;
+uint64_t g_failSaidMs = 0;   // transport's Input thread only
+void SayFail(const seam::ArmyXPressFrame& f, const char* line) {
+    const uint64_t now = GetTickCount64();
+    if (!f.say || (g_failSaidMs && now >= g_failSaidMs && now - g_failSaidMs < FailLineMs)) return;
+    g_failSaidMs = now;
+    f.say(line);
 }
-void PathText(char* out, size_t n, const xm::Hover& h) {
-    if (h.parent < 0) { std::snprintf(out, n, "the center"); return; }
-    const auto& b = xm::Layout[size_t(h.parent)];
-    if (h.sub == xm::SubPast) std::snprintf(out, n, "%s > past its reach", b.name);
-    else if (h.sub < 0 || h.sub >= b.count) std::snprintf(out, n, "%s", b.name);
-    else std::snprintf(out, n, "%s > %s", b.name, xm::OrderLabel(b.orders[h.sub]));
-}
-
 // The one call site of an order: the commander path, with the spot aimed at the press.
 bool Give(seam::ArmyXPressFrame& f, int order) { return f.order(order, st.aim[0], st.aim[1]); }
 // The one call site of Attack my target and Move and hold, summons only: the army half of the commander's
@@ -216,7 +207,7 @@ void Buzz(seam::ArmyXPressFrame& f, int hand, const xm::Tuning& t) {
     if (t.issueMs > 0 && t.issueAmp > 0 && f.pulse) f.pulse(hand, t.issueAmp, uint64_t(t.issueMs * 1e6));
 }
 // Attack my target could not focus a monster: Spearhead wedge (the Aggressive stance) through the commander path instead, its
-// toast "No target" over the wedge's name when there was no monster. head: the line's start (hand, slot, time, path, order);
+// toast "No target" over the wedge's name when there was no monster. head: the line's start (hand, order);
 // id: the monster it was for (0: none).
 enum class FallWhy { NoTarget, TacticalOff, Refused, NotTaken };
 // Why the game thread did not take an order within FocusQueue::TimeoutMs (the army step's seam runs only with an army out and not
@@ -226,7 +217,7 @@ void NotTakenWhy(char* out, size_t n, bool& noArmy) {
     const uint64_t at = g_armyTickMs.load(std::memory_order_relaxed), now = GetTickCount64();
     if (noArmy) std::snprintf(out, n, "no army out (no summon the army step tracks)");
     else if (::companionai::IsSummonFreeRoam()) std::snprintf(out, n, "Fall out is on (the army step idles in Fall out: give Regroup or a formation first)");
-    else std::snprintf(out, n, "the army step did not run for %.1f s (a load, a menu, or VR Settings' summon formations off)",
+    else std::snprintf(out, n, "the army step did not run for %.1f s (a load or a menu)",
                        at && now >= at ? double(now - at) / 1000.0 : -1.0);
 }
 void Fallback(seam::ArmyXPressFrame& f, const char* head, FallWhy why, uint32_t id, int hand, double nowMs, const xm::Tuning& t) {
@@ -236,7 +227,7 @@ void Fallback(seam::ArmyXPressFrame& f, const char* head, FallWhy why, uint32_t 
     st.ctl.Given(given, ok, nowMs, t, why == FallWhy::NoTarget);
     char reason[200];
     if (why == FallWhy::NoTarget) std::snprintf(reason, sizeof reason, "no target");
-    else if (why == FallWhy::TacticalOff) std::snprintf(reason, sizeof reason, "VR Settings' Tactical commands are off");
+    else if (why == FallWhy::TacticalOff) std::snprintf(reason, sizeof reason, "VR Settings > Monsters > Mercenary > Tactical commands is off");
     else if (why == FallWhy::Refused) std::snprintf(reason, sizeof reason, "monster %u refused", id);
     else {
         char whyNot[160]; bool noArmy = false;
@@ -244,71 +235,51 @@ void Fallback(seam::ArmyXPressFrame& f, const char* head, FallWhy why, uint32_t 
         std::snprintf(reason, sizeof reason, "monster %u not taken by the game thread within %.0f s: %.120s", id, xm::FocusQueue::TimeoutMs / 1000, whyNot);
     }
     char line[480];
-    std::snprintf(line, sizeof line, "%s (%s, wedge: %s (commander %d)) %s", head, reason, xm::OrderLabel(given), given,
-                  ok ? "given (the commander took it)" : "refused by the commander (formations off)");
-    if (f.say) f.say(line);
+    std::snprintf(line, sizeof line, "%s not given (%s); %s instead: %s", head, reason, xm::OrderLabel(given),
+                  ok ? "given" : "refused by the commander");
+    SayFail(f, line);
 }
-// Each frame while Attack my target is out on the game thread: its outcome, once. Took: the buzz, the toast and the line;
-// refused or not taken in time: the wedge (Fallback). off: the menu taken off its button: a queued one is dropped; one the game thread
-// already took is only logged.
-// Move and hold's outcome: Took: the buzz, the toast and the line; not taken in time: "Move and hold" over "No army" or
-// "Canceled" and the line with why (no fallback order).
+// Each frame while Attack my target is out on the game thread: its outcome, once. Took: the buzz and the toast; refused or
+// not taken in time: the wedge (Fallback) and a line. off: the menu taken off its button: a queued one is dropped.
+// Move and hold's outcome: Took: the buzz and the toast; not taken in time: "Move and hold" over "No army" or "Canceled"
+// and a line with why (no fallback order).
 void SettleSpot(seam::ArmyXPressFrame& f, xm::FocusQueue::Outcome o, bool quiet, double nowMs, const xm::Tuning& t) {
     const xm::Aimed a = g_focus.target;
-    char line[480];
     if (o == xm::FocusQueue::Outcome::Took) {
         if (!quiet) { Buzz(f, st.pendingHand, t); st.ctl.Given(xm::MoveHold, true, nowMs, t); }
-        const float r = cfg::Gated(cfg::rules.defendRadius);
-        char defend[96];
-        if (r > 0) std::snprintf(defend, sizeof defend, "defended within %.1f sub-tiles (Defend radius, ini)", r);
-        else std::snprintf(defend, sizeof defend, "Defend radius Off: the commander's hold");
-        std::snprintf(line, sizeof line, "%s (spot %.1f %.1f, %.1f sub-tiles from you; summons only: the coordinator's AnchorAt on the game thread, the mercenary not ordered; %s) given%s",
-                      st.pendingHead, a.x, a.y, st.groundHeroDist, defend, quiet ? "; taken off its button while it was being given: no buzz or toast" : "");
-    } else {
-        char whyNot[160]; bool noArmy = false;
-        NotTakenWhy(whyNot, sizeof whyNot, noArmy);
-        if (!quiet) st.ctl.Toast(noArmy ? xm::atlas::LabelNoArmy : xm::atlas::LabelCanceled, nowMs, t, xm::atlas::LabelMoveHold);
-        std::snprintf(line, sizeof line, "%s (spot %.1f %.1f), nothing given: not taken by the game thread within %.0f s: %.160s%s", st.pendingHead, a.x, a.y,
-                      xm::FocusQueue::TimeoutMs / 1000, whyNot, quiet ? " (taken off its button)" : "");
+        return;
     }
-    if (f.say) f.say(line);
+    char whyNot[160]; bool noArmy = false;
+    NotTakenWhy(whyNot, sizeof whyNot, noArmy);
+    if (!quiet) st.ctl.Toast(noArmy ? xm::atlas::LabelNoArmy : xm::atlas::LabelCanceled, nowMs, t, xm::atlas::LabelMoveHold);
+    char line[400];
+    std::snprintf(line, sizeof line, "%s (spot %.1f %.1f) not given: not taken by the game thread within %.0f s: %.160s", st.pendingHead, a.x, a.y,
+                  xm::FocusQueue::TimeoutMs / 1000, whyNot);
+    SayFail(f, line);
 }
 void Settle(seam::ArmyXPressFrame& f, double nowMs, const xm::Tuning& t, bool off) {
     const xm::Aimed a = g_focus.target;   // written by Post before it was queued; Drain never writes it
     const bool spot = g_focus.kind == xm::FocusQueue::Kind::Anchor;   // Move and hold's (the same: written before it was queued)
-    char line[320];
     if (off) {
         st.mark.Clear();
-        if (g_focus.Off() == xm::FocusQueue::OffResult::Dropped) {
-            if (spot) std::snprintf(line, sizeof line, "%s (spot %.1f %.1f), nothing given (taken off its button before the game thread took it)", st.pendingHead, a.x, a.y);
-            else std::snprintf(line, sizeof line, "%s (monster %u), nothing given (taken off its button before the game thread took it)", st.pendingHead, a.id);
-            if (f.say) f.say(line);
-            return;
-        }
+        if (g_focus.Off() == xm::FocusQueue::OffResult::Dropped) return;   // never given: the off line says why
     }
     const auto o = g_focus.Poll(nowMs);
     if (o == xm::FocusQueue::Outcome::None) return;
-    // Taken off its button while the game thread was giving it: its outcome, after the next bind, is only logged.
+    // Taken off its button while the game thread was giving it: no buzz, toast or mark for its outcome.
     const bool quiet = g_focus.TakeQuiet() || off;
     if (spot) { SettleSpot(f, o, quiet, nowMs, t); return; }
     if (o != xm::FocusQueue::Outcome::Took && st.mark.id == a.id) st.mark.Clear();   // not focused: no arrow over it
     if (o == xm::FocusQueue::Outcome::Took) {
         if (!quiet) { Buzz(f, st.pendingHand, t); st.ctl.Given(xm::AttackTarget, true, nowMs, t); }
         else if (st.mark.id == a.id) st.mark.Clear();
-        std::snprintf(line, sizeof line, "%s (monster %u%s at %.1f %.1f, the summon army's priority target, summons only: the mercenary not ordered; given on the game thread) given%s",
-                      st.pendingHead, a.id, a.eyes ? " (the eyes' pick)" : "", a.x, a.y,
-                      quiet ? "; taken off its button while it was being given: no buzz, toast or mark" : st.mark.id != a.id ? "" : "; the mark is over it");
-    } else if (quiet) {
-        std::snprintf(line, sizeof line, "%s (monster %u %s; taken off its button, no wedge)", st.pendingHead, a.id,
-                      o == xm::FocusQueue::Outcome::Refused ? "refused" : "not taken by the game thread in time");
-    } else {
-        Fallback(f, st.pendingHead, o == xm::FocusQueue::Outcome::Refused ? FallWhy::Refused : FallWhy::NotTaken, a.id, st.pendingHand, nowMs, t);
         return;
     }
-    if (f.say) f.say(line);
+    if (quiet) return;   // off by now: no wedge, and the off line says why
+    Fallback(f, st.pendingHead, o == xm::FocusQueue::Outcome::Refused ? FallWhy::Refused : FallWhy::NotTaken, a.id, st.pendingHand, nowMs, t);
 }
 
-// A picture of steamvr/army_x_menu.rc (RCDATA `name`) as straight RGBA through `wic`; empty when it is missing or not
+// A picture of steamvr/interaction_assets.rc (RCDATA `name`) as straight RGBA through `wic`; empty when it is missing or not
 // wantW x wantH. The sheet (D2RVR_ARMY_X_SHEET): the session's static paint and the bind entry's icon (the icon worker's own
 // WIC); the mark's strip (D2RVR_ARMY_X_MARK): the static paint.
 void DecodePicture(IWICImagingFactory* wic, const wchar_t* name, UINT wantW, UINT wantH, std::vector<uint8_t>& sheet, UINT& w, UINT& h) {
@@ -345,16 +316,7 @@ void PaintRegion(const seam::StaticAtlasFrame& f, framevr::panelatlas::Region r,
     }
 }
 
-// ---- Attack my target's targeting mode and its mark ----
-const char* EndName(xm::TargetEnd e) {
-    switch (e) {
-        case xm::TargetEnd::Grip: return "canceled by the grip";
-        case xm::TargetEnd::Timeout: return "canceled: no lock in time";
-        case xm::TargetEnd::Off: return "taken off its button";
-        case xm::TargetEnd::Replaced: return "the X menu opened again";
-        default: return "";
-    }
-}
+// ---- Attack my target's mark ----
 // The scanned monster with this id, if the scan is fresh (its cells: the outline's).
 bool Scanned(const targetlock::Snapshot& s, uint32_t id, float& x, float& y) {
     if (!id || !s.at || GetTickCount64() - s.at > ScanFreshMs) return false;
@@ -365,50 +327,27 @@ bool Scanned(const targetlock::Snapshot& s, uint32_t id, float& x, float& y) {
 }  // namespace
 
 namespace armyxmenu {
-int Button() { return ReadButton(); }
-bool On() { return ReadButton() >= 0; }
-// Before interactions.Step: Edit Slots on a hand button lists "Army X menu" (General / Items, as Draw glyph), with an army out.
+bool On() { return ReadButtons() > 0; }
+// Before interactions.Step: Edit Slots on a hand button lists "Army X menu" (General / Items, as Draw glyph) with an army out,
+// whether the menu is on a button yet or not.
 void Input(seam::WheelInputFrame f) {
     auto* in = static_cast<ia::Input*>(f.engineIn);
     if (!in) return;
-    auto& s = in->snapshot;
-    st.injected = false;
-    if (!armyxmenu::On() || f.wheelHand < 0 || !ia::HasSummonArmy(s) || s.skillCount >= s.catalog.size()) return;
-    for (unsigned i = 0; i < s.skillCount && i < s.catalog.size(); ++i) if (s.catalog[i].id == xm::ItemId) return;
-    ia::Skill item{};
-    item.id = xm::ItemId; item.owner = -1; item.level = 1; item.known = item.available = true;
-    item.directed = true;   // never in the GLYPHS page's picker (its skills need no target)
-    std::snprintf(item.name, sizeof item.name, "Army X menu");
-    s.catalog[s.skillCount++] = item;
-    st.injected = true;
+    st.binder.buttons = Stored();
+    st.binder.Before(*in);
 }
-// After interactions.Step: the entry out again; a BindSkill for it, from Edit Slots, is
-// made the commander's clear of the button's game skill; the reply kept.
+// After interactions.Step: the entry out again; a BindSkill for it, from Edit Slots, is made the commander's clear of the
+// button's game skill, and the game's answer to it kept: that slot is the menu's button in that weapon set.
 void Request(seam::WheelRequestFrame f) {
-    if (auto* in = static_cast<ia::Input*>(f.engineIn); in && st.injected) {
-        auto& s = in->snapshot;
-        if (s.skillCount > 0 && s.catalog[s.skillCount - 1].id == xm::ItemId) s.catalog[--s.skillCount] = {};
-        st.injected = false;
-    }
-    const bool on = armyxmenu::On();
-    if (!on) { st.bind.Forget(); return; }   // the Off call: a bind still waiting is forgotten
-    if (!f.request || !f.reply) return;
-    auto& r = *static_cast<ia::Request*>(f.request);
-        if (st.bind.Take(r)) {   // the commander's own clear (interactionstate's BindSkill), as Draw glyph's pick
-        char line[180];
-        std::snprintf(line, sizeof line, "Frame army x menu: %s put it on slot %d (its game skill %d cleared first)", "Edit Slots", r.index, r.previousSkill);
-        if (f.say) f.say(line);
-    }
-    int slot = -1;
-    const auto done = st.bind.Reply(*static_cast<const ia::Reply*>(f.reply), slot);
-    if (done != xm::BindWatch::Done::None) {
-        const bool ok = done == xm::BindWatch::Done::Applied;
-        if (ok) { SaveButton(slot); st.boundAtMs = GetTickCount64(); }
-        char line[160];
-        std::snprintf(line, sizeof line, "Frame army x menu: slot %d %s", slot,
-                      ok ? "is the Army X menu button ([wheel] army_x_menu_button saved)" : "refused by the game: the button keeps what it had");
-        if (f.say) f.say(line);
-    }
+    st.binder.buttons = Stored();
+    const auto o = st.binder.After(static_cast<ia::Input*>(f.engineIn), static_cast<ia::Request*>(f.request), static_cast<const ia::Reply*>(f.reply), double(GetTickCount64()));
+    if (o.done == xm::BindWatch::Done::None) return;
+    const bool ok = o.done == xm::BindWatch::Done::Applied;
+    if (ok) SaveButton(o.set, o.slot);
+    char line[200];
+    if (ok) std::snprintf(line, sizeof line, "Frame army x menu: on: slot %d is its button in weapon set %s ([wheel] %ls saved)", o.slot, o.set ? "II" : "I", ButtonKey[o.set]);
+    else std::snprintf(line, sizeof line, "Frame army x menu: bind refused by the game: slot %d keeps what it had", o.slot);
+    if (f.say) f.say(line);
 }
 // vrcam mobaim::Tick (Picks): each hand's aimed monster and its cells, stamped now (a pick older
 // than xm::AimedFreshMs at a press is no target, so the key gate's missing Off call needs no re-arm).
@@ -429,7 +368,7 @@ void Picks(const seam::HandPicksFrame& f) {
 }
 // companion_ai's game-thread tick (GameTick; right after the army step, the same thread, no
 // companion_ai lock held): the commander's priority target, kept for the mark's life; and Defend's scan round the X menu's spot
-// S1/S2: never under g_tacticalLock, and seen from a summon by the spot, as the mercenary's hold sentry scans from the
+// (never under g_tacticalLock, and seen from a summon by the spot, as the mercenary's hold sentry scans from the
 // mercenary at its spot, not from the hero tens of sub-tiles away), for the next army tick.
 void GameTick(seam::CompanionTickFrame f) {
     if (!armyxmenu::On()) return;
@@ -458,18 +397,11 @@ void ArmyTick(seam::ArmyMovesFrame& f) {
     const bool on = armyxmenu::On();
     g_armyTickMs.store(f.nowMs, std::memory_order_relaxed);
     if (on) g_focus.Drain([&c](const xm::Aimed& a) { return Apply(c, a, g_focus.kind); });
-    char line[260];
     // Hold here (the commander path, transport's thread) anchored the army: that anchor is the X menu's, to defend. Timed
     // on the clock now.
     if (const uint64_t claim = g_holdClaimMs.exchange(0, std::memory_order_relaxed), now = GetTickCount64();
-        on && claim && now >= claim && now - claim <= ClaimMs && c.anchorActive) {
-        g_defend.Own(c.anchorPos);
-        if (f.say) {
-            std::snprintf(line, sizeof line, "Frame army x menu: defend: Hold here's spot (%.1f %.1f) is the X menu's", c.anchorPos.x, c.anchorPos.y);
-            f.say(line);
-        }
-    }
-    // Defend the X menu's spot (Off, the radius 0 or Hunt the mark Off: a monster it set is let go, the commander's hold).
+        on && claim && now >= claim && now - claim <= ClaimMs && c.anchorActive) g_defend.Own(c.anchorPos);
+    // Defend the X menu's spot (on no button, or the radius or the hunt rule 0: a monster it set is let go, the commander's hold).
     const float radius = on ? cfg::Gated(cfg::rules.defendRadius) : 0.f;
     const bool hunting = on && xhunt::ModeOf(cfg::Gated(cfg::rules.hunt)) != xhunt::Mode::Off;
     const bool owned = g_defend.Owns();
@@ -477,7 +409,7 @@ void ArmyTick(seam::ArmyMovesFrame& f) {
     const auto sp = g_defend.Spot();
     const bool fresh = s.n >= 0 && f.nowMs >= s.atMs && f.nowMs - s.atMs <= DefendScanFreshMs;   // the last tick's, after its step
     const bool here = std::hypot(s.spot.x - sp.x, s.spot.y - sp.y) < .05f;
-    const auto d = g_defend.Step(c, radius, hunting, f.nowMs, s.foes, fresh && here ? s.n : -1);
+    g_defend.Step(c, radius, hunting, f.nowMs, s.foes, fresh && here ? s.n : -1);
     // The next scan (GameTick, after this step): wanted while the X menu holds a spot to defend and nothing is focused; seen from
     // the summon nearest the spot.
     auto& w = g_defendWant;
@@ -490,60 +422,35 @@ void ArmyTick(seam::ArmyMovesFrame& f) {
         }
         w.spot = g_defend.Spot(); w.radius = radius; w.atMs = f.nowMs;
     }
-    if (!on && !owned) return;
-    // Taken off its button: the X menu's own anchor (Move and hold, Hold here's claimed spot) goes
-    // too, the coordinator's ClearAnchor (the army re-forms on the hero); another order's anchor is never touched.
-    if (!on && g_defend.Release(c) && f.say) {
-        std::snprintf(line, sizeof line, "Frame army x menu: taken off its button: the X menu's held spot (%.1f %.1f) let go (the coordinator's ClearAnchor: the army re-forms on you)", sp.x, sp.y);
-        f.say(line);
-    }
-    if (!f.say) return;
-    if (d.gaveUp) {   // alive after its focus was cleared: the hunt gave up on it
-        std::snprintf(line, sizeof line, "Frame army x menu: defend: monster %u given up (the hunt could not reach it): skipped for %.0f s or until a new spot",
-                      d.gaveUp, double(xhunt::GivenUpMs) / 1000.0);
-        f.say(line);
-    }
-    if (d.act == xhunt::Defend::Act::None) return;
-    switch (d.act) {
-        case xhunt::Defend::Act::Picked:
-            std::snprintf(line, sizeof line, "Frame army x menu: defend: monster %u, %.1f sub-tiles from the spot (%.1f %.1f; %d hostiles within %.1f): the summons' target, summons only",
-                          d.id, d.dist, sp.x, sp.y, d.seen, radius);
-            break;
-        case xhunt::Defend::Act::Lost:
-            std::snprintf(line, sizeof line, "Frame army x menu: defend: monster %u is no longer the target (killed, lost, or given up by the hunt: the next scan tells); back to the spot", d.id);
-            break;
-        case xhunt::Defend::Act::LetGo:
-            if (d.dist > 0) std::snprintf(line, sizeof line, "Frame army x menu: defend: monster %u ran %.1f sub-tiles from the spot (past %.1f + %.0f): let go, back to the spot", d.id, d.dist, radius, xhunt::DefendSlack);
-            else std::snprintf(line, sizeof line, "Frame army x menu: defend: monster %u let go (%s): the commander's hold", d.id, !on ? "taken off its button" : radius <= 0 ? "Defend radius Off" : "Hunt the mark Off");
-            break;
-        case xhunt::Defend::Act::Ended:
-            std::snprintf(line, sizeof line, "Frame army x menu: defend: the spot (%.1f %.1f) is no longer held (another order; its target, if any, is that order's)", sp.x, sp.y);
-            break;
-        default: return;
-    }
-    f.say(line);
-}// The held button, once a frame.
+    // Taken off its button: the X menu's own anchor (Move and hold, Hold here's claimed spot) goes too, the coordinator's
+    // ClearAnchor (the army re-forms on the hero); another order's anchor is never touched.
+    if (!on && owned) g_defend.Release(c);
+}
+// The held button, once a frame.
 void Press(seam::ArmyXPressFrame f) {
-    // A game skill or a Draw glyph put on the menu's button takes it back at once: the menu is on no button again (one
-    // line), and with that every army rule of it is off. A snapshot from just before the bind may still show the skill
-    // the bind cleared: wait it out.
-    if (const int was = armyxmenu::Button(); was >= 0 && was < framevr::skills::Count && f.fresh && f.snapshot && GetTickCount64() - st.boundAtMs > 2000) {
+    // A game skill or a Draw glyph put on the menu's button, in the weapon set in hand, takes it back at once (one line);
+    // on no button in either set every army rule of the menu is off.
+    st.binder.buttons = Stored();
+    if (f.fresh && f.snapshot) {
         const auto& now = *static_cast<const ia::Snapshot*>(f.snapshot);
-        const bool skill = now.skills[size_t(was)].known && now.skills[size_t(was)].id >= 0;
-        if (skill || f.glyphDraw[0] == was || f.glyphDraw[1] == was) {
-            char line[160];
-            std::snprintf(line, sizeof line, "Frame army x menu: slot %d %s: the menu is on no button now", was, skill ? "has a game skill" : "is a Draw glyph button");
-            if (f.say) f.say(line);
-            SaveButton(-1);
-        }
+        if (const int k = xm::Buttons::Set(now.bindingBank); k >= 0) st.set = k;
+        int slot = -1, set = -1;
+        if (st.binder.buttons.Any())
+            if (const auto took = st.binder.Takeover(now, f.glyphDraw, double(GetTickCount64()), slot, set); took != xm::Binder::Taken::No) {
+                SaveButton(set, -1);
+                char line[200];
+                std::snprintf(line, sizeof line, "Frame army x menu: %s: slot %d %s in weapon set %s", st.binder.buttons.Any() ? "moved off a button" : "off",
+                              slot, took == xm::Binder::Taken::Skill ? "has a game skill" : "is a Draw glyph button", set ? "II" : "I");
+                if (f.say) f.say(line);
+            }
     }
     const bool on = armyxmenu::On();
-    const int bound = armyxmenu::Button();
+    const int bound = st.binder.buttons.slot[st.set];
     // Closed and not our press (or nothing bound), no targeting and no mark: one branch, nothing else (the toast still fades out
     // below).
     if (!st.ctl.menu.open && !st.drawn && !st.ctl.waitUp && !g_focus.Waiting() && !st.targeting.Busy() && !st.ground.Busy() && !st.ringShown &&
         !st.mark.id && (bound < 0 || f.slot != bound)) return;
-    if (!on) st.ctl.toastLabel = -1;   // the Off call: no stale toast after the next On
+    if (!on) st.ctl.toastLabel = -1;   // on no button: no stale toast after the next bind
     const auto& snap = *static_cast<const ia::Snapshot*>(f.snapshot);
     const auto* aims = static_cast<const framevr::gameplay::Pose*>(f.aims);
     xm::FrameIn in;
@@ -582,13 +489,10 @@ void Press(seam::ArmyXPressFrame f) {
         const bool fresh = at && now >= at && double(now - at) <= xm::Mark::StaleMs;
         const auto end = !on ? xm::Mark::End::Dropped : st.mark.Step(g_priority.load(std::memory_order_relaxed), in.nowMs, fresh);
         if (!on) st.mark.Clear();
-        if (end != xm::Mark::End::None && f.say) {
-            char line[220];
-            std::snprintf(line, sizeof line, "Frame army x menu: the mark over monster %u is gone (%s)", was,
-                          !on ? "taken off its button" : end == xm::Mark::End::Dropped ? "the commander's priority target let it go: it died, was lost, or an order cleared it" :
-                          end == xm::Mark::End::Stale ? "no game tick for 2 s confirmed the commander's priority target (a load, or companion AI idle)" :
-                          "the commander never made it the priority target");
-            f.say(line);
+        if (on && end == xm::Mark::End::NeverTaken) {
+            char line[160];
+            std::snprintf(line, sizeof line, "Frame army x menu: Attack my target failed: the commander never made monster %u its priority target", was);
+            SayFail(f, line);
         }
     }
     // Attack my target's targeting mode: the ray's candidate, the lock, the cancels. It owns its hand's trigger.
@@ -610,31 +514,14 @@ void Press(seam::ArmyXPressFrame f) {
         // The trigger's own action (attack, skill) never fires: its slot's request is cleared, the locking pull's too.
         xm::OwnTrigger(to, h, f.slot, f.requested, f.interact);
         if (to.tick && t.hoverMs > 0 && t.hoverAmp > 0 && f.pulse) f.pulse(h, t.hoverAmp, uint64_t(t.hoverMs * 1e6));
-        if (to.missed && in.nowMs - st.missedToldMs > 1000 && f.say) {
-            st.missedToldMs = in.nowMs;
-            f.say("Frame army x menu: targeting: the trigger pulled with no monster on the ray: swallowed, still targeting (said at most once a second)");
-        }
-        const double s = (in.nowMs - st.aimStartMs) / 1000.0;
         if (to.end == xm::TargetEnd::Locked) {
             st.mark.Clear();
-            char head[160];
-            std::snprintf(head, sizeof head, "Frame army x menu: %s hand, targeting %.2f s: locked monster %u", h ? "left" : "right", s, cand.id);
             if (g_focus.Post(cand, in.nowMs)) {   // the game thread gives it (Settle: the buzz and the toast); the arrow stays on it now
-                std::snprintf(st.pendingHead, sizeof st.pendingHead, "%s", head);
+                std::snprintf(st.pendingHead, sizeof st.pendingHead, "Frame army x menu: %s hand: Attack my target", h ? "left" : "right");
                 st.pendingHand = h;
                 st.mark.Set(cand.id, in.nowMs);
-            } else if (f.say) {
-                char line[240]; std::snprintf(line, sizeof line, "%s, nothing given (the last Attack my target is still on its way to the game thread)", head);
-                f.say(line);
-            }
-        } else if (to.end != xm::TargetEnd::None) {
-            if (to.end != xm::TargetEnd::Off) st.ctl.Toast(xm::atlas::LabelCanceled, in.nowMs, t);
-            if (f.say) {
-                char line[240];
-                std::snprintf(line, sizeof line, "Frame army x menu: %s hand, targeting %.2f s: %s, nothing given", h ? "left" : "right", s, EndName(to.end));
-                f.say(line);
-            }
-        }
+            } else SayFail(f, "Frame army x menu: Attack my target not given: the last order is still on its way to the game thread");
+        } else if (to.end != xm::TargetEnd::None && to.end != xm::TargetEnd::Off) st.ctl.Toast(xm::atlas::LabelCanceled, in.nowMs, t);
         // The X menu on that very trigger: the cross never sees it while the mode owns it (the lock is not a new press).
         if (st.targeting.Busy() && in.bound == framevr::skills::TriggerSlot(h)) in.down = false;
     }
@@ -646,11 +533,9 @@ void Press(seam::ArmyXPressFrame f) {
         const int h = st.ground.hand;
         float gx = 0, gy = 0, px = 0, py = 0;
         bool floor = false, reach = false;
-        double heroDist = 0;
         if (st.ground.active && f.aimsTracked[h] && map.Valid()) {
             floor = xm::FloorCell(map, xm::RayOf(map, aims[h].p, aims[h].q), gx, gy);
             const bool hero = ::companionai::GetPlayerWorldSubtilePos(px, py);
-            heroDist = hero ? std::hypot(gx - px, gy - py) : 0.0;
             reach = floor && (!hero || xm::InReach(gx, gy, px, py, float(framevr::companionai::ElasticCombatLeashDistance)));
         }
         xm::TargetIn ti;
@@ -669,38 +554,15 @@ void Press(seam::ArmyXPressFrame f) {
             board.ClearSkill(framevr::telegraph::CompanionMark);
             st.ringShown = false; st.wasInReach = -1;
         }
-        if (to.missed) {   // a pull with no spot: past the reach (the chord's error buzz) or no floor on the ray
-            if (floor && !reach && f.pulse) f.pulse(h, .60f, 60000000ull);
-            if (in.nowMs - st.missedToldMs > 1000 && f.say) {
-                st.missedToldMs = in.nowMs;
-                char line[200];
-                if (floor) std::snprintf(line, sizeof line, "Frame army x menu: move and hold: too far (%.1f > %d sub-tiles from you): refused, still picking (said at most once a second)",
-                                         heroDist, framevr::companionai::ElasticCombatLeashDistance);
-                else std::snprintf(line, sizeof line, "Frame army x menu: move and hold: the trigger pulled with no ground on the ray: swallowed, still picking (said at most once a second)");
-                f.say(line);
-            }
-        }
-        const double s = (in.nowMs - st.groundStartMs) / 1000.0;
+        if (to.missed && floor && !reach && f.pulse) f.pulse(h, .60f, 60000000ull);   // a pull past the reach: the chord's error buzz
         if (to.end != xm::TargetEnd::None && st.ringShown) { board.ClearSkill(framevr::telegraph::CompanionMark); st.ringShown = false; st.wasInReach = -1; }
         if (to.end == xm::TargetEnd::Locked) {
-            char head[200];
-            std::snprintf(head, sizeof head, "Frame army x menu: %s hand, move and hold %.2f s: spot set", h ? "left" : "right", s);
             const xm::Aimed spot{0, gx, gy, double(GetTickCount64()), false};
             if (g_focus.Post(spot, in.nowMs, xm::FocusQueue::Kind::Anchor)) {   // the game thread gives it (Settle: the buzz and the toast)
-                std::snprintf(st.pendingHead, sizeof st.pendingHead, "%s", head);
-                st.pendingHand = h; st.groundAt[0] = gx; st.groundAt[1] = gy; st.groundHeroDist = heroDist;
-            } else if (f.say) {
-                char line[280]; std::snprintf(line, sizeof line, "%s, nothing given (the last order is still on its way to the game thread)", head);
-                f.say(line);
-            }
-        } else if (to.end != xm::TargetEnd::None) {
-            if (to.end != xm::TargetEnd::Off) st.ctl.Toast(xm::atlas::LabelCanceled, in.nowMs, t, xm::atlas::LabelMoveHold);
-            if (f.say) {
-                char line[240];
-                std::snprintf(line, sizeof line, "Frame army x menu: %s hand, move and hold %.2f s: %s, nothing given", h ? "left" : "right", s, EndName(to.end));
-                f.say(line);
-            }
-        }
+                std::snprintf(st.pendingHead, sizeof st.pendingHead, "Frame army x menu: %s hand: Move and hold", h ? "left" : "right");
+                st.pendingHand = h;
+            } else SayFail(f, "Frame army x menu: Move and hold not given: the last order is still on its way to the game thread");
+        } else if (to.end != xm::TargetEnd::None && to.end != xm::TargetEnd::Off) st.ctl.Toast(xm::atlas::LabelCanceled, in.nowMs, t, xm::atlas::LabelMoveHold);
         if (st.ground.Busy() && in.bound == framevr::skills::TriggerSlot(h)) in.down = false;
     }
     auto out = st.ctl.Step(in, t);
@@ -709,27 +571,13 @@ void Press(seam::ArmyXPressFrame f) {
         const int h = st.targeting.hand;
         st.targeting.End(hi.trigger[h]);
         cand = {};
-        if (f.say) {
-            char line[200];
-            std::snprintf(line, sizeof line, "Frame army x menu: %s hand, targeting %.2f s: %s, nothing given", h ? "left" : "right",
-                          (in.nowMs - st.aimStartMs) / 1000.0, EndName(xm::TargetEnd::Replaced));
-            f.say(line);
-        }
     }
     if (out.event == xm::Event::Opened && st.ground.active) {   // the same for Move and hold's spot pick
         const int h = st.ground.hand;
         st.ground.End(hi.trigger[h]);
         if (st.ringShown) { framevr::telegraph::Current().ClearSkill(framevr::telegraph::CompanionMark); st.ringShown = false; st.wasInReach = -1; }
-        if (f.say) {
-            char line[200];
-            std::snprintf(line, sizeof line, "Frame army x menu: %s hand, move and hold %.2f s: %s, nothing given", h ? "left" : "right",
-                          (in.nowMs - st.groundStartMs) / 1000.0, EndName(xm::TargetEnd::Replaced));
-            f.say(line);
-        }
     }
     if (out.event == xm::Event::Opened) {
-        shared.open.fetch_add(1, std::memory_order_relaxed);
-        st.openedMs = in.nowMs;
         st.aim[0] = st.aim[1] = 0;
         if (f.aimAt) f.aimAt(f.aimCtx, in.hand, st.aim);   // Hold ground's spot: where the hand aimed at the press
         // Attack my target's monster: the one this hand aimed at the press, else the eyes' (the outline's rule), by the commander's aim rules
@@ -740,64 +588,37 @@ void Press(seam::ArmyXPressFrame f) {
         }
     }
     if (out.tick && t.hoverMs > 0 && t.hoverAmp > 0 && f.pulse) f.pulse(out.hand, t.hoverAmp, uint64_t(t.hoverMs * 1e6));
-    if (out.event == xm::Event::Issue || out.event == xm::Event::Canceled) {
-        char path[64]; PathText(path, sizeof path, st.ctl.path[1]);
-        // The layout it was given in and which arm was held
-        char arms[176]; xm::ArmsText(arms, sizeof arms, st.ctl.arms, st.ctl.path[1].parent, t.viaCenter);
-        char layout[240];
-        if (t.parentDepthDeg > 0) std::snprintf(layout, sizeof layout, "%s layout, depth %.1f deg, %s", t.tee ? "T" : "straight", t.parentDepthDeg, arms);
-        else std::snprintf(layout, sizeof layout, "%s layout, %s", t.tee ? "T" : "straight", arms);
-        char line[720];
-        if (out.event == xm::Event::Issue) {
-            char head[400];
-            std::snprintf(head, sizeof head, "Frame army x menu: %s hand, slot %d, %.2f s, %s: %s -> %s", out.hand ? "left" : "right",
-                          in.bound, (in.nowMs - st.openedMs) / 1000.0, layout, path, xm::OrderLabel(out.order));
-            line[0] = 0;
-            if (st.mark.id) {   // a new order: the mark is gone (the new one's own comes when the commander takes it)
-                char gone[120]; std::snprintf(gone, sizeof gone, "Frame army x menu: the mark over monster %u is gone (a new order)", st.mark.id);
-                if (f.say) f.say(gone);
-                st.mark.Clear();
-            }
-            if (out.order == xm::AttackTarget) {
-                const auto how = xm::PlanAttack(st.target, st.targetAtMs, ::companionai::IsTacticalCommandsEnabled(), t.reachCells > 0);
-                if (how == xm::AttackHow::Targeting) {   // no monster outlined: the hand picks one (the cross is closed now)
-                    st.targeting.Start(out.hand, in.nowMs, hi.trigger[out.hand], hi.grip[out.hand]);
-                    st.aimStartMs = in.nowMs;
-                    char limit[32];
-                    if (t.targetS > 0) std::snprintf(limit, sizeof limit, "%.1f s", t.targetS); else std::snprintf(limit, sizeof limit, "no time limit");
-                    std::snprintf(line, sizeof line, "%s (no monster outlined: targeting, the %s hand's ray out to %.0f cells, %s; its trigger locks, the grip cancels%s)",
-                                  head, out.hand ? "left" : "right", t.reachCells, limit, hi.trigger[out.hand] > xm::TriggerDown ? "; its trigger is held: let go first" : "");
-                } else if (how != xm::AttackHow::Focus)   // no monster (reach Off), or Tactical commands off: the Aggressive stance instead, now
-                    Fallback(f, head, how == xm::AttackHow::NoTarget ? FallWhy::NoTarget : FallWhy::TacticalOff, 0u, out.hand, in.nowMs, t);
-                else if (g_focus.Post(st.target, in.nowMs)) {   // the game thread gives it; its line, buzz and toast when it reports (Settle)
-                    std::snprintf(st.pendingHead, sizeof st.pendingHead, "%s", head);
-                    st.pendingHand = out.hand;
-                    st.mark.Set(st.target.id, in.nowMs);   // the arrow over it from the let go (gone again if the commander refuses)
-                } else std::snprintf(line, sizeof line, "%s, nothing given (the last order is still on its way to the game thread)", head);
-            } else if (out.order == xm::MoveHold) {   // the hand picks the spot (the cross is closed now); summons only
-                st.ground.Start(out.hand, in.nowMs, hi.trigger[out.hand], hi.grip[out.hand]);
-                st.groundStartMs = in.nowMs; st.wasInReach = -1;
-                char limit[32];
-                if (t.targetS > 0) std::snprintf(limit, sizeof limit, "%.1f s", t.targetS); else std::snprintf(limit, sizeof limit, "no time limit");
-                std::snprintf(line, sizeof line, "%s (pick the spot: the %s hand's laser on the ground, within %d sub-tiles of you; its trigger sets it, the grip cancels, %s; summons only%s)",
-                              head, out.hand ? "left" : "right", framevr::companionai::ElasticCombatLeashDistance, limit,
-                              hi.trigger[out.hand] > xm::TriggerDown ? "; its trigger is held: let go first" : "");
-            } else {
-                const bool ok = Give(f, out.order);
-                if (ok) Buzz(f, out.hand, t);
-                st.ctl.Given(out.order, ok, in.nowMs, t);
-                // Hold here's anchor is the X menu's: the next army tick claims it to defend (ArmyTick, Defend radius)
-                if (ok && out.order == framevr::commander::SkillHoldGround) g_holdClaimMs.store(GetTickCount64(), std::memory_order_relaxed);
-                std::snprintf(line, sizeof line, "%s (commander %d) %s%s", head, out.order, ok ? "given (the commander took it)" : "refused by the commander (formations off)",
-                              ok && out.order == framevr::commander::SkillHoldGround ? "; summons only; the spot defended (Defend radius, ini)" : "");
-            }
+    // The let go on an order. A line only when it could not be given.
+    if (out.event == xm::Event::Issue) {
+        char head[120];
+        std::snprintf(head, sizeof head, "Frame army x menu: %s hand, slot %d: %s", out.hand ? "left" : "right", in.bound, xm::OrderLabel(out.order));
+        st.mark.Clear();   // a new order: the mark is gone (the new one's own comes when the commander takes it)
+        if (out.order == xm::AttackTarget) {
+            const auto how = xm::PlanAttack(st.target, st.targetAtMs, ::companionai::IsTacticalCommandsEnabled(), t.reachCells > 0);
+            if (how == xm::AttackHow::Targeting)   // no monster outlined: the hand picks one (the cross is closed now)
+                st.targeting.Start(out.hand, in.nowMs, hi.trigger[out.hand], hi.grip[out.hand]);
+            else if (how != xm::AttackHow::Focus)   // no monster and no reach, or Tactical commands off: the Aggressive stance instead, now
+                Fallback(f, head, how == xm::AttackHow::NoTarget ? FallWhy::NoTarget : FallWhy::TacticalOff, 0u, out.hand, in.nowMs, t);
+            else if (g_focus.Post(st.target, in.nowMs)) {   // the game thread gives it; its buzz and toast when it reports (Settle)
+                std::snprintf(st.pendingHead, sizeof st.pendingHead, "%s", head);
+                st.pendingHand = out.hand;
+                st.mark.Set(st.target.id, in.nowMs);   // the arrow over it from the let go (gone again if the commander refuses)
+            } else SayFail(f, "Frame army x menu: Attack my target not given: the last order is still on its way to the game thread");
+        } else if (out.order == xm::MoveHold) {   // the hand picks the spot (the cross is closed now); summons only
+            st.ground.Start(out.hand, in.nowMs, hi.trigger[out.hand], hi.grip[out.hand]);
+            st.wasInReach = -1;
         } else {
-            const char* why = !on ? "taken off its button" : in.wheelOpen ? "a wheel opened" : !in.slotFree ? "the button was taken" :
-                              in.occupied ? "the hand took a potion or holster" : WhyName(out.why);
-            std::snprintf(line, sizeof line, "Frame army x menu: %s hand, slot %d, %.2f s, %s: %s, nothing given (%s)", out.hand ? "left" : "right",
-                          in.bound, (in.nowMs - st.openedMs) / 1000.0, layout, path, why);
+            const bool ok = Give(f, out.order);
+            if (ok) Buzz(f, out.hand, t);
+            st.ctl.Given(out.order, ok, in.nowMs, t);
+            // Hold here's anchor is the X menu's: the next army tick claims it to defend (ArmyTick)
+            if (ok && out.order == framevr::commander::SkillHoldGround) g_holdClaimMs.store(GetTickCount64(), std::memory_order_relaxed);
+            if (!ok) {
+                char line[200];
+                std::snprintf(line, sizeof line, "%s refused by the commander", head);
+                SayFail(f, line);
+            }
         }
-        if (f.say && line[0]) f.say(line);
     }
     // The targeting hint where the cross was, the candidate's arrow, and the mark's (each over its monster, in the room).
     if (st.targeting.active && !st.ctl.menu.open) xm::TargetingHint(out.draw, st.ctl.plane, t);
@@ -815,20 +636,19 @@ void Press(seam::ArmyXPressFrame f) {
 // EndPair: the frame's quads from the static atlas, all of them or none.
 void Layer(const seam::ArmyXLayerFrame& f) {
     static XrCompositionLayerQuad quads[xm::MaxQuads];   // lives until xrEndFrame (the submit keeps a pointer)
-    static uint32_t toldOpen = 0;
+    static bool told = false;   // no room: said once a session
     if (!f.layer || !f.chain || shared.n.load(std::memory_order_relaxed) == 0 || !armyxmenu::On() || !g_sheetPainted.load(std::memory_order_acquire)) return;
     const uint32_t s1 = shared.seq.load(std::memory_order_acquire);
     if (s1 & 1) return;
     const xm::DrawList d = shared.list;
     std::atomic_thread_fence(std::memory_order_acquire);
     if (shared.seq.load(std::memory_order_relaxed) != s1 || d.n == 0) return;
-    if (f.count + uint32_t(d.n) > f.limit) {   // no room for the whole cross: none of it, every the commander layer kept (once an open)
-        const uint32_t opens = shared.open.load(std::memory_order_relaxed);
-        if (toldOpen != opens && f.say) {
-            char line[140]; std::snprintf(line, sizeof line, "Frame army x menu: no room for its %d quads (%u of %u layers used), not drawn (said once an open)", d.n, f.count, f.limit);
+    if (f.count + uint32_t(d.n) > f.limit) {   // no room for the whole cross: none of it, every other layer kept
+        if (!told && f.say) {
+            told = true;
+            char line[160]; std::snprintf(line, sizeof line, "Frame army x menu: no room for its %d quads (%u of %u layers used), not drawn (said once a session)", d.n, f.count, f.limit);
             f.say(line);
         }
-        toldOpen = opens;
         return;
     }
     const bool markPainted = g_markPainted.load(std::memory_order_acquire);
@@ -852,10 +672,10 @@ std::shared_ptr<const framevr::interaction::icons::Image> Icon(const std::string
     auto image = std::make_shared<framevr::interaction::icons::Image>();
     xm::atlas::BindIcon(sheet.empty() ? nullptr : sheet.data(), int(w), int(h), image->rgba);
     image->width = xm::atlas::BindW; image->height = xm::atlas::BindH;
-    char line[160];
-    std::snprintf(line, sizeof line, "Frame army x menu: its bind icon %s", sheet.empty() ? "missing (the sheet did not decode): the entry shows its letters" : "painted from the sheet (the cross, 132 x 130)");
-    framevr::logging::Write(line);
-    if (sheet.empty()) return nullptr;
+    if (sheet.empty()) {
+        framevr::logging::Write("Frame army x menu: its bind icon is missing (the sheet did not decode): the entry shows its letters");
+        return nullptr;
+    }
     return image;
 }
 const bool g_iconMaker = (framevr::interaction::icons::SetBuiltIn(&Icon), true);
@@ -867,7 +687,6 @@ void Paint(const seam::StaticAtlasFrame& f) {
     g_sheetPainted.store(false, std::memory_order_release);
     const auto r = framevr::panelatlas::ArmyXMenu;
     if (!f.pixels || !framevr::panelatlas::Inside(r, f.width, f.height)) return;
-    const auto t0 = std::chrono::steady_clock::now();
     // Never over someone else's picture: the region and its Gap must still be empty, else no pictures this session.
     if (!xm::atlas::RegionClear(f.pixels, f.width, f.height, r.x, r.y, r.w, r.h, framevr::panelatlas::Gap)) {
         if (f.say) f.say("Frame army x menu: its static-image region is not empty; no pictures this session");
@@ -886,9 +705,8 @@ void Paint(const seam::StaticAtlasFrame& f) {
         g_sheetPainted.store(true, std::memory_order_release);
     }
     if (f.say) {
-        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-        char line[160]; std::snprintf(line, sizeof line, "Frame army x menu: its sheet %s (%ux%u, %s, %.1f ms at session start)",
-                                      sheet.empty() ? "is missing or the wrong size: nothing drawn" : "painted", w, h, f.srgb ? "sRGB" : "linear", ms);
+        char line[160]; std::snprintf(line, sizeof line, "Frame army x menu: its sheet %s (%ux%u, %s)",
+                                      sheet.empty() ? "is missing or the wrong size: nothing drawn" : "painted at session start", w, h, f.srgb ? "sRGB" : "linear");
         f.say(line);
     }
 }
@@ -910,10 +728,6 @@ void PaintMark(const seam::StaticAtlasFrame& f) {
     if (wic) wic->Release();
     if (SUCCEEDED(co)) CoUninitialize();
     if (!strip.empty()) { PaintRegion(f, r, strip); g_markPainted.store(true, std::memory_order_release); }
-    if (f.say) {
-        char line[160]; std::snprintf(line, sizeof line, "Frame army x menu: the target mark's %d frames %s (%ux%u)", xm::atlas::MarkFrames,
-                                      strip.empty() ? "are missing or the wrong size: no arrow drawn" : "painted", w, h);
-        f.say(line);
-    }
+    if (strip.empty() && f.say) f.say("Frame army x menu: the target mark's frames are missing or the wrong size: no arrow drawn");
 }
 }  // namespace armyxmenu

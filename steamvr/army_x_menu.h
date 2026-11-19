@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <vector>
 #include "interactions.h"
 #include "skill_slots.h"
@@ -31,7 +32,7 @@ inline constexpr const char* IconKey = "s9001";
 // ---- The bind ----
 // Army X menu goes on a hand button through the hand wheel: Edit Slots lists it (General / Items, with an army out) and sends
 // the commander's own BindSkill with skill ItemId; Take makes it the commander's clear of that button's game skill (as Draw glyph's pick does) and
-// remembers it; the reply's Applied makes that slot the X menu's button ([wheel] army_x_menu_button = slot + 1).
+// remembers it; the reply's Applied makes that slot the X menu's button in that weapon set ([wheel] army_x_menu_button = slot + 1).
 struct BindWatch {
     uint64_t seq = 0; int slot = -1;
     enum class Done { None, Applied, Refused };
@@ -54,6 +55,74 @@ struct BindWatch {
 };
 // The slot the menu is on, from the stored button (slot + 1; 0: none).
 inline int SlotOfButton(float stored, int slots) noexcept { const int b = int(stored + .5f) - 1; return b >= 0 && b < slots ? b : -1; }
+// The buttons the menu is on: one a weapon set, as the game keeps each button's skill (Snapshot::bindingBank: 0 is set I,
+// 16 set II). A weapon swap shows the other set's buttons, so the menu's button in one set says nothing about the other.
+struct Buttons {
+    int slot[2] = {-1, -1};
+    static constexpr int Set(int bindingBank) noexcept { return bindingBank == 0 ? 0 : bindingBank == 16 ? 1 : -1; }
+    int Of(int bindingBank) const noexcept { const int k = Set(bindingBank); return k < 0 ? -1 : slot[k]; }
+    bool Any() const noexcept { return slot[0] >= 0 || slot[1] >= 0; }
+};
+// The Edit Slots entry: one more skill in the wheel engine's catalog while a hand wheel is open with an army out, whether
+// the menu is on a button yet or not (this is how a player first binds it). True: added, as the catalog's last entry.
+inline bool Offer(interaction::Snapshot& s, int wheelHand) noexcept {
+    if (wheelHand < 0 || !interaction::HasSummonArmy(s) || s.skillCount >= s.catalog.size()) return false;
+    for (unsigned i = 0; i < s.skillCount && i < s.catalog.size(); ++i) if (s.catalog[i].id == ItemId) return false;
+    interaction::Skill item{};
+    item.id = ItemId; item.owner = -1; item.level = 1; item.known = item.available = true;
+    item.directed = true;   // never in the GLYPHS page's picker (its skills need no target)
+    std::snprintf(item.name, sizeof item.name, "Army X menu");
+    s.catalog[s.skillCount++] = item;
+    return true;
+}
+inline void Withdraw(interaction::Snapshot& s) noexcept {
+    if (s.skillCount > 0 && s.skillCount <= s.catalog.size() && s.catalog[s.skillCount - 1].id == ItemId) s.catalog[--s.skillCount] = {};
+}
+// The bind from start to end, on the thread that steps the wheel engine: Before its Step, After it.
+struct Binder {
+    Buttons buttons;
+    BindWatch watch;
+    int watchSet = -1;            // the weapon set of the bind awaited
+    bool listed = false;          // the entry is in the engine's snapshot right now
+    double boundAtMs = -1e12;     // the last bind: a snapshot from just before it may still show the skill it cleared
+    static constexpr double SettleMs = 2000;
+    struct Result {
+        bool took = false; int tookSlot = -1, cleared = -1;      // this frame's request was the entry's pick (a clear now)
+        BindWatch::Done done = BindWatch::Done::None; int slot = -1, set = -1;   // the game's answer to it
+    };
+    void Before(interaction::Input& in) noexcept {
+        listed = Offer(in.snapshot, in.wheelHand);
+    }
+    Result After(interaction::Input* in, interaction::Request* request, const interaction::Reply* reply, double nowMs) noexcept {
+        Result o;
+        if (in && listed) Withdraw(in->snapshot);
+        listed = false;
+        if (!request || !reply) return o;
+        const int set = Buttons::Set(request->bank), cleared = request->previousSkill;
+        if (watch.Take(*request)) { watchSet = set; o.took = true; o.tookSlot = request->index; o.cleared = cleared; }
+        o.done = watch.Reply(*reply, o.slot);
+        if (o.done == BindWatch::Done::None) return o;
+        o.set = watchSet; watchSet = -1;
+        if (o.done == BindWatch::Done::Applied) {
+            if (o.set < 0 || o.slot < 0 || o.slot >= skills::Count) o.done = BindWatch::Done::Refused;   // no weapon set known: nothing kept
+            else { buttons.slot[o.set] = o.slot; boundAtMs = nowMs; }
+        }
+        return o;
+    }
+    // A game skill or a Draw glyph put on the menu's button, in the weapon set in hand, takes that button back (the other
+    // set's button stays). s: a fresh snapshot. Skill or Glyph: unbound now (slotOut, setOut).
+    enum class Taken { No, Skill, Glyph };
+    Taken Takeover(const interaction::Snapshot& s, const int* glyphDraw, double nowMs, int& slotOut, int& setOut) noexcept {
+        const int set = Buttons::Set(s.bindingBank);
+        if (set < 0 || nowMs - boundAtMs <= SettleMs) return Taken::No;
+        const int was = buttons.slot[set];
+        if (was < 0 || was >= skills::Count) return Taken::No;
+        const bool skill = s.skills[size_t(was)].known && s.skills[size_t(was)].id >= 0;
+        if (!skill && !(glyphDraw && (glyphDraw[0] == was || glyphDraw[1] == was))) return Taken::No;
+        buttons.slot[set] = -1; slotOut = was; setOut = set;
+        return skill ? Taken::Skill : Taken::Glyph;
+    }
+};
 
 enum Dir : int { Up = 0, Down = 1, Left = 2, Right = 3, DirCount = 4 };
 constexpr int MaxFan = 2;
@@ -440,7 +509,7 @@ struct Hover {
 };
 // One frame's hover from the last one (hysteresis: entering is stricter than staying). The open circle (h.parent) is the whole
 // state of "which arm is held": it is set from the center, and with Switch arms Back through center (t.viaCenter) only the
-// center zone lets it go. refused: the other circle a clear move pointed at and was not given (-1: none), for the one log line.
+// center zone lets it go. refused: the other circle a clear move pointed at and did not open (-1: none).
 inline Hover Step(Hover h, Vec2f c, const Tuning& t, int* refused = nullptr) noexcept {
     if (refused) *refused = -1;
     const float r = Len(c), a = AngOf(c);
@@ -571,7 +640,7 @@ constexpr int LabelNoArmy = 7, LabelAttackTarget = 8, LabelNoTarget = 9, LabelCa
 struct Rect { int x, y, w, h; };
 // The target mark's frames (Attack my target's arrow): a region of their own in the static image (panelatlas::ArmyXMark, the glue checks
 // they agree), MarkFrames of MarkFrame px one under the other, MarkGap apart; the art is tools/army_x_mark_strip.py's
-// steamvr/assets/lab/army-x-target-mark.png (straight alpha, MarkFrame x MarkStripH).
+// steamvr/assets/army-x-target-mark.png (straight alpha, MarkFrame x MarkStripH).
 constexpr int MarkFrame = 64, MarkFrames = 8, MarkGap = Gap, MarkStripH = MarkFrames * MarkFrame + (MarkFrames - 1) * MarkGap;
 constexpr Rect MarkRect(int frame) noexcept { return {0, (frame % MarkFrames) * (MarkFrame + MarkGap), MarkFrame, MarkFrame}; }
 constexpr int IconRows = (CellCount + 3) / 4;
@@ -821,32 +890,8 @@ struct FrameOut {
     int hand = 0;
     DrawList draw;              // what to show this frame (empty: nothing)
 };
-// Which arm was held over one open, for the one log line at the let go (no line per frame).
-struct Arms {
-    int lets = 0, lastLet = -1;   // times the center let a circle go; the last one let go
-    double lastLetMs = 0;         // ... and when, ms since the press
-    int refused = 0, at = -1;     // Back through center: moves onto another circle that opened nothing; the one pointed now
-    void Note(int was, int now, int refusedNow, double sincePressMs) noexcept {
-        if (was >= 0 && now < 0) { ++lets; lastLet = was; lastLetMs = sincePressMs; }
-        if (refusedNow != at) { if (refusedNow >= 0) ++refused; at = refusedNow; }
-    }
-};
-// "arms through the center: Hold here held; the center let go of Attack 1 time (last at 0.84 s); 2 moves toward another circle
-// ignored" / "arms anywhere: none held". held: the open circle at the let go (-1: the center).
-inline void ArmsText(char* out, size_t n, const Arms& a, int held, bool viaCenter) noexcept {
-    const auto name = [](int d) { return d >= 0 && d < DirCount ? Layout[size_t(d)].name : "none"; };
-    int k = std::snprintf(out, n, "arms %s: %s held", viaCenter ? "through the center" : "anywhere", name(held));
-    if (a.lets > 0 && k > 0 && size_t(k) < n)
-        k += std::snprintf(out + k, n - size_t(k), "; the center let go of %s (%d time%s, last at %.2f s)", name(a.lastLet), a.lets, a.lets == 1 ? "" : "s", a.lastLetMs / 1000.0);
-    if (a.refused > 0 && k > 0 && size_t(k) < n)
-        std::snprintf(out + k, n - size_t(k), "; %d move%s toward another circle ignored", a.refused, a.refused == 1 ? "" : "s");
-}
-
 struct Controller {
     Menu menu; Plane plane; int hand = 0; int heldSlot = -1;
-    Arms arms;                  // which arm was held this open (the log line's)
-    Hover path[2];              // the first parent and the last hover (for the one log line)
-    bool sawParent = false;
     bool waitUp = false;        // closed without a release (a wheel, Off, occupied): the button must come up before it opens again
     // The toast: a label (the last order's name, or Canceled), until toastUntil; toastOver: one over it ("No target" when
     // Attack my target fell back; -1 none).
@@ -862,7 +907,6 @@ struct Controller {
                 const float hp[3] = {in.handPos.x, in.handPos.y, in.handPos.z};
                 const float rt[3] = {plane.right.x, plane.right.y, plane.right.z};
                 menu.Open(in.nowMs, hp, rt);
-                sawParent = false; path[0] = path[1] = {}; arms = {};
                 out.event = Event::Opened; out.mute = true;
                 toastLabel = -1;
             }
@@ -879,11 +923,7 @@ struct Controller {
                 // names this press again); only an untracked hand freezes the hover.
                 if (in.tracked) {
                     const float hp[3] = {in.handPos.x, in.handPos.y, in.handPos.z};
-                    const int was = menu.hover.parent;
                     out.tick = menu.Held(in.nowMs, hp, t) && (menu.hover.parent >= 0);
-                    arms.Note(was, menu.hover.parent, menu.refused, in.nowMs - menu.pressMs);
-                    if (menu.hover.parent >= 0 && !sawParent) { path[0] = menu.hover; sawParent = true; }
-                    path[1] = menu.hover;
                 }
             } else {   // the physical up edge: the release decides
                 const auto r = menu.Let(in.nowMs, in.army, t);

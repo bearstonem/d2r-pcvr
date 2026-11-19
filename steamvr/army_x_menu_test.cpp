@@ -475,6 +475,97 @@ int main() {
     }
     ++checks;
 
+    // 23. A fresh player (the menu on no button yet) with an army out: the hand wheel's Edit Slots lists "Army X menu" and
+    //     its pick binds it, through the real wheel engine and the calls transport makes round its Step (Binder::Before,
+    //     Binder::After). Then one button a weapon set: a swap or a skill in the other set never takes this set's button.
+    {
+        namespace ia = framevr::interaction;
+        struct Wheel {
+            ia::Engine engine; ia::Input in; ia::Output out; ia::Reply reply{};
+            Binder b; Binder::Result last;
+            explicit Wheel(int hand) {
+                in.active = true; in.session = 10; in.epoch = 1; in.tracked[0] = in.tracked[1] = true;
+                in.head.p = {0, 1.7f, 0}; in.hand[0].p = {.25f, 1.3f, -.4f}; in.hand[1].p = {-.25f, 1.3f, -.4f};
+                in.wheelHand = hand; in.snapshot.session = 10; in.snapshot.skillClass = 2;   // a Necromancer
+                in.snapshot.bindingsEditable = true; in.snapshot.bindingBank = 0; in.snapshot.activeSet = 1;
+                for (auto& skill : in.snapshot.skills) skill.known = true;
+                for (int id : {0, 70, 66}) { auto& k = in.snapshot.catalog[in.snapshot.skillCount++]; k.id = id; k.owner = -1; k.known = k.available = true; }   // Raise Skeleton: an army
+                Step(); Step(); Step();
+            }
+            ia::Output Step() {
+                in.time += .02; in.at = 1000000 + uint64_t(in.time * 1000); in.snapshot.at = in.at;
+                b.Before(in);                      // transport: armyxmenu::Input, before interactions.Step
+                out = engine.Step(in);
+                last = b.After(&in, &out.request, &reply, in.time * 1000);   // transport: armyxmenu::Request, after it
+                return out;
+            }
+            ia::Output Click(int cell) { in.trigger = 0; Step(); in.hover = cell; in.trigger = 1; return Step(); }
+            int Entry() const { for (int i = 0; i < out.editCount; ++i) if (out.editOptions[i].id == ItemId) return i; return -1; }
+        };
+        for (int hand : {0, 1}) {
+            Wheel w(hand);
+            assert(!w.b.buttons.Any());                                   // fresh: on no button
+            const unsigned before = w.in.snapshot.skillCount;
+            w.in.wheel = true; w.Click(0);
+            assert(w.out.editor == 2);                                    // the hand slot's picker
+            w.Click(ia::SkillCategoryCell(framevr::skillcategories::General));
+            const int entry = w.Entry();
+            assert(entry >= 0 && "a fresh player with an army out sees Army X menu under General / Items");
+            assert(w.in.snapshot.skillCount == before);                   // the entry is out of the snapshot again after each Step
+            const ia::Output picked = w.Click(entry);
+            const int slot = framevr::skills::HandSlot(hand, 0);
+            assert(w.last.took && w.last.tookSlot == slot);
+            assert(picked.request.action == ia::Action::BindSkill && picked.request.skill == -1 && picked.request.index == slot && picked.request.bank == 0);   // the game's own clear
+            assert(!w.b.buttons.Any());                                   // not ours until the game says so
+            w.reply = ia::Reply{picked.request.sequence, 10, ia::Result::Applied};
+            w.in.trigger = 0; w.Step();
+            assert(w.last.done == BindWatch::Done::Applied && w.last.slot == slot && w.last.set == 0);
+            assert(w.b.buttons.Of(0) == slot && w.b.buttons.Of(16) == -1 && w.b.buttons.Any());
+            // The other weapon set: its buttons are its own. A game skill on that slot there takes nothing.
+            const int none[2] = {-1, -1};
+            int tookSlot = -9, tookSet = -9;
+            auto other = w.in.snapshot; other.bindingBank = 16; other.skills[size_t(slot)].id = 70;
+            assert(w.b.Takeover(other, none, w.in.time * 1000 + 5000, tookSlot, tookSet) == Binder::Taken::No && w.b.buttons.Of(0) == slot);
+            auto unknown = other; unknown.bindingBank = -1;   // no set known: nothing taken
+            assert(w.b.Takeover(unknown, none, w.in.time * 1000 + 5000, tookSlot, tookSet) == Binder::Taken::No);
+            // This set: right after the bind an older snapshot may still show the cleared skill (waited out); later a skill takes it.
+            auto same = w.in.snapshot; same.skills[size_t(slot)].id = 70;
+            assert(w.b.Takeover(same, none, w.in.time * 1000 + 100, tookSlot, tookSet) == Binder::Taken::No);
+            assert(w.b.Takeover(w.in.snapshot, none, w.in.time * 1000 + 5000, tookSlot, tookSet) == Binder::Taken::No);   // nothing on it
+            const int glyph[2] = {-1, slot};
+            Binder g = w.b;
+            assert(g.Takeover(w.in.snapshot, glyph, w.in.time * 1000 + 5000, tookSlot, tookSet) == Binder::Taken::Glyph && tookSlot == slot && tookSet == 0 && !g.buttons.Any());
+            assert(w.b.Takeover(same, none, w.in.time * 1000 + 5000, tookSlot, tookSet) == Binder::Taken::Skill && tookSlot == slot && tookSet == 0);
+            assert(!w.b.buttons.Any());
+        }
+        {   // set II binds its own button; set I's stays
+            Wheel w(0);
+            w.b.buttons.slot[0] = 3;
+            w.in.snapshot.bindingBank = 16; w.Step(); w.Step();
+            w.in.wheel = true; w.Click(0);
+            assert(w.out.editor == 2);
+            w.Click(ia::SkillCategoryCell(framevr::skillcategories::General));
+            const int entry = w.Entry();
+            assert(entry >= 0);
+            const ia::Output picked = w.Click(entry);
+            assert(picked.request.bank == 16);
+            w.reply = ia::Reply{picked.request.sequence, 10, ia::Result::Refused};
+            w.in.trigger = 0; w.Step();
+            assert(w.last.done == BindWatch::Done::Refused && w.b.buttons.Of(16) == -1 && w.b.buttons.Of(0) == 3);   // refused: nothing kept
+        }
+        {   // no army, or no hand wheel: no entry
+            Wheel w(0);
+            ia::Snapshot s = w.in.snapshot;
+            assert(Offer(s, 0) && s.catalog[s.skillCount - 1].id == ItemId);
+            assert(!Offer(s, 0));                                         // once
+            Withdraw(s);
+            assert(s.skillCount == w.in.snapshot.skillCount && !Offer(s, -1));
+            ia::Snapshot bare = w.in.snapshot; bare.catalog[1].id = 66;   // no summon skill, no summon out
+            assert(!Offer(bare, 0));
+        }
+    }
+    ++checks;
+
     // 12. The bind: Edit Slots' pick of "Army X menu" is a BindSkill with ItemId; BindWatch makes it the game's own clear of
     //     that button's skill (as Draw glyph's pick does) and keeps the slot from the reply. Then that button's press opens
     //     the cross; and the entry's icon is the cross cut from the sheet.
@@ -589,7 +680,7 @@ int main() {
         const atlas::Rect nt = atlas::LabelRect(atlas::LabelNoTarget), sw = atlas::LabelRect(atlas::LabelOf(commander::SkillWedgeAgg));
         assert(o.draw.n == 2 && o.draw.q[0].rect.y == nt.y && o.draw.q[0].rect.x == nt.x && o.draw.q[1].rect.x == sw.x && o.draw.q[1].rect.y == sw.y);
         assert(o.draw.q[0].pose[1] > o.draw.q[1].pose[1]);   // "No target" above the order's name
-        c.Given(AttackFallback, false, in.nowMs, t, true);   // refused (formations off): no new toast
+        c.Given(AttackFallback, false, in.nowMs, t, true);   // refused by the commander: no new toast
         o = frame(c, -1, false, rest);
         assert(o.draw.n == 2);
         o = frame(c, -1, false, rest); in.nowMs = (ms += 1100); o = c.Step(in, t);
@@ -664,7 +755,7 @@ int main() {
     ++checks;
 
     // 15. Attack my target's targeting mode, the plan at the let go: a monster already outlined (the hand's
-    //     fresh pick, else the eyes') is focused at once, as before; none -> the targeting mode when the reach row is above Off;
+    //     fresh pick, else the eyes') is focused at once, as before; none -> the targeting mode when the reach is above 0;
     //     reach Off -> the wedge exactly as before; Tactical commands off -> the wedge (the reason named first).
     {
         const Aimed outlined{11, 1, 2, 1000, false}, none{0, 0, 0, 1000, false};
@@ -674,7 +765,7 @@ int main() {
         assert(PlanAttack(none, 1100, true, false) == AttackHow::NoTarget);       // reach Off: as before (the wedge)
         assert(PlanAttack(outlined, 1100, true, false) == AttackHow::Focus);
         assert(PlanAttack(none, 1100, false, true) == AttackHow::TacticalOff && PlanAttack(outlined, 1100, false, true) == AttackHow::TacticalOff);
-        // The settings row's range: 0 (Off) to 68 = the hostile scan's reach rounded up.
+        // The reach: 0 (none) to 68 = the hostile scan's reach rounded up.
         assert(ScanCells > 67.f && ScanCells <= 68.f && Tuning{}.reachCells == ScanCells && Tuning{}.targetS == 4.f);
     }
     ++checks;
@@ -776,7 +867,7 @@ int main() {
     // 17. The mode owns its hand's trigger: while it is on, that trigger's own action never fires (the commander's
     //     request for its slot is cleared, as the X menu mutes its hand), the locking pull included; after the lock or a cancel
     //     the trigger is the game's again on its next fresh press (a held one must come up first). Cancel: a fresh grip press, or
-    //     the time row (0: no limit); nothing is locked then. Off: the commander's at once.
+    //     the time limit (0: none); nothing is locked then. Off: the commander's at once.
     {
         using framevr::skills::TriggerSlot;
         const auto passes = [](const TargetOut& o, int hand, int slot) {   // what transport still requests after the menu's handler
@@ -1096,7 +1187,7 @@ int main() {
         }
         assert(!Tuning{}.viaCenter);   // the rule's own default is as before; Shipped() turns it on
         // The controller, each hand: up, left, down with the button held, then the let go. Back through center: Up stays the
-        // held arm and its own order is given; the trace counts the two moves that opened nothing. Then up > center > left.
+        // held arm and its own order is given; the menu knows the circle the pointer is on and did not open. Then up > center > left.
         for (const int hand : {0, 1}) {
             for (const bool viaCenter : {true, false}) {
                 Tuning u = t; u.tee = true; u.viaCenter = viaCenter;
@@ -1113,32 +1204,17 @@ int main() {
                 sweep(up); assert(c.menu.hover.parent == Up);
                 sweep(left); assert(c.menu.hover.parent == (viaCenter ? Up : Left));
                 sweep(down); assert(c.menu.hover.parent == (viaCenter ? Up : Down));
-                assert(c.arms.lets == 0 && c.arms.refused == (viaCenter ? 2 : 0) && c.arms.at == (viaCenter ? Down : -1));
-                char text[176];
-                ArmsText(text, sizeof text, c.arms, c.menu.hover.parent, viaCenter);
-                const std::string want = viaCenter ? std::string("arms through the center: ") + Layout[Up].name + " held; 2 moves toward another circle ignored"
-                                                   : std::string("arms anywhere: ") + Layout[Down].name + " held";
-                assert(text == want);
-                // Back to the center: let go of, once, with its time since the press; then left opens Left.
-                sweep({0, 0}); assert(c.menu.hover.parent < 0 && c.arms.lets == 1 && c.arms.lastLet == (viaCenter ? Up : Down) && c.arms.lastLetMs > 0);
-                const double letMs = c.arms.lastLetMs;
-                sweep(left); assert(c.menu.hover.parent == Left && c.arms.lets == 1 && c.arms.lastLetMs == letMs);
-                ArmsText(text, sizeof text, c.arms, c.menu.hover.parent, viaCenter);
-                char tail[96]; std::snprintf(tail, sizeof tail, "; the center let go of %s (1 time, last at %.2f s)", Layout[viaCenter ? Up : Down].name, letMs / 1000.0);
-                assert(std::string(text).find(std::string(Layout[Left].name) + " held" + tail) != std::string::npos);
+                assert(c.menu.refused == (viaCenter ? Down : -1));   // pointed at, not opened
+                // Back to the center lets the held circle go; then left opens Left.
+                sweep({0, 0}); assert(c.menu.hover.parent < 0);
+                sweep(left); assert(c.menu.hover.parent == Left && c.menu.refused == -1);
                 const auto o = frame(pos, false);   // the let go on Left's circle: Left's own order
                 assert(o.event == Event::Issue && o.order == Pointed(Left, -1));
-                // A new open starts a new trace.
+                // A new open starts from the center again.
                 frame(rest, false);
-                assert(frame(rest, true).event == Event::Opened && c.arms.lets == 0 && c.arms.refused == 0 && c.arms.at == -1);
+                assert(frame(rest, true).event == Event::Opened && c.menu.hover.parent < 0);
             }
         }
-        // The text never overruns a small buffer.
-        Arms big; big.lets = 12; big.lastLet = Right; big.lastLetMs = 123456; big.refused = 34;
-        char small[24]; ArmsText(small, sizeof small, big, Up, true);
-        assert(std::strlen(small) == sizeof small - 1);
-        Arms none; char z[64]; ArmsText(z, sizeof z, none, -1, true);
-        assert(std::string(z) == "arms through the center: none held");
     }
     ++checks;
 

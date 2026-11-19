@@ -16,29 +16,26 @@
 #include "army_x_hunt.h"
 #include "../vr/army_x_orders.h"
 
-// The far mark trace's game reads (vr/melee.cpp, vr/combat.cpp, vr/summon_range.cpp: not linked here): the test's own server.
+// The handlers' game reads (vr/melee.cpp: not linked here): the test's own server.
 uintptr_t g_farGame = 0, g_farHero = 0;
 std::map<uint32_t, uintptr_t> g_farUnits;                 // server units by id
-std::map<uintptr_t, std::pair<int, int>> g_farLife;       // a unit's life and max life (whole points)
-float g_farRange = 1.0f;
 namespace melee {
 bool LocalServer(uintptr_t& game, uintptr_t& player) { game = g_farGame; player = g_farHero; return game && player; }
 uintptr_t ServerUnit(uintptr_t, int, uint32_t id) { const auto it = g_farUnits.find(id); return it == g_farUnits.end() ? 0 : it->second; }
 }
-namespace combat {
-bool UnitStat(uintptr_t unit, int stat, int& value) {
-    const auto it = g_farLife.find(unit);
-    if (it == g_farLife.end() || (stat != 6 && stat != 7)) return false;
-    value = (stat == 6 ? it->second.first : it->second.second) << 8;
-    return true;
-}
-}
-namespace summonrange { float AggroFactor() { return g_farRange; } }
 // The game's addresses (cleanroom/sigscan, not linked here). TestRunRead points StatsRva at FakeRow: a MonStats2 row in this
 // process whose mode mask (+0xF0) the test sets; until then no row is read.
 alignas(8) uint8_t g_fakeRow[0x100]{};
 uintptr_t FakeRow(uint8_t, int) { return reinterpret_cast<uintptr_t>(g_fakeRow); }
 bool g_sigOk = false;
+namespace melee {   // vr/melee.cpp's read (not linked here): the unit's stats bank at +0x1BD, the row's mask at +0xF0
+uint32_t MonsterModes(uintptr_t unit, uint32_t classId) {
+    uint32_t mask = 0;
+    if (!unit || *reinterpret_cast<const uint8_t*>(unit + 0x1bd) > 3 || classId > 4095) return 0;
+    std::memcpy(&mask, reinterpret_cast<const uint8_t*>(FakeRow(0, int(classId))) + 0xf0, sizeof mask);
+    return mask;
+}
+}
 namespace d2rsig {
 uintptr_t Addr(uint64_t) { return g_sigOk ? reinterpret_cast<uintptr_t>(&FakeRow) : 0; }
 bool Check(uint64_t, const void*, uint32_t) { return g_sigOk; }
@@ -49,7 +46,6 @@ namespace interactionstate { int CurrentLevel(uint64_t, uint64_t) { return g_tes
 bool g_menuOn = false;   // the menu is on a hand button (vr/army_x_menu.cpp's, not linked here: the transport glue)
 namespace armyxmenu {
 bool On() { return g_menuOn; }
-int Button() { return g_menuOn ? 0 : -1; }
 void ArmyTick(framevr::armyseam::ArmyMovesFrame&) {}   // nothing queued, nothing to give; its Defend engine is TestDefend's below
 }
 
@@ -76,7 +72,7 @@ constexpr uint32_t MarkId = 999;
 const Vec2 Hero{100, 100};
 const Vec2 FarMark{100, 150};   // 50 sub-tiles from the hero: past every leash, no hostile near the hero
 
-// An army ticked as StepSummonArmyServer: the watchdog (its relocation done at once), Step, then (lab) the engine or the
+// An army ticked as StepSummonArmyServer: the watchdog (its relocation done at once), Step, then the engine or the
 // handler on Step's moves, then each move "sent": the unit walks toward it at `speed` sub-tiles a tick, mode 2, then stands.
 struct Sim {
     enum class Via { None, Engine, Handler } via = Via::Engine;
@@ -160,7 +156,7 @@ struct Sim {
 };
 
 void TestWhoHunts() {
-    Check(xhunt::ModeOf(0) == Mode::Off && xhunt::ModeOf(1) == Mode::Melee && xhunt::ModeOf(2) == Mode::All, "the row's values: Off, Melee only, Melee and ranged");
+    Check(xhunt::ModeOf(0) == Mode::Off && xhunt::ModeOf(1) == Mode::Melee && xhunt::ModeOf(2) == Mode::All, "the hunt rule's values: off, melee only, melee and ranged");
     Check(xhunt::ModeOf(cfg::Rules{}.hunt) == Mode::All,
           "On (Melee and ranged) by default, Off 0 under any master");
     const auto melee = cmd::SummonRole::FrontlineMelee, ranged = cmd::SummonRole::RangedArtillery;
@@ -449,7 +445,7 @@ void TestDefend() {
     u.foes = {{781, 103, 128}};
     for (int i = 0; i < 4; ++i) u.Tick();
     Check(u.c.priorityTargetId == 0 && !d2.Owns(), "the commander's Hold Ground: no defense of ours");
-    // Defend radius Off (0) and Hunt the mark Off: nothing picked; a monster already picked is let go
+    // The defend radius 0 and the hunt rule off: nothing picked; a monster already picked is let go
     xhunt::Defend d3;
     Sim o; o.defend = &d3; o.defendR = 0;
     o.c.AnchorAt(spot); d3.Own(spot);
@@ -459,7 +455,7 @@ void TestDefend() {
     o.defendR = 7.5f; o.Tick();
     Check(o.c.priorityTargetId == 782, "radius On again: picked");
     o.mode = Mode::Off; o.Tick();
-    Check(o.defendOut.act == Act::LetGo && o.c.priorityTargetId == 0, "Hunt the mark Off: the monster let go (nothing would walk them to it)");
+    Check(o.defendOut.act == Act::LetGo && o.c.priorityTargetId == 0, "the hunt rule off: the monster let go (nothing would walk them to it)");
 
     // every summon blocked, a monster by the spot that never dies (across water). Picked once; the hunt gives
     // up after 15 s; the next scan finds it alive: given up, skipped, never picked again (until the cooldown or a new spot).
@@ -571,53 +567,53 @@ void TestHandler() {
         same = same && s.emitted == s.stepEmitted;
         for (size_t k = 0; k < s.units.size(); ++k) same = same && s.units[k].pos == up.units[k].pos && s.c.tracked[k].slotPos == up.c.tracked[k].slotPos;
     }
-    Check(same && g_lines.empty(), "Army X menu Off (its Hunt row On): as before exactly, no line");
+    Check(same && g_lines.empty(), "the menu on no button: as before exactly, no line");
+    const int formed = s.Near(Hero, 6.0f, false);
     g_menuOn = true;
     s.Tick();
-    Check(Lines("Frame army x menu: hunt the mark: Melee and ranged") == 1 && Lines("Frame army x menu: hunt: monster 999") == 1 && s.emitted > 0,
-          "On: the mode line and the hunt's start line");
+    bool lifted = true;
+    for (size_t k = 0; k < s.c.trackedCount; ++k) lifted = lifted && s.c.tracked[k].slotPos == FarMark;
+    Check(s.emitted > 0 && lifted, "on a button: the hunt starts that tick (moves go out, every hunter's spot is the mark)");
     for (int i = 0; i < 60; ++i) s.Tick();
-    Check(Lines("Frame army x menu: hunt: 7 of 7 at monster 999") == 1 && Lines("Frame army x menu: hunt 5 s:") == 0, "the arrival line once all are there; no line every 5 s");
+    Check(s.Near(FarMark, xhunt::MeleeArrive + .01f, true) == 5 && s.Near(FarMark, xhunt::RangedArrive + .01f, false) == 7, "all seven reach the far mark through the handler");
     s.c.ClearPriorityTarget();
-    s.Tick();
-    Check(Lines("Frame army x menu: hunt over: monster 999 after") == 1 && Lines("killed or lost") == 1 && Lines("Regroup, back to formation") == 1, "the kill line: Regroup");
-    Check(Lines("Frame army x menu: hunt over: monster 999 hunters 1-7 of 7 (start > best > end sub-tiles):") == 1, "the per-hunter proof line");
-    for (int i = 0; i < 60 && !Lines("Frame army x menu: hunt return:"); ++i) s.Tick();
-    Check(Lines("Frame army x menu: hunt return: 7 of 7") == 1, "the return line");
-    // Melee only, then Off with a hunt under way
+    for (int i = 0; i < 60; ++i) s.Tick();
+    Check(formed > 0 && s.Near(Hero, 6.0f, false) == formed && s.Near(FarMark, 30, false) == 0, "the mark gone: Regroup, every summon back in formation on the hero");
+    // Melee only, then the rule off with a hunt under way
     cfg::rules.hunt = 1;
     s.c.SetPriorityTarget(MarkId + 5, FarMark);
-    s.Tick();
-    Check(Lines("hunt the mark: Melee only") == 1 && Lines("hunt: monster 1004") == 1 && Lines("5 summons sent") >= 1, "Melee only: five sent");
+    for (int i = 0; i < 60; ++i) s.Tick();
+    Check(s.Near(FarMark, xhunt::MeleeArrive + .01f, true) == 5 && s.Near(FarMark, 10, false) == 5, "melee only: the five melee summons go, the mages stay");
     cfg::rules.hunt = 0;
     s.Tick();
-    Check(Lines("hunt the mark: Off") == 1 && Lines("Hunt the mark taken off its button") == 1 && s.emitted == s.stepEmitted, "Off: its line, the hunt over, Step's moves untouched");
-    const size_t before = g_lines.size();
-    for (int i = 0; i < 4; ++i) s.Tick();
-    Check(g_lines.size() == before && s.emitted == s.stepEmitted, "Off: no more lines, nothing touched");
+    Check(s.emitted == s.stepEmitted, "the rule off: the hunt over, Step's moves untouched");
+    bool untouched = true;
+    for (int i = 0; i < 4; ++i) { s.Tick(); untouched = untouched && s.emitted == s.stepEmitted; }
+    Check(untouched, "off: nothing touched");
+    Check(g_lines.empty(), "a hunt that starts, arrives, ends and returns logs nothing (ordinary play)");
     cfg::rules.hunt = cfg::Rules{}.hunt;
-    g_menuOn = false; g_menuOn = false;
+    g_menuOn = false;
 }
 
-void TestHandlerGiveUp() {   // the give-up's lines, as a headset log shows them
+void TestHandlerGiveUp() {   // the one line of a hunt: it gave up
     g_lines.clear();
     g_menuOn = true;
     Sim s; s.via = Sim::Via::Handler;
     s.blocked.assign(s.units.size(), true);
     s.c.SetPriorityTarget(MarkId + 9, FarMark);
     for (int i = 0; i < 70; ++i) s.Tick();
-    Check(Lines("Frame army x menu: hunt: 7 hunters gave up on monster 1008 (no new best distance in 15 s)") == 1, "the hunters' give-up line");
-    Check(Lines("Frame army x menu: hunt over: monster 1008 after 15.0 s, 0 of 7 hunters reached it, 0 attacked it; gave up: no progress for 15 s") == 1 &&
-          Lines("Regroup, back to formation") == 1, "the end line: gave up, no progress for 15 s");
-    Check(Lines("hunters 1-7 of 7 (start > best > end sub-tiles): 200: ") == 1 && Lines(" gave up;") == 1, "the per-hunter proof line names each and its give-up");
-    g_menuOn = false; g_menuOn = false;
+    Check(Lines("Frame army x menu: hunt gave up: monster 1008 after 15.0 s, no progress for 15 s (0 of 7 hunters reached it, 0 attacked it): its focus let go; Regroup, back to formation") == 1,
+          "a hunt that gave up: its line");
+    Check(g_lines.size() == 1 && g_lines[0].size() < 300, "and no other line");
+    Check(s.c.priorityTargetId == 0, "its focus let go");
+    g_menuOn = false;
 }
 
 // Summons run: who runs, from the type and the summon's own MonStats2 mode mask (bit 2 walk, bit 15 run).
 void TestRunRules() {
     using xhunt::RunMode;
     constexpr uint32_t walkRun = xhunt::WalkModeBit | xhunt::RunModeBit | (1u << 1) | (1u << 4), walkOnly = xhunt::WalkModeBit | (1u << 1) | (1u << 4);
-    Check(xhunt::RunModeOf(0) == RunMode::Off && xhunt::RunModeOf(1) == RunMode::Wolves && xhunt::RunModeOf(2) == RunMode::Runners, "the row's three values");
+    Check(xhunt::RunModeOf(0) == RunMode::Off && xhunt::RunModeOf(1) == RunMode::Wolves && xhunt::RunModeOf(2) == RunMode::Runners, "the run rule's three values");
     for (uint8_t t : {uint8_t(3), uint8_t(4), uint8_t(5), uint8_t(6)})
         for (RunMode m : {RunMode::Off, RunMode::Wolves, RunMode::Runners})
             Check(!xhunt::Runs(m, t, walkRun) && !xhunt::Runs(m, t, 0), "a Necromancer summon always walks, whatever its data says (as before)");
@@ -636,7 +632,7 @@ void TestRunRules() {
           "a type outside the army (the hireling, an unknown class's pet) walks: unknown unchanged");
 }
 
-// Hold the leash: the roster the veto reads, and the rule.
+// The leash rule, and the roster the veto reads.
 void TestLeashRule() {
     const uint32_t ids[3] = {200, 201, 205};
     // JudgeLeash at the relocation itself: held, or the reason it lets the game move the summon ("recall brings
@@ -646,11 +642,11 @@ void TestLeashRule() {
     using R = xhunt::LeashRelease;
     Check(xhunt::JudgeLeash(k, ids, 3) == R::Held, "a hunter in a fresh roster, same area, its mark, no order: kept");
     auto with = [&](auto edit) { xhunt::LeashNow c = k; edit(c); return xhunt::JudgeLeash(c, ids, 3); };
-    Check(with([](auto& c) { c.on = false; }) == R::Off, "Hold the leash Off: the game's leash as before");
+    Check(with([](auto& c) { c.on = false; }) == R::Off, "the leash rule off: as the game's leash was before");
     Check(with([](auto& c) { c.unit = 202; }) == R::NotHunter && with([](auto& c) { c.unit = 0; }) == R::NotHunter, "not a hunter: the game's leash as before");
     Check(with([](auto& c) { c.nowMs = 1000 + xhunt::GapMs + 1; }) == R::NotHunter && with([](auto& c) { c.atMs = 0; }) == R::NotHunter && xhunt::JudgeLeash(k, ids, 0) == R::NotHunter,
           "a stale roster (no army tick for GapMs), none, or empty: nothing kept");
-    Check(with([](auto& c) { c.hunting = false; }) == R::HuntOff, "Hunt the mark Off: released at once");
+    Check(with([](auto& c) { c.hunting = false; }) == R::HuntOff, "the hunt rule off: released");
     Check(with([](auto& c) { c.freeRoam = true; }) == R::FallOut, "Fall out: released at once");
     Check(with([](auto& c) { c.orderPending = true; }) == R::Order, "an order since the last army tick (Regroup, a formation, Hold): released at once");
     Check(with([](auto& c) { c.orderPending = true; c.priorityTarget = 0; }) == R::Order, "Regroup (an order that also clears the mark): said as the order");
@@ -659,8 +655,7 @@ void TestLeashRule() {
     Check(with([](auto& c) { c.levelNow = 3; }) == R::AreaChanged, "the area changed since the roster (a portal, waypoint, stairs): released at once");
     Check(with([](auto& c) { c.levelNow = 0; }) == R::NoArea, "the area unknown: released");
     Check(with([](auto& c) { c.levelNow = c.levelAt = 1; }) == R::Town && with([](auto& c) { c.levelNow = c.levelAt = 40; }) == R::Town, "in town: released");
-    Check(std::string(xhunt::LeashReleaseText(R::Order)).find("Regroup") != std::string::npos && std::string(xhunt::LeashReleaseText(R::Town)).find("Town Portal") != std::string::npos,
-          "each release names its reason");    // PickLeash: which hunters the leash may keep this tick
+    // PickLeash: which hunters the leash may keep this tick
     {
         const uint32_t hid[3] = {300, 301, 302};
         const Vec2 pos[3] = {{100, 150}, {100, 179}, {100, 181}};   // 50, 79 and 81 sub-tiles from the hero
@@ -719,26 +714,23 @@ void TestHandlerLeashRunAsk() {
     g_lines.clear();
     g_menuOn = true;
     cfg::rules.hunt = 2; cfg::rules.huntLeash = true; cfg::rules.run = 1;
-    // Each phase runs on its own clock, set so its army ticks sit just before the real clock the leash veto and the trace read
+    // Each phase runs on its own clock, set so its army ticks sit just before the real clock the leash veto reads
     // (GetTickCount64; a roster older than GapMs counts for nothing); each new Sim's first tick is a gap for the handler (re-armed).
     const auto clockFor = [](Sim& s, int ticks) { s.now = GetTickCount64() - 500 - uint64_t(ticks) * 250; };
     const Vec2 mark{100, 120};
     g_testLevel = 2;
-    const auto at = [](Sim& s, uint32_t id) { return seam::SummonRelocateFrame{id, 100, 100, {s.c.orderStampPending, s.c.priorityTargetId, s.c.freeRoam}, &Say}; };
-    {   // Hold the leash: a hunter kept, a stranger not, Off and Hunt the mark Off release it
+    const auto at = [](Sim& s, uint32_t id) { return seam::SummonRelocateFrame{id, 100, 100, {s.c.orderStampPending, s.c.priorityTargetId, s.c.freeRoam}}; };
+    {   // The leash rule: a hunter kept, a stranger not; the rule off or the hunt rule off releases it
         Sim s; s.via = Sim::Via::Handler; clockFor(s, 2);
         s.c.SetPriorityTarget(MarkId + 20, mark);
         s.Tick(); s.Tick();
-        Check(armyxhunt::Leash(at(s, 200)) && Lines("Frame army x menu: hunt leash: the game's own leash would move summon 200 to (100, 100): kept, it hunts monster 1019") == 1,
-              "Hold the leash: a hunter kept, its line");
-        Check(Lines("Frame army x menu: hunt leash: held: hunters are kept until an order, Off or an area change (area 2; 7 of 7 hunters held, no distance limit)") == 1,
-              "the hunt's leash line: no distance limit by default");
+        Check(armyxhunt::Leash(at(s, 200)), "the leash rule: a hunter is kept");
         Check(!armyxhunt::Leash(at(s, 777)), "not a hunter: the game's leash as before");
         cfg::rules.huntLeash = false;
-        Check(!armyxhunt::Leash(at(s, 200)), "Hold the leash Off: the game's leash as before");
+        Check(!armyxhunt::Leash(at(s, 200)), "the leash rule off: the game's leash as before");
         cfg::rules.huntLeash = true;
         cfg::rules.hunt = 0;
-        Check(!armyxhunt::Leash(at(s, 200)) && Lines("hunt leash: released: the game moves summon 200 (Hunt the mark is Off;") == 1, "Hunt the mark Off: released at once, said");
+        Check(!armyxhunt::Leash(at(s, 200)), "the hunt rule off: released at once");
         cfg::rules.hunt = 2;
     }
     {   // Recall and every other order release the leash at once
@@ -747,10 +739,9 @@ void TestHandlerLeashRunAsk() {
         s.Tick(); s.Tick();
         Check(armyxhunt::Leash(at(s, 201)), "hunting: kept");
         s.c.ApplyCommanderSkill(cmd::SkillRegroup, Hero);   // the X menu's Regroup or the commander skill: the same coordinator call
-        Check(!armyxhunt::Leash(at(s, 201)) && Lines("hunt leash: released: the game moves summon 201 (a new order since the last army tick (Regroup, a formation, Hold);") == 1,
-              "Regroup: released at once (before the next army tick), said");
+        Check(!armyxhunt::Leash(at(s, 201)), "Regroup: released at once (before the next army tick)");
         s.Tick();
-        Check(!armyxhunt::Leash(at(s, 201)) && Lines("hunt over: monster 1023 after") == 1, "the next tick: the hunt over (a new order), nothing kept");
+        Check(!armyxhunt::Leash(at(s, 201)) && s.c.priorityTargetId == 0, "the next tick: the hunt over (a new order), nothing kept");
         s.c.SetPriorityTarget(MarkId + 25, mark); s.Tick();
         Check(armyxhunt::Leash(at(s, 201)), "a new mark: hunting, kept");
         s.c.SetStanceAndFormation(cmd::ArmyStance::Defensive, cmd::ArmyFormation::PhalanxArc);   // a formation order
@@ -758,11 +749,10 @@ void TestHandlerLeashRunAsk() {
         s.Tick(); s.c.SetPriorityTarget(MarkId + 26, mark); s.Tick();
         Check(armyxhunt::Leash(at(s, 201)), "a new mark: kept");
         s.c.SetPriorityTarget(MarkId + 27, {100, 130});   // another mark (the X menu's Attack my target, the tactical chord)
-        Check(!armyxhunt::Leash(at(s, 201)) && Lines("hunt leash: released: the game moves summon 201 (the mark is no longer the army's target") == 1,
-              "another mark, or the mark cleared (killed, lost): released at once, said");
+        Check(!armyxhunt::Leash(at(s, 201)), "another mark, or the mark cleared (killed, lost): released at once");
         s.c.SetPriorityTarget(MarkId + 26, mark);
         s.c.ApplyCommanderSkill(cmd::SkillFallOut, Hero);
-        Check(!armyxhunt::Leash(at(s, 201)) && Lines("hunt leash: released: the game moves summon 201 (Fall out;") == 1, "Fall out: released at once, said");
+        Check(!armyxhunt::Leash(at(s, 201)), "Fall out: released at once");
     }
     {   // Leash reach, when set: hunters fighting a mark forever (a fight is progress: the hunt never gives up) while you walk 100
         // sub-tiles away. No limit (the default) keeps them; Leash reach 80 lets the game bring them home. The hunt goes on either way.
@@ -772,32 +762,28 @@ void TestHandlerLeashRunAsk() {
         s.hero = {100, 220};
         auto swing = [&] { for (size_t k = 0; k < s.units.size(); ++k) if (!s.Ranged(k) && Dist(s.units[k].pos, mark) <= xhunt::MeleeArrive) s.units[k].animMode = 4; };
         for (int i = 0; i < 6; ++i) { swing(); s.Tick(); }
-        Check(Lines("hunt over: monster 1020") == 0, "the hunt is still under way (no distance ends it)");
+        Check(s.c.priorityTargetId == MarkId + 21 && g_lines.empty(), "the hunt is still under way (no distance ends it)");
         Check(armyxhunt::Leash(at(s, 200)), "No limit (the default): kept 100 sub-tiles from you");
         cfg::rules.leashReach = 80;
         swing(); s.Tick();
-        Check(!armyxhunt::Leash(at(s, 200)) && Lines("(area 2; 0 of 7 hunters held, within 80 sub-tiles of you)") == 1,
-              "Leash reach 80: the hunter is not kept, the line says none is within reach");
+        Check(!armyxhunt::Leash(at(s, 200)), "a leash reach of 80: the hunter is not kept");
         cfg::rules.leashReach = cfg::Rules{}.leashReach;
     }
-    {   // A portal, waypoint or stairs (the area changes), then a Town Portal: released at once, said
+    {   // A portal, waypoint or stairs (the area changes), then a Town Portal: released at once
         Sim s; s.via = Sim::Via::Handler; clockFor(s, 7);
         s.c.SetPriorityTarget(MarkId + 22, mark);
         s.Tick(); s.Tick();
         Check(armyxhunt::Leash(at(s, 200)), "same area: kept");
         g_testLevel = 3;   // the hero took the stairs: before the next army tick
-        Check(!armyxhunt::Leash(at(s, 200)) && Lines("hunt leash: released: the game moves summon 200 (your area changed (a portal, waypoint or stairs); area 3, the roster's 2)") == 1,
-              "the area changed since the roster: released at once, said");
+        Check(!armyxhunt::Leash(at(s, 200)), "the area changed since the roster: released at once");
         s.Tick();
-        Check(!armyxhunt::Leash(at(s, 200)) && Lines("hunt leash: your area changed (a portal, waypoint or stairs): the roster dropped, the game brings them (area 3, was 2;") == 1,
-              "the next tick drops the roster, said");
+        Check(!armyxhunt::Leash(at(s, 200)), "the next tick drops the roster");
         s.Tick();
         Check(armyxhunt::Leash(at(s, 200)), "the tick after, in the new area beside you: held again (you are together)");
         g_testLevel = 1;   // a Town Portal: the Rogue Encampment
-        Check(!armyxhunt::Leash(at(s, 200)) && Lines("hunt leash: released: the game moves summon 200 (you are in town (a Town Portal or waypoint);") == 1,
-              "Town Portal: released at once, said");
+        Check(!armyxhunt::Leash(at(s, 200)), "Town Portal: released at once");
         s.Tick();
-        Check(!armyxhunt::Leash(at(s, 200)) && Lines("hunt leash: you are in town: no hunter kept (the game brings them)") == 1, "in town: no roster, said");
+        Check(!armyxhunt::Leash(at(s, 200)), "in town: no roster");
         g_testLevel = 0;
         s.Tick();
         Check(!armyxhunt::Leash(at(s, 200)), "the area unknown: nobody kept");
@@ -811,11 +797,10 @@ void TestHandlerLeashRunAsk() {
     // Summons run: the move's walk flag (no game here: every mask unread)
     auto walk = [](uint8_t type) { bool w = true; armyxhunt::Walk({0, 300, type, w, &Say}); return w; };
     Check(!walk(11) && !walk(12) && walk(4) && walk(5) && walk(3) && walk(2) && walk(16), "Wolves: the wolves run; Necromancer summons, the Valkyrie and Shadows walk");
-    Check(Lines("Frame army x menu: run: Wolves (") == 1, "the row's line");
     cfg::rules.run = 2;
     Check(!walk(11) && walk(2) && walk(15) && walk(16) && walk(4), "Every runner, masks unread: only the wolves run (never guessed)");
     cfg::rules.run = 0;
-    Check(walk(11) && walk(12) && walk(2) && Lines("Frame army x menu: run: Off (") == 1, "Off: every summon walks, its line");
+    Check(walk(11) && walk(12) && walk(2), "the run rule off: every summon walks");
     cfg::rules.run = 1; g_menuOn = false;
     Check(walk(11) && walk(12), "Army X menu Off: every summon walks (as before)");
    
@@ -839,18 +824,17 @@ void TestRunRead() {
     setMask(walkOnly);
     Check(!walk(wolf, 900, 11), "within a second: not read again (still unread)");
     Sleep(1100);
-    Check(walk(wolf, 900, 11) && Lines("run check: summon 900, Spirit wolf (type 11, class 359): MonStats2 modes 0x00000016 (walk, no run: it walks)") == 1,
-          "read again a second later, accepted: no run in its data, it walks; said");
+    Check(walk(wolf, 900, 11), "read again a second later, accepted: no run in its data, it walks");
     setMask(walkRun);
-    Check(walk(wolf, 900, 11) && Lines("run check: summon 900") == 2, "an accepted mask is kept for good (not read again)");
-    Check(walk(skel, 901, 4) && Lines("run check: summon 901, Skeleton (type 4, class 363): MonStats2 modes 0x00008016 (walk and run: it can run)") == 1,
-          "a Skeleton's mask is read and logged too (the proof line); it walks whatever it says");
+    Check(walk(wolf, 900, 11), "an accepted mask is kept for good (not read again)");
+    Check(walk(skel, 901, 4), "a Skeleton walks whatever its mask says");
+    Check(Lines("run check:") == 1 && g_lines.size() == 1, "only the failed read was said, once");
     g_sigOk = false;
     cfg::rules.run = cfg::Rules{}.run; g_menuOn = false; g_menuOn = false;
 }
 
 // Run the whole approach, the engine: a runner the AI slowed to a walk is sent again after MinResendMs; one running
-// is not; with no runners (the row Off) Step is exactly as before, tick for tick.
+// is not; with no runners (the rule off) Step is exactly as before, tick for tick.
 void TestRunApproachEngine() {
     auto run = [](Sim& s, bool inject, int ticks) {
         s.moveMode = xhunt::RunMode15;   // our runs make them run
@@ -894,15 +878,8 @@ struct FakeUnit {
     }
     uintptr_t at() const { return reinterpret_cast<uintptr_t>(b); }
 };
-// On a failed check: the lines it read, to see why
-void Dump(const char* tag) { for (const auto& l : g_lines) if (l.find(tag) != std::string::npos) std::printf("    | %s\n", l.c_str()); }
-bool Fits(const char* tag) {
-    bool fits = true;
-    for (const auto& l : g_lines) if (l.find(tag) != std::string::npos) fits = fits && l.size() <= size_t(xhunt::LineMax);
-    return fits;
-}
 // A handler Sim whose army ticks sit just before the real clock the seams read (GetTickCount64; a roster older than GapMs counts
-// for nothing): `ticks` ticks, then the seam calls (fresh), then a few more ticks to say them. Its first tick is a gap (re-armed).
+// for nothing): `ticks` ticks, then the seam calls (fresh). Its first tick is a gap (re-armed).
 void Ready(Sim& s, uint32_t mark, Vec2 at, int ticks) {
     s.via = Sim::Via::Handler;
     s.now = GetTickCount64() - 500 - uint64_t(ticks) * 250;
@@ -922,15 +899,12 @@ void TestRunApproachHandler() {
     // The AI's own place walk for a hunting wolf on its way: sent as a run, the call ServerMoveToCoord makes
     auto move = [](uint32_t id, uintptr_t target, int mode, int x = 120, int y = 130) {
         int m = mode; uint8_t p = 3; uint16_t f = 0x10;
-        armyxhunt::Move({id, target, x, y, m, p, f, &Say});
+        armyxhunt::Move({id, target, x, y, m, p, f});
         return std::array<int, 3>{m, int(p), int(f)};
     };
     const std::array<int, 3> asCame{2, 3, 0x10};
     Check(move(200, 0, 2) == std::array<int, 3>{15, 1, 0}, "a hunting wolf's own walk to a place: ServerMoveUnit mode 15, path type 1, flags 0");
-    Check(Lines("Frame army x menu: run approach: summon 200's own walk to a place (path type 3, flags 0x0010) sent as a run: ServerMoveUnit mode 15, path type 1, flags 0") == 1,
-          "the first one said, with the game's own path type and flags");
-    move(201, 0, 2);
-    Check(Lines("sent as a run: ServerMoveUnit") == 1, "said once a session");
+    Check(move(201, 0, 2) == std::array<int, 3>{15, 1, 0}, "and the next wolf's");
     Check(move(204, 0, 2) == asCame && move(206, 0, 2) == asCame, "a mage, a golem (no run): the game's call as it came");
     Check(move(777, 0, 2) == asCame, "not a hunter (any other monster): untouched");
     Check(move(200, 0x12345678, 2) == asCame, "a unit-aimed walk: the game's shape kept");
@@ -947,21 +921,6 @@ void TestRunApproachHandler() {
     cfg::rules.hunt = cfg::Rules{}.hunt; g_menuOn = false;
 }
 
-// The far mark trace: its pure rules, the hunter that leaves mid-hunt, and the
-// sampler's lines over a fake server (units with a path, a room, a MonStats row; rooms with a near list).
-struct FarRoom { alignas(8) uint8_t b[0x48]{}; uintptr_t at() const { return reinterpret_cast<uintptr_t>(b); } };
-struct FarUnit {
-    alignas(8) uint8_t b[0x200]{}; alignas(8) uint8_t path[0x40]{}; alignas(8) uint8_t data[0x20]{}; alignas(8) uint8_t row[508]{};
-    FarUnit(uint32_t type, uint32_t cls, uint32_t id, uint32_t mode, const FarRoom& room) {
-        const uint32_t h[4] = {type, cls, id, mode};
-        std::memcpy(b, h, sizeof h);
-        const uintptr_t p = reinterpret_cast<uintptr_t>(path), d = reinterpret_cast<uintptr_t>(data), r = reinterpret_cast<uintptr_t>(row), game = at(), rm = room.at();
-        std::memcpy(b + 0x38, &p, sizeof p); std::memcpy(b + 0x10, &d, sizeof d); std::memcpy(b + 0xd8, &game, sizeof game);
-        std::memcpy(data, &r, sizeof r); std::memcpy(path + 0x20, &rm, sizeof rm);
-    }
-    void Mode(uint32_t m) { std::memcpy(b + 0xc, &m, sizeof m); }
-    uintptr_t at() const { return reinterpret_cast<uintptr_t>(b); }
-};
 // ---- Beside a far mark: the retry, the refused move answered failed; and the fight back when hit ----
 void TestFarMarkRetryAndRefusedRules() {
     using xhunt::RetryDue; using xhunt::RetryGoal;
@@ -1164,9 +1123,6 @@ void TestHitBack() {
           int endAt = -1;
           for (int i = 0; i < 20 && endAt < 0; ++i) { h.s.Tick(false); if (h.s.hbOut.endedN) endAt = i; }
           Check(kept && endAt == 15 && h.s.hbOut.ended[0].end == HB::End::Quiet && h.s.hbOut.ended[0].fought, "fighting beside its attacker keeps it on (6 s, no new hit); the keep time runs from its last swing; said as fought"); }
-        Check(std::strlen(HB::EndText(HB::End::Gone)) && std::strlen(HB::EndText(HB::End::Quiet)) && std::strlen(HB::EndText(HB::End::Far)) && std::strlen(HB::EndText(HB::End::Order)) &&
-              std::strlen(HB::EndText(HB::End::Mark)) && std::strlen(HB::EndText(HB::End::Off)) && std::strlen(HB::EndText(HB::End::Left)) && !std::strlen(HB::EndText(HB::End::None)),
-              "every end has its words");
     }
     {   // the host takes few moves a tick and Step's come first: a fighter with no room is said so and goes next
         Sim s; s.via = Sim::Via::None; HB hb;
@@ -1275,22 +1231,20 @@ void TestFarMarkHandlers() {
           "the rules as shipped: a retry after 1 s, refused moves answered failed, a hit summon fights back (reach 25, kept 4 s)");
     g_menuOn = true; cfg::rules.hunt = 2;
     const Vec2 at{100, 112};
-    {   // Retry at the mark's line
+    {   // Retry at the mark, through the handler
         g_lines.clear();
         cfg::rules.farRetryS = 1; cfg::rules.hitBack = false;
         Sim s; Ready(s, MarkId + 100, at, 30);
-        Check(Lines("Frame army x menu: hunt retry: ") >= 2 && Lines("hunt retry: ") <= 8, "Retry at the mark: said, at most a line a second");
-        Check(Lines(" hunter moves sent again beside monster 1099 (standing idle for 1.00 s; the last: summon 20") == Lines("hunt retry: ") &&
-              Lines(" sub-tiles from it): a short step beside it, so the game thinks for it again") == Lines("hunt retry: ") && Lines("the last: summon 0,") == 0,
-              "the line: how many, the mark, the time, the last one retried since the last line and how far it stood (never \"summon 0\")");
-        if (g_failed) Dump("hunt retry:");
-        Check(Fits("hunt retry:"), "every retry line within LineMax");
+        const auto besideMoves = [&](int ticks) {   // moves for the melee hunters, all beside the mark by now
+            int n = 0;
+            for (int i = 0; i < ticks; ++i) { s.Tick(); for (size_t k = 0; k < 5; ++k) n += s.InMoves(s.units[k == 4 ? 6 : k].unitId); }
+            return n;
+        };
+        Check(besideMoves(12) > 0, "Retry at the mark: a melee hunter standing idle beside the mark is sent again");
         cfg::rules.farRetryS = 0;
-        for (int i = 0; i < 5; ++i) s.Tick();   // (what was counted before Off is said)
-        const size_t told = Lines("hunt retry:");
-        bool none = true;
-        for (int i = 0; i < 12; ++i) { s.Tick(); for (size_t k = 0; k < 5; ++k) none = none && !(s.InMoves(s.units[k == 4 ? 6 : k].unitId)); }
-        Check(Lines("hunt retry:") == told && none, "Retry at the mark Off: no line, and no move for a melee hunter beside the mark");
+        for (int i = 0; i < 5; ++i) s.Tick();
+        Check(besideMoves(12) == 0, "Retry at the mark off: no move for a melee hunter beside the mark");
+        Check(g_lines.empty(), "a retry logs nothing");
     }
     {   // A hunter's refused move beside its mark is answered as failed, through the refused-move handler
         g_lines.clear();
@@ -1306,20 +1260,11 @@ void TestFarMarkHandlers() {
         Check(refused(200) == 1, "the rule off: the swallow");
         cfg::rules.farRefuse = true;
         Check(refused(206) == 0 && refused(204, 15) == 0, "a Golem, a Skeleton Mage beside the mark: failed too");
-        const unsigned failsAll = fails;
         g_menuOn = false;
         Check(refused(200) == 1, "the menu on no button: the swallow");
         g_menuOn = true;
         for (int i = 0; i < 6; ++i) s.Tick();
-        unsigned said = 0, saidFor = 0; size_t saidLines = 0;
-        for (const auto& l : g_lines) {
-            unsigned f = 0, m = 0; float sec = 0;
-            if (std::sscanf(l.c_str(), "Frame army x menu: hunt refused: in the last %f s, %u refused moves of hunters beside monster %u were answered failed", &sec, &f, &m) == 3) { said += f; saidFor = m; ++saidLines; }
-        }
-        Check(saidLines >= 1 && saidLines <= 3 && said == failsAll && saidFor == mark && failsAll == 3, "the hunt refused line: every answer counted once, at most a line a second");
-        Check(Lines("(the last: summon 204, running to 100 101)") == 1, "and the last one: who, its mode and place as the game asked");
-        if (g_failed) Dump("hunt refused:");
-        Check(Fits("hunt refused:"), "every refused line within LineMax");
+        Check(fails == 3 && g_lines.empty(), "three answers failed in all; none of them logged");
     }
     {   // Fight back when hit, through the seams: the to-hit roll, the army tick, the target hook, the look at the attacker
         g_lines.clear();
@@ -1335,13 +1280,9 @@ void TestFarMarkHandlers() {
         Check(target(200) == 0, "no hit yet: the target hook hands nothing of ours");
         armyxhunt::Roll({pet1.at(), pet.at(), 0});   // a summon of the army "rolls" on 200: no attacker
         s.Tick();
-        Check(Lines("hit back:") == 0 && target(200) == 0 && s.emitted == s.stepEmitted, "a roll by one of the army's own summons: nothing");
+        Check(target(200) == 0 && s.emitted == s.stepEmitted, "a roll by one of the army's own summons: nothing");
         armyxhunt::Roll({archer.at(), pet.at(), 0});
         s.Tick();
-        Check(Lines("Frame army x menu: hit back: summon 200 (Skeleton) was hit by monster 5000, ") == 1 && Lines(" sub-tiles away (") == 1 &&
-              Lines(" from its spot): it goes for it, the others keep formation (1 fighting back now); its walk was sent") == 1,
-              "a monster's roll on a summon: it takes it on, said, with whether its walk was sent");
-        if (g_failed) Dump("hit back:");
         Check(target(200) == 5000, "the target hook: that summon is handed its attacker (the commander then looks it up and hands it only alive)");
         Check(target(201) == 0 && target(777) == 0 && target(200, false) == 0 && target(200, true, 77) == 77,
               "another summon, a stranger, an untracked unit: nothing; a priority target of the army stays (the mark comes first)");
@@ -1355,34 +1296,29 @@ void TestFarMarkHandlers() {
         g_farUnits.erase(5000);
         armyxhunt::Sample();
         s.Tick();
-        Check(Lines("Frame army x menu: hit back: over for summon 200 and monster 5000 after 0.5 s: the attacker is dead or gone; it did not get to fight it (0 fighting back now)") == 1 &&
-              target(200) == 0 && s.emitted == s.stepEmitted, "the attacker gone from the game: over, said; the target hook hands nothing again; Step's moves untouched");
-        if (g_failed) Dump("hit back:");
+        Check(target(200) == 0 && s.emitted == s.stepEmitted, "the attacker gone from the game: over; the target hook hands nothing again; Step's moves untouched");
         armyxhunt::Roll({archer2.at(), pet.at(), 0});
         s.Tick();
-        const bool again = Lines("hit back: summon 200 (Skeleton) was hit by monster 5001, ") == 1 && target(200) == 5001;
+        const bool again = target(200) == 5001;
         const uint32_t dead = 12;
         std::memcpy(archer2.b + 0xc, &dead, 4);
         armyxhunt::Sample();
         s.Tick();
-        Check(again && Lines("hit back: over for summon 200 and monster 5001 after 0.") == 1 && Lines(": the attacker is dead or gone; it did not get to fight it (0 fighting back now)") == 2 && target(200) == 0,
+        Check(again && target(200) == 0,
               "hit again by another (in the same clock step as the first roll: a hit is told by its count, not its time): taken on; that one dead (its mode): over");
-        if (g_failed) Dump("hit back:");
         armyxhunt::Roll({archer3.at(), pet.at(), 0});
         s.Tick();
         const bool third = target(200) == 5002;
         cfg::rules.hitBack = false;
         armyxhunt::Roll({archer3.at(), pet1.at(), 0});   // Off: not recorded
         s.Tick();
-        Check(third && Lines("hit back: over for summon 200 and monster 5002 after 0.") == 1 && Lines(": Fight back when hit is Off; it did not get to fight it (0 fighting back now)") == 1 &&
-              target(200) == 0 && s.emitted == s.stepEmitted, "Fight back when hit Off mid-fight: over, said; nothing handed, Step's moves untouched");
-        const size_t all = Lines("Frame army x menu:");
+        Check(third && target(200) == 0 && s.emitted == s.stepEmitted, "the fight back rule off mid-fight: over; nothing handed, Step's moves untouched");
         bool untouched = true;
         for (int i = 0; i < 4; ++i) { s.Tick(); untouched = untouched && s.emitted == s.stepEmitted; }
-        Check(Lines("Frame army x menu:") == all && target(201) == 0 && untouched, "Off: no line, no target, no move changed (the roll made while Off counted for nothing)");
-        Check(Fits("hit back:"), "every hit back line within LineMax");
+        Check(target(201) == 0 && untouched, "off: no target, no move changed (the roll made while off counted for nothing)");
+        Check(g_lines.empty(), "a fight back logs nothing, from the first hit to its end");
     }
-    {   // Many summons hit at once: each its own attacker, at most four lines a second
+    {   // Many summons hit at once: each its own attacker
         g_lines.clear();
         cfg::rules.hitBack = true;
         Sim s; ReadyBehind(s, 0, {}, 3, 2);
@@ -1391,14 +1327,13 @@ void TestFarMarkHandlers() {
         std::vector<std::unique_ptr<FakeUnit>> pets;
         for (uint32_t id = 200; id < 207; ++id) { pets.push_back(std::make_unique<FakeUnit>(1, id)); armyxhunt::Roll({archer.at(), pets.back()->at(), 0}); }
         s.Tick();
-        uint32_t t = 0;
-        armyxhunt::Target({206, true, t});
-        Check(Lines("hit back: summon ") == 4 && Lines("(7 fighting back now)") == 4 && t == 5010, "seven hit at once: all seven take it on, four lines that second");
+        const auto handed = [](uint32_t want) { int n = 0; for (uint32_t id = 200; id < 207; ++id) { uint32_t t = 0; armyxhunt::Target({id, true, t}); n += t == want; } return n; };
+        Check(handed(5010) == 7, "seven hit at once: all seven are handed the attacker");
         for (int i = 0; i < 4; ++i) s.Tick();
-        Check(Lines("hit back 1 s:") == 0, "no line a second while they fight back: only the start and the end are said");
         s.c.SetPriorityTarget(MarkId + 130, FarMark);
         s.Tick();
-        Check(Lines("the army has a mark or a priority target now") >= 1 && Lines("(0 fighting back now)") >= 1, "a mark: every one of them lets go (the hunt has the army)");
+        Check(handed(0) == 7, "a mark: every one of them lets go (the hunt has the army)");
+        Check(g_lines.empty(), "none of it logged");
         s.c.ClearPriorityTarget();
         cfg::rules.hitBack = false;
         s.Tick(); s.Tick();

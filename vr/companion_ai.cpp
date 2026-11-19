@@ -632,8 +632,9 @@ int DetourRelocateUnit(uintptr_t game, uintptr_t unit, uintptr_t targetRoom, int
             framevr::logging::Write(line);
             return 1;
         }
-        // Army X menu: a summon hunting the marked monster is not pulled back by the game's own leash.
-        if (::armyxhunt::Leash(framevr::armyseam::SummonRelocateFrame{unitId, x, y, [] { AcquireSRWLockShared(&g_tacticalLock); const framevr::armyseam::ArmyOrderNow a{g_summonCoordinator.orderStampPending, g_summonCoordinator.priorityTargetId, g_summonCoordinator.freeRoam}; ReleaseSRWLockShared(&g_tacticalLock); return a; }(), &framevr::logging::Write})) return 1;
+        // Army X menu: a summon hunting the marked monster is not pulled back by the game's own leash. On no button:
+        // nothing is read and no lock taken.
+        if (::armyxmenu::On() && ::armyxhunt::Leash(framevr::armyseam::SummonRelocateFrame{unitId, x, y, [] { AcquireSRWLockShared(&g_tacticalLock); const framevr::armyseam::ArmyOrderNow a{g_summonCoordinator.orderStampPending, g_summonCoordinator.priorityTargetId, g_summonCoordinator.freeRoam}; ReleaseSRWLockShared(&g_tacticalLock); return a; }()})) return 1;
         return originalRelocateUnit ? originalRelocateUnit(game, unit, targetRoom, x, y, unk1, unk2) : 1;
     }
 
@@ -752,7 +753,7 @@ int DetourServerMoveUnit(uintptr_t game, uintptr_t unit, uintptr_t targetUnit, i
         // Army X menu: a hunter's refused move beside its mark is answered as failed (the game thinks again); its own walk
         // to a place on the way there goes out as a run.
         if (!allowMove) { int answer = 1; ::armyxhunt::Refused(framevr::armyseam::SummonRefusedFrame{header[2], moveMode, x, y, answer}); return answer; }
-        ::armyxhunt::Move(framevr::armyseam::SummonMoveFrame{header[2], targetUnit, x, y, moveMode, pathType, flags, &framevr::logging::Write});
+        ::armyxhunt::Move(framevr::armyseam::SummonMoveFrame{header[2], targetUnit, x, y, moveMode, pathType, flags});
         return originalServerMoveUnit(game, unit, targetUnit, moveMode, x, y, pathType, flags);
     }
 

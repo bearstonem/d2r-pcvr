@@ -54,6 +54,9 @@ ButtonStroke ButtonHit(uint32_t monster);
 // from its session/id rather than passing a native pointer across threads.
 bool LocalServer(uintptr_t& game,uintptr_t& player);
 uintptr_t ServerUnit(uintptr_t game,int type,uint32_t id); // owning game thread only
+// The animation modes a monster has: its MonStats2 row's mask, one bit per mode (bit 3 GetHit, bit 13 knockback,
+// bit 15 run); 0 when unreadable. Owning game thread only, after the melee signatures checked out.
+uint32_t MonsterModes(uintptr_t unit,uint32_t classId);
 // Perfect parry: native hit recovery for this monster on a LATER game update,
 // never inside its own attack. Thread-safe. False when unavailable/not queued.
 // durability: the shield's before the parried hit, refunded; -2 = read it now.

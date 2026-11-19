@@ -55,10 +55,6 @@ inline constexpr uint64_t ReturnWatchMs = 10000;
 inline constexpr float ProgressStep = 0.5f;
 inline constexpr uint64_t HunterStallMs = 15000;   // one hunter with no new best this long gives up (back to its spot)
 inline constexpr uint64_t NoProgressMs = 15000;    // no hunter with a new best this long: the hunt gives up
-// A hunter whose distance to the mark changes this much between two ticks was moved, not walked (the game's own leash relocates a
-// summon far from the hero, DetourRelocateUnit, vetoed for a hunter only while the leash rule holds it): only logged.
-inline constexpr float JumpCells = 10.0f;
-inline constexpr float TraceNear = 3.0f;           // the hunt's hunters: within this of the mark (MeleeArrive)
 static_assert(HunterStallMs <= NoProgressMs, "a hunter never gives up before the hunt would");
 // The arrive distances sit inside the commander's own gates, so an arrived hunter's attack is never refused by them: melee inside the
 // attack gate's self-defense radius, ranged inside the native-move gate's mage window [RangedMinStandOff, 18].
@@ -73,16 +69,10 @@ inline bool Hunts(Mode m, uint8_t petType, cmd::SummonRole role) {
 }
 inline constexpr uint8_t WalkMode = 2, RunMode15 = 15;   // MONMODE_WALK, MONMODE_RUN (unit +0xC)
 inline bool Walking(uint8_t mode) { return mode == WalkMode || mode == RunMode15; }   // MONMODE_WALK, run
-// the hunt and its friends: a log row holds about 597 characters of text (steamvr/logging.cpp Row.text[640] less
-// its prefix). Every line the hunt builds stays within LineMax: a header within HeaderMax, each hunter's clause within ClauseMax
-// (cut there, never past it), and hunters packed into a line only while it fits (the next starts a new line).
-inline constexpr int LineMax = 590, HeaderMax = 170, ClauseMax = LineMax - HeaderMax;
-static_assert(HeaderMax + ClauseMax <= LineMax && ClauseMax >= 300, "a header and one whole clause always fit a line");
 // A ServerMoveUnit (0x4a8a10) mode that is an attack or a skill: the commander's own isCombatAction set in DetourServerMoveUnit
 // (attack 1 and 2, cast, skills 1-4). The hunt counts these; nothing here makes one.
 inline bool AttackMode(int mode) { return mode == 4 || mode == 5 || mode == 7 || (mode >= 8 && mode <= 11); }
-// The hunt swing trace: a mode the game asks its mode setter for (melee.cpp SetMode, 0x34e5f0, which the commander hooks
-// to time monster attack starts for the parry), as counted per hunter: attack 1 or 2, a skill (S1-S4), a cast, a get-hit.
+// What a unit's mode is: attack 1 or 2, a skill (skills 1 to 4), a cast, a get-hit.
 enum class Swing : uint8_t { None, Attack, Skill, Cast, GetHit };
 inline Swing SwingOf(int mode) {
     return mode == 4 || mode == 5 ? Swing::Attack : mode >= 8 && mode <= 11 ? Swing::Skill : mode == 7 ? Swing::Cast : mode == 3 ? Swing::GetHit : Swing::None;
@@ -127,30 +117,19 @@ struct Tick {
     bool started = false;           // a hunt began on `mark`
     uint32_t mark = 0;              // the hunt's monster now (0: none)
     int hunters = 0, melee = 0, ranged = 0, kept = 0;   // this call's roster (kept: tracked, not hunting)
-    float nearest = 0, farthest = 0, heroDist = 0;      // hunters' distances to the mark, the hero's (sub-tiles)
-    int arrivedNew = 0, arrived = 0;                    // reached it for the first time this call / arrived now
+    float nearest = 0, heroDist = 0;                    // the nearest hunter's distance to the mark, the hero's (sub-tiles)
+    int arrived = 0;                                    // hunters standing at the mark now
     int sent = 0, dropped = 0;      // hunt moves added / Step's moves back dropped, this call
     int gaveUp = 0, gaveUpNew = 0;  // hunters that gave up (HunterStallMs), all / this call
     int runAgain = 0;               // Run the whole approach: hunt moves sent because a runner was seen walking (else not due yet)
     int retried = 0;                // Retry at the mark: arrived hunters standing idle sent again this call (counted in sent too)
     uint32_t retryId = 0; float retryDist = 0;   // the first of them, and how far it stood from the mark
-    int jumped = 0;                 // hunters whose distance to the mark jumped by JumpCells since the last call (moved, not walked)
-    uint32_t jumpId = 0; float jumpFrom = 0, jumpTo = 0;   // the first of them
-    // Hunters that left the army mid-hunt (, the evening audit's anomaly: a Shadow cast again is a new unit, and the end
-    // line listed only the new one): this call's, the first of them and how near it got. Bookkeeping only: the glue says them
-    // only with the hunt On, and every other field of this struct is as it was before.
-    int left = 0; uint32_t leftId = 0; float leftBest = 0; bool leftReached = false;
-    // The hunt: each hunter (not given up) within TraceNear of the mark this call, its type and mode as sampled
-    struct Beside { uint32_t id = 0; uint8_t petType = 0, mode = 0; float dist = 0; };
-    std::array<Beside, cmd::MaxArmyUnits> beside{};
-    int besideN = 0;
     // A hunt that ended this call
     End end = End::None;
     uint32_t endedMark = 0;
     uint64_t endedAfterMs = 0;
     int endedHunters = 0, endedReached = 0, endedFought = 0;
-    int endedLeft = 0, endedLeftReached = 0, endedLeftFought = 0;   // those that left mid-hunt and never came back (not in the three above)
-    // Each former hunter of the ended hunt (the proof they went): its distance to the mark at the start, its best, at the end;
+    // Each former hunter of the ended hunt: its distance to the mark at the start, its best, at the end;
     // fought: seen in a fight beside it; gaveUp: it gave up alone (HunterStallMs).
     struct HunterSum { uint32_t id = 0; float start = 0, best = 0, end = 0; bool fought = false, gaveUp = false; };
     std::array<HunterSum, cmd::MaxArmyUnits> summary{};
@@ -160,7 +139,6 @@ struct Tick {
     bool returned = false, returnTimedOut = false;
     uint32_t returnMark = 0;
     int returnFormed = 0, returnOf = 0;
-    uint64_t returnMs = 0;
 };
 
 class Hunt {
@@ -195,7 +173,7 @@ public:
             n_ = 0; mark_ = 0;
         }
         if (!mark) { WatchReturn(t, c, nowMs); return t; }
-        if (!mark_) { mark_ = mark; startMs_ = progressMs_ = nowMs; n_ = 0; cursor_ = 0; backN_ = 0; t.started = true; goneN_ = 0; }
+        if (!mark_) { mark_ = mark; startMs_ = progressMs_ = nowMs; n_ = 0; cursor_ = 0; backN_ = 0; t.started = true; }
         t.mark = mark_;
         t.heroDist = std::hypot(hero.x - at.x, hero.y - at.y);
 
@@ -219,8 +197,7 @@ public:
             const bool ranged = Ranged(tu.role);
             const float d = std::hypot(u.pos.x - at.x, u.pos.y - at.y);
             const float arrive = ranged ? RangedArrive : MeleeArrive;
-            if (!known) { h.start = h.best = d; h.progressMs = nowMs; Returned(h.id); }
-            else if (std::fabs(d - h.last) > JumpCells && !t.jumped++) { t.jumpId = h.id; t.jumpFrom = h.last; t.jumpTo = d; }   // moved, not walked
+            if (!known) { h.start = h.best = d; h.progressMs = nowMs; }
             h.last = d;
             if (d <= arrive + ArriveSlack && cmd::IsFightMode(u.animMode)) h.fought = true;
             if (!h.gaveUp) {
@@ -236,10 +213,8 @@ public:
             tu.farSinceMs = tu.stuckSinceMs = 0;            // the watchdog never moves it back mid-hunt
             tu.lastMoveDispatchMs = 0; tu.inSlot = false;   // Step's move back is dropped below: its record cleared
             ++(ranged ? t.ranged : t.melee);
-            t.nearest = std::min(t.nearest, d); t.farthest = std::max(t.farthest, d);
-            if (d <= TraceNear) t.beside[size_t(t.besideN++)] = {u.unitId, u.petType, u.animMode, d};
+            t.nearest = std::min(t.nearest, d);
             if (d <= arrive) {
-                if (!h.arrived && !h.reached) ++t.arrivedNew;
                 h.arrived = h.reached = true;
             } else if (d > arrive + ArriveSlack) {
                 h.arrived = false;
@@ -263,7 +238,6 @@ public:
         if (progress) progressMs_ = nowMs;
         // no hunter left, or none with progress for NoProgressMs: given up (with no hunters at all, none of this: the
         // summons that hunt are not out, the commander's priority target only re-aims them, as before).
-        NoteLeft(t, next, n);
         if (n > 0 && (t.hunters == 0 || nowMs - progressMs_ >= NoProgressMs)) {
             h_ = next; n_ = n;
             GiveUp(t, c, hero, End::Stalled, nowMs);
@@ -301,7 +275,7 @@ public:
     }
     uint32_t Mark() const { return mark_; }
     bool Returning() const { return backN_ != 0; }
-    // The hunt's hunters now (not given up; none without a hunt), for the leash veto and the trace: ids into out, the count.
+    // The hunt's hunters now (not given up; none without a hunt), for the leash veto: ids into out, the count.
     size_t Hunters(uint32_t* out, size_t cap) const {
         size_t n = 0;
         for (size_t i = 0; mark_ && i < n_ && n < cap; ++i) if (!h_[i].gaveUp) out[n++] = h_[i].id;
@@ -343,26 +317,10 @@ private:
     }
     // Hunters of the last call missing from this call's roster (died, unsummoned, or cast again as a new unit): counted for the
     // end line (they hunted, and may have reached and fought), the first one handed out for its own line.
-    void NoteLeft(Tick& t, const std::array<Hunter, cmd::MaxArmyUnits>& next, size_t n) {
-        for (size_t k = 0; k < n_; ++k) {
-            bool still = false;
-            for (size_t i = 0; i < n && !still; ++i) still = next[i].id == h_[k].id;
-            if (still) continue;
-            if (goneN_ < gone_.size()) gone_[goneN_++] = {h_[k].id, h_[k].reached, h_[k].fought};
-            if (!t.left++) { t.leftId = h_[k].id; t.leftBest = h_[k].best; t.leftReached = h_[k].reached; }
-        }
-    }
-    // A hunter seen again after it left (the army step skipped it for a tick: its sample and its tracked slot disagreed): it is a
-    // hunter again, counted once, as the one it is now.
-    void Returned(uint32_t id) {
-        for (size_t k = 0; k < goneN_; ++k) if (gone_[k].id == id) { gone_[k] = gone_[--goneN_]; return; }
-    }
     void EndAs(Tick& t, End why, uint64_t nowMs) {
         t.end = why; t.endedMark = mark_;
         t.endedAfterMs = nowMs >= startMs_ ? nowMs - startMs_ : 0;
         t.endedHunters = int(n_);
-        t.endedLeft = int(goneN_);
-        for (size_t k = 0; k < goneN_; ++k) { t.endedLeftReached += gone_[k].reached; t.endedLeftFought += gone_[k].fought; }
         for (size_t i = 0; i < n_; ++i) {
             t.endedReached += h_[i].reached;
             t.endedFought += h_[i].fought;
@@ -385,7 +343,7 @@ private:
         const uint64_t ms = nowMs >= backFromMs_ ? nowMs - backFromMs_ : 0;
         if (present == formed || ms >= ReturnWatchMs) {
             t.returned = true; t.returnTimedOut = formed < present;
-            t.returnMark = backMark_; t.returnFormed = formed; t.returnOf = present; t.returnMs = ms;
+            t.returnMark = backMark_; t.returnFormed = formed; t.returnOf = present;
             backN_ = 0;
         }
     }
@@ -397,9 +355,6 @@ private:
     size_t backN_ = 0;
     uint64_t backFromMs_ = 0;
     uint32_t backMark_ = 0;
-    struct Gone { uint32_t id = 0; bool reached = false, fought = false; };
-    std::array<Gone, cmd::MaxArmyUnits> gone_{};   // hunters that left the army during this hunt and are not back (NoteLeft, Returned)
-    size_t goneN_ = 0;
 };
 
 // ---- Defend the spot ----
@@ -415,8 +370,8 @@ private:
 // mode: Off, no defense); when it dies the commander's liveness check clears it and, the anchor still on, Step walks them back to their
 // spots; then the next one. A defended monster that runs DefendSlack past the radius is let go (the summons go back).
 // A monster the hunt gave up on (unreachable: its focus cleared while it lives)
-// is not picked again until the spot changes (Own) or GivenUpMs; F2, "another order took the anchor" never clears the priority
-// target (the only order that keeps one is an Attack on that very monster); S1/S2, the scan is not made here (under g_tacticalLock):
+// is not picked again until the spot changes (Own) or GivenUpMs; "another order took the anchor" never clears the priority
+// target (the only order that keeps one is an Attack on that very monster); the scan is not made here (under g_tacticalLock):
 // the glue scans on GameTick, no lock held, from a summon near the spot, and hands the result in.
 struct Foe { uint32_t id = 0; float x = 0, y = 0; };
 inline constexpr float DefendSlack = 6.0f;
@@ -514,7 +469,7 @@ private:
 // stays held off until it stands in its spot again (Step's inSlot; `formed` stays true from the last order, so it says nothing
 // here) or ReturnWatchMs. Off: nothing is touched, tick by tick the commander.
 inline constexpr float HitBackSlack = 4.0f;   // an attacker this far past the reach is let go (not at the reach's edge: no flutter)
-inline bool Swinging(uint8_t mode);   // below (the far mark trace): in an attack, skill or cast
+inline bool Swinging(uint8_t mode);   // below: in an attack, skill or cast
 class HitBack {
 public:
     enum class End : uint8_t { None, Gone, Quiet, Far, Order, Mark, Off, Left };
@@ -653,18 +608,7 @@ public:
         for (size_t k = 0; k < n_ && n < cap; ++k) { pets[n] = e_[k].pet; foes[n++] = e_[k].foe; }
         return n;
     }
-    static const char* EndText(End e) {
-        switch (e) {
-            case End::Gone: return "the attacker is dead or gone";
-            case End::Quiet: return "no new hit and no fight for the keep time";
-            case End::Far: return "the attacker is past its reach from its spot";
-            case End::Order: return "an order (the commander re-forms the army)";
-            case End::Mark: return "the army has a mark or a priority target now";
-            case End::Off: return "Fight back when hit is Off";
-            case End::Left: return "the summon left the army";
-            default: return "";
-        }
-    }
+
 
 private:
     struct Fight {
@@ -687,13 +631,13 @@ private:
     uint64_t lastMs_ = 0;
 };
 
-// ---- Hold the leash ----
+// ---- The leash rule ----
 // DetourRelocateUnit (RelocateUnit 0x491ca0) is a general teleport, not only the leash: a portal, a
 // waypoint or an area change may move pets through it too. "recall brings minions back, town portal brings
-// minions back": the veto has no distance limit by default (Leash reach 0), and it ends at once on any recall or order (Regroup,
-// a formation, Hold, Fall out: the coordinator's order stamp since the last Step), a changed or cleared mark, Hunt the mark or Hold
-// the leash Off, and on any area change, town or unknown area (the game brings them along). The leash roster (the hunters it may
-// keep) is picked each army tick: within Leash reach of the hero when one is set, the hero's level known, not a town, the same level
+// minions back": the veto has no distance limit (a leash reach of 0), and it ends at once on any recall or order (Regroup,
+// a formation, Hold, Fall out: the coordinator's order stamp since the last Step), a changed or cleared mark, the hunt or leash
+// rule off, and on any area change, town or unknown area (the game brings them along). The leash roster (the hunters it may
+// keep) is picked each army tick: within the leash reach of the hero when one is set, the hero's level known, not a town, the same level
 // as the last publish (a level change drops it for that tick). The hunt itself has no distance limit either.
 inline constexpr int TownLevels[5] = {1, 40, 75, 103, 109};   // the five act towns
 inline bool TownLevel(int level) { for (int t : TownLevels) if (t == level) return true; return false; }
@@ -718,8 +662,8 @@ inline LeashPick PickLeash(float reach, int level, int lastLevel, const uint32_t
 enum class LeashRelease : uint8_t {
     Held,
     Off,          // the leash rule off, or the menu on no button
-    NotHunter,    // not in the leash roster (not hunting, gave up, beyond Leash reach), or no fresh roster
-    HuntOff,      // Hunt the mark Off
+    NotHunter,    // not in the leash roster (not hunting, gave up, beyond the leash reach), or no fresh roster
+    HuntOff,      // the hunt rule off
     FallOut,      // Fall out
     Order,        // an order since the last army tick: Regroup (the X menu's or the commander's), a formation, Hold
     MarkChanged,  // the army's priority target is no longer the hunt's mark (killed, lost, cleared, another mark)
@@ -728,7 +672,7 @@ enum class LeashRelease : uint8_t {
     AreaChanged,  // the hero's area is not the roster's (a portal, waypoint or stairs since the last army tick)
 };
 struct LeashNow {
-    bool on = false, hunting = false;   // Hold the leash, Hunt the mark (not Off)
+    bool on = false, hunting = false;   // the leash rule, the hunt rule (not off)
     uint32_t unit = 0;
     uint64_t nowMs = 0, atMs = 0;       // now, the roster's publish
     int levelNow = 0, levelAt = 0;      // the hero's level now, the roster's
@@ -750,23 +694,10 @@ inline LeashRelease JudgeLeash(const LeashNow& s, const uint32_t* ids, size_t n)
     if (s.levelNow != s.levelAt) return LeashRelease::AreaChanged;
     return LeashRelease::Held;
 }
-inline const char* LeashReleaseText(LeashRelease r) {
-    switch (r) {
-        case LeashRelease::HuntOff: return "Hunt the mark is Off";
-        case LeashRelease::FallOut: return "Fall out";
-        case LeashRelease::Order: return "a new order since the last army tick (Regroup, a formation, Hold)";
-        case LeashRelease::MarkChanged: return "the mark is no longer the army's target (killed, lost, cleared or another mark)";
-        case LeashRelease::NoArea: return "your area is not known now";
-        case LeashRelease::Town: return "you are in town (a Town Portal or waypoint)";
-        case LeashRelease::AreaChanged: return "your area changed (a portal, waypoint or stairs)";
-        default: return "";
-    }
-}
-
 // ---- Summons run ----
 // The commander sends every army move walking: the Necromancer's skeletons, mages and golems have no run animation (monstats2 mRN empty)
-// and slid run-moved (owner). The rule reads each summon's own game data: the MonStats2 row's mode mask (+0xF0, one bit
-// per mode, as melee.cpp ModeMask reads it for hit reactions: bit 3 GetHit, bit 13 knockback), so bit 15 is RN, the run mode and
+// and slid when sent running. The rule reads each summon's own game data: the MonStats2 row's mode mask (+0xF0, one bit
+// per mode, as melee reads it for hit reactions: bit 3 GetHit, bit 13 knockback), so bit 15 is RN, the run mode and
 // bit 2 WL, the walk mode (a mask without a walk is no read: every army summon walks).
 enum class RunMode : uint8_t { Off = 0, Wolves = 1, Runners = 2 };   // cfg::Rules::run
 inline RunMode RunModeOf(float v) { return v >= 1.5f ? RunMode::Runners : v >= .5f ? RunMode::Wolves : RunMode::Off; }
@@ -810,10 +741,5 @@ inline const char* PetName(uint8_t t) {
         case 11: return "Spirit wolf"; case 12: return "Dire wolf"; case 15: return "Grizzly"; case 16: return "Shadow";
         default: return "summon";
     }
-}
-inline const char* ModeName(uint8_t m) {
-    static constexpr const char* names[16] = {"death", "standing", "walking", "hit", "attack 1", "attack 2", "block", "cast",
-                                              "skill 1", "skill 2", "skill 3", "skill 4", "dead", "knock-back", "sequence", "running"};
-    return m < 16 ? names[m] : "other";
 }
 }  // namespace xhunt

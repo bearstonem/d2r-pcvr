@@ -63,11 +63,11 @@ struct ArmyMovesFrame {
 };
 // companion_ai DetourRelocateUnit: the game's own leash is about to move a summon.
 struct ArmyOrderNow { bool orderPending; uint32_t priorityTarget; bool freeRoam; };
-struct SummonRelocateFrame { uint32_t unitId; int x, y; ArmyOrderNow army; void (*say)(const char*); };
+struct SummonRelocateFrame { uint32_t unitId; int x, y; ArmyOrderNow army; };
 // companion_ai, where an army move is sent: walk (true, as before) or run.
 struct ArmyWalkFrame { uintptr_t unit; uint32_t unitId; uint8_t petType; bool& walk; void (*say)(const char*); };
 // companion_ai DetourServerMoveUnit: a summon's own move the gate let through, and one it refused.
-struct SummonMoveFrame { uint32_t unitId; uintptr_t targetUnit; int x, y; int& mode; uint8_t& pathType; uint16_t& flags; void (*say)(const char*); };
+struct SummonMoveFrame { uint32_t unitId; uintptr_t targetUnit; int x, y; int& mode; uint8_t& pathType; uint16_t& flags; };
 struct SummonRefusedFrame { uint32_t unitId; int mode, x, y; int& ret; };
 // companion_ai TryOverrideCombatTarget: the target a tracked summon is handed (0: none).
 struct SummonTargetFrame { uint32_t unitId; bool managed; uint32_t& target; };
@@ -76,8 +76,7 @@ struct HitRollFrame { uintptr_t attacker, defender; int missile; };
 }  // namespace framevr::armyseam
 
 namespace armyxmenu {
-bool On();       // the menu is on a hand button
-int Button();   // that button's slot, -1 none
+bool On();       // the menu is on a hand button (in either weapon set)
 void Input(framevr::armyseam::WheelInputFrame f);
 void Request(framevr::armyseam::WheelRequestFrame f);
 void Press(framevr::armyseam::ArmyXPressFrame f);

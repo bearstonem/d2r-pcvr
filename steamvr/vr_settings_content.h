@@ -548,7 +548,7 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.companion_ai",.page=View::Monsters,.section="Mercenary",.kind=RowKind::Toggle,.label="Smarter mercenary",
      .help="Your mercenary keeps close in fights, spots monsters as far as they spot you, and is moved behind you if it gets stuck."},
     {.id="gameplay.companion_tactical_commands",.page=View::Monsters,.section="Mercenary",.kind=RowKind::Toggle,.label="Tactical commands",
-     .help="Point at your mercenary, hold Grip and pull Trigger, aim and let go: hold ground, prioritize monsters, or regroup.",
+     .help="Point at your mercenary, hold Grip and pull Trigger, aim and let go: hold ground, prioritize monsters, or regroup. Army X menu's Attack my target needs it.",
      .beside=true,.besideLabel="Commands"},
     // Mercenary potion assistance, independent of class and outline settings (#424, RobinHeggelund).
     {.id="gameplay.merc_potion_assist",.page=View::Monsters,.section="Mercenary",.kind=RowKind::Toggle,.label="Merc potion throw autoaim",

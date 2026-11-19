@@ -892,11 +892,14 @@ starts over. **VR Settings > Interface > Wrist > Map grab hint** turns it off; t
 
 For a class with summons (Necromancer, Druid, Amazon's Valkyrie, Assassin's Shadow).
 
-1. With a summon out, open a hand's skill wheel, choose **Edit Slots** on a button and pick **Army X menu** (last under
-   **General / Items**). That button now opens the menu; putting a skill or Draw glyph on it later takes the button back.
+1. With a summon out, open a hand's skill wheel, choose **Edit Slots** on a button and pick **Army X menu** (under
+   **General / Items**, beside Draw glyph). That button now opens the menu; putting a skill or Draw glyph on it later takes the button back.
+   The button is kept for the weapon set in hand, as skills are: pick it again after a weapon swap to have it in both.
 2. Hold the button: four circles appear in front of you. Move your hand toward one and let go.
    - **Up, Attack my target:** the summons go for the monster your hand (or your eyes) points at. With none pointed, aim
      the hand's ray at one and pull the trigger; the grip cancels. Beside it: Spearhead wedge, Marching crescent.
+     Needs **VR Settings > Monsters > Mercenary > Tactical commands** on (the default); with it off the summons take
+     the Spearhead wedge instead.
    - **Down, Defend me:** Protective ring. Beside it: Phalanx.
    - **Left, Regroup.**
    - **Right, Hold here:** Hold ground. Beside it: Fall out, and Move and hold (point the laser at the ground within 40

@@ -5,7 +5,7 @@
 //     corridor check; the second hands the same heading on and seeds the coordinator's HeadingFilter with it (Reset, Update),
 //     so Step's own Update forms on it unchanged.
 // The mercenary reads companion_ai's cached forward, never these, so it is untouched.
-// Log "Frame army face:": armed (once each time the army comes out or after a gap) and no facing (once a stretch).
+// Log "Frame army face:": armed (once a session, the first time the army forms on the facing) and a lost facing (once a session).
 #include <windows.h>
 #include <atomic>
 #include <cmath>
@@ -39,7 +39,7 @@ struct State {
     bool on = false;
     uint64_t lastCallMs = 0;
     armyface::Latch latch;
-    bool noFacingSaid = false;
+    bool armedSaid = false, noFacingSaid = false;   // each line once a session
     bool decided = false; uint64_t decidedMs = 0; armyface::Vec2 heading{};   // the tick's heading, for its Step call
 };
 State g;
@@ -69,7 +69,7 @@ void Heading(HeadingFrame f) {
     }
     g.decided = false;
     const armyface::Tuning t = armyface::tuning;
-    if (!g.on || f.nowMs - g.lastCallMs > GapMs) { g.latch.Reset(); g.noFacingSaid = false; }
+    if (!g.on || f.nowMs - g.lastCallMs > GapMs) g.latch.Reset();
     g.on = true;
     g.lastCallMs = f.nowMs;
 
@@ -79,15 +79,10 @@ void Heading(HeadingFrame f) {
     if (faceOk) Unpack(g_facing.load(std::memory_order_relaxed), faceX, faceY);
     const bool wasArmed = g.latch.Armed();
     const armyface::Step s = g.latch.Update({f.heroX, f.heroY}, {f.fx, f.fy}, faceOk, {faceX, faceY}, f.nowMs, t);
-    if (!faceOk) {
-        if (!g.noFacingSaid) {
-            g.noFacingSaid = true;
-            if (s.apply) std::snprintf(line, sizeof line, "Frame army face: no headset facing: the army's heading held at %.0f deg, a walk follows the model as before", Deg(s.heading));
-            else std::snprintf(line, sizeof line, "Frame army face: no headset facing yet: the model's forward until one comes");
-            Say(f, line);
-        }
-    } else {
-        g.noFacingSaid = false;
+    if (!faceOk && s.apply && !g.noFacingSaid) {   // the facing lost while the army is out (the view not updating)
+        g.noFacingSaid = true;
+        std::snprintf(line, sizeof line, "Frame army face: no headset facing: the army's heading held at %.0f deg, a walk follows the model as before (said once a session)", Deg(s.heading));
+        Say(f, line);
     }
     if (!s.apply) return;   // not armed: the model's forward and the filter as they are this tick
 
@@ -96,8 +91,9 @@ void Heading(HeadingFrame f) {
     f.fy = s.heading.y;
     g.decided = true; g.decidedMs = f.nowMs; g.heading = s.heading;   // Step's call hands it on and seeds the filter
 
-    if (s.why == armyface::Why::First && !wasArmed) {
-        std::snprintf(line, sizeof line, "Frame army face: armed: the army's heading %.0f deg (the facing; the model's %.0f deg)", Deg(s.heading), Deg(model));
+    if (s.why == armyface::Why::First && !wasArmed && !g.armedSaid) {
+        g.armedSaid = true;
+        std::snprintf(line, sizeof line, "Frame army face: armed: the army forms on the headset's facing (%.0f deg now; the model's %.0f deg); said once a session", Deg(s.heading), Deg(model));
         Say(f, line);
     }
 }
