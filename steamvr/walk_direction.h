@@ -31,4 +31,8 @@ inline void ToView(float& x,float& y,float controllerHeading,float headHeading) 
     const float d=controllerHeading-headHeading,c=std::cos(d),s=std::sin(d);
     const float vx=x*c-y*s,vy=x*s+y*c;x=vx;y=vy;
 }
+// The stick in the view's frame as a way on the ground in the world: right and ahead are the view's level right
+// and ahead there (vrcam's StickFrame camR / camF). Walking turns it onto the game's screen (ViewStickToGame);
+// Whirlwind's steering takes it to the grid (whirl_steer.h), so a whirl goes where the same push would walk.
+inline Vec OnGround(float x,float y,Vec right,Vec ahead) {return right*x+ahead*y;}
 }
