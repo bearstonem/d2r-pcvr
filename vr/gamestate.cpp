@@ -20,6 +20,7 @@
 #endif
 #include <windows.h>
 #include <sddl.h>
+#include "multiplayer_fields.h"
 
 #include <atomic>
 #include <cstdio>
@@ -340,9 +341,19 @@ std::atomic<uint64_t> g_cursorItemAt{0};
 std::atomic<bool> g_respecButton{false};  // its Character page alone: Reset Skills & Stats (respec_button.h)
 // Character creation with a hero picked: the name box is up, so the VR keyboard (vr_keyboard.h)
 // shows; the epoch changes each time it comes up anew. The box is read on the UI message thread.
+// D2RLoader's multiplayer panel open (and no character creation over it): its boxes want the
+// keyboard with digits (g_keyboardText); the name box goes first. Both read on that thread.
 framevr::keyboard::NameBox g_nameBox;
-std::atomic<bool> g_keyboard{false};
-std::atomic<uint32_t> g_keyboardEpoch{0};
+framevr::keyboard::MultiplayerPanel g_multiplayer;
+std::atomic<bool> g_keyboard{false}, g_keyboardText{false};
+// The main menu (owner 2026-11-14): what Right B may close over it. The cog's panel is D2RLoader's own
+// (D2RLoaderSettingsPanel) - Escape does not close it, the game asked whether to quit instead; it gets a
+// ClosePanel. So does D2RLoader's multiplayer panel (D2RLoaderMultiplayerPanel: Right B's Escape asked to
+// quit, owner's 2026-11-17 log) when nothing is over it. Anything else not of the menu itself (a dialog,
+// the game's options, character creation) gets Escape; with nothing over the menu B does nothing.
+std::atomic<bool> g_frontSettings{false}, g_frontOver{false}, g_frontMultiplayer{false};
+std::atomic<uint32_t> g_keyboardEpoch{0},g_fieldEpoch{0};
+std::atomic<int> g_field{-1}; std::atomic<bool> g_scanPending{false};
 std::atomic<uint32_t> g_panelChanges{0};   // every panel opened or closed (leather::Back)
 std::atomic<bool> g_npcChoices{false};
 std::atomic<uint32_t> g_questNotices{0};   // quest updates while the notification panel is hidden
@@ -945,6 +956,19 @@ void CinemaMessage(const char* target,const char* command,const char* text) {
     if(c.changed&&c.playing)TellMoviePanels();
 }
 
+// Where D2RLoader's multiplayer panel stands (the game's UI units), once a session for each message of its
+// own: to fit the VR keyboard or the main menu's board to it later from a log, not a guess. Widget calls on
+// this UI thread, as OnUiMessage runs.
+void TellMultiplayerPanel(const char* command) {
+    static std::set<std::string> told;
+    if(!g_widgets||!g_widgets->findPanel||!g_widgets->getWidgetRect||told.size()>=16||!told.insert(command).second)return;
+    Widgets::WidgetHandle panel=0;Widgets::Rect r{};
+    const auto found=g_widgets->findPanel(g_ctx,"D2RLoaderMultiplayerPanel",&panel);
+    const auto read=found==Widgets::Result::Success?g_widgets->getWidgetRect(g_ctx,panel,&r):found;
+    char b[200];snprintf(b,sizeof b,"Frame multiplayer: D2RLoaderMultiplayerPanel at %d,%d %dx%d with '%.40s' (result %u)",
+                         r.x,r.y,r.width,r.height,command,unsigned(read));
+    Log(b);
+}
 void TellSheetRects(const char* opened);   // below
 SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessageEvent* e, void*) noexcept {
     if (!e) return SharedEvents::UiMessageAction::Continue;
@@ -953,17 +977,32 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
     const char* text = e->text ? e->text : "";
     static std::set<std::string> seen;
     std::string key = std::string(target) + ":" + command;
-    const std::string keyText = key + ":" + text;   // the panel's name is in the text
+    const char* diagnosticText = strcmp(target,"PanelManager")==0 ? text : ""; // Never retain or log edit payloads.
+    const std::string keyText = key + ":" + diagnosticText;
     if (seen.size() < 4000 && seen.insert(keyText).second && strcmp(target, "InputMessage") != 0) {
         char b[300];
-        snprintf(b, sizeof b, "gamestate: ui message '%s' '%s' text '%.80s'", target, command, text);
+        snprintf(b, sizeof b, "gamestate: ui message '%s' '%s' text '%.80s'", target, command, diagnosticText);
         Log(b);
     }
     g_nameBox.Message(target, command, text);
+    const auto oldEpoch=g_multiplayer.Epoch();const bool wasOpen=g_multiplayer.Open();
+    g_multiplayer.Message(target, command, text);
+    if(oldEpoch!=g_multiplayer.Epoch()||wasOpen!=g_multiplayer.Open())g_field.store(-1);
+    if (g_multiplayer.Open() && target == framevr::keyboard::MultiplayerPanel::Channel) TellMultiplayerPanel(command);
     CinemaMessage(target, command, text);
-    if (g_keyboard.exchange(g_nameBox.Shown()) != g_nameBox.Shown())
-        Log(g_nameBox.Shown() ? "gamestate: name box up (a hero picked) - VR keyboard shown" : "gamestate: name box gone - VR keyboard hidden");
-    g_keyboardEpoch.store(g_nameBox.Epoch());
+    {
+        using framevr::keyboard::Want;
+        const Want want = framevr::keyboard::Wanted(g_nameBox, g_multiplayer);
+        const bool digits = want == Want::Text;
+        const bool shownChanged = g_keyboard.exchange(want != Want::None) != (want != Want::None);
+        const bool kindChanged = g_keyboardText.exchange(digits) != digits;
+        if (shownChanged || kindChanged)
+            Log(want == Want::Name ? "gamestate: name box up (a hero picked) - VR keyboard shown" :
+                want == Want::Text ? "gamestate: multiplayer panel open (D2RLoaderMultiplayerPanel) - VR keyboard with digits shown" :
+                                     "gamestate: no text box on screen - VR keyboard hidden");
+        // Either one's coming up anew brings a closed keyboard back.
+        g_keyboardEpoch.store(g_nameBox.Epoch() + g_multiplayer.Epoch());
+    }
     if (strcmp(target, "PanelManager") == 0) {
         const bool before = g_menu.load() != 0;
         if (!strcmp(command, "OpenPanel") || !strcmp(command, "OpenExclusivePanel")) { if (*text) g_panels.insert(text); }
@@ -982,6 +1021,22 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         g_statsButton.store(framevr::statsbutton::Shown(g_panels));
         g_stashButtons.store(framevr::stashbuttons::Shown(g_panels));
         g_respecButton.store(framevr::respecbutton::Shown(g_panels));
+        {
+            // CandidateListPanel: the game's list for a text box's input method - opened with character creation's name
+            // box and with Browse Games' filter, and never closed (owner's 2026-11-17 log), so nothing over the menu.
+            static const char* const kFrontBase[] = {"TitleScreenPanel", "TooltipsPanel", "MainMenuPanel", "MainMenuLoadingPanel",
+                "MainMenuLinks", "MainMenuButtonRibbon", "CharacterSelectPanel", "ShowItemsPanel", "EmoteWheelPanel", "BlockingPanel",
+                "D2RLoaderSettingsPanel", "LogoMenuPanel", "CandidateListPanel"};
+            bool over = false, overMultiplayer = false;
+            for (const std::string& n : g_panels)
+                if (std::none_of(std::begin(kFrontBase), std::end(kFrontBase), [&](const char* b) { return n == b; })) {
+                    over = true;
+                    if (n != framevr::keyboard::MultiplayerPanel::Panel) overMultiplayer = true;
+                }
+            g_frontOver.store(over);
+            g_frontSettings.store(g_panels.count("D2RLoaderSettingsPanel") != 0);
+            g_frontMultiplayer.store(g_panels.count(std::string(framevr::keyboard::MultiplayerPanel::Panel)) != 0 && !overMultiplayer);
+        }
         bool menu = false;
         for (const std::string& n : g_panels) if (IsMenuPanel(n)) { menu = true; break; }
         if(menu!=before)++g_menuEpoch;
@@ -1239,6 +1294,10 @@ bool RespecButtonShown(){return false;}   // the reset engine is in the native O
 #endif
 uint32_t PanelChanges(){return g_panelChanges.load();}
 bool KeyboardShown(){return g_keyboard.load();}
+bool KeyboardText(){return g_keyboardText.load();}
+bool FrontSettingsOpen(){return g_frontSettings.load();}
+bool FrontOverlayOpen(){return g_frontOver.load();}
+bool FrontMultiplayerOpen(){return g_frontMultiplayer.load();}
 uint32_t KeyboardEpoch(){return g_keyboardEpoch.load();}
 bool NpcChoicesOnly(){return g_npcChoices.load();}
 void ReadNpcChoicesRect() {
@@ -1434,6 +1493,43 @@ bool StowLeatherMenu() {
     return g_ctx&&g_threads&&g_threads->runOnUiThread&&g_widgets&&g_widgets->dispatchUiAction&&
         g_threads->runOnUiThread(g_ctx,&DispatchLeatherStow,nullptr)==Threads::Result::Success;
 }
+// Right B on the main menu's board with one of D2RLoader's panels open (the cog's, or the multiplayer
+// panel): ClosePanel by its name (user: a string literal), on the UI thread.
+void __cdecl DispatchFrontClose(const PluginContext* ctx,void* user) noexcept {
+    if(!g_widgets||!g_widgets->dispatchUiAction||!user)return;
+    const char* name=static_cast<const char*>(user);
+    Widgets::UiAction action{};action.structSize=sizeof action;
+    action.target="PanelManager";action.text=name;action.command="ClosePanel";
+    const auto result=g_widgets->dispatchUiAction(ctx,&action);
+    char line[160];snprintf(line,sizeof line,"gamestate: Right B on the main menu - ClosePanel %s (result %u)",name,unsigned(result));Log(line);
+}
+bool CloseFrontPanel(const char* name) {
+    return g_ctx&&g_threads&&g_threads->runOnUiThread&&g_widgets&&g_widgets->dispatchUiAction&&
+        g_threads->runOnUiThread(g_ctx,&DispatchFrontClose,const_cast<char*>(name))==Threads::Result::Success;
+}
+bool CloseFrontSettings(){return CloseFrontPanel("D2RLoaderSettingsPanel");}
+bool CloseFrontMultiplayer(){return CloseFrontPanel("D2RLoaderMultiplayerPanel");}
+// What the multiplayer panel's boxes hold (the names D2RCore gives them), as lengths only - never the
+// text, a password among them: whether the VR keyboard's letters reached a box, and which. A line only
+// when a length changed since the last read. UI thread.
+// UI-thread only. Discard requests queued for a previous panel view.
+void __cdecl UpdateField(const PluginContext* ctx,void* user) noexcept {
+    const auto bits=reinterpret_cast<uintptr_t>(user);unsigned pos=unsigned(bits);bool poll=pos==0;
+    if(g_keyboardText.load()&&uint32_t(bits>>32)==g_keyboardEpoch.load()){
+        if(!mpfields::Api(g_widgets).ready()){static bool told=false;if(!told){told=true;Log("Frame multiplayer: loader lacks widget focus/screen bounds; native input-method fallback");}g_field.store(-2);}
+        else {int next=mpfields::Scan(ctx,g_widgets,poll?-1:int(pos&65535)-1,poll?-1:int(pos>>16)-1);if(g_field.exchange(next)!=next&&next>=0)++g_fieldEpoch;}
+    }
+    if(poll)g_scanPending.store(false);
+}
+void MultiplayerField(int x,int y){
+    if(!g_keyboardText.load()||!g_threads||!g_ctx||!g_threads->runOnUiThread)return;
+    const bool poll=x<0;if(poll&&g_scanPending.exchange(true))return;
+    if(!poll&&(x>65534||y<0||y>65534))return;
+    uintptr_t v=(uintptr_t(g_keyboardEpoch.load())<<32)|(poll?0u:((unsigned(y+1)<<16)|unsigned(x+1)));
+    if(g_threads->runOnUiThread(g_ctx,&UpdateField,reinterpret_cast<void*>(v))!=Threads::Result::Success&&poll)g_scanPending.store(false);
+}
+int MultiplayerFocus(){return g_field.load();}
+uint32_t MultiplayerFocusEpoch(){return g_fieldEpoch.load();}
 bool CloseLeatherMenu() {
     return g_ctx&&g_threads&&g_threads->runOnUiThread&&g_widgets&&g_widgets->dispatchUiAction&&
         g_threads->runOnUiThread(g_ctx,&DispatchLeatherClose,nullptr)==Threads::Result::Success;

@@ -675,3 +675,7 @@ foreach(CLIENT_TEST server-loot-scan-test loot-reports-test client-attack-timing
   add_test(NAME ${CLIENT_TEST} COMMAND ${CLIENT_TEST})
 endforeach()
 add_test(NAME loot-network-wiring-test COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/loot_network_wiring_test.py")
+add_executable(multiplayer-fields-test multiplayer_fields_test.cpp)
+target_include_directories(multiplayer-fields-test PRIVATE ${D2RL_SDK}/include)
+target_compile_options(multiplayer-fields-test PRIVATE -UNDEBUG)
+add_test(NAME multiplayer-fields-test COMMAND multiplayer-fields-test)

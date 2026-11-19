@@ -15,4 +15,9 @@ assert v.count('melee::InstallRemoteHost();')==2, 'desktop startup and retry mus
 assert 'hero[1]==5' not in m, 'do not exclude Druid'
 assert 'servertarget::ReadBody(' in m, 'host must fill body dimensions required by client vibration'
 assert 'BasicWeapon(' not in m, 'do not restrict the original detector to basic weapons'
-print('client swing wiring: original detector, shared resolver, isolated state and no class/basic-only exclusions passed')
+feel=m[m.index('void Feel('):m.index('// Bow bash',m.index('void Feel('))]
+assert 'meleedispatch::NotifyContact(' in feel, 'host contact must return exact physical-sweep feedback'
+assert 'meleedispatch::Predicted(value,target)' in m, 'prediction and receipts must share duplicate suppression'
+assert 'meleedispatch::TakeFeedback(' in m, 'confirmed contacts must reach the joining controller'
+assert 'current[lane]' in m and 'feedback.epoch' in m and 'feedback.equipment' in m, 'old equipment/tracking must reject stale feedback'
+print('client swing wiring: original detector/resolver plus correlated, deduplicated contact feedback passed')

@@ -32,7 +32,16 @@ struct DualMemo {uint64_t session=0,stroke=0;int hand=-1,skill=-1;uint32_t cycle
 DualMemo dualMemo;
 std::atomic<uint64_t> sequenceDueAt{0};
 ''' + section('struct RemoteState {', 'bool ApplyRemoteContact(') + r'''
+int FeedbackLane(int hand,bool shield){
+ struct {int hand;bool shield;} feedback{hand,shield};
+''' + section('        const int lane=feedback.', '        const auto& sample=current[lane];') + r'''
+ return lane;
+}
 int main(){
+ for(bool shield:{false,true})for(int hand:{0,1}) {
+  Sample sample;sample.handIndex=hand;sample.shield=shield;
+  assert(FeedbackLane(hand,shield)==Lane(sample));
+ }
  RemoteState a,b;a.input.player=101;b.input.player=202;
  localCombat.hands[0].hits.Insert(7,1,900);
  dualMemo.hand=0;cleanRates[0]={7,100};doubleSwingStatUntil=4000;sequenceDueAt=123;

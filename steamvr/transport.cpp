@@ -154,6 +154,7 @@
 #include "hit_reactions.h"
 
 namespace gamestate {bool CinemaPlaying();}
+namespace gamestate {bool FrontSettingsOpen();bool FrontOverlayOpen();bool CloseFrontSettings();bool FrontMultiplayerOpen();bool CloseFrontMultiplayer();}
 namespace gamestate {bool MenuOpen();uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();int AttackWsm(int hand);}
 namespace gamecmd {void RequestPotion(int slot);void CancelPotion();}
 namespace gamestate {void MenuMap(bool wanted);uint32_t QuestNotices();bool NoticePanelOpen();bool NoticeText(int kind,char* out,uint32_t size);}
@@ -1174,13 +1175,15 @@ bool respecArtReady=false,respecShown=false,respecLit=false;
 statsbutton::Press respecPress;
 respecbutton::Button respecButton;
 respecbutton::Face respecFace=respecbutton::Face::Reset;
-// The VR keyboard for character creation's name box (vr_keyboard.h), its own board hinged under
-// the menu: its keys painted into the static image, small and with capitals; shown, the key under
-// the laser, and the laser's dot on it, this frame (MenuPointer); a pull on a key types it
-// (SendKeyboard). Close hides it until the box comes up anew (KeyboardEpoch).
-bool keyboardArtReady=false,keyboardShown=false,keyboardClosed=false,keyboardPointer=false;
+// The VR keyboard for character creation's name box and D2RLoader's multiplayer panel (vr_keyboard.h),
+// its own board hinged under the menu (over the main menu's 3D board): its keys painted into the static
+// image, both layouts, small and with capitals; shown, which layout (keyboardText: the multiplayer
+// panel's, with digits), the key under the laser, and the laser's dot on it, this frame (MenuPointer);
+// a pull on a key types it (SendKeyboard). Close hides it until the box comes up anew (KeyboardEpoch).
+bool keyboardArtReady=false,keyboardShown=false,keyboardText=false,keyboardClosed=false,keyboardPointer=false;
 int keyboardLit=-1;
 uint32_t keyboardClosedEpoch=0;
+uint64_t nextFieldPoll=0;
 statsbutton::Press keyboardPress;
 keyboard::Typist keyboardTypist;
 leather::Holder leatherHolder;
@@ -2236,23 +2239,24 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
         respecbutton::Stamp(px,label,stashbuttons::Width,stashbuttons::Height,lit);
         stashPainted=put(px,Stash(i))&&stashPainted;
     }
-    // The VR keyboard: every key on its stone with its label, plain and lit, small letters and
-    // capitals (vr_keyboard.h).
+    // The VR keyboards: every key on its stone with its label, plain and lit, small letters and
+    // capitals, the name's layout and the multiplayer panel's (vr_keyboard.h).
     const bool keyboardPainted=[&]{
         bool ok=true;
-        for(int picture=0;picture<4&&ok;++picture) {
-            const bool lit=picture&1,capitals=picture>=2;
-            auto board=keyboard::PaintKeys(lit,capitals);
-            for(int i=0;i<keyboard::KeyCount&&ok;++i) {
-                const auto r=keyboard::KeyTexelRect(i);
+        for(int picture=0;picture<8&&ok;++picture) {
+            const bool lit=(picture&1)!=0,capitals=(picture&2)!=0,digits=(picture&4)!=0;
+            const auto& layout=digits?keyboard::Text:keyboard::Name;
+            auto board=keyboard::PaintKeys(layout,lit,capitals);
+            for(int i=0;i<layout.count&&ok;++i) {
+                const auto r=keyboard::KeyTexelRect(layout,i);
                 std::vector<uint8_t> face(size_t(r.w)*r.h*4);
                 for(int y=0;y<r.h;++y)std::memcpy(&face[size_t(y)*r.w*4],&board[(size_t(r.y+y)*keyboard::TexelWidth+r.x)*4],size_t(r.w)*4);
-                const auto text=RespecLabel(keyboard::Label(i,capitals).c_str(),r.w,r.h);
+                const auto text=RespecLabel(keyboard::Label(layout,i,capitals).c_str(),r.w,r.h);
                 if(text.empty()){ok=false;break;}
-                respecbutton::Stamp(face,text,r.w,r.h,lit||(capitals&&keyboard::Keys[i].action==keyboard::Action::Shift));
+                respecbutton::Stamp(face,text,r.w,r.h,lit||(capitals&&layout.keys[i].action==keyboard::Action::Shift));
                 for(int y=0;y<r.h;++y)std::memcpy(&board[(size_t(r.y+y)*keyboard::TexelWidth+r.x)*4],&face[size_t(y)*r.w*4],size_t(r.w)*4);
             }
-            ok=ok&&put(board,capitals?(lit?KeyboardCapsLit:KeyboardCaps):(lit?KeyboardLit:Keyboard));
+            ok=ok&&put(board,KeyboardPicture(digits,capitals,lit));
         }
         return ok;
     }();
@@ -2475,6 +2479,18 @@ XrPosef UiSurfacePose() {
     }
     return pose;
 }
+// The VR keyboard's layout and board this frame, as MenuPointer aims at it and the layer draws it,
+// at the menu surface `at` of `size`: under the flat menu or the workspace (keyboard::Place); the
+// multiplayer panel's over the main menu's board in its 3D scene, which stands low and leans back
+// by its drop over its distance (keyboard::PlaceAbove). The name keyboard keeps its place under the
+// campfire's low strip.
+const keyboard::Layout& KeyboardLayout(){return keyboardText?keyboard::Text:keyboard::Name;}
+keyboard::Board KeyboardBoard(const XrPosef& at,panels::Size size) {
+    if(keyboardText&&spatialMode&&campfirePointer.load())
+        return keyboard::PlaceAbove(keyboard::Text,V(at.position),Q(at.orientation),size.width,size.height,
+                                    std::atan2(campfireMenuDrop.load(),std::max(.1f,campfireMenuDistance.load())));
+    return keyboard::Place(KeyboardLayout(),V(at.position),Q(at.orientation),size.width,size.height);
+}
 // A VR keyboard key to the game as a real keyboard's would arrive: the key the game window's
 // own Windows layout puts the character on (a German Z is not on the US Z's scan code), its
 // scan code (the game reads keys by scan code, SendShift), Shift round it when the layout wants
@@ -2533,34 +2549,49 @@ void MenuPointer(const menus::Pad& controls) {
         // The cinema screen: no beam across the film unless it is pointed at it.
         if(cinemaMode&&!spatialMode&&!pointerHit)pointerVisible=false;
     }
-    // The VR keyboard for character creation's name box (vr_keyboard.h): its own board hinged under
-    // the menu, out of the game's picture. The laser hits the board itself; on it (keys or the gaps
-    // between them) the laser is the keyboard's - no game cursor, no button under it, no game
-    // trigger - and a pull on a key types it into the box. Close hides it until the box comes up
-    // anew (another hero picked, or creation opened again).
-    const uint32_t keyboardEpoch=gamestate::KeyboardEpoch();
+    // The VR keyboard for character creation's name box and D2RLoader's multiplayer panel
+    // (vr_keyboard.h): its own board hinged under the menu, out of the game's picture (over the
+    // main menu's 3D board). The laser hits the board itself; on it (keys or the gaps between
+    // them) the laser is the keyboard's - no game cursor, no button under it, no game trigger -
+    // and a pull on a key types it into the box the laser last clicked. Close hides it until the
+    // box comes up anew (another hero picked, creation or the multiplayer panel opened again,
+    // another of the panel's views).
+    // A text box taking the focus anew brings a closed multiplayer keyboard back too (panelinput::TextFocusOns).
+    if(gamestate::KeyboardText()&&GetTickCount64()>=nextFieldPoll){nextFieldPoll=GetTickCount64()+80;gamestate::MultiplayerField(-1,-1);}
+    const int field=gamestate::MultiplayerFocus();
+    const uint32_t keyboardEpoch=gamestate::KeyboardEpoch()+(field==-2?panelinput::TextFocusOns():gamestate::MultiplayerFocusEpoch());
     if(keyboardClosed&&keyboardEpoch!=keyboardClosedEpoch)keyboardClosed=false;
-    // The campfire's menu board: the keyboard comes up only once the name box itself is pulled on
-    // (the middle of the board's strip, where the game puts the box), not as soon as a hero is
-    // picked - the heroes stay in reach of the laser until the name is wanted.
+    const bool keyboardDigits=gamestate::KeyboardText();
+    // The campfire's menu board: the name keyboard comes up only once the name box itself is pulled
+    // on (the middle of the board's strip, where the game puts the box), not as soon as a hero is
+    // picked - the heroes stay in reach of the laser until the name is wanted. The multiplayer
+    // panel's boxes do not say where they are or which has the focus: its keyboard is up with it.
     static bool campfireKeyboardOpen=false;
-    if(!campfirePointer.load()||!gamestate::KeyboardShown())campfireKeyboardOpen=false;
+    if(!campfirePointer.load()||!gamestate::KeyboardShown()||keyboardDigits)campfireKeyboardOpen=false;
     else if(pressed&&!triggerWasDown&&pointerHit&&hit.u>.36f&&hit.u<.64f){campfireKeyboardOpen=true;keyboardClosed=false;}
-    const bool keyboardWas=keyboardShown;
+    const bool keyboardWas=keyboardShown,keyboardTextWas=keyboardText;
+    keyboardText=keyboardDigits;
+    // The multiplayer panel's keyboard: up while one of its boxes has the game's focus (the game window's
+    // input method on, panels::TextKeyboardUp; owner 2026-11-17: "keyboard is always up anyway"), or with the
+    // panel while the game has said nothing of it this session.
     keyboardShown=keyboardArtReady&&uiActive&&!journalMode&&!leatherMode&&gamestate::KeyboardShown()&&!keyboardClosed&&
-        (!campfirePointer.load()||campfireKeyboardOpen);
-    if(keyboardShown!=keyboardWas) {
+        (!campfirePointer.load()||campfireKeyboardOpen||keyboardText)&&
+        (!keyboardText||field>=0||(field==-2&&panels::TextFocus(panelinput::TextFocusState())==panels::TextFocus::On));
+    if(keyboardShown!=keyboardWas||(keyboardShown&&keyboardText!=keyboardTextWas)) {
         keyboardTypist.Reset();keyboardPress.Reset();
-        Say(keyboardShown?"Frame panels: VR keyboard shown (the name box is up)":"Frame panels: VR keyboard hidden");
+        Say(!keyboardShown?"Frame panels: VR keyboard hidden":
+            !keyboardText?"Frame panels: VR keyboard shown (the name box is up)":
+            panels::TextFocus(panelinput::TextFocusState())==panels::TextFocus::On?"Frame panels: VR keyboard shown (a multiplayer box has the focus, with digits)":
+                                                                                   "Frame panels: VR keyboard shown (the multiplayer panel, with digits; the game has not said which box has the focus)");
     }
     bool onKeyboard=false;keyboardLit=-1;
     if(keyboardShown&&aimTracked&&!(mouseDown||rightMouseDown)) {
-        const auto board=keyboard::Place(V(surfacePose.position),Q(surfacePose.orientation),surface.width,surface.height);
+        const auto board=KeyboardBoard(surfacePose,surface);
         const auto ray=V(aim.pose.position),direction=math::Rotate(Q(aim.pose.orientation),{0,0,-1});
         math::PanelHit on{};
         if(math::IntersectPanel(ray,direction,board.position,board.orientation,board.width,board.height,on)&&(!pointerHit||on.distance<hit.distance)) {
             onKeyboard=keyboardPointer=true;pointerHit=false;   // the menu's laser hit is not this one
-            keyboardLit=keyboard::KeyAt(on.u,on.v);
+            keyboardLit=keyboard::KeyAt(KeyboardLayout(),on.u,on.v);
             beamLength=on.distance;
             const auto mid=ray+direction*(beamLength*.5f);
             const auto rot=math::BeamOrientation(direction,V(head.position)-mid);
@@ -2613,19 +2644,23 @@ void MenuPointer(const menus::Pad& controls) {
     stashPad=stashInput.Step(stashShown&&uiActive&&focused,stashHover,pressed,respecNow);
     // A pull on a VR keyboard key (the board under the menu, above).
     if(keyboardPress.Step(onKeyboard&&uiActive,pressed,GetTickCount64())&&keyboardLit>=0) {
-        const auto typed=keyboardTypist.Press(keyboardLit);
+        const auto typed=keyboardTypist.Press(KeyboardLayout(),keyboardLit);
         if(typed.close) {
             keyboardClosed=true;keyboardClosedEpoch=keyboardEpoch;
-            Say("Frame panels: VR keyboard closed until the name box comes up anew");
+            Say(keyboardText?"Frame panels: VR keyboard closed until a box takes the focus again, the panel's next view or its reopening":
+                             "Frame panels: VR keyboard closed until the name box comes up anew");
         } else if(typed.send!=keyboard::Send::None) {
             if(!focused)Say("Frame panels: VR keyboard key not sent - the game window is not focused");
             else if(!SendKeyboard(typed))Say("Frame panels: VR keyboard key could not be sent (not on this keyboard layout, or SendInput refused)");
             else {
                 static bool told=false;
                 if(!told){told=true;Say("Frame panels: VR keyboard typing into the game");}
+
             }
         }
     }
+    // The multiplayer panel's box lengths a moment after a key (gamestate logs a change only): did it land?
+
     const bool onButton=onStats||onRespec||stashHover>=0||onKeyboard;   // a stamped button: no game cursor, no game trigger
     // An item on the game's cursor and a trigger pull begun off the menu's art (past or on the
     // hide, or the band's see-through margins): the pad's X, the controller menu's own Drop for
@@ -2675,14 +2710,26 @@ void MenuPointer(const menus::Pad& controls) {
     // The campfire: the board owns the game's pointer only while the laser is on it - owned, a
     // pointer event no menu takes never reaches the scene, and the heroes could not be picked.
     if(active&&(!campfirePointer.load()||pointerHit))panelinput::OwnPointer();
+    // The multiplayer panel's boxes (keyboard::ParkedPointer): the laser crosses the panel's tabs and
+    // buttons on its way up to the VR keyboard, and the first one passed over took the clicked box's
+    // focus (owner 2026-11-17: nothing could be typed into the game name, password or description).
+    const bool parkPointer=keyboardShown&&keyboardText;
+    const auto park=keyboard::ParkedPointer(parkPointer,
+        active&&pointerHit&&!onButton&&!dropOwns&&!grabbing&&pressed&&!triggerWasDown,mouseDown||rightMouseDown);
+    const bool parkJump=park.jump;
+    static bool pointerParkTold=false;
+    if(parkPointer&&!pointerParkTold){pointerParkTold=true;Say("Frame panels: multiplayer panel - the game's pointer stays where the laser last clicked (passing over a button would take a box's focus)");}
+    int fieldX=-1,fieldY=-1;
     if(active&&pointerHit&&!onButton&&!dropOwns) {
         RECT client{};
         if(GetClientRect(gameWindow,&client)) {
             math::Vec native{hit.u,hit.v,0};
             if(!spatialMode&&cinemaMode)cinema::ToFrame(hit.u,hit.v,flat.band,width,height,native.x,native.y);   // the band's point in the frame
             if(spatialMode&&!journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},hit.u,hit.v,uiWidth,uiHeight,native))pointerHit=false;
+            fieldX=int(native.x*int(spatialMode?uiWidth:width));fieldY=int(native.y*int(spatialMode?uiHeight:height));
             POINT pixel{LONG(native.x*(client.right-1)),LONG(native.y*(client.bottom-1))};
-            if(pointerHit&&ClientToScreen(gameWindow,&pixel))pointerHit=SetCursorPos(pixel.x,pixel.y)!=FALSE;
+            if(pointerHit&&ClientToScreen(gameWindow,&pixel))
+                pointerHit=!park.move||SetCursorPos(pixel.x,pixel.y)!=FALSE;   // parked: the dot shows, the game's pointer stays
             else pointerHit=false;
         } else pointerHit=false;
     }
@@ -2691,7 +2738,7 @@ void MenuPointer(const menus::Pad& controls) {
     const bool modifiers=active&&(gamePointer||mouseDown||rightMouseDown);
     PanelModifier(VK_CONTROL,modifiers&&controls.lt>140,controlDown);
     PanelModifier(VK_SHIFT,modifiers&&!grabbing&&(controls.buttons&menus::RightBumper),shiftDown);
-    laserClick.Step(pressed&&!grabbing,(controls.buttons&menus::LeftBumper)!=0);
+    laserClick.Step(pressed&&!grabbing&&!parkJump,(controls.buttons&menus::LeftBumper)!=0);   // a Jump's click the frame after
     const auto edges=panelMouse.Step(active,gamePointer,laserClick.Left(),laserClick.Right());
     panelinput::ItemHover(active,gamePointer,panelMouse.down[0]||panelMouse.down[1]);
     for(int i=0;i<2;++i) {
@@ -2700,6 +2747,7 @@ void MenuPointer(const menus::Pad& controls) {
         if(edges.press[i]) {
             INPUT down{};down.type=INPUT_MOUSE;down.mi.dwFlags=i?MOUSEEVENTF_RIGHTDOWN:MOUSEEVENTF_LEFTDOWN;
             held=SendInput(1,&down,sizeof down)==1;
+            if(held&&!i&&keyboardDigits&&fieldX>=0)gamestate::MultiplayerField(fieldX,fieldY);
             if(!held)panelMouse.down[i]=false;
         }
     }
@@ -4127,6 +4175,30 @@ void Input() {
     if(!settingsOwned&&(menuPressed||inventoryPressed)&&!focused)focused=FocusGameForUi();
     if(heldKeyScan&&(!focused||GetTickCount64()>=keyReleaseAt))ReleaseUiKey();
     if(!settingsOwned&&!nativeUi&&focused&&menuPressed)PulseUiKey(VK_ESCAPE);
+    {   // The campfire's and the main menu's board (campfirePointer): Right B is Back - Escape to the game, which
+        // closes what is open over the menu (the options behind the cog under Play could not be closed, owner
+        // 2026-11-13). Not while the name keyboard is up nor with VR Settings open; on the press, once.
+        static bool boardBackWas=false;
+        const bool down=(controls.buttons&menus::B)!=0;
+        // The cog's panel and the multiplayer panel are D2RLoader's: Escape left them open and the game asked
+        // whether to quit (owner 2026-11-14, and the multiplayer panel's 2026-11-17 log) - they are closed by
+        // name (the multiplayer panel, keyboard and all, while nothing else is over it). With nothing over the
+        // menu, nothing: Escape there is Quit.
+        const bool nameKeyboard=gamestate::KeyboardShown()&&!gamestate::KeyboardText();
+        if(campfirePointer.load()&&down&&!boardBackWas&&!settingsOwned&&!settingsChord&&!nameKeyboard) {
+            if(gamestate::FrontSettingsOpen()) {
+                Say(gamestate::CloseFrontSettings()?"Frame campfire: Right B - closing the cog's panel (D2RLoaderSettingsPanel)":
+                                                     "Frame campfire: Right B - the cog's panel could not be asked to close");
+            } else if(gamestate::FrontMultiplayerOpen()) {
+                Say(gamestate::CloseFrontMultiplayer()?"Frame campfire: Right B - closing the multiplayer panel (D2RLoaderMultiplayerPanel)":
+                                                        "Frame campfire: Right B - the multiplayer panel could not be asked to close");
+            } else if(gamestate::FrontOverlayOpen()) {
+                const bool f=focused||FocusGameForUi();
+                if(f){PulseUiKey(VK_ESCAPE);Say("Frame campfire: Right B - Escape (Back) to the game");}
+            } else Say("Frame campfire: Right B - nothing open over the menu; no Escape (it would ask to quit)");
+        }
+        boardBackWas=down;
+    }
     if(!settingsOwned&&(!nativeUi||gripMenuPressed)&&inventoryPressed&&inWorld&&inWorld()) {
         // Keyboard shortcuts can be gated after switching input layouts or
         // panels. Queue the game's own panel actions on its UI thread instead.
@@ -7939,22 +8011,22 @@ void EndPair() {
             stashQuads[i].layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
         }
     }
-    // The VR keyboard on its own board under character creation's screen - the flat menu panel or
-    // the spatial surface, as MenuPointer aims at it - small letters, or capitals while Shift waits,
-    // and the key under the laser lit a hair in front of it.
+    // The VR keyboard on its own board under character creation's screen or the multiplayer panel -
+    // the flat menu panel or the spatial surface, as MenuPointer aims at it (KeyboardBoard) - small
+    // letters, or capitals while Shift waits, and the key under the laser lit a hair in front of it.
     XrCompositionLayerQuad keyboardQuad{XR_TYPE_COMPOSITION_LAYER_QUAD},keyboardLitQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(layer&&keyboardShown&&staticChain&&!settingsModel.open&&!bodyCalibration.Active()&&
        (spatialMode?book.subImage.swapchain!=XR_NULL_HANDLE:menuPlaced)) {
         const auto size=spatialMode?UiSurfaceSize():FlatPanel().size;
         const auto at=spatialMode?UiSurfacePose():menuPose;
-        const auto board=keyboard::Place(V(at.position),Q(at.orientation),size.width,size.height);
+        const auto board=KeyboardBoard(at,size);
         const bool capitals=keyboardTypist.Shifted();
         const XrPosef boardPose{{board.orientation.x,board.orientation.y,board.orientation.z,board.orientation.w},{board.position.x,board.position.y,board.position.z}};
-        motionQuad(keyboardQuad,boardPose,board.width,board.height,Rect(capitals?panelatlas::KeyboardCaps:panelatlas::Keyboard),staticChain);
+        motionQuad(keyboardQuad,boardPose,board.width,board.height,Rect(panelatlas::KeyboardPicture(keyboardText,capitals,false)),staticChain);
         keyboardQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;   // premultiplied (SetupStatic)
         if(keyboardLit>=0&&keyboardQuad.subImage.swapchain) {
-            const auto key=keyboard::KeySpot(board,keyboardLit);const auto r=keyboard::KeyTexelRect(keyboardLit);
-            const auto lit=capitals?panelatlas::KeyboardCapsLit:panelatlas::KeyboardLit;
+            const auto key=keyboard::KeySpot(KeyboardLayout(),board,keyboardLit);const auto r=keyboard::KeyTexelRect(KeyboardLayout(),keyboardLit);
+            const auto lit=panelatlas::KeyboardPicture(keyboardText,capitals,true);
             motionQuad(keyboardLitQuad,XrPose({board.position+math::Rotate(board.orientation,{key.x,key.y,.002f}),board.orientation}),key.width,key.height,
                 {{lit.x+r.x,lit.y+r.y},{r.w,r.h}},staticChain);
             keyboardLitQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
