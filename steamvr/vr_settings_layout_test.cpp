@@ -1077,6 +1077,29 @@ int main(int argc,char** argv){
         int laserDots=0;const L::Element* off=nullptr;for(const auto& e:laser.elements){if(e.role==L::Role::ColorDot)++laserDots;if(e.role==L::Role::PopoverOption)off=&e;}
         Check(laserDots==24&&off&&off->text=="Off"&&off->hit.value==LaserOff&&off->Has(L::Selected),"the arrow path line: Off a chip (chosen by default), 24 hues");
     }
+    {   // Summon range (#426) applies at once: no 'Requires restart' line, its value reads as a percent (100% to 500%), and it steps and drags in 10%.
+        Model m;m.Open(Ready());L::Press(m,{Kind::Open,int(View::Monsters),-1},0);
+        auto elementOf=[&](L::Role role)->L::Element{
+            const auto page=L::Build(m,m.context,{});
+            for(const auto& e:page.elements)if(e.role==role&&e.key==SummonRangeMultiplier)return e;
+            Check(false,"Summon range: its row is drawn on Monsters");return {};
+        };
+        const L::Element label=elementOf(L::Role::Label),value=elementOf(L::Role::Value);
+        Check(label.sub.empty()&&!label.Has(L::Warn),"Summon range: no 'Requires restart' line under its label");
+        Check(value.text=="100%","Summon range: the value box reads 100% at the game's own range");
+        Check(value.dragSteps==40&&value.dragIndex==0,"Summon range: a drag runs over 40 steps (100% to 500%)");
+        L::Press(m,{Kind::Change,SummonRangeMultiplier,1},0);
+        Check(m.Get()[SummonRangeMultiplier]==1.1f&&elementOf(L::Role::Value).text=="110%","Summon range: + is 110%");
+        L::Press(m,{Kind::Change,SummonRangeMultiplier,3},0);
+        Check(m.Get()[SummonRangeMultiplier]==1.4f&&elementOf(L::Role::Value).text=="140%"&&elementOf(L::Role::Value).dragIndex==4,"Summon range: three held steps are 140%, the drag knob at step 4");
+        L::Press(m,{Kind::Change,SummonRangeMultiplier,-100},0);
+        Check(m.Get()[SummonRangeMultiplier]==1.f,"Summon range: below the bottom stays 100%");
+        L::Press(m,{Kind::Change,SummonRangeMultiplier,100},0);
+        Check(m.Get()[SummonRangeMultiplier]==5.f&&elementOf(L::Role::Value).text=="500%","Summon range: past the top stays 500%");
+        L::Press(m,{Kind::Set,SummonRangeMultiplier,0,1.25f},0);
+        L::Press(m,{Kind::Change,SummonRangeMultiplier,1},0);
+        Check(m.Get()[SummonRangeMultiplier]==1.35f,"Summon range: a 1.25 from an older profile steps to 135%");
+    }
     {   // The fallback (docs/VR_SETTINGS_MENU.md): settings with no override still show, with upstream's words.
         const auto& demo=content::FallbackDemo();const L::Tables t=L::TablesOf(demo);
         auto rowOf=[&](Key k)->const content::ContentRow*{return t.Row(k);};

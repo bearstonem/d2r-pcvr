@@ -10,6 +10,8 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <iterator>
+#include "../steamvr/logging.h"
 
 namespace framevr::summonrange::native {
 using ThinkFn=void(*)(uintptr_t,uintptr_t,uintptr_t);
@@ -18,12 +20,13 @@ inline ThinkFn originalWolf=nullptr,originalBear=nullptr;
 inline EnumerateFn originalEnumerate=nullptr;
 inline std::atomic<bool> ready{false};
 inline std::atomic<uint64_t> wolfCalls{0},bearCalls{0},searchCalls{0};
-// Written during startup only; reload refuses changes until restart.
-inline double aggroMultiplier=1,leashMultiplier=1;
+// Set at startup, then only by ApplyPosted (below) when Summon range changes in VR Settings.
+inline std::atomic<double> aggroMultiplier{1},leashMultiplier{1};
 inline uintptr_t base=0;
 struct Scope {uintptr_t game=0,unit=0;};
 inline thread_local Scope scope;
 struct Restore {Scope saved=scope;~Restore(){scope=saved;}};
+inline void ApplyPosted();   // below: the first line of every pet hook
 constexpr uint64_t WolfRva=0x5ca610,BearRva=0x5c95d0,EnumerateRva=0x596340;
 constexpr uint8_t WolfSig[]={0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xec,0x20};
 constexpr uint8_t BearSig[]={0x40,0x53,0x55,0x56,0x57,0x41,0x56,0x48,0x83,0xec,0x60};
@@ -61,6 +64,7 @@ inline bool PrepareWolf(uintptr_t unit,uintptr_t tick,std::array<uint8_t,64>& lo
     return true;
 }
 inline void Wolf(uintptr_t game,uintptr_t unit,uintptr_t tick) {
+    ApplyPosted();
     if(!ready.load(std::memory_order_acquire)) {originalWolf(game,unit,tick);return;}
     Restore restore;scope={game,unit};
     std::array<uint8_t,64> localTick{};
@@ -71,6 +75,7 @@ inline void Wolf(uintptr_t game,uintptr_t unit,uintptr_t tick) {
     } else originalWolf(game,unit,tick);
 }
 inline void Bear(uintptr_t game,uintptr_t unit,uintptr_t tick) {
+    ApplyPosted();
     if(!ready.load(std::memory_order_acquire)) {originalBear(game,unit,tick);return;}
     Restore restore;scope={game,unit};
     bearCalls.fetch_add(1,std::memory_order_relaxed);
@@ -138,7 +143,7 @@ inline RangeState StateOf(const RangeSite& site,uintptr_t image,double factor) {
     return {Scale(site.native,factor),0,next,uintptr_t(intptr_t(next)+relative)};
 }
 struct Patch {uint64_t rva;std::array<uint8_t,8> bytes;uint32_t size,immediate,width;bool owner;};
-// Bear target search already takes a full 32-bit immediate.
+// The Bear target search takes a full 32-bit immediate. Install verifies its bytes and hooks the site (live::BearSearchStore).
 constexpr Patch patches[]={
     {0x5c97e2,{0xc7,0x44,0x24,0x28,0x1c,0,0,0},8,4,4,false},
 };
@@ -206,6 +211,7 @@ inline void PrepareParameters(int ai,std::array<uint8_t,508>& row) {
 }
 inline ThinkFn originals[7]{};
 inline void Think(unsigned index,uintptr_t game,uintptr_t unit,uintptr_t tick) {
+    ApplyPosted();
     Restore restore;RestoreContext saved;
     std::array<uint8_t,64> local{};std::array<uint8_t,508> row{};
     if(Enter(game,unit,index==0)&&Read(tick,local)&&Read(Get<uintptr_t>(local,0x28),row)) {
@@ -290,10 +296,8 @@ inline bool Check(const D2RL::PluginContext* ctx) {
 }
 inline bool Install(const D2RL::PluginContext* ctx) {
     owner=reinterpret_cast<OwnerFn>(ctx->exeBase+0x4a53c0);
-    for(const auto& s:sites) {
-        if(leashMultiplier==1&&(s.rva==0x596720||s.rva==0x324fc0))continue;
+    for(const auto& s:sites)   // every site, also at 100%: a later change in VR Settings has to reach them
         if(!ctx->InstallInlineHook(s.rva,s.bytes.data(),s.size,s.detour,s.original))return false;
-    }
     for(size_t i=0;i<std::size(gates);++i) {
         const auto& g=gates[i];summonPetThresholds[i]=Scale(g.bytes[g.immediate],aggroMultiplier);
         summonPetNext[i]=ctx->exeBase+g.rva+g.size;
@@ -309,10 +313,111 @@ inline int AggroRange(int value,uintptr_t game,uintptr_t unit) {
     return Scale(value,aggroMultiplier);
 }
 
+// Summon range applies live (VR Settings > Monsters > Summons > Summon range, no restart).
+// Install bakes twelve numbers once: the seven CMP stubs' thresholds (summonRangeBranches), the four Necro gates
+// (other::summonPetThresholds) and the Grizzly's target search. A change in VR Settings rewrites exactly those numbers. The settings
+// thread only Posts the new multiplier (two atomic stores); the next pet AI hook (ApplyPosted, the first line of Wolf, Bear and every
+// other::Think) rewrites the tables on the AI thread, between two pets' calls, and the stubs and gates read them inside those same
+// calls. Every cell is one aligned 32-bit store, so a reader never sees a torn number. At 100% `ready` is false: every hook passes
+// straight to the game's own function and the tables hold the game's own numbers.
+namespace live {
+constexpr size_t Branches=std::size(ranges),Gates=std::size(other::gates),Searches=std::size(patches);
+constexpr int Sites=int(Branches+Gates+Searches);
+// The one baked patch turned into a data read: mov dword [rsp+0x28],28 at 0x5c97e2, the Grizzly's target search (a full 32-bit
+// immediate, aggro-scaled). A second patch, another width or another place needs its own stub: stop here.
+static_assert(Searches==1&&patches[0].rva==0x5c97e2&&patches[0].size==8&&patches[0].immediate==4&&patches[0].width==4&&
+              !patches[0].owner&&patches[0].bytes[4]==28,"the baked patch table changed, so its stub must be revisited");
+inline bool Valid(double m){return std::isfinite(m)&&m>=1&&m<=5;}
+// Every number the tables hold for one multiplier: upstream's own Scale over the same ranges, gates and patches tables.
+struct Cells {int branch[Branches],gate[Gates],search[Searches];};
+inline Cells Compute(double aggro,double leash) {
+    Cells c{};
+    for(size_t i=0;i<Branches;++i)c.branch[i]=Scale(ranges[i].native,ranges[i].owner?leash:aggro);
+    for(size_t i=0;i<Gates;++i)c.gate[i]=Scale(other::gates[i].bytes[other::gates[i].immediate],aggro);
+    for(size_t i=0;i<Searches;++i)c.search[i]=Scale(patches[i].bytes[patches[i].immediate],patches[i].owner?leash:aggro,32767);
+    return c;
+}
+// The target search as a data read: the original instruction is `mov dword [rsp+0x28],28` (c7 44 24 28 1c 00 00 00). The stub stores the
+// cell in the same stack slot (0x28 plus the 8 bytes it pushes = 0x30) and jumps to the next instruction; mov, push and pop leave the
+// flags alone, and Windows x64 has no red zone. At 100% the cell is 28: the original store, exactly.
+extern "C" {
+inline int summonBearSearch=28;
+inline uintptr_t summonBearSearchNext=0;
+}
+__attribute__((naked,noinline)) inline void BearSearchStore() {
+    __asm__ volatile("push %rax\n"
+                     "mov summonBearSearch(%rip), %eax\n"
+                     "mov %eax, 0x30(%rsp)\n"
+                     "pop %rax\n"
+                     "jmp *summonBearSearchNext(%rip)\n");
+}
+inline void* searchOriginal=nullptr;   // the loader's trampoline; the stub jumps to the verified successor instead
+// Writing the tables: the real ones (RealSink), or a test's. Going to 100%, `ready` drops first (every hook already reads the game's
+// own numbers); going above, it rises last, after the tables and the multipliers are in.
+struct RealSink {
+    void Branch(size_t i,int v){__atomic_store_n(&summonRangeBranches[i].threshold,v,__ATOMIC_RELAXED);}
+    void Gate(size_t i,int v){__atomic_store_n(&other::summonPetThresholds[i],v,__ATOMIC_RELAXED);}
+    void Search(size_t,int v){__atomic_store_n(&summonBearSearch,v,__ATOMIC_RELAXED);}
+    void Multipliers(double aggro,double leash){
+        aggroMultiplier.store(aggro,std::memory_order_release);
+        leashMultiplier.store(leash,std::memory_order_release);
+    }
+    void Ready(bool on){ready.store(on,std::memory_order_release);}
+};
+template<class Sink> inline void Write(Sink& sink,double aggro,double leash) {
+    const Cells c=Compute(aggro,leash);
+    const bool active=aggro>1||leash>1;
+    if(!active)sink.Ready(false);
+    for(size_t i=0;i<Branches;++i)sink.Branch(i,c.branch[i]);
+    for(size_t i=0;i<Gates;++i)sink.Gate(i,c.gate[i]);
+    for(size_t i=0;i<Searches;++i)sink.Search(i,c.search[i]);
+    sink.Multipliers(aggro,leash);
+    if(active)sink.Ready(true);
+}
+struct Change {double from=1,to=1;};
+// The settings thread posts, the AI thread drains. Nothing is applied until Install arms it, nor after Shutdown disarms it.
+class Mailbox {
+public:
+    void Arm(double current){current_=current;seen_=posted_.load(std::memory_order_acquire);armed_.store(true,std::memory_order_release);}
+    void Disarm(){armed_.store(false,std::memory_order_release);}
+    void Post(double m) {   // any thread; a post while not armed is dropped by Arm (it re-reads the counter) and by Drain
+        value_.store(m,std::memory_order_release);
+        posted_.fetch_add(1,std::memory_order_release);
+    }
+    // The AI thread, at the top of a pet hook. Nothing posted: two loads and a compare. A posted value that is not a valid
+    // multiplier, or is the one already in, changes nothing.
+    template<class Sink> bool Drain(Sink& sink,Change& out) {
+        if(!armed_.load(std::memory_order_acquire))return false;
+        const uint32_t p=posted_.load(std::memory_order_acquire);
+        if(p==seen_)return false;
+        seen_=p;
+        const double m=value_.load(std::memory_order_acquire);
+        if(!Valid(m)||m==current_)return false;
+        Write(sink,m,m);
+        out=Change{current_,m};current_=m;
+        return true;
+    }
+private:
+    std::atomic<double> value_{1};
+    std::atomic<uint32_t> posted_{0};
+    std::atomic<bool> armed_{false};
+    uint32_t seen_=0;    // AI thread only, set by Arm before armed_ rises
+    double current_=1;   // likewise
+};
+inline Mailbox mailbox;
+}
+inline void ApplyPosted() {
+    live::Change change;live::RealSink sink;
+    if(!live::mailbox.Drain(sink,change))return;
+    char line[220];
+    std::snprintf(line,sizeof line,"Frame summon range: live: %.0f%% > %.0f%%; %d sites rewritten (%u branches, %u gates, %u search); ready=%d",
+        change.from*100,change.to*100,live::Sites,unsigned(live::Branches),unsigned(live::Gates),unsigned(live::Searches),ready.load(std::memory_order_relaxed)?1:0);
+    framevr::logging::Write(line);
+}
+
 enum class InstallResult {Unavailable,Ready,Failed};
 inline InstallResult Install(const D2RL::PluginContext* ctx) {
-    ready.store(false,std::memory_order_release);base=ctx->exeBase;
-    if(aggroMultiplier==1&&leashMultiplier==1) return InstallResult::Unavailable;
+    ready.store(false,std::memory_order_release);base=ctx->exeBase;live::mailbox.Disarm();
     bool valid=true;
     const auto check=[&](uint64_t rva,const uint8_t* bytes,uint32_t size) {
         if(ctx->CheckExpectedBytes(rva,bytes,size)) return;
@@ -348,16 +453,18 @@ inline InstallResult Install(const D2RL::PluginContext* ctx) {
         summonRangeBranches[i]=StateOf(site,base,site.owner?leashMultiplier:aggroMultiplier);
         if(!ctx->InstallInlineHook(site.rva,site.bytes.data(),site.size,reinterpret_cast<void*>(site.detour),&rangeOriginals[i]))return InstallResult::Failed;
     }
-    for(const auto& patch:patches) {
-        auto bytes=patch.bytes;
-        const int value=Scale(bytes[patch.immediate],patch.owner?leashMultiplier:aggroMultiplier,32767);
-        if(patch.width==1) bytes[patch.immediate]=static_cast<uint8_t>(value);
-        else std::memcpy(bytes.data()+patch.immediate,&value,sizeof value);
-        if(bytes!=patch.bytes&&!ctx->PatchBytes(patch.rva,patch.bytes.data(),patch.size,bytes.data(),patch.size)) return InstallResult::Failed;
-    }
+    // The target search is hooked, not patched: its stub stores the live cell (live::BearSearchStore).
+    live::summonBearSearchNext=base+patches[0].rva+patches[0].size;
+    if(!ctx->InstallInlineHook(patches[0].rva,patches[0].bytes.data(),patches[0].size,reinterpret_cast<void*>(&live::BearSearchStore),&live::searchOriginal))return InstallResult::Failed;
     if(!other::Install(ctx))return InstallResult::Failed;
-    ready.store(true,std::memory_order_release);
-    ctx->LogInfo("Shared summon aggression/leash enabled. Player-owned summons only; mercenaries and native attack reach retained. Offline gameplay test required.");
+    // Every table, the search cell and `ready` (false at 100%) for the startup multiplier; Summon range changes post from here on.
+    live::RealSink sink;live::Write(sink,aggroMultiplier,leashMultiplier);
+    live::mailbox.Arm(aggroMultiplier);
+    char line[260];
+    std::snprintf(line,sizeof line,"Frame summon range: live: installed at %.0f%% (%d range sites: %u branches, %u gates, %u search); ready=%d (the adapter idles at 100%%); applies on the pet AI thread, between pets",
+        aggroMultiplier*100,live::Sites,unsigned(live::Branches),unsigned(live::Gates),unsigned(live::Searches),ready.load(std::memory_order_relaxed)?1:0);
+    framevr::logging::Write(line);
+    ctx->LogInfo("Shared summon aggression/leash installed; Summon range applies live and idles at 100%. Player-owned summons only; mercenaries and native attack reach retained. Offline gameplay test required.");
     return InstallResult::Ready;
 }
 }
