@@ -1,5 +1,5 @@
 #pragma once
-// Lab Ring wheel (T025 round 2026-11-08, item 3): every skill name the game can show, longest first, for the hold line's width test
+// Ring skill menu (T025 round 2026-11-08, item 3): every skill name the game can show, longest first, for the hold line's width test
 // (ring-wheel-preview, the real font). From the game's skilldesc.txt "str name" through its enUS strings; test data only, never shipped.
 namespace framevr::ringwheel {
 inline constexpr const char* AllSkillNames[] = {

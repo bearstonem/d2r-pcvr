@@ -1,10 +1,10 @@
 #pragma once
-// Lab Ring wheel (T025, review-r6 X4): waiting for the reply to a ring bind, assign or glyph, as plain data. Pure and
+// Ring skill menu (T025, review-r6 X4): waiting for the reply to a ring bind, assign or glyph, as plain data. Pure and
 // Windows-free (ring-wheel-test).
 //
 // Transport's request queue (interactionstate::Request) drops a request silently while another is queued or waiting, so a
 // ring bind could get no reply at all: no log, no "Refused", no pulse. Two rules now:
-//  - the Lab sends its next request only once the one before is answered (else transport would drop the new one);
+//  - the ring sends its next request only once the one before is answered (else transport would drop the new one);
 //  - a request with no answer within upstream's own limit (interactions.h: a pending request is Refused after 1.5 s) is
 //    refused, so every request the ring sends is answered exactly once.
 #include <cstdint>

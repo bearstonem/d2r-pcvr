@@ -1,4 +1,4 @@
-// Lab Ring wheel (T025, build-plan L1b): Tree orbs' open-tree state (steamvr/ring_wheel_orbs.h). Measured with the real glyph
+// Ring skill menu (T025, build-plan L1b): Tree orbs' open-tree state (steamvr/ring_wheel_orbs.h). Measured with the real glyph
 // metrics: upstream's menu fonts through the atlas worker's own BuildGlyphs (DirectWrite; no GPU), so every width is the one
 // the wheel draws with.
 #include "ring_wheel_orbs.h"

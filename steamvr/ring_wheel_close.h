@@ -1,8 +1,8 @@
 #pragma once
-// Lab Ring wheel (T025 round 2026-11-08 #1, Jeff's rule for closing): with the Lab On the wheel closes only on a deliberate
+// Ring skill menu (T025 round 2026-11-08 #1, Jeff's rule for closing): with the ring On the wheel closes only on a deliberate
 // action or a named safety reason. A hitch of any length, a lost hand, a lost laser or the headset's tracking never closes it.
 // Upstream closes the wheel on an input gap over 100 ms (hand_controls.h:44) and the engine resets on one over 150 ms
-// (interactions.h:787); the Lab shows both a clock that never makes a step that long while the wheel is open. Pure: the Lab
+// (interactions.h:787); the ring shows both a clock that never makes a step that long while the wheel is open. Pure: the ring
 // feeds each frame's facts; ring_wheel_test.cpp drives it with upstream's real HandControls and Engine.
 #include <algorithm>
 #include <cstdint>
@@ -38,7 +38,7 @@ public:
         return o;
     }
     double Offset() const { return offset_; }
-    double RealStep() const { return step_; }   // the last real step, for a close the Lab cannot name
+    double RealStep() const { return step_; }   // the last real step, for a close the ring cannot name
     void Clear() { offset_ = 0; }
 };
 
@@ -127,7 +127,7 @@ public:
     double RealStep() const { return clock_.RealStep(); }
     // The wheel's own timers (quick cast, hold to assign): a hitch must not count as a long hold, so they run on the shown clock.
     double NowMs(double realMs) const { return realMs - clock_.Offset() * 1000; }
-    // The Lab's Off edge and the XR session's end. One jump to real time: on that frame upstream sees what any real gap shows.
+    // the ring's Off edge and the XR session's end. One jump to real time: on that frame upstream sees what any real gap shows.
     void Reset() { *this = Hold{}; }
 };
 }  // namespace framevr::ringwheel::closing

@@ -1,8 +1,8 @@
 #pragma once
-// Lab Ring wheel (T025, build steps R4-R5): the compose pass. It draws steamvr/ring_wheel_draw.h's instance list into a
-// target (the Lab's own layer swapchain in the game from R6, a WARP texture in ring-wheel-preview). Plan E3, E4,
+// Ring skill menu (T025, build steps R4-R5): the compose pass. It draws steamvr/ring_wheel_draw.h's instance list into a
+// target (the ring's own layer swapchain in the game from R6, a WARP texture in ring-wheel-preview). Plan E3, E4,
 // the design notes sections 2, 3 and 6:
-//  - Setup runs on the Lab's worker (vr/ring_wheel_atlas.h), never on the frame thread: shader compile (about 20 ms),
+//  - Setup runs on the ring's worker (vr/ring_wheel_atlas.h), never on the frame thread: shader compile (about 20 ms),
 //    root signature, pipeline, three slots, both atlases twice (front and back), one upload staging, the query heap and a
 //    persistently mapped readback. Ready() is its release store; the frame thread reads it with acquire.
 //  - Atlases: the worker writes a packed image into the mapped staging (Stage); the frame thread's Pump copies at most 1 MB
@@ -11,7 +11,7 @@
 //    re-submits the last image and keeps the compose due (ComposePolicy::Done(false)). A closed wheel never calls it.
 //  - Output is premultiplied (ONE, INV_SRC_ALPHA, color and alpha) for a layer with XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT.
 //  - Window() hands the CPU and GPU cost of every compose since the last call (mean, max, p95) to the E8 10 s line.
-//  - Release waits on the Lab's own fence once, at most `waitMs`; false = still in flight, keep it and free in OnUiReset.
+//  - Release waits on the ring's own fence once, at most `waitMs`; false = still in flight, keep it and free in OnUiReset.
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -38,7 +38,7 @@ struct AtlasImage {
     size_t MipOffset(int mip) const { size_t o = 0; for (int i = 0; i < mip; ++i) { const size_t s = size_t(px >> i); o += s * s * size_t(bpp); } return o; }
 };
 // A screenshot's pixels, in the readback buffer the GPU has filled (Compose::Shot waited for that copy). It holds that
-// buffer and nothing else of the compose pass, which may be freed first (the Lab going Off with a save pending).
+// buffer and nothing else of the compose pass, which may be freed first (the ring going Off with a save pending).
 // Round 2026-11-12 Job B: reading 7 MB out of it cost the frame about 2 ms, so the save worker does it (Read).
 class ShotRows {
 public:
@@ -65,7 +65,7 @@ public:
     ~Compose();
     Compose(const Compose&) = delete;
     Compose& operator=(const Compose&) = delete;
-    // Any one thread, once (the Lab's worker). `format` a DXGI_FORMAT: R8G8B8A8 / B8G8R8A8, UNORM or _SRGB (sRGB targets get
+    // Any one thread, once (the ring's worker). `format` a DXGI_FORMAT: R8G8B8A8 / B8G8R8A8, UNORM or _SRGB (sRGB targets get
     // linear colors; the hardware encodes).
     bool Setup(ID3D12Device* device, ID3D12CommandQueue* queue, int format, void (*say)(const char*));
     bool Ready() const { return ready.load(std::memory_order_acquire); }
@@ -73,7 +73,7 @@ public:
     bool StagingFree() const { return Ready() && stage.load(std::memory_order_acquire) == 0; }
     // Worker: copies `image` into the mapped staging and hands it to the frame thread. False when not free or malformed.
     bool Stage(const AtlasImage& image);
-    // Frame thread, once a frame while the Lab is On: at most 1 MB of a staged atlas; the bytes copied (0: nothing to do or busy).
+    // Frame thread, once a frame while the ring is On: at most 1 MB of a staged atlas; the bytes copied (0: nothing to do or busy).
     size_t Pump();
     bool HasAtlas(AtlasKind k) const;
     unsigned Flips(AtlasKind k) const;   // atlases flipped in so far
@@ -87,7 +87,7 @@ public:
     bool EffectsPending() const;
     bool FinishEffects(void (*say)(const char*));
     ShaderStats Stats() const;
-    // Frame thread: a Draw now would get a slot (no wait). The Lab asks before it acquires a swapchain image, so a busy
+    // Frame thread: a Draw now would get a slot (no wait). the ring asks before it acquires a swapchain image, so a busy
     // ring never acquires one it cannot draw.
     bool CanDraw() const;
     enum class Result { Composed, Busy, NotReady };
@@ -101,8 +101,8 @@ public:
     // Round 2026-11-12 Job B: the frame thread stops there, `out` holding the filled buffer. Copying its rows out
     // (ShotRows::Read), the picture (shot::Picture: the sRGB and straight-alpha math) and the PNG are the save worker's.
     const char* Shot(const ContentRect& content, const Instance* list, int n, unsigned waitMs, ShotRows& out);
-    uint64_t Submitted() const;     // the Lab fence's last value
-    uint64_t Completed() const;     // the Lab fence's completed value
+    uint64_t Submitted() const;     // the ring fence's last value
+    uint64_t Completed() const;     // the ring fence's completed value
     unsigned SkippedBusy() const;
     struct Window { unsigned composes = 0, gpuSamples = 0; double cpuMean = 0, cpuMax = 0, cpuP95 = 0, gpuMean = 0, gpuMax = 0, gpuP95 = 0; };
     Window TakeWindow();            // every compose since the last call (GPU: those completed), then reset

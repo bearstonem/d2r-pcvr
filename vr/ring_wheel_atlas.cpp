@@ -1,4 +1,4 @@
-// Lab Ring wheel (T025, build step R5): the atlases on the Lab's worker (vr/ring_wheel_atlas.h).
+// Ring skill menu (T025, build step R5): the atlases on the ring's worker (vr/ring_wheel_atlas.h).
 #include "ring_wheel_atlas.h"
 #include "../steamvr/spell_sprites.h"   // stage 3a: upstream's spell sprite cache reader (pure)
 #include "../steamvr/ring_wheel_unbake.h"   // T036: the clean icon's key (pure)
@@ -207,7 +207,7 @@ void BuildIcons(const int* ids, int n, int scalePct, const IconSource& source, c
         const float cx0 = whole ? 0.f : im->width * (14.f / 132), cy0 = whole ? 0.f : im->height * (13.f / 130);
         const float kx = (whole ? float(im->width) : im->width * (104.f / 132)) / art, ky = (whole ? float(im->height) : im->height * (104.f / 130)) / art;
         // T036 (ring_wheel_unbake.h): the clean icon, the glyph keyed out of the game's plate per source pixel, its tint pulled
-        // to gray; our own art and a remapped icon (Kick while Lab Kick icon is On) stay whole.
+        // to gray; our own art and a remapped icon (Kick while ring Kick icon is On) stay whole.
         const bool key = unbake::Keyed(unique[u], variant);
         if (key) ++pack.keyed;
         std::fill(acc.begin(), acc.end(), 0.f);
@@ -415,7 +415,7 @@ void AtlasWorker::Loop() {
         ++builds;
         last = r; any = true;
         if (compose->EffectsPending()) compose->FinishEffects(say);   // no offline blob: the effects' compile, after the first atlas
-        if (!fxTexTried) {   // stage 3a: the game effect textures, once per On (Lab On only: this worker runs only then)
+        if (!fxTexTried) {   // stage 3a: the game effect textures, once per On (ring On only: this worker runs only then)
             fxTexTried = true;
             const auto t = std::chrono::steady_clock::now();
             AtlasImage fx; int served = 0; std::string why;

@@ -1,4 +1,4 @@
-// Lab Ring wheel (T025, build step R2; steamvr/ring_wheel.h): the seats of both Tree layouts against the kit's numbers,
+// Ring skill menu (T025, build step R2; steamvr/ring_wheel.h): the seats of both Tree layouts against the kit's numbers,
 // the hit test (nearest wins, hysteresis, faded trees take no hits, the center halves, the footer remap onto upstream's
 // cells), the tree dwell and hold, fire on release, the page lockout, and pick / bind / clear.
 #include <algorithm>
@@ -995,7 +995,7 @@ int main() {
             Check(l.Step(q, set).event == rw::PageEvent::None, "R7 a press inside the 250 ms lockout fires nothing");
         }
         {   // 2026-11-16 (Jeff: "ring menu > quick cast / ring menu > gestures / ring menu > glyph"): Quick cast's page, its 12 places
-            // on r 205 open the chooser for that place, the whole center is Back (the Lab's page: no upstream cell), the footer upstream's Spells
+            // on r 205 open the chooser for that place, the whole center is Back (the ring's page: no upstream cell), the footer upstream's Spells
             rw::PageEngine e; double t = 0; settle(e, rw::RingPage::Quick, rw::QuickPlaces, t);
             for (int i = 0; i < rw::QuickPlaces; ++i) {
                 const auto [x, y] = at(i, rw::QuickPlaces, rw::QuickR);
@@ -1186,7 +1186,7 @@ int main() {
             auto ordersIn = [&](const rw::Layout& l) { std::vector<int> ids; for (int i = 0; i < l.count; ++i) if (rw::OrderSeat(l, i)) ids.push_back(l.seats[size_t(i)].id); return ids; };
             const std::vector<int> all7{3901, 3902, 3903, 3904, 3905, 3906, 3907};
             {   // 2026-11-16: Quick cast's chooser: every tree seat where the main ring has it, the shelf skills Quick cast casts, then its
-                // eight potions and scrolls (Lab Quick cast radial's family ids) on the row; the list never a Lab entry or an order
+                // eight potions and scrolls (ring Quick cast radial's family ids) on the row; the list never a ring entry or an order
                 const std::vector<int> fams{(2 << 28) | 1, (2 << 28) | 2, (2 << 28) | 3, (2 << 28) | 6, (2 << 28) | 4, (2 << 28) | 5, (2 << 28) | 16, (2 << 28) | 17};
                 int ninthCost = 0;   // review F8 (2026-11-17): classes whose chooser would lose a shelf skill to a ninth row seat
                 const auto shelfKept = [](const rw::Layout& l) { int k = 0; for (int i = 0; i < l.count; ++i) k += l.seats[size_t(i)].tree < 0 && !rw::ItemSeat(l.seats[size_t(i)].id) && !rw::OrderSeat(l, i); return k; };
@@ -1808,7 +1808,7 @@ int main() {
               std::string(rw::FooterLabel(3, P::Spells, false, true)) == "INVENTORY" && std::string(rw::FooterLabel(4, P::Spells, true, true)) == "DEV", "item 4: the labels as upstream's");
         Check(std::string(rw::FooterLabel(0, P::EditSkills, false, true)) == "PREVIOUS" && std::string(rw::FooterLabel(1, P::EditSkills, false, true)) == "NEXT" &&
               std::string(rw::FooterLabel(2, P::EditSkills, false, true)) == "BACK", "item 4: the editor footer reads PREVIOUS / NEXT / BACK");
-        // Upstream's own lines, so a rename there fails here (the Lab's copy stays upstream's words).
+        // Upstream's own lines, so a rename there fails here (the ring's copy stays upstream's words).
         std::string ui;
         { std::string here = __FILE__; here = here.substr(0, here.find_last_of("/\\") + 1); std::ifstream in(here + "interaction_ui.cpp"); std::stringstream ss; ss << in.rdbuf(); ui = ss.str(); }
         Check(ui.find(R"(const char* footer[5]={(o.utility||o.map||o.developer||o.glyphs||o.motions)?"SPELLS":"EQUIPMENT","MAP","VR SETTINGS",handWheel?"INVENTORY":"EDIT SKILLS","DEV"};)") != std::string::npos &&
@@ -2038,7 +2038,7 @@ int main() {
             f.Click(1); f.Step(5);
             Check(f.Open(1), "#1 after a " + g + " gap: the reopen is normal");
         }
-        {   // Lab Off: upstream's rules, as before
+        {   // ring Off: upstream's rules, as before
             Frame f; f.labOn = false; f.Click(1); f.Step(60); f.One(.101);
             Check(f.hc.Wheel() == -1, "#1 Lab Off: a 101 ms gap closes (upstream)");
             Frame g; g.labOn = false; g.Click(1); g.Step(60); g.One(.09);
@@ -2100,7 +2100,7 @@ int main() {
                 Check(ev == rw::Quick::Assign && n * 11 + 90 + 66 >= 1000 && n * 11 + 90 + 66 <= 1030, "#1 M1 " + g + ": a real hold assigns at the full time of shown frames (" + std::to_string(n) + " frames)");
             }
         }
-        {   // Merge check M1 (ff4007a8): the Glyphs half's "click spent" test and the hold it reads share one clock. As the Lab's Input seam:
+        {   // Merge check M1 (ff4007a8): the Glyphs half's "click spent" test and the hold it reads share one clock. As the ring's Input seam:
             // the test first, on last frame's QuickOut, then QuickCast on the shown clock. A hitch leaves an offset until the session ends.
             struct Tap { bool spent = false, tapped = false; };
             auto run = [&](double earlierHitch, double hitchDuring, int heldFrames) {
@@ -2199,11 +2199,11 @@ int main() {
             Check(b.Step(true, 4000, false), "#1 a new blip holds"); b.Focused();
             Check(b.Step(true, 9000, false), "#1 back in focus: the next blip starts over");
         }
-        {   // B: only a fresh press cancels (SlotPress state as the Lab keeps it; right B is index 2)
+        {   // B: only a fresh press cancels (SlotPress state as the ring keeps it; right B is index 2)
             const int per[3] = {4, 4, 4};
             const auto l = ClassLayout(1, per, rw::TreeLayout::Shown);
             rw::QuickCast qc; rw::QuickIn q; q.main = true; q.under = {};
-            bool held[3] = {true, true, true};   // the Lab's state at an open: everything counts as held
+            bool held[3] = {true, true, true};   // the ring's state at an open: everything counts as held
             auto frame = [&](double ms, bool down) { const bool d[3] = {false, false, down}; q.nowMs = ms; q.press[0] = rw::SlotPress(d, false, held); return qc.Step(q, l).event; };
             Check(frame(1000, true) == rw::Quick::None, "#1 B held at the open: no close");
             Check(frame(6000, true) == rw::Quick::None, "#1 B held through a 5 s gap: no close");
@@ -2276,7 +2276,7 @@ int main() {
                 Check(!fc.Step(false, int(ia::MenuPage::Spells), 11, 0, false) && !fc.Step(false, int(ia::MenuPage::Spells), 11, 1, false),
                       "bug 3: the ring's own page: nothing (the Lab's own write names that close)");
             }
-            {   // the Lab On cost of the one step this adds to every frame (the Request seam): printed for the perf gate
+            {   // the ring On cost of the one step this adds to every frame (the Request seam): printed for the perf gate
                 rw::FooterClick fc; unsigned seed = 7; int named = 0;
                 const int n = 4000000;
                 const auto t0 = std::chrono::steady_clock::now();
@@ -2310,8 +2310,8 @@ int main() {
             }
         }
     }
-    {   // Review-bug9 M1: each close reason. The Lab writes at frame k-1 (after that frame's Frame call), the close edge shows at
-        // frame k; a write from two frames back is stale (the old code read that one, so every Lab close said upstream).
+    {   // Review-bug9 M1: each close reason. the ring writes at frame k-1 (after that frame's Frame call), the close edge shows at
+        // frame k; a write from two frames back is stale (the old code read that one, so every ring close said upstream).
         const bool none[2]{}, left[2]{false, true}, right[2]{true, false};
         auto close = [&](const char* wrote, int staleFrames, const bool* click, const char* safety, uint64_t sessionAtClose) {
             rw::WheelEdges e;
@@ -2362,7 +2362,7 @@ int main() {
         }
         { auto e = opened(); e.Wrote("center"); Check(e.Cleared("xr-sync-failed", false).reason == "xr-sync-failed" && opened().Cleared("copy-failed", false).reason == "copy-failed", "N1: the same for a failed sync; a clear with no write is unchanged"); }
         Check(rw::ClosedLine("headset-focus", 12.34, "Spells") == "Frame ring wheel: closed reason=headset-focus after 12.3 s, page Spells", "bug 2: the close line's words are unchanged (" + rw::ClosedLine("headset-focus", 12.34, "Spells") + ")");
-        {   // The Lab's two handlers in transport's order, 11 ms frames: the headset off at 5 s for 1.5 s (Nov 10 4:45 PM), or for
+        {   // the ring's two handlers in transport's order, 11 ms frames: the headset off at 5 s for 1.5 s (Nov 10 4:45 PM), or for
             // good (Nov 8 11:04 AM, the game ended unfocused). Blip: FocusBlip, then the name; Cleared: OnClearInput in ClearInput.
             auto run = [&](double backAtMs, bool sessionStops, std::vector<std::string>& lines, const char* ignoredWrite = nullptr) {
                 rw::WheelEdges e; rw::closing::FocusBlip blip; const char* why = nullptr; bool shut = false;
@@ -2471,11 +2471,11 @@ int main() {
             const bool had = g->chain; g->chain = false;
             rw::SayReleased(had, [&] { return rw::ReleasedLine(where, ms); }, [&](const char* line) { lines.push_back(line); });
         };
-        auto retire = [&](rw::Retired<Gpu>& list, Gpu* g, const char* where) {   // the Lab's Retire
+        auto retire = [&](rw::Retired<Gpu>& list, Gpu* g, const char* where) {   // the ring's Retire
             const auto r = list.Off(g, 16, [](Gpu* x, unsigned) { return x->gpuDone; }, [] { return 0.0; }, [](Gpu* x) { x->chain = false; }, [](Gpu*) {});
             if (r.destroyed) lines.push_back(rw::ReleasedLine(where, r.ms));
         };
-        auto reap = [&](rw::Retired<Gpu>& list, bool wait) {                     // the Lab's Reap
+        auto reap = [&](rw::Retired<Gpu>& list, bool wait) {                     // the ring's Reap
             list.DestroyDone([](Gpu* g) { return g->chain; }, [](Gpu* g) { return g->gpuDone; }, [&](Gpu* g) { destroy(g, rw::ReapWhere(wait, rw::ReapStep::GpuDone), -1); });
             list.Reap(wait, [](Gpu* g) { return g->exited; }, [](Gpu*) {}, [&](Gpu* g) { destroy(g, rw::ReapWhere(wait, rw::ReapStep::WorkerGone), -1); }, [](Gpu*) {});
         };
@@ -2522,7 +2522,7 @@ int main() {
             Check(rw::SayReleased(true, line, [&](const char* text) { said += std::string(text) == "x"; }) && built == 1 && said == 1, "perf nit: a swapchain released: the text built once and said");
         }
     }
-    {   // Audit 2026-11-10, the Lab's wiring (read from the sources: the Lab file needs the game to run). Each line here was
+    {   // Audit 2026-11-10, the ring's wiring (read from the sources: the ring file needs the game to run). Each line here was
         // missing or different before its fix, and a merge that drops one fails here.
         auto read = [](const char* file) {
             std::string here = __FILE__; here = here.substr(0, here.find_last_of("/\\") + 1);
@@ -2579,7 +2579,7 @@ int main() {
               "wiring orders: a skill by the engine's pick, an order by the tap rule");
         Check(has(lab, "p.bind={true,rw::SlotOf(e.hand,e.slot),id,-1,e.slot,e.hand,f.layout};Enqueue(p,s,f.say);") && has(lab, "elseif(act==rw::OrderAct::Assign&&rw::OrderSeat(cl,e.seat)){"),
               "wiring orders: an order held to full is queued as upstream's BindSkill");
-        {   // Designer gate D1 D2 D3: the Lab names the held order, shows an order's blurb whole, and the header keeps no copy of upstream's words
+        {   // Designer gate D1 D2 D3: the ring names the held order, shows an order's blurb whole, and the header keeps no copy of upstream's words
             const std::string hdr = read("ring_wheel_orders.h");
             // Review RN1: a rebuilt chooser is no longer stale; without it the chooser would be rebuilt and its engine reset every frame after an army change.
             Check(has(lab, "chooseCellsOf=nullptr;chooseKey=seatsKey;chooseStale=false;chooseHoldFrac=0;++revision;"), "wiring RN1: BuildChooser clears the stale mark as it sets the chooser's key");
@@ -3140,7 +3140,7 @@ int main() {
             Check(qc.Step(q, l).event == rw::Quick::Close, "#1: B with no laser on the wheel closes it");
         }
         {   // perf 'Pointing check' must-fix 1: the thin beam keeps 2 layer slots for the blood and strain quads; should-fix 2:
-            // it is Off at the Lab's Off edge (TabOn false), whatever the frame says.
+            // it is Off at the ring's Off edge (TabOn false), whatever the frame says.
             using B = pt::Beam;
             Check(pt::BeamFor(true, true, true, 10, 16) == B::Draw, "job B beam: 10 of 16 used, drawn (5 stay spare)");
             Check(pt::BeamFor(true, true, true, 13, 16) == B::Draw, "job B beam: 13 of 16, drawn (14 after it: 2 spare)");
@@ -3457,7 +3457,7 @@ int main() {
         Check(!none.Off(static_cast<Gpu*>(nullptr), 16, [](Gpu*, unsigned) { return true; }, [] { return 0.0; }, [](Gpu*) {}, [](Gpu*) {}).destroyed && none.Empty(),
               "X1 Off with nothing made: nothing destroyed, nothing kept");
     }
-    {   // Review-r6 X6: rapid On / Off never holds two Lab swapchains. Frames run Layer's order: an Off edge = Retired::Off
+    {   // Review-r6 X6: rapid On / Off never holds two ring swapchains. Frames run Layer's order: an Off edge = Retired::Off
         // (16 ms bound); an On frame = Reap(false), then Setup's MayCreate gate. The GPU is busy at some Off edges (the
         // swapchain stays for Reap), and a worker takes a few frames to exit.
         struct Side { bool chain = true; int exitAt = 0; bool busy = false; };
@@ -3702,7 +3702,7 @@ int main() {
             sh::Finish(raw, name, 1000.0, Ticket{1003.5, 0, sh::NowMs()}, write, say);
             Check(writes == 0 && starts("Frame capture: ring wheel not saved (the picture could not be read back for C:\\shots\\Frame-pair-1-ring-wheel.png; 3.5 ms on the frame, "), "shot save: rows that are not whole write no file and say so (" + line + ")");
         }
-        {   // the frame thread's half, as the Lab's hook runs it: take, queue, and nothing of the save on the caller
+        {   // the frame thread's half, as the ring's hook runs it: take, queue, and nothing of the save on the caller
             const uint8_t px[] = {10, 20, 30, 255,   0, 0, 0, 0,   60, 30, 15, 128,   200, 0, 0, 100,   9, 9, 9, 9};
             auto rowsOf = [&](sh::Raw& raw) { raw = {}; raw.w = 5; raw.h = 2; raw.rowPitch = 24; raw.rows.assign(44, 0); std::memcpy(raw.rows.data(), px, 20); std::memcpy(raw.rows.data() + 24, px, 20); return true; };
             Gate gate;
@@ -3741,7 +3741,7 @@ int main() {
             delete q;
         }
     }
-    {   // The On edge's log line: the Lab's state, never a build step
+    {   // The On edge's log line: the ring's state, never a build step
         rw::LabState st;
         const std::string a = rw::OnLine(st);
         Check(a.find("build step") == std::string::npos && a.find("R7") == std::string::npos, "On line: no build step named");
@@ -3754,6 +3754,12 @@ int main() {
               b.find("render 100%") != std::string::npos, "On line: changed rows show their new values (" + b + ")");
         st.worldLock = false;
         Check(rw::OnLine(st).find("upstream's wheel on its hand anchor") != std::string::npos, "On line: Stays in the room Off says the ring is not drawn");
+        {   // the quiet log (Jeff's PR rule): edges, refusals and failures pass; per-open, per-pick, pointer and periodic lines do not
+            auto keep = [](const char* l) { return rw::KeepQuietLine(l); };
+            Check(keep(rw::OnLine(st).c_str()) && keep(rw::OffLine()) && keep("Frame ring wheel: bind Fireball -> right A (applied)") && keep("Frame ring wheel: bind Fireball -> right A (refused: 3 already waiting to be sent)") && keep("Frame ring wheel: compose setup failed: x") && keep("Frame ring wheel: Quick cast not put on right A: Quick cast is Off") && keep("Frame ring wheel: swapchain kept: the GPU still busy after 10 ms"), "quiet log: edges, binds, refusals and failures are kept");
+            Check(!keep("Frame ring wheel: opened right hand's wheel, page Spells") && !keep("Frame ring wheel: page Spells") && !keep("Frame ring wheel: pointer owner=right why=row") && !keep("Frame ring wheel: 10 s: composes=1") && !keep("Frame ring wheel: placed 0.90 m ahead") && !keep("Frame ring wheel: tap cast Fireball slot=A") && !keep("Frame ring wheel: layers icon=x") && !keep("Frame ring wheel: assign Fireball -> A held=500 ms") && !keep("Frame ring wheel: closed reason=back after 1.0 s"), "quiet log: opens, pages, pointing, placement, picks and the 10 s line are not said");
+            Check(keep("Frame glyph: x") && !keep(nullptr), "quiet log: a line that is not the ring's passes unchanged");
+        }
         Check(a.size() < 400 && a.rfind("Frame ring wheel: On", 0) == 0 && std::string(rw::OffLine()).rfind("Frame ring wheel: Off", 0) == 0,
               "On / Off lines keep the tag and fit the buffer");
     }
@@ -3811,7 +3817,7 @@ int main() {
                 worst = std::min(worst, std::hypot(cl.seats[size_t(i)].x - rw::C, cl.seats[size_t(i)].y - rw::C) - rw::IconPx / 2 - 3.5f - rw::ThirdReach(true, rw::ThirdGrowDefault));
         }
         Check(worst >= 6, "T036 the grown third (11%) stays 6 px clear of every seat's ring: " + std::to_string(worst) + " px");
-        // Fire on release: Glyphs and Gestures release upstream's cells, Quick cast the Lab's OpenQuick (2026-11-16: its page in the ring)
+        // Fire on release: Glyphs and Gestures release upstream's cells, Quick cast the ring's OpenQuick (2026-11-16: its page in the ring)
         auto click = [&](float deg) {
             rw::Engine en; en.Reset(l); rw::StepOut last{};
             const auto p = at(deg, 50);
@@ -3900,7 +3906,7 @@ int main() {
         Check(rw::NavigateTo(rw::ThirdGestures, P::Motions).nav == rw::Nav::Done, "T036 already there: done");
         Check(rw::NavigateTo(rw::ThirdGlyphs, P::EditSlots).nav == rw::Nav::Wait, "T036 an editor open: wait (the Lab gives up after a second)");
     }
-    {   // 2026-11-16: the Quick cast page went (one quick cast: Lab Quick cast radial); its shared pieces stay tested here
+    {   // 2026-11-16: the Quick cast page went (one quick cast: ring Quick cast radial); its shared pieces stay tested here
         constexpr int Eight = 8;
         {   // T035/T036 one stick-select rule (steamvr/stick_select.h) over eight items, with the shared feel's defaults
             namespace ss = framevr::stickselect;
@@ -3951,7 +3957,7 @@ int main() {
             rw::QuickCast q; rw::QuickOut got{};
             for (double t = 0; t <= 1400; t += 1) {
                 rw::QuickIn in; in.nowMs = t; in.main = true; in.under = {rw::Kind::Seat, 2}; in.thirds = true;
-                in.bound[0] = {-1, -1, -1, -1, -1}; in.bound[1] = {-1, -1, -1, -1, -1};   // the menu's button: no game skill (its key is the Lab's)
+                in.bound[0] = {-1, -1, -1, -1, -1}; in.bound[1] = {-1, -1, -1, -1, -1};   // the menu's button: no game skill (its key is the ring's)
                 if (t == 200) in.press[1] = 1;
                 in.down[1][1] = t >= 200;
                 const auto o = q.Step(in, l);
@@ -3959,7 +3965,7 @@ int main() {
             }
             Check(got.event == rw::Quick::Assign && got.hand == 1 && got.slot == 1 && got.seat == 2, "bug 1/2: held about 1 s on a seat, left X (a menu's button) takes that skill");
         }
-        // Bug 4: a Lab menu over a game skill moves that skill: to the menu's old button when free, else into Quick cast, else said
+        // Bug 4: a ring menu over a game skill moves that skill: to the menu's old button when free, else into Quick cast, else said
         using M = rw::MovedTo;
         Check(rw::WhereMoved(-1, 3, 5, -1, false, true) == M::Nothing, "bug 4: nothing on the button: nothing to move");
         Check(rw::WhereMoved(54, 3, 5, -1, false, true) == M::OldButton, "bug 4: the menu's old button is free: the skill swaps there");
@@ -3985,13 +3991,13 @@ int main() {
         Check(!rw::QuickBindRefusal(1, true, true, false) && !rw::QuickBindRefusal(4, true, true, false), "review F1: a free face or grip button takes Quick cast");
         for (int slot = 1; slot < rw::Slots; ++slot) Check(rw::MenuButtonAllowed(slot) == !rw::QuickBindRefusal(slot, true, true, false), "review F1: the same buttons as every sub-menu");
         Check(!rw::MenuButtonAllowed(0) && rw::QuickBindRefusal(0, true, true, false), "review F1: the trigger, as every sub-menu");
-        // Review N4: an Applied skill bind lets a Lab menu's button go; a sub-menu's clear, Draw glyph or a Lab entry never
+        // Review N4: an Applied skill bind lets a ring menu's button go; a sub-menu's clear, Draw glyph or a ring entry never
         Check(rw::SkillTakesButton(54, -1, false) && rw::SkillTakesButton(3901, -1, false), "review N4: a game skill or a commander order takes the button");
         Check(!rw::SkillTakesButton(-1, 1, false) && !rw::SkillTakesButton(-1, -1, false) && !rw::SkillTakesButton(9000, -1, true) && !rw::SkillTakesButton(54, -1, true) &&
               !rw::SkillTakesButton(9001, -1, false) && !rw::SkillTakesButton(9003, -1, false) && !rw::SkillTakesButton(rw::MenuEntryId(0), -1, false),
               "review N4: a clear, a sub-menu, Draw glyph, Army X menu, Quick cast and a menu's entry never let a menu go");
-        // The Quick cast third's words: Off in the Lab when its switch is Off, Not for this class (review N1); a draw key change redraws
-        Check(std::string(rw::QuickThirdWord(false, true)) == "Off in the Lab" && std::string(rw::QuickThirdWord(false, false)) == "Off in the Lab" &&
+        // The Quick cast third's words: Off in the ring when its switch is Off, Not for this class (review N1); a draw key change redraws
+        Check(std::string(rw::QuickThirdWord(false, true)) == "Off" && std::string(rw::QuickThirdWord(false, false)) == "Off" &&
               std::string(rw::QuickThirdWord(true, false)) == "Not for this class" && !rw::QuickThirdWord(true, true), "review N1: the Quick cast third's word");
         rw::Scene a, b, c2; b.quickWord = rw::QuickThirdWord(false, true); c2.quickWord = rw::QuickThirdWord(true, false);
         Check(!(rw::KeyOf(a) == rw::KeyOf(b)) && !(rw::KeyOf(b) == rw::KeyOf(c2)), "Quick cast Off or not this class: the draw key changes (the third says why)");

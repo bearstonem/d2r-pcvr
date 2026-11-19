@@ -1,5 +1,5 @@
 #pragma once
-// Lab Ring wheel (T025, feedback 1 item 2; build-plan E5): grip to move the wheel, as plain data. Pure and Windows-free
+// Ring skill menu (T025, feedback 1 item 2; build-plan E5): grip to move the wheel, as plain data. Pure and Windows-free
 // (ring-wheel-test). Reuses upstream's panels::Grab unchanged (steamvr/native_panels.h, the VR Settings helper): grip on
 // the panel arms it, 3 cm of hand travel starts the move, the grabbed point stays in the hand (move, angle, tilt, push and
 // pull in one hold), hand roll ignored, tilt clamped, the distance kept 0.40-1.50 m from the head. The result is an offset

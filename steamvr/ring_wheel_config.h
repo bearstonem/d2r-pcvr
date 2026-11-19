@@ -1,6 +1,6 @@
 #pragma once
 // The Ring skill menu's numbers. The player's own choice is one VR Settings row (Menus > Ring skill menu, On or Off); everything
-// else is fixed here at the values tuned in the headset (the Lab's DEV rows are gone from this build). A value is read by
+// else is fixed here at the values tuned in the headset (the ring's DEV rows are gone from this build). A value is read by
 // Value / On and can be changed in memory by Set (the Effects preset keeps its rows in step; the Reset place press clears itself);
 // only the three sub-menu buttons persist: each is the hand button (slot + 1, 0 none) its sub-menu is bound to, kept in
 // d2r_pcvr.ini [ring_wheel] by ring_wheel.cpp through the Persist hook below (pure here: the tests install their own).

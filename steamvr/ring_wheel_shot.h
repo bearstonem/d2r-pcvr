@@ -1,5 +1,5 @@
 #pragma once
-// Lab Ring wheel (T025, round 2026-11-08 item 4): a screenshot's picture of the ring's layer, as data. The compose pass writes
+// Ring skill menu (T025, round 2026-11-08 item 4): a screenshot's picture of the ring's layer, as data. The compose pass writes
 // premultiplied color into an 8-bit target; a layer PNG (layer_shot.h, upstream's) is sRGB with straight alpha. Pure and
 // Windows-free. Runs only on a screenshot's frame.
 // Round 2026-11-12 Job B (audit bug 4: the save's 42-58 ms sat on the frame): the frame thread only hands the filled
@@ -86,7 +86,7 @@ public:
     struct Ticket { double at = 0; int behind = 0; double begun = 0; };   // when Push took it (NowMs), the saves not finished then, when the worker began it
     using Job = std::function<void(const Ticket&)>;
     SaveQueue() = default;
-    // Never a blocking join here (as AtlasWorker, review R5 K3: it may run at DLL unload, under the loader lock): the Lab
+    // Never a blocking join here (as AtlasWorker, review R5 K3: it may run at DLL unload, under the loader lock): the ring
     // holds its queue on the heap and never destroys it; a test calls Drain first.
     ~SaveQueue() { if (thread.joinable()) { if (Idle()) thread.join(); else thread.detach(); } }
     SaveQueue(const SaveQueue&) = delete;
@@ -154,7 +154,7 @@ void Finish(const Raw& raw, const std::wstring& file, double frameT0, const Save
     say(line);
 }
 
-// The frame thread's half of a screenshot (the Lab's OnLayerShot hook). With MaxWaiting saves unwritten it refuses at
+// The frame thread's half of a screenshot (the ring's OnLayerShot hook). With MaxWaiting saves unwritten it refuses at
 // once, before any GPU work. Else `take(why)` does the GPU's part (Compose::Shot) and returns how the worker reads the
 // rows, or sets `why`; then the save is queued (the queue is made at the first one). Null: queued, and the worker says
 // the saved / not saved line. Else why not, for the caller to say. On the worker, per save: `begin()` (its thread's

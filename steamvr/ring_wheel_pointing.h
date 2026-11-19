@@ -1,5 +1,5 @@
 #pragma once
-// Lab Ring wheel: pointing with either hand (T025 job B; the design notes item 1; Jeff 2026-11-07: "laser from either
+// Ring skill menu: pointing with either hand (T025 job B; the design notes item 1; Jeff 2026-11-07: "laser from either
 // hand, go"). Either hand's laser can point at the ring; one hand owns it at a time:
 //  - With no owner, a hand claims it by moving its ray 1.5 deg within 300 ms, or by pressing its trigger, with its ray on the
 //    panel. A trigger press also takes the wheel at once from an owner with no button down (a held button pins its owner until
@@ -13,7 +13,7 @@
 //    timer runs only while its ray is off the panel or on nothing.
 //  - It is lost at once when its aim is untracked, the "Pointing hand" row forbids that hand, or the wheel closes.
 //  - With no owner there is no hover and no laser. B / X still close the wheel (Jeff's closing rule, 2026-11-08).
-// Pure (no game, no clock): the Lab feeds each frame's facts and its milliseconds; ring_wheel_test.cpp drives it.
+// Pure (no game, no clock): the ring feeds each frame's facts and its milliseconds; ring_wheel_test.cpp drives it.
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -21,7 +21,7 @@
 
 namespace framevr::ringwheel::pointing {
 // The "Pointing hand" row (exp.ring_wheel.pointing_hand). Other hand = upstream's rule (the hand not holding the wheel), the
-// row's Off: the Lab then skips Owner and points with that hand whenever it is tracked, as before job B (no claim needed).
+// row's Off: the ring then skips Owner and points with that hand whenever it is tracked, as before job B (no claim needed).
 enum class Allow { Either = 0, Right = 1, Left = 2, OtherHand = 3 };
 inline bool Allowed(Allow a, int hand, int wheelHand) {
     return a == Allow::Either || (a == Allow::Right && hand == 0) || (a == Allow::Left && hand == 1) || (a == Allow::OtherHand && hand != wheelHand);
@@ -52,9 +52,9 @@ inline const char* WhyName(Why w) {
 }
 struct Out { int owner = -1; bool changed = false; Why why = Why::None; };
 
-// The non-owner's thin beam, once a headset frame (OnWheelBeam): drawn only with the Lab On, the wheel's laser showing, a
+// The non-owner's thin beam, once a headset frame (OnWheelBeam): drawn only with the ring On, the wheel's laser showing, a
 // beam written this frame, and at least SpareSlots composition layers left after it (perf 'Pointing check' must-fix: the
-// blood visor and the guard strain quads go in after it and need their slots). Off at the Lab's Off edge (TabOn false).
+// blood visor and the guard strain quads go in after it and need their slots). Off at the ring's Off edge (TabOn false).
 constexpr uint32_t SpareSlots = 2;
 enum class Beam { Draw, LabOff, Closed, None, NoSlot };
 inline Beam BeamFor(bool tabOn, bool open, bool written, uint32_t count, uint32_t limit) {

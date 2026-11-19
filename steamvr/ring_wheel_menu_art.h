@@ -1,14 +1,14 @@
 #pragma once
-// Lab Ring wheel (T036, Jeff 2026-11-16: "the Gestures, Glyphs and Quick cast icons show gold; they must match the Diablo
+// Ring skill menu (T036, Jeff 2026-11-16: "the Gestures, Glyphs and Quick cast icons show gold; they must match the Diablo
 // silver-on-rust set"): the three sub-menus' own pictures, our ChatGPT art (the design kit, icon-glyphs-v3b,
 // icon-gestures-v2, icon-quick-cast-v2), made offline the way the ring shows a game icon after the T036 key: the silver motif
 // keyed out of its rust plate, its tint pulled to gray, on transparent, 144 px (the atlas art square at 150%), framed so the motif
 // fills the disc like a game glyph (make-ring-menu-icons.py there). Embedded by steamvr/ring_wheel_menu_art.rc
 // (steamvr/assets/ring-wheel/ring-menu-*.png). The atlas worker packs them whole (no game-frame crop, no key: ids 9000 and up), and the
 // compose shader draws our dark disc under them and cuts them round, as every seat. Drawn on the center's thirds (their marks) and
-// on the sub-menus' General shelf entries (and Lab Quick cast radial's entry); a picture that fails to decode keeps the drawn
+// on the sub-menus' General shelf entries (and ring Quick cast radial's entry); a picture that fails to decode keeps the drawn
 // mark in silver (ring_wheel_draw.h PushSigil).
-// Decoded on the Lab's atlas worker (never the frame thread), once a process each, then shared.
+// Decoded on the ring's atlas worker (never the frame thread), once a process each, then shared.
 #include <windows.h>
 #include <wincodec.h>
 #include <array>

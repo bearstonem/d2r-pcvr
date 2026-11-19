@@ -1,5 +1,5 @@
 #pragma once
-// Lab Ring wheel (T025; Lab > Experiment: Ring wheel, exp.ring_wheel): the wheel's geometry, hit test and input state,
+// Ring skill menu (T025; ring > Experiment: Ring wheel, exp.ring_wheel): the wheel's geometry, hit test and input state,
 // pure and Windows-free so every number is unit-tested (ring_wheel_test.cpp). Build step R2 (E2, E5; look L1, L2).
 //
 // Coordinates: "wheel px" are the design kit's (the design kit's wheel.js): the 768 x 800 wheel region, its center
@@ -163,7 +163,7 @@ inline bool SeatsFrom(const interaction::Snapshot& s, std::array<SeatIn, MaxSeat
     });
     return true;
 }
-// Another Lab's bindable entry (headset fixes 2026-11-15: Lab Army X menu, T033, through the FilterRingEntry seam): one more
+// Another ring's bindable entry (headset fixes 2026-11-15: ring Army X menu, T033, through the FilterRingEntry seam): one more
 // General seat on the shelf, after the hero's own general skills (owner -1, no tree), so Build places it on the shelf row.
 // id < 0, no room, or already there: unchanged. Returns the new count.
 inline int AddShelfEntry(std::array<SeatIn, MaxSeats>& in, int n, int id) {
@@ -378,7 +378,7 @@ inline int FaceCopies(int skill, Element e, double ageMs, float r, FaceCopy out[
 // R8 match stage 2 (r8-match-spec 4a): the pointed effect's lifecycle. The hover ring and the 1.3x grow are immediate; the
 // skill's effect starts 100 ms after the pointer settles on a target and fades in over 100 ms (a sweep across neighbors starts
 // none). On leaving it fades out over 120 ms (the face eases back with it); a new target waits until that fade-out is done
-// (one effect at a time). Re-pointed within 300 ms, the effect goes on from its age. Pure: the Lab steps it once a frame.
+// (one effect at a time). Re-pointed within 300 ms, the effect goes on from its age. Pure: the ring steps it once a frame.
 struct PointedFx {
     static constexpr double OnsetMs = 100, FadeInMs = 100, FadeOutMs = 120, ResumeMs = 300;
     struct Out { int seat = -1; double ageMs = 0; float alpha = 0; };
@@ -880,17 +880,17 @@ public:
 };
 // ---- T036: each sub-menu on a button (Jeff: "bindable to a button from the General row, as Army X menu is") ----
 // The three sub-menus' entries on the General shelf (AddShelfEntry). Never a game skill id (those stay under 400; upstream's
-// Draw glyph is 9000, Lab Army X menu 9001). A hold there, or on the sub-menu's third (Gestures, Quick cast), sends upstream's
-// own clear of that button's game skill (BindSkill, skill -1, as Draw glyph's pick does); on its Applied the Lab keeps the slot.
+// Draw glyph is 9000, ring Army X menu 9001). A hold there, or on the sub-menu's third (Gestures, Quick cast), sends upstream's
+// own clear of that button's game skill (BindSkill, skill -1, as Draw glyph's pick does); on its Applied the ring keeps the slot.
 constexpr int MenuEntryFirst = 9101;
-// Quick cast's potions and scrolls on its chooser's row (2026-11-16): Lab Quick cast radial's item ids (quick_radial.h: exact
-// 1 << 28, family 2 << 28), never a skill or a Lab entry.
+// Quick cast's potions and scrolls on its chooser's row (2026-11-16): ring Quick cast radial's item ids (quick_radial.h: exact
+// 1 << 28, family 2 << 28), never a skill or a ring entry.
 inline bool ItemSeat(int id) { return id >= (1 << 28); }
 inline bool KindSeat(int id) { return (id >> 28) == 2; }   // a kind (quick_radial.h IsFamilyId): the best one carried when cast
 inline int MenuEntryId(int third) { return third >= 0 && third < ThirdCount ? MenuEntryFirst + third : -1; }
 inline int MenuOfEntry(int id) { return id >= MenuEntryFirst && id < MenuEntryFirst + ThirdCount ? id - MenuEntryFirst : -1; }
-constexpr const char* MenuEntryName[ThirdCount] = {"Glyphs menu", "Gestures menu", "Quick cast"};   // Quick cast's entry is Lab Quick cast radial's own (2026-11-16)
-// Per sub-menu the hand slot (skills::HandSlot numbering, 0-9) it is on, -1 none. The Lab's keys hold slot + 1 (0: none).
+constexpr const char* MenuEntryName[ThirdCount] = {"Glyphs menu", "Gestures menu", "Quick cast"};   // Quick cast's entry is ring Quick cast radial's own (2026-11-16)
+// Per sub-menu the hand slot (skills::HandSlot numbering, 0-9) it is on, -1 none. the ring's keys hold slot + 1 (0: none).
 struct MenuButtons {
     std::array<int, ThirdCount> slot{-1, -1, -1};
     int MenuOf(int s) const { if (s < 0) return -1; for (int t = 0; t < ThirdCount; ++t) if (slot[size_t(t)] == s) return t; return -1; }
@@ -935,7 +935,7 @@ inline MenuPress MenuPressed(const MenuButtons& b, const bool down[2][3], const 
 inline bool MenuPressOpens(bool wheelOpen, bool ringMain, Kind under) {
     return !(wheelOpen && ringMain && (under == Kind::Seat || ThirdOf(under) >= 0));
 }
-// Bug 4: a Lab menu (Glyphs or Gestures menu, Quick cast, Army X menu) put on a button clears that button's game skill (upstream's
+// Bug 4: a ring menu (Glyphs or Gestures menu, Quick cast, Army X menu) put on a button clears that button's game skill (upstream's
 // own clear, as Draw glyph's pick). That skill is never dropped without a word: it moves to the menu's old button when that one is
 // free now (a swap), else into Quick cast's ring (quickCastTakes: Quick cast On and a skill of this hero's catalog), else it is
 // said taken off. was: the skill the button held (-1 none); oldSlot: the menu's button before (-1 none) and what it holds now.
@@ -958,16 +958,16 @@ inline float MovedQuickButton(float oldMenuButton, float quickCastButton) {
 // slot: the hand's button (0 trigger .. 4 grip + secondary).
 inline const char* QuickBindRefusal(int slot, bool on, bool classKnown, bool drawsGlyph) {
     if (slot <= 0) return "never a trigger (the attack, and the ring's click)";   // as ring_wheel_pages.h MenuButtonAllowed
-    if (!on) return "Quick cast is Off (Lab > Experiment: Ideas > Combat > Quick cast radial)";
+    if (!on) return "Quick cast is Off";
     if (!classKnown) return "this class keeps upstream's buttons";
     if (drawsGlyph) return "that button draws glyphs (put a skill on it first)";
     return nullptr;
 }
 
 // The Quick cast third's word when pointed (review N1): why nothing opens, or nullptr ("Trigger to open").
-inline const char* QuickThirdWord(bool on, bool classKnown) { return !on ? "Off in the Lab" : !classKnown ? "Not for this class" : nullptr; }
+inline const char* QuickThirdWord(bool on, bool classKnown) { return !on ? "Off" : !classKnown ? "Not for this class" : nullptr; }
 // Review N4 (2026-11-16): an Applied ring bind that puts a skill on a button (a game skill or a commander order: ids under 9000),
-// so a Lab menu on that button lets go of it. Never a sub-menu's or Lab entry's bind (Draw glyph 9000, Lab entries 9001 on, a clear).
+// so a ring menu on that button lets go of it. Never a sub-menu's or ring entry's bind (Draw glyph 9000, ring entries 9001 on, a clear).
 inline bool SkillTakesButton(int skill, int menu, bool draw) { return menu < 0 && !draw && skill >= 0 && skill < 9000; }
 
 // The hold's haptic ticks at 25 / 50 / 75 % (L2, eval #10): how many quarter marks the fill crossed since last frame.
@@ -986,7 +986,7 @@ struct CastResult { bool started = false; const char* refused = nullptr; glyphca
 template <class CastT, class ParkF>
 CastResult StartCast(CastWait& w, CastT& cast, const interaction::Snapshot& s, bool labOn, bool fresh, bool active, bool wheelShut, double nowS, double waitedMs, ParkF&& park) {
     CastResult r;
-    if (!labOn) { w = {}; return r; }   // the Lab went Off with a cast queued: it never fires (perf R6Q)
+    if (!labOn) { w = {}; return r; }   // the ring went Off with a cast queued: it never fires (perf R6Q)
     if (!w.on) return r;
     if (!wheelShut) {   // the cast waits for upstream's close (cell 8 the frame before)
         if (waitedMs > 1000) { r.refused = "the wheel did not close"; w = {}; }
@@ -1013,11 +1013,11 @@ CastResult StartCast(CastWait& w, CastT& cast, const interaction::Snapshot& s, b
     return r;
 }
 // The wheel's edges and the close's reason (bug 9 logging; review-bug9 M1), once a frame at the top of the Input seam
-// (after HandControls, before interactions.Step). Wrote: what the Lab released to upstream later in that same seam; upstream
+// (after HandControls, before interactions.Step). Wrote: what the ring released to upstream later in that same seam; upstream
 // acts on it in that frame's interactions.Step (the center closes the wheel there, transport closes HandControls), so the
 // close shows on the next frame's edge, and that next Frame reads it. A write is kept one frame only. First match wins:
-// the Lab's write, a stick click (left first), the frame's safety reason (ring_wheel_close.h), a new session, else "upstream",
-// which the Lab's log line turns into a named reason or `unknown` with its source.
+// the ring's write, a stick click (left first), the frame's safety reason (ring_wheel_close.h), a new session, else "upstream",
+// which the ring's log line turns into a named reason or `unknown` with its source.
 class WheelEdges {
     int was = -1;
     uint64_t session = 0;
@@ -1041,7 +1041,7 @@ public:
     // unfocused past the blip, the session ending, a failed sync or copy), which closes the wheel there, so the close is that
     // moment's and not the next focused frame's (it came late, or never when the game ended first). The next Frame finds
     // the wheel closed already: one line a close. shutBefore: upstream had closed it on the last focused frame, after that
-    // frame's Frame call, so the clear is not its reason (the Lab's write, else "upstream"). Only then is the write the
+    // frame's Frame call, so the clear is not its reason (the ring's write, else "upstream"). Only then is the write the
     // reason (review N1): no Frame runs between the last focused frame and the clear, so a write upstream ignored is still
     // here, and with the wheel still open at the clear it closed nothing.
     Edge Cleared(const char* why, bool shutBefore) {
@@ -1051,10 +1051,10 @@ public:
         return e;
     }
     bool Open() const { return was >= 0; }
-    void Off() { was = -1; wrote = nullptr; }   // the Lab's Off edge (the caller logs lab-off)
+    void Off() { was = -1; wrote = nullptr; }   // the ring's Off edge (the caller logs ring-off)
 };
 // Audit 2026-11-10 bug 3: a footer tab clicked while upstream's own page shows (Map, Equipment, or any page while the ring
-// is not drawn). The Lab writes nothing there, so the close was named upstream-page. Upstream's engine closes the wheel on
+// is not drawn). the ring writes nothing there, so the close was named upstream-page. Upstream's engine closes the wheel on
 // a trigger press over Inventory, VR Settings and the DEV window's tab (interactions.h Engine::Step; no editor page has
 // them). Stepped once a frame with the hover and trigger that engine read; the press edge is the engine's own (over .55 to
 // press, .2 to let go). The caller hands the name to WheelEdges::Wrote, which keeps it one frame: it names only a close on

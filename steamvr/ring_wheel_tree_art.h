@@ -1,5 +1,5 @@
 #pragma once
-// Lab Ring wheel > Layers > Tree icon (T025, Jeff 2026-11-17 late: "change these to be sizable and have gpt draw them"): the tree
+// Ring skill menu > Layers > Tree icon (T025, Jeff 2026-11-17 late: "change these to be sizable and have gpt draw them"): the tree
 // mark's picture, one painted rust square per skill tree (24: 8 classes x 3 trees), our own art,
 // in full color. Today's mark is the kit's drawn glyph (TreeGlyphOf, RecipeTreeGlyph); this header is the painted picture's side:
 //   - the slot of a (class, position): class x 3 + the tree's skillcategories page (PageAt), -1 for an unknown class;
@@ -9,7 +9,7 @@
 //     cell is left fully transparent, and PaintedMask (steamvr/ring_wheel_tree_sheet.h, written by the same script) names the
 //     painted ones, so the sheet works with 0, 3 or 24 squares and nothing decodes it on the frame thread to know;
 //   - the atlas id of a slot (ArtId, 9200 up: our art, never keyed, ring_wheel_unbake.h) and the slice that serves it;
-//   - the Lab rows' reading: Mode (Drawn / Painted circle / Painted square) and the size (25..300%, 0 hides the mark).
+//   - the ring rows' reading: Mode (Drawn / Painted circle / Painted square) and the size (25..300%, 0 hides the mark).
 // A slot with no painted square keeps the drawn glyph (the fallback is the draw path's: no cell, no picture).
 // The file names the script and the use are FileName(slot): tree-<class>-<tree>.png in kebab case.
 #include <algorithm>
@@ -30,7 +30,7 @@ constexpr int SheetCols = 6, SheetRows = 4, CellPx = 144, SheetW = SheetCols * C
 static_assert(SheetCols * SheetRows == Count, "one sheet cell per tree");
 inline constexpr const wchar_t* ResourceName = L"D2RVR_LAB_RING_TREE_SHEET";   // RCDATA in steamvr/lab_ring_wheel_tree_art.rc
 
-// Mode, the Lab row's list: Drawn is today's glyph (its Off value).
+// Mode, the ring row's list: Drawn is today's glyph (its Off value).
 enum class Mode : int { Drawn = 0, Circle = 1, Square = 2 };
 inline constexpr const char* ModeName[3] = {"Drawn", "Painted circle", "Painted square"};
 inline Mode ModeOf(float v) { return v >= 1.5f ? Mode::Square : v >= .5f ? Mode::Circle : Mode::Drawn; }

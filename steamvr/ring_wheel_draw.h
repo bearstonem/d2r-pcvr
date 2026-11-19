@@ -1,5 +1,5 @@
 #pragma once
-// Lab Ring wheel (T025, build steps R4-R5): what the compose pass draws, as plain data (plan E3, E4; look L1-L3;
+// Ring skill menu (T025, build steps R4-R5): what the compose pass draws, as plain data (plan E3, E4; look L1-L3;
 // the design notes sections 2-3). Pure and Windows-free: the instance list a frame draws (shapes, icons, glyphs), when a
 // frame composes at all, the 3-slot ring that never waits on the GPU, the atlas cell grid and the content rectangle inside
 // the swapchain. vr/ring_wheel_compose.cpp draws the list; ring-wheel-preview renders it on WARP (the design notes 14-16).
@@ -15,8 +15,8 @@
 #include "ring_wheel_orders.h"
 #include "ring_wheel_skill_fx.h"
 #include "ring_wheel_text.h"
-#include "ring_wheel_tree_art.h"   // T025: the tree marks' painted pictures (Lab > Ring wheel > Layers > Tree icon)
-#include "ring_wheel_glyph_art.h"   // the Glyphs page's shapes and the center's sigils, painted (Lab > Ring wheel > Center > Glyph icon)
+#include "ring_wheel_tree_art.h"   // T025: the tree marks' painted pictures (ring > Ring wheel > Layers > Tree icon)
+#include "ring_wheel_glyph_art.h"   // the Glyphs page's shapes and the center's sigils, painted (ring > Ring wheel > Center > Glyph icon)
 
 namespace framevr::ringwheel {
 constexpr int MaxInstances = 320, MaxText = 512, MaxDraw = MaxInstances + MaxText;   // R8 match stage 1: up to 2 rest glows and 2 over-face passes an icon   // fixed arrays (no growth per frame)
@@ -48,7 +48,7 @@ enum Recipe : uint32_t {
     RecipeSquare = 15,  // T025 a tree mark's painted square: the atlas cell as a rounded square (the face is the quad less SeatRingPx each side), the
                         // seat's rim shade-less look: a 3 px #070504 line on 1 px out, the rim `param` px wide in the tint (the accent) on 1.5 px out
 };
-// T036 the skill circle's layers (Lab > Experiment: Ring wheel > Layers): each its own switch, drawn in this order. Float is the
+// T036 the skill circle's layers (ring > Experiment: Ring wheel > Layers): each its own switch, drawn in this order. Float is the
 // Animation rows' (Anim::floats). fx: the rest glow under the face, its passes over the face and the lightning crawl (today's
 // look; the Animation layer). The Scene default is today's look so a caller that sets none draws as before.
 struct SeatLayers {
@@ -267,7 +267,6 @@ inline const char* FooterLabel(int i, interaction::MenuPage page, bool developer
     case 2: return "VR SETTINGS";
     case 3: return handWheel ? "INVENTORY" : "EDIT SKILLS";
     case 4: return "DEV";
-    case 5: return "LAB";
     default: return "";
     }
 }
@@ -349,7 +348,7 @@ struct Scene {
     const RestGlow* rest = nullptr;   // R8 match stage 1: per seat its rest glow (RestGlowOf); null: one kind, its element
     float fight = 1;
     double pointedSinceMs = 0;
-    // R8 match stage 2: the pointed effect's seat, age and alpha (the Lab's PointedFx); fxSeat -2: none given, from
+    // R8 match stage 2: the pointed effect's seat, age and alpha (the ring's PointedFx); fxSeat -2: none given, from
     // pointedSinceMs (the effect 100 ms after the pointing, fading in over 100 ms).
     int fxSeat = -2; double fxAgeMs = 0; float fxAlpha = 0;
     bool fxTex = false;   // stage 3a: the game texture atlas is in (level 3 for fire, poison and lightning; else level 4)
@@ -363,7 +362,7 @@ struct Scene {
     const BadgeSet* badges = nullptr;   // feedback 1 item 3: the bound-button badges (BadgeBoard); main page only, never with chooseTitle
     // T036: the layers (Layers page), the center in thirds (main page) with the grow and the dim, each sub-menu's button badge on
     // its third's mark (on: bound), per seat a sub-menu entry's mark (0 none, 1 + the third). quickWord (T035, 2026-11-16, review N1):
-    // why the Quick cast third opens nothing (QuickThirdWord: Off in the Lab, Not for this class), said instead of "Trigger to open".
+    // why the Quick cast third opens nothing (QuickThirdWord: Off in the ring, Not for this class), said instead of "Trigger to open".
     SeatLayers layers{};
     bool thirds = false;
     float thirdGrowPct = ThirdGrowDefault, thirdDimPct = ThirdDimDefault;
@@ -373,12 +372,12 @@ struct Scene {
     // T036 (2026-11-16): each third's picture's atlas cell (ring_wheel_menu_art.h; -1: none, the drawn mark in silver). A shelf
     // entry's picture comes through `cells` as any seat's.
     std::array<int16_t, ThirdCount> thirdCell{-1, -1, -1};
-    // T025 (Lab > Ring wheel > Layers > Tree icon): the mode (treeart::Mode: 0 Drawn is today's glyph), the mark's size in percent
+    // T025 (ring > Ring wheel > Layers > Tree icon): the mode (treeart::Mode: 0 Drawn is today's glyph), the mark's size in percent
     // (treeart::SizePct: 100 today's, 0 hides the mark) and each tree position's painted picture's atlas cell (-1: none, the drawn
     // glyph). Trees shown only: the orbs keep their glyphs.
     int treeMode = 0; int treeSizePct = treeart::SizeDefault;
     std::array<int16_t, Trees> treeCell{-1, -1, -1};
-    // Lab > Ring wheel > Center > Glyph icon: the Glyphs page's eight shapes and the center split's four sigils as painted pictures
+    // ring > Ring wheel > Center > Glyph icon: the Glyphs page's eight shapes and the center split's four sigils as painted pictures
     // (mode 0 Drawn: today's strokes; a slot with no cell keeps its drawn shape or sigil).
     glyphart::View glyph{};
 };
@@ -513,7 +512,7 @@ inline void MenuBadgeAt(int t, bool left, float g, float k, float& x, float& y, 
     x += (left ? -.55f : .55f) * 20 * MarkScale * k; y += .45f * 20 * MarkScale * k;
 }
 struct Half { const char* label = nullptr; Sigil sigil = Sigil::None; const char* line0 = nullptr; const char* line1 = nullptr; };
-// The painted picture's slot of a split sigil (Lab > Ring wheel > Center > Glyph icon); -1: no picture for it (the thirds' marks).
+// The painted picture's slot of a split sigil (ring > Ring wheel > Center > Glyph icon); -1: no picture for it (the thirds' marks).
 inline int SigilSlot(Sigil s) {
     switch (s) { case Sigil::Back: return glyphart::SlotBack; case Sigil::Cross: return glyphart::SlotClear; case Sigil::Star: return glyphart::SlotStar; case Sigil::Hand: return glyphart::SlotHand; default: return -1; }
 }
@@ -829,7 +828,7 @@ inline int Build(const Scene& s, Instance* out, int maxShapes = MaxInstances, in
                 pushFx(mode == 2, {x, y, 2 * capR, 2 * capR, 0, glowT, seed, ev, seed, c.r, c.g, c.b, glowA, RecipeFx, float(uint32_t(kind) + 256u * uint32_t(mode))});
             }
         };
-        const SeatLayers& L = s.layers;   // T036: each layer its own switch (Lab > Experiment: Ring wheel > Layers)
+        const SeatLayers& L = s.layers;   // T036: each layer its own switch (ring > Experiment: Ring wheel > Layers)
         if (L.fx) pushRest(0);
         if (L.frame) {   // our own static band outside the color ring (8 px at 1x, so a framed seat stays inside the 70 px pitch)
             const float k = size / IconPx, r0 = r + 4 * k, band = FrameBandPx * k, el = s.elements ? float(std::min<uint32_t>(s.elements[i], uint32_t(Element::Count) - 1)) : float(Element::Phys);

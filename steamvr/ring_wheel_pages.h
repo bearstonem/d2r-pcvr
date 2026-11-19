@@ -1,5 +1,5 @@
 #pragma once
-// Lab Ring wheel (T025, build step R7): the Glyphs and Gestures pages (plan E6; look L3 "Glyphs page", "Gestures page",
+// Ring skill menu (T025, build step R7): the Glyphs and Gestures pages (plan E6; look L3 "Glyphs page", "Gestures page",
 // "Glyph Choose a skill state"). Pure and Windows-free. Upstream keeps both pages' data and actions: the ring only draws
 // them in its own look and turns a release into upstream's cell for one frame (a gesture card, Back, the other hand), or,
 // for a glyph's skill, into a BindGlyph request (upstream's paged picker never opens; the picker's list is upstream's rule).
@@ -20,12 +20,12 @@ namespace framevr::ringwheel {
 // have one potion each, so no "Best" pill and no "best one" line (Jeff's headset 2026-11-17).
 inline bool BestSeat(int id) { return KindSeat(id) && framevr::quickradial::HasTiers(id & 0xffff); }
 // T035/T036 (2026-11-16, Jeff: "ring menu > quick cast / ring menu > gestures / ring menu > glyph"; "the edit mode is when the user
-// is in the ring menu"): Quick cast is a sub-menu of the ring as Glyphs is. Quick: its 12 places (Lab Quick cast radial's ring, in
+// is in the ring menu"): Quick cast is a sub-menu of the ring as Glyphs is. Quick: its 12 places (ring Quick cast radial's ring, in
 // order) round the ring, center Back; QuickChoose: the class's skill layout to choose what goes in a place, its potions and
 // scrolls on the shelf row, center Back / Clear (as the glyph chooser). QuickKind (review 2026-11-16, Jeff: "if they have normal
 // rejuv and a full rejuv, and they select the normal rejuv, it should not drink a full rejuv"): a kind picked on the chooser's row
 // while the hero carries some: the kind (the best one, when cast), then each exact one carried, round the ring as Quick's places,
-// center Back to the chooser. All the Lab's own pages over upstream's Spells page.
+// center Back to the chooser. All the ring's own pages over upstream's Spells page.
 enum class RingPage { Main, Glyphs, GlyphChoose, Gestures, Quick, QuickChoose, QuickKind };
 inline bool QuickPage(RingPage p) { return p == RingPage::Quick || p == RingPage::QuickChoose || p == RingPage::QuickKind; }
 inline bool QuickRing(RingPage p) { return p == RingPage::Quick || p == RingPage::QuickKind; }   // drawn and hit as Quick's 12 places, one Back
@@ -42,7 +42,7 @@ inline interaction::MenuPage UpstreamPage(RingPage p) {
 }
 // T036: a sub-menu wanted (its bound button, its shelf entry's tap) from upstream's page, once a frame until Done: Glyphs and
 // Gestures are upstream's own pages (from Spells their center cells; from the other page back to Spells first). Quick cast's page
-// is the Lab's own (RingPage::Quick, over Spells): Done at once. Fire: release `cell` to upstream this frame (as a click), then ask
+// is the ring's own (RingPage::Quick, over Spells): Done at once. Fire: release `cell` to upstream this frame (as a click), then ask
 // again. Wait: an editor or another page the ring does not draw (the caller gives up after a while).
 enum class Nav { Wait, Fire, Done };
 struct NavStep { Nav nav = Nav::Wait; int cell = -1; };
@@ -145,7 +145,7 @@ inline Layout ChooserLayout(const Layout& main, const std::vector<interaction::S
     return ChooserRow(main, list, row);
 }
 // Quick cast's chooser list (2026-11-16): every known skill the radial casts (a skill id under 4096: the class's, the general and
-// item skills; quick_radial.h IsSkillId), never a Lab entry (Draw glyph 9000, the Labs' 9001 on) or a Commander order (the
+// item skills; quick_radial.h IsSkillId), never a ring entry (Draw glyph 9000, the modules' 9001 on) or a Commander order (the
 // radial casts the catalog's skills only). Built when a place is chosen, never per frame.
 inline bool QuickPickable(const interaction::Skill& k) { return k.known && k.id >= 0 && k.id < 4096 && !orders::Is(k.id); }
 inline std::vector<interaction::Skill> QuickChoices(const interaction::Snapshot& s) {
@@ -230,7 +230,7 @@ inline void RingPos(int i, int n, float r, float& x, float& y) {
 
 // ---- Pointing and releases on the two pages ----
 struct PageIn { double nowMs = 0; bool hit = false; float x = 0, y = 0; bool trigger = false; RingPage page = RingPage::Glyphs; int count = 0; };
-enum class PageEvent { None, Upstream, ChooseSkill, Back, Move };   // Back: Quick cast's center (the Lab's page, no upstream cell); Move: its page's lower half (2026-11-17)
+enum class PageEvent { None, Upstream, ChooseSkill, Back, Move };   // Back: Quick cast's center (the ring's page, no upstream cell); Move: its page's lower half (2026-11-17)
 // Copied into a Scene's StepOut (ToStep) for the draw and the redraw key: under, pressed, locked, centerGrown, blurb.
 struct PageOut { Target under{}, pressed{}; PageEvent event = PageEvent::None; int cell = -1, shape = -1; bool locked = false, grown = false; int blurb = -1; };
 class PageEngine {
@@ -306,7 +306,7 @@ inline void ToStep(const PageOut& p, StepOut& s) {
     s = {}; s.under = p.under; s.pressed = p.pressed; s.locked = p.locked; s.centerGrown = p.grown; s.blurb = p.blurb;
 }
 
-// ---- What the page shows (the Lab fills it on a change, never per frame) ----
+// ---- What the page shows (the ring fills it on a change, never per frame) ----
 struct PageView {
     RingPage page = RingPage::Glyphs;
     int count = 0;                              // 8 shapes, or the class's gesture cards

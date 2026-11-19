@@ -1,5 +1,5 @@
 #pragma once
-// Lab Ring wheel > Center > Glyph icon (Jeff 2026-11-18 5:49 PM: "glyph icons are claude drawings, lets see what gpt can do to make them
+// Ring skill menu > Center > Glyph icon (Jeff 2026-11-18 5:49 PM: "glyph icons are claude drawings, lets see what gpt can do to make them
 // look d2 style with the rust and silver, we need the square as the basic, and then we need to make a circle version for our ring
 // menu"): the pictures that replace the ring wheel's code-drawn glyphs, 12 of them, our own art:
 //   - slots 0-7 the Glyphs page's shape faces, in glyphs::Shape order (circle, triangle, square, lightning bolt, spiral, V, star, wave);
@@ -9,7 +9,7 @@
 // silver motif in the middle 80%); an unpainted slot's cell is fully transparent and its bit in PaintedMask
 // (steamvr/ring_wheel_glyph_sheet.h, written by the same script) is clear, so the sheet works with 0, 3 or 12 squares and the engine
 // keeps the drawn shape or sigil for every slot with no square. The atlas ids are 9300 up (our art: never keyed, ring_wheel_unbake.h).
-// Mode (Drawn / Painted circle / Painted square) and the size row (25..300%) are the Lab rows' reading.
+// Mode (Drawn / Painted circle / Painted square) and the size row (25..300%) are the ring rows' reading.
 #include <algorithm>
 #include <array>
 #include <cmath>

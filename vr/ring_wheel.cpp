@@ -1,11 +1,11 @@
-// Lab Ring wheel (Lab > Experiment: Ring wheel; exp.ring_wheel, Dev only; ticket T025, 2026-11-07). Jeff: "let's also add a
-// new lab item for turn on the new skill menu ... the class skills are broken into 3 sections on the screen. When you mouse
+// Ring skill menu (ring > Experiment: Ring wheel; exp.ring_wheel, Dev only; ticket T025, 2026-11-07). Jeff: "let's also add a
+// new ring item for turn on the new skill menu ... the class skills are broken into 3 sections on the screen. When you mouse
 // over one areas the other two tree skills fade away ... The center of the skill tree menu would give the helper text for the
 // mouse over skill ... One side to open glyphs and the other gestures". Plan: the design notes
 // (E1 seams, E9 build order).
 //
 // The ring is a skin over upstream's wheel engine (interaction::Engine), not a second engine: upstream keeps open and close,
-// pages, the footer, editors and every request; this Lab moves the panel, turns laser hits into upstream cells or ring-only
+// pages, the footer, editors and every request; this ring moves the panel, turns laser hits into upstream cells or ring-only
 // events, queues BindSkill requests upstream's dispatch already takes, and swaps the wheel quad's picture.
 //
 // T036 (ring tree cleanup): each skill circle in layers, each
@@ -14,9 +14,9 @@
 // ThirdAt), each third a pseudo seat (a tap opens it, a hold puts that sub-menu on the button); Glyphs and Gestures on the General
 // shelf (Center > Sub-menus on the shelf); a sub-menu's button opens its wheel there (FilterRingHands).
 // T035 + T036 headset fixes (2026-11-16, Jeff: "ONE quick cast"): the Quick cast page (upstream's eight button slots) is gone. The
-// Quick cast third is Lab Quick cast radial: a tap opens its page in the ring (12 places, a chooser each; 2026-11-16), a hold puts the radial on that
+// Quick cast third is ring Quick cast radial: a tap opens its page in the ring (12 places, a chooser each; 2026-11-16), a hold puts the radial on that
 // button (its own bind, as its shelf entry's); its switch Off, the third says so and does nothing. A seat or third under the laser
-// takes a sub-menu button's press like any other button's (a hold rebinds it); a Lab menu bound over a game skill moves that skill
+// takes a sub-menu button's press like any other button's (a hold rebinds it); a ring menu bound over a game skill moves that skill
 // (to the menu's old button, else into Quick cast) and says where.
 // Build step R8: the animation layers (float, element glow, hover effects, icon art motion, tree burst, lightning crawl) from
 // Ring wheel > Animation (the 4-value Animation row sets the six under it; a row changed by hand shows Custom), and the fight
@@ -31,12 +31,12 @@
 // OnRingCast seam, so mana, cast rate and aim stay the game's and the player's); held to Hold to assign, it goes on that
 // button (BindSkill); released between, no change. The plain cancel button (right B, left X) with the laser off the wheel
 // closes it. Build step R6: the ring on the main (Spells) page. Placement (R3) opens the panel ahead of the eyes and
-// keeps it in the room. On the Spells page, once the Lab's GPU pass and atlases are ready for the hero's class and skills,
-// the ring draws (steamvr/ring_wheel_draw.h through vr/ring_wheel_compose.cpp into the Lab's own 1536 x 1320 swapchain)
+// keeps it in the room. On the Spells page, once the ring's GPU pass and atlases are ready for the hero's class and skills,
+// the ring draws (steamvr/ring_wheel_draw.h through vr/ring_wheel_compose.cpp into the ring's own 1536 x 1320 swapchain)
 // and replaces upstream's quad; the other hand's ray hits the ring (steamvr/ring_wheel.h Engine); a release on a footer tab
 // or a center half becomes upstream's own cell for one frame; a skill picked, then one of the open hand's five buttons,
 // binds it through upstream's BindSkill. Every other page (Glyphs, Gestures, editors, Equipment, Developer) and the time
-// before the ring is ready: upstream's picture and hit test at the Lab's pose, as R3. The Map page: exactly upstream's.
+// before the ring is ready: upstream's picture and hit test at the ring's pose, as R3. The Map page: exactly upstream's.
 //
 // Doors (steamvr/ring_wheel_host.h): each is called every frame; with the Ring skill menu setting Off the Off edge drains and upstream runs:
 //  - FilterWheelPointer  transport Input, after MotionPointer: the spawn pose, the ray, the hit (ring: canvas px; else upstream's cell).
@@ -49,7 +49,7 @@
 //                        shut (upstream's glyphcast::Dispatch, interactionstate::Park, glyphCast.Begin); feedback pulses.
 //  - FilterWheelTracking transport Input, after handInput.active (round 2026-11-08 #1, ring_wheel_close.h): while the wheel is
 //                        open only a deliberate action or a named safety reason closes it. FilterWheelInput and FilterWheelRequest
-//                        do the same for the interaction engine and put its input back. Lab Off: upstream's values.
+//                        do the same for the interaction engine and put its input back. ring Off: upstream's values.
 //  - VetoWheelBlip       transport Input, before the unfocused ClearInput: a blip under 250 ms keeps the open wheel.
 //  - OnWheelBeam         transport EndPair, after the laser's if (job B): the non-owner hand's thin beam, no dot.
 //  - OnLayerShot         transport EndPair, a screenshot's frame only: the ring's layer as its own picture (round 2026-11-08 item 4).
@@ -63,6 +63,7 @@
 // Cost with the master Off: each seam is one relaxed load, an AND and a not-taken branch, its arguments never built.
 // Telemetry "Frame ring wheel:": On / Off each edge; setup; "upstream: <reason>"
 // once a session; placed at most once a 10 s; a Placement change at most once a second; "10 s:" while the ring is open; each bind.
+#include <atomic>
 #include <windows.h>
 #include <d3d12.h>
 #define XR_USE_GRAPHICS_API_D3D12
@@ -113,7 +114,7 @@ bool told = false;          // the On line said, so the Off edge's drain call sa
 void (*sayKept)(const char*) = nullptr;   // transport's Say as the seams hand it over, for the two hooks that carry no arguments (OnClearInput, OnUiReset)
 bool developerNow = false;  // the snapshot's developer mode, for the pointer's quad (review R6 X2)
 rw::Placer placer;
-bool placed = false;        // this frame the Lab placed the panel (the layer seam sizes the quad)
+bool placed = false;        // this frame the ring placed the panel (the layer seam sizes the quad)
 float placedWidth = .8f;
 ia::Pose placedPose{};
 // Feedback 1 item 2: grip to move (steamvr/ring_wheel_grab.h, upstream's panels::Grab). The pointing hand's grip, trigger and
@@ -175,7 +176,7 @@ rw::ComposePolicy policy;
 tx::BlurbCache blurbs;
 int blurbSeat = -1;
 // A bind for FilterWheelRequest, and the one in flight.
-// draw: the #3 Draw glyph button; menu (T036): a sub-menu's button (the clear first). A Lab menu's bind (a sub-menu, Quick cast,
+// draw: the #3 Draw glyph button; menu (T036): a sub-menu's button (the clear first). A ring menu's bind (a sub-menu, Quick cast,
 // Army X menu; 2026-11-16 bug 4): was / wasOwner the game skill that button held, oldSlot the menu's button before, labName its name.
 struct Bind { bool queued = false; int index = -1, skill = -1, owner = -1, slot = -1, hand = 0, layout = 0; bool draw = false; int menu = -1;
               int was = -1, wasOwner = -1, oldSlot = -1; const char* labName = nullptr; };
@@ -199,6 +200,7 @@ ULONGLONG windowAt = 0;
 // R8: per seat its element and its order among the lightning icons; the fight fade; the Animation row's last value.
 std::vector<uint8_t> elements;
 std::vector<rw::RestGlow> restGlows;   // R8 match stage 1: per seat its rest glow (the kit's el list per skill)
+std::atomic<bool> verboseLog{false};   // [debug] ring_wheel_log (default Off): every ring line, not only the quiet ones
 int restFromKit = 0, restByTree = 0; bool restSaid = true;   // the last layout's counts, logged once a layout (Frame ring wheel: rest glow)
 std::vector<int8_t> crawlIdx;
 int crawlCount = 0;
@@ -251,7 +253,7 @@ void SyncPreset(void (*say)(const char*)) {
         say(line);
     }
 }
-// R7: the ring's page (upstream's Spells, Glyphs or Motions page; the glyph chooser is the Lab's own on upstream's Glyphs),
+// R7: the ring's page (upstream's Spells, Glyphs or Motions page; the glyph chooser is the ring's own on upstream's Glyphs),
 // the pages' engine and picture, upstream's glyph and gesture state as its last Output had it, a glyph bind.
 rw::RingPage ringPage = rw::RingPage::Main;
 bool ringPageSeen = false;
@@ -300,21 +302,21 @@ int wheelHandNow = 0, glyphHandNow = 0, motionsOffNow = 0;
 // ---- Extra entries on the General shelf (headset fixes 2026-11-15) ----
 // Entries: an entry on the General shelf (Jeff assigns skills here, hold to assign, and never saw it
 // in upstream's Edit Slots). Its id joins the seats' key (a change rebuilds the layout); dim and slot are draw-only.
-// T035 (2026-11-15): a second Lab's entry, Lab Quick cast radial's, beside the Army X menu's (FilterRingEntry): slot 0 Army X
+// T035 (2026-11-15): a second ring's entry, ring Quick cast radial's, beside the Army X menu's (FilterRingEntry): slot 0 Army X
 // menu through its key-gated seam, slot 1 Quick cast radial read from its pure header while its switch is On (no row free).
 struct Entry { int id = -1; const char* name = nullptr; const char* help = nullptr; bool dim = false; int slot = -1; };
 constexpr int EntryCount = 2;
 std::array<Entry, EntryCount> entries;
 std::array<ia::Skill, EntryCount> entrySkills{};   // each entry as a catalog skill would be: its name and help for the blurb, the hold and the log
 std::array<int, EntryCount> entrySeats{-1, -1};    // its seat in the main layout (-1: none)
-std::vector<uint8_t> mainDim;    // per main seat: 1 drawn faint (an entry its Lab calls dim: Army X menu with no army out); empty: none
+std::vector<uint8_t> mainDim;    // per main seat: 1 drawn faint (an entry its ring calls dim: Army X menu with no army out); empty: none
 std::array<bool, EntryCount> entryDimSaid{}; std::array<int, EntryCount> entrySaid{-1, -1};
-// What a dim entry means (its Lab's words): Army X menu's cross opens dim with no army out; Quick cast radial keeps upstream for this class.
+// What a dim entry means (its ring's words): Army X menu's cross opens dim with no army out; Quick cast radial keeps upstream for this class.
 constexpr const char* EntryDimLog[EntryCount] = {"dim (no army out: its cross opens dim, No army)", "dim (this class keeps upstream: its ring stays shut)"};
 constexpr const char* EntryLitLog[EntryCount] = {"lit (an army is out)", "lit"};
 constexpr const char* EntryDimBlurb[EntryCount] = {"No army out: it opens dim", "Not for this class"};
-// FilterIconVariant: the icon remaps that are On (Lab Kick icon's bit). A change: every icon fetched again, a new atlas.
-// (the Lab's icon-remap variant is not part of this menu: the atlas request's iconVariant stays 0)
+// FilterIconVariant: the icon remaps that are On (ring Kick icon's bit). A change: every icon fetched again, a new atlas.
+// (the ring's icon-remap variant is not part of this menu: the atlas request's iconVariant stays 0)
 int EntryOf(int id, int owner) {
     if (owner != -1) return -1;
     for (int k = 0; k < EntryCount; ++k) if (entries[size_t(k)].id >= 0 && id == entries[size_t(k)].id) return k;
@@ -336,7 +338,7 @@ cfg::Key MenuKey(int t) { return t == rw::ThirdGlyphs ? cfg::GlyphsButton : t ==
 rw::MenuButtons ReadButtons() {   // review F1: a trigger stored before the refusal is ignored (the attack stays the attack)
     rw::MenuButtons b;
     for (int t = 0; t < rw::ThirdCount; ++t) {
-        if (t == rw::ThirdQuick) continue;   // 2026-11-16: Quick cast's button is Lab Quick cast radial's own (its key moved there once, Input)
+        if (t == rw::ThirdQuick) continue;   // 2026-11-16: Quick cast's button is ring Quick cast radial's own (its key moved there once, Input)
         const int s = rw::ButtonSlotOf(cfg::Value(MenuKey(t)));
         b.slot[size_t(t)] = s == framevr::skills::TriggerSlot(0) || s == framevr::skills::TriggerSlot(1) ? -1 : s;
     }
@@ -387,7 +389,7 @@ void AskOtherLabs(const ia::Snapshot& s, void (*say)(const char*)) {
         if (e.id != entrySaid[size_t(k)] && say) {   // its arrival and its going, once each (the switch's edges)
             char line[220];
             if (e.id >= 0) std::snprintf(line, sizeof line, "Frame ring wheel: entry %s on the General shelf (bind id %d, %s; hold a button on it to put it there)", e.name ? e.name : "?", e.id, e.dim ? EntryDimLog[k] : "lit");
-            else std::snprintf(line, sizeof line, "Frame ring wheel: entry %s gone from the shelf (its Lab switched Off)", entrySkill.name[0] ? entrySkill.name : "?");
+            else std::snprintf(line, sizeof line, "Frame ring wheel: entry %s gone from the shelf (its menu switched Off)", entrySkill.name[0] ? entrySkill.name : "?");
             say(line);
             entrySaid[size_t(k)] = e.id; entryDimSaid[size_t(k)] = e.dim;
         } else if (e.id >= 0 && e.dim != entryDimSaid[size_t(k)] && say) {   // the army (or the class) comes and goes: one line a change
@@ -544,9 +546,9 @@ void Seats(const ia::Snapshot& s) {
             mainMark[size_t(i)] = uint8_t(1 + t);
             continue;
         }
-        if (const int k = EntryOf(seat.id, seat.owner); k >= 0) {   // another Lab's entry: its letters from its own name, faint while it says so
+        if (const int k = EntryOf(seat.id, seat.owner); k >= 0) {   // another ring's entry: its letters from its own name, faint while it says so
             entrySeats[size_t(k)] = i;
-            if (k == 1) {   // 2026-11-16: Lab Quick cast radial's entry shows the Quick cast picture (its third's), its mark if none
+            if (k == 1) {   // 2026-11-16: ring Quick cast radial's entry shows the Quick cast picture (its third's), its mark if none
                 if (mainMark.empty()) mainMark.assign(size_t(layout.count), 0);
                 mainMark[size_t(i)] = uint8_t(1 + rw::ThirdQuick); request.ids[size_t(i)] = rw::menuart::ArtId(rw::ThirdQuick);
             }
@@ -572,7 +574,7 @@ void Seats(const ia::Snapshot& s) {
     request.n = rw::AddGesturePageIcons(s.skillClass, request.ids.data(), request.n, int(request.ids.size()));   // item 6: only here, when the seats changed
     if (army.icons) request.n = rw::AddOrderIcons(request.ids.data(), request.n, int(request.ids.size()));   // the chooser's order row has its icons ready
     // 2026-11-16: Quick cast's potions and scrolls, each picture once (a kind shows one: qr::PictureId). Review N2: asked for every
-    // class and with Quick cast radial Off too (19 cells, once a layout, nothing per frame): the seats' key carries no Lab switch, so
+    // class and with Quick cast radial Off too (19 cells, once a layout, nothing per frame): the seats' key carries no ring switch, so
     // a switch turned On later finds them ready.
     for (const uint32_t code : qr::ExactCodes) {
         const int id = qr::ExactId(code);
@@ -597,7 +599,7 @@ void Seats(const ia::Snapshot& s) {
 }
 const ia::Skill* SkillOf(const ia::Snapshot& s, int id, int owner) {
     for (unsigned k = 0; k < s.skillCount && k < s.catalog.size(); ++k) if (s.catalog[k].id == id && s.catalog[k].owner == owner) return &s.catalog[k];
-    if (const int k = EntryOf(id, owner); k >= 0) return &entrySkills[size_t(k)];   // headset fixes 2026-11-15: another Lab's shelf entry (Army X menu, Quick cast radial)
+    if (const int k = EntryOf(id, owner); k >= 0) return &entrySkills[size_t(k)];   // headset fixes 2026-11-15: another ring's shelf entry (Army X menu, Quick cast radial)
     if (owner == -1 && rw::MenuOfEntry(id) >= 0) return MenuSkill(rw::MenuOfEntry(id));   // T036: a sub-menu's shelf entry
     if (owner == -1 && rw::orders::Is(id)) {   // a Commander order is no catalog skill: upstream's own entry for it (its name in the blurb, the hold and the log)
         static ia::Skill made[rw::orders::Count];
@@ -727,7 +729,7 @@ std::string SkillWords(const ia::Snapshot& s, int id, int owner) {
     const auto* k = SkillOf(s, id, owner);
     return k ? tx::Clean(k->name) : "skill " + std::to_string(id);
 }
-// 2026-11-16 bug 4: a Lab menu's bind remembers what its button held and where the menu was (its Applied moves that skill).
+// 2026-11-16 bug 4: a ring menu's bind remembers what its button held and where the menu was (its Applied moves that skill).
 void Displaced(Bind& b, const ia::Snapshot& s, int oldSlot, const char* name) {
     if (b.index >= 0 && b.index < framevr::skills::Count) { b.was = s.skills[size_t(b.index)].id; b.wasOwner = s.skills[size_t(b.index)].owner; }
     b.oldSlot = oldSlot == b.index ? -1 : oldSlot; b.labName = name;
@@ -770,7 +772,7 @@ void MoveDisplaced(const Bind& b, const ia::Snapshot& s, void (*say)(const char*
 }
 // T036: a hold to assign on a sub-menu's third or shelf entry: upstream's own clear of that button's game skill (as Draw glyph's
 // pick, and Army X menu's), and on its Applied the sub-menu keeps the button (Request). A button that draws glyphs is refused out
-// loud: the clear would leave Draw glyph on it. Quick cast's third (2026-11-16): Lab Quick cast radial's own bind (QuickBind).
+// loud: the clear would leave Draw glyph on it. Quick cast's third (2026-11-16): ring Quick cast radial's own bind (QuickBind).
 void QuickBind(const rw::QuickOut& e, int layout, const ia::Snapshot& s, void (*say)(const char*));
 void MenuBind(int third, const rw::QuickOut& e, int layout, const ia::Snapshot& s, void (*say)(const char*)) {
     if (third == rw::ThirdQuick) { QuickBind(e, layout, s, say); return; }
@@ -887,12 +889,12 @@ std::shared_ptr<const ia::icons::Image> MenuArt(int third, void (*say)(const cha
     }
     return d.image;
 }
-// The On edge (the first frame with the Lab On and a session): the swapchain (once; refused = upstream all session) and
+// The On edge (the first frame with the ring On and a session): the swapchain (once; refused = upstream all session) and
 // the worker (the compose pass's setup and the atlases, off the frame thread). Never on wheel open.
 bool waitSaid = false;   // X6: "swapchain waits" said once per wait
 void Setup(host::LayerFrame& f) {
     if ((saidUpstream & 1) || !f.session || !f.device || !f.queue || !f.create || !f.enumerate) return;
-    // Review-r6 X6: never a second Lab swapchain while a retired one is alive (rapid On / Off with a busy GPU); Reap destroys
+    // Review-r6 X6: never a second ring swapchain while a retired one is alive (rapid On / Off with a busy GPU); Reap destroys
     // it once its worker has exited, and the next frame makes the new one. Upstream's wheel shows meanwhile.
     if (!retiring.MayCreate(gpu != nullptr, [](Gpu* g) { return g->chain != XR_NULL_HANDLE; })) {
         if (!gpu && !waitSaid && f.say) { waitSaid = true; f.say("Frame ring wheel: swapchain waits: the last one is still being freed (rapid Off / On); upstream's wheel meanwhile"); }
@@ -984,7 +986,7 @@ int StepOwner(const host::PointerFrame& f, bool tracked0, bool tracked1, Where w
         const int other = f.wheelHand >= 0 && tracked[1 - f.wheelHand] ? 1 - f.wheelHand : -1;
         o.owner = other; o.changed = other != pointerOwner; o.why = other >= 0 ? pt::Why::Row : pt::Why::Untracked;
     } else { o = pointing.Step(in); pointingLive = true; }
-    const bool changed = o.owner != pointerOwner;   // against what the Lab used last frame (a row change between the two paths)
+    const bool changed = o.owner != pointerOwner;   // against what the ring used last frame (a row change between the two paths)
     pointerOwner = o.owner;
     if (changed && f.say) {
         char line[120];
@@ -1064,7 +1066,7 @@ void Pointer(host::PointerFrame f) {
     Write(f.palettePose, pose);
     placed = true; placedWidth = p.widthM; placedPose = pose;
     // Each hand's ray against the panel where it now is: the ring's content quad on a ring frame (canvas px into the ring's
-    // engine; upstream's hover -1, so its picture never repaints on Lab pointing), else upstream's square picture. Job B: either
+    // engine; upstream's hover -1, so its picture never repaints on ring pointing), else upstream's square picture. Job B: either
     // hand may point; the owner (ring_wheel_pointing.h) gets the beam, the dot, the hover and the hit.
     const bool ring = ringActive && RingShown(f.page);
     f.hover = -1; f.pointerHit = false;
@@ -1155,7 +1157,7 @@ const char* UpPageName(int page) {
     default: return "an editor";
     }
 }
-// Why a cell the Lab released to upstream would close the wheel (the footer's cells as interaction::FooterCell).
+// Why a cell the ring released to upstream would close the wheel (the footer's cells as interaction::FooterCell).
 const char* CellWhy(int cell) {
     if (cell == CenterCell) return "center";
     if (cell == ia::GlyphsCell) return "glyphs";
@@ -1215,12 +1217,12 @@ void Cleared() {
     const char* why = focusWhy ? focusWhy : "session-end";
     const bool shut = shutBeforeClear;
     focusWhy = nullptr; shutBeforeClear = false;
-    if (!edges.Open() || !EnabledNow()) return;   // closed: one branch. Off: the Off edge says lab-off
+    if (!edges.Open() || !EnabledNow()) return;   // closed: one branch. Off: the Off edge says ring-off
     const auto e = edges.Cleared(why, shut);
     if (sayKept) sayKept(rw::ClosedLine(NameClose(e.reason, nullptr).c_str(), double(GetTickCount64() - openedAt) / 1000, UpPageName(pageWas)).c_str());
 }
 // The wheel's edges, once a frame at the top of the Input seam (after HandControls, before interactions.Step): opened,
-// switched, closed with its reason (rw::WheelEdges: the Lab's own write last frame, a stick click, a safety reason, a new
+// switched, closed with its reason (rw::WheelEdges: the ring's own write last frame, a stick click, a safety reason, a new
 // session, else named here or unknown with its source).
 void Edges(const host::InputFrame& f, const ia::Snapshot* s) {
     bool click[2]{};
@@ -1288,7 +1290,7 @@ void HoldStep(const rw::QuickOut& e, float frac, const rw::QuickIn& q, const ia:
             const auto* k = was >= 0 ? SkillOf(s, was, -1) : nullptr;
             const std::string skillName = !k ? std::string() : rw::orders::Is(was) ? std::string(rw::orders::Short(was)) : tx::Clean(k->name);   // an order alone on the line: without "Army: "
             const rw::HoldWords words = rw::HoldWordsFor(rw::HeldBy(was, glyphDrawNow, e.hand, e.slot), k ? skillName.c_str() : nullptr, e.holding);   // audit bug 1: a Draw glyph button
-            rw::HoldWords lw = words;   // review S1: a button another Lab keeps says so ("Replaces Army X menu")
+            rw::HoldWords lw = words;   // review S1: a button another ring keeps says so ("Replaces Army X menu")
             if (!lw.bound) if (const char* other = buttons::OwnerOf(rw::SlotOf(e.hand, e.slot)); other) lw = {other, true};
 
             holdStatusText = lw.text; holdBound = lw.bound;
@@ -1651,7 +1653,7 @@ void Input(host::InputFrame f) {
     HoldStep(e, e.holdFrac, q, s, f.layout);   // the hold, from the tap limit
     auto name = [&](int seat) { const auto& st = layout.seats[size_t(seat)]; const auto* k = SkillOf(s, st.id, st.owner); return k ? tx::Clean(k->name) : std::string("?"); };
     auto slotName = [&](int h, int k) { return rw::SlotName(framevr::controllers::Layout(f.layout), h, k); };
-    auto wasText = [&](const rw::QuickOut& o) {   // what the button held: its game skill, else Draw glyph (audit bug 1), else a Lab menu (2026-11-16), else none
+    auto wasText = [&](const rw::QuickOut& o) {   // what the button held: its game skill, else Draw glyph (audit bug 1), else a ring menu (2026-11-16), else none
         const auto* was = o.replaced >= 0 ? SkillOf(s, o.replaced, -1) : nullptr;
         const std::string wasName = was ? tx::Clean(was->name) : std::string();
         if (rw::HeldBy(o.replaced, glyphDrawNow, o.hand, o.slot) == rw::Held::None) if (const char* lab = buttons::OwnerOf(rw::SlotOf(o.hand, o.slot))) return std::string(lab);
@@ -1662,7 +1664,7 @@ void Input(host::InputFrame f) {
     case rw::Quick::QuickCast: {   // close through upstream's center, then cast through upstream's glyph press (OnRingCast)
         const auto& st = layout.seats[size_t(e.seat)];
         if (const int k = EntryOf(st.id, st.owner); k == 1 && !entries[1].dim) { OpenQuickCast(e.hand, s, f, e.heldMs, "its shelf entry"); break; }   // T035: a tap opens its page
-        if (const int k = EntryOf(st.id, st.owner); k >= 0) {   // headset fixes 2026-11-15: another Lab's entry casts nothing; the wheel stays open
+        if (const int k = EntryOf(st.id, st.owner); k >= 0) {   // headset fixes 2026-11-15: another ring's entry casts nothing; the wheel stays open
             QueuePulses(e.hand, 2, .25f);
             if (f.say) { std::snprintf(line, sizeof line, "Frame ring wheel: tap on %s: nothing to cast (hold a button on it to put it there) held=%.0f ms", entrySkills[size_t(k)].name, e.heldMs); f.say(line); }
             break;
@@ -1684,7 +1686,7 @@ void Input(host::InputFrame f) {
         if (const int t = st.owner == -1 ? rw::MenuOfEntry(st.id) : -1; t >= 0) { MenuBind(t, e, f.layout, s, f.say); break; }   // T036: a sub-menu's shelf entry
         {
             Pending p; p.bind = {true, rw::SlotOf(e.hand, e.slot), st.id, st.owner, e.slot, e.hand, f.layout};
-            if (const int k = EntryOf(st.id, st.owner); k >= 0)   // another Lab's menu (Army X menu, Quick cast): bug 4, the skill it clears moves
+            if (const int k = EntryOf(st.id, st.owner); k >= 0)   // another ring's menu (Army X menu, Quick cast): bug 4, the skill it clears moves
                 Displaced(p.bind, s, (k == 0 ? -1 : framevr::quickradial::ButtonSlot()), entrySkills[size_t(k)].name);
             Enqueue(p, s, f.say);
         }
@@ -1777,7 +1779,7 @@ void Request(host::RequestFrame f) {
         if (rw::IsRefusal(e)) { engine.Refused(); QueuePulses(bindSent.hand, 3, .35f); }
         if (e == rw::ReplyEnd::Applied && bindSent.menu >= 0 && bindSent.menu < rw::ThirdCount) {   // T036: the button is that sub-menu's now
             const rw::MenuButtons b = rw::Assigned(ReadButtons(), bindSent.menu, bindSent.index);
-            buttons::Claim(bindSent.index, bindSent.menu == rw::ThirdGlyphs ? buttons::Owner::Glyphs : bindSent.menu == rw::ThirdGestures ? buttons::Owner::Gestures : buttons::Owner::QuickCast, f.say);   // review S1: one Lab per button (Army X menu, Quick cast radial)
+            buttons::Claim(bindSent.index, bindSent.menu == rw::ThirdGlyphs ? buttons::Owner::Glyphs : bindSent.menu == rw::ThirdGestures ? buttons::Owner::Gestures : buttons::Owner::QuickCast, f.say);   // review S1: one ring per button (Army X menu, Quick cast radial)
             for (int t = 0; t < rw::ThirdCount; ++t) cfg::Set(MenuKey(t), float(b.slot[size_t(t)] + 1));
             keptHoldUntil = GetTickCount64() + 2000;   // the snapshot catches up with the clear
             if (f.say) {
@@ -1794,8 +1796,8 @@ void Request(host::RequestFrame f) {
             f.say(line);
         }
         if (e == rw::ReplyEnd::Applied && rw::SkillTakesButton(bindSent.skill, bindSent.menu, bindSent.draw))
-            buttons::LetGo(bindSent.index, f.say);   // review N4: a skill put on a Lab menu's button: that menu lets go of it (key 0)
-        if (e == rw::ReplyEnd::Applied) MoveDisplaced(bindSent, s, f.say);   // 2026-11-16 bug 4: a Lab menu's clear never drops the skill silently
+            buttons::LetGo(bindSent.index, f.say);   // review N4: a skill put on a ring menu's button: that menu lets go of it (key 0)
+        if (e == rw::ReplyEnd::Applied) MoveDisplaced(bindSent, s, f.say);   // 2026-11-16 bug 4: a ring menu's clear never drops the skill silently
     };
     auto glyphDone = [&](rw::ReplyEnd e) {
         if (e == rw::ReplyEnd::None) return;
@@ -1839,7 +1841,7 @@ void Layer(host::LayerFrame f) {
     const bool on = EnabledNow();
     if (on != told) {
         told = on;
-        if (f.say) {   // the On line says the Lab's state at that moment, so a later log read knows what was tested
+        if (f.say) {   // the On line says the ring's state at that moment, so a later log read knows what was tested
             if (!on) f.say(rw::OffLine());
             else {
                 static constexpr const char* anims[5] = {"Off", "Floating icons", "Effect on hover", "All effects", "Custom"};
@@ -1854,7 +1856,7 @@ void Layer(host::LayerFrame f) {
         }
     }
     if (!on && edges.Open()) {   // bug 9: the Off edge with the wheel open (upstream's wheel takes over)
-        if (f.say) { char line[160]; std::snprintf(line, sizeof line, "Frame ring wheel: closed reason=lab-off after %.1f s, page %s", double(GetTickCount64() - openedAt) / 1000, UpPageName(pageWas)); f.say(line); }
+        if (f.say) { char line[160]; std::snprintf(line, sizeof line, "Frame ring wheel: closed reason=setting-off after %.1f s, page %s", double(GetTickCount64() - openedAt) / 1000, UpPageName(pageWas)); f.say(line); }
         edges.Off();
     }
     if (!on) { hold.Reset(); focusBlip.Focused(); focusWhy = nullptr; shutBeforeClear = false; Retire(f.say, "Off edge"); Reap(false, f.say); ringActive = false; engineOpen = false; seatsKey = 0; built.reset(); choose = -1; ringPageSeen = false; layoutSaid = -1; otherTreesSaid = -1; wantMenu = {}; thirdSaid = -2; layersSaid = false; return; }   // layoutSaid: the next On says tree layout= again
@@ -1869,7 +1871,7 @@ void Layer(host::LayerFrame f) {
     gpu->compose.Pump();
     if (!f.open || !placed || !f.palette) { treeSaid = false; glyphSaid = false; policy.Want(rw::Scene{}); pointedFx.Reset(); return; }   // T025: the next open says its tree icons line
     auto& q = *static_cast<XrCompositionLayerQuad*>(f.palette);
-    if (!ringActive) {   // upstream's picture at the Lab's pose and width (R3)
+    if (!ringActive) {   // upstream's picture at the ring's pose and width (R3)
         if (q.subImage.swapchain != XR_NULL_HANDLE) q.size = {placedWidth, placedWidth};
         return;
     }
@@ -1883,7 +1885,7 @@ void Layer(host::LayerFrame f) {
     rw::Scene scene;
     scene.open = true; scene.layout = &shown; scene.step = step; scene.tMs = double(f.nowMs);
     scene.anim = ReadAnim();
-    scene.layers = ReadLayers();   // T036: Lab > Experiment: Ring wheel > Layers
+    scene.layers = ReadLayers();   // T036: ring > Experiment: Ring wheel > Layers
     if (const ULONGLONG t = GetTickCount64(); f.say && (!layersSaid || !(scene.layers == layersTold)) && t - layersSaidAt > 1000) {   // the first frame and each change, at most once a second
         layersTold = scene.layers; layersSaid = true; layersSaidAt = t;
         char line[200];
@@ -2053,7 +2055,7 @@ void Layer(host::LayerFrame f) {
             }
             scene.blurb = &blurbs.Get(built->metrics, key, {});
         } else if (const auto* k = SkillOf(s, seat.id, seat.owner)) {
-            const int ek = EntryOf(seat.id, seat.owner);   // headset fixes 2026-11-15: another Lab's entry (its words, its dim)
+            const int ek = EntryOf(seat.id, seat.owner);   // headset fixes 2026-11-15: another ring's entry (its words, its dim)
             const bool other = ek >= 0, otherDim = other && entries[size_t(ek)].dim;
             const uint64_t key = (uint64_t(chooser) << 62) | (uint64_t(otherDim) << 61) | (uint64_t(quickChooser) << 59) | (uint64_t(quickChooser ? quickChoose + 1 : 0) << 52) |   // review N1: its place's words
                                  (uint64_t(uint32_t(seat.id)) << 32) | uint32_t(seat.owner + 1);
@@ -2115,7 +2117,7 @@ void Layer(host::LayerFrame f) {
     if (f.nowMs - windowAt >= 10000) {
         windowAt = f.nowMs;
         const auto w = gpu->compose.TakeWindow();
-        if (f.say) {
+        if (f.say && verboseLog.load(std::memory_order_relaxed)) {   // the periodic line only under [debug] ring_wheel_log
             char line[260];
             std::snprintf(line, sizeof line, "Frame ring wheel: 10 s: composes=%u reused=%u busy=%u cpu mean/p95/max=%.3f/%.3f/%.3f ms gpu mean/p95/max=%.3f/%.3f/%.3f ms (%u) acquire max=%.3f ms render=%d%%",
                           w.composes, policy.reused, policy.busy, w.cpuMean, w.cpuP95, w.cpuMax, w.gpuMean, w.gpuP95, w.gpuMax, w.gpuSamples, acquireMax, RenderPct());
@@ -2128,7 +2130,7 @@ void Layer(host::LayerFrame f) {
 // Job B: the non-owner's beam, after upstream's laser and dot (Pointer wrote it this frame; nothing when only one hand points).
 void Beam(host::BeamFrame f) {
     const auto b = pt::BeamFor(EnabledNow(), f.open, beam2, f.count, f.limit);
-    if (b == pt::Beam::LabOff) beam2 = false;   // the Off edge (perf should-fix 2): never a beam after the Lab went Off
+    if (b == pt::Beam::LabOff) beam2 = false;   // the Off edge (perf should-fix 2): never a beam after the ring went Off
     {   // a beam skipped for want of a layer slot: said once on each change
         const bool noSlot = b == pt::Beam::NoSlot;
         if (noSlot != beamNoSlotSaid && f.say) {
@@ -2227,7 +2229,14 @@ void LoadStoredOnce() {   // the two sub-menu buttons the ring keeps itself, rea
         for (const cfg::Key k : {cfg::GlyphsButton, cfg::GesturesButton})
             cfg::Load(k, float(GetPrivateProfileIntW(L"ring_wheel", StoredKey(k), 0, ini.c_str())));
     cfg::Persist() = &PersistButton;
+    if (const std::wstring ini = StoredIni(); !ini.empty())
+        ringwheelimpl::verboseLog.store(GetPrivateProfileIntW(L"debug", L"ring_wheel_log", 0, ini.c_str()) != 0);
 }
+std::atomic<void (*)(const char*)> realSay{nullptr};
+void QuietSay(const char* line) {   // the ring's own say: the quiet lines, or every line under [debug] ring_wheel_log
+    if (const auto say = realSay.load(std::memory_order_relaxed); say && (ringwheelimpl::verboseLog.load(std::memory_order_relaxed) || framevr::ringwheel::KeepQuietLine(line))) say(line);
+}
+template <class Frame> void Quiet(Frame& f) { if (f.say && f.say != &QuietSay) { realSay.store(f.say, std::memory_order_relaxed); f.say = &QuietSay; } }
 }  // namespace
 namespace ringwheelimpl { bool EnabledNow() { return framevr::ringwheel::host::Enabled(); } }
 namespace framevr::ringwheel::host {
@@ -2237,15 +2246,15 @@ bool Enabled() {
     framevr::quickradial::SetEnabled(on);   // Quick cast lives in the ring menu: it runs only while the ring menu does
     return on;
 }
-void Pointer(PointerFrame f) { ringwheelimpl::Pointer(f); }
-void Input(InputFrame f) { ringwheelimpl::Input(f); }
-void Tracking(TrackingFrame f) { ringwheelimpl::Tracking(f); }
+void Pointer(PointerFrame f) { Quiet(f); ringwheelimpl::Pointer(f); }
+void Input(InputFrame f) { Quiet(f); ringwheelimpl::Input(f); }
+void Tracking(TrackingFrame f) { Quiet(f); ringwheelimpl::Tracking(f); }
 bool Blip(BlipFrame f) { return ringwheelimpl::Blip(f); }
-void Request(RequestFrame f) { ringwheelimpl::Request(f); }
-void Layer(LayerFrame f) { ringwheelimpl::Layer(f); }
-void Beam(BeamFrame f) { ringwheelimpl::Beam(f); }
-void Cast(CastFrame f) { ringwheelimpl::Cast(f); }
-void Hands(HandsFrame f) { ringwheelimpl::Hands(f); }
+void Request(RequestFrame f) { Quiet(f); ringwheelimpl::Request(f); }
+void Layer(LayerFrame f) { Quiet(f); ringwheelimpl::Layer(f); }
+void Beam(BeamFrame f) { Quiet(f); ringwheelimpl::Beam(f); }
+void Cast(CastFrame f) { Quiet(f); ringwheelimpl::Cast(f); }
+void Hands(HandsFrame f) { Quiet(f); ringwheelimpl::Hands(f); }
 void Cleared() { ringwheelimpl::Cleared(); }
 void Session() { ringwheelimpl::Session(); }
 void Reset() { ringwheelimpl::Reset(); }

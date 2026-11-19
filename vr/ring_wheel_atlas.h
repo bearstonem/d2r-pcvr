@@ -1,6 +1,6 @@
 #pragma once
-// Lab Ring wheel (T025, build step R5): the atlases (plan E4, E2 text; frame-budget section 2). Everything here runs on the
-// Lab's one worker thread, never on the frame thread:
+// Ring skill menu (T025, build step R5): the atlases (plan E4, E2 text; frame-budget section 2). Everything here runs on the
+// ring's one worker thread, never on the frame thread:
 //  - the compose pass's Setup (shader compile, GPU objects; perf R4 item 1),
 //  - the glyph atlas: upstream's menu fonts (Cinzel 700, Alegreya Sans 500 / 700; SIL OFL) at the render scale through
 //    DirectWrite's grayscale glyph analysis, the 2.5 px dark outline baked in (fill red, outline green), and the metrics
@@ -64,11 +64,11 @@ public:
     };
     AtlasWorker() = default;
     // Review R5 K3: never a blocking join here (it may run at DLL unload, under the loader lock). A worker that exited is
-    // joined; one still running is detached (the Lab holds its worker on the heap and never destroys it while running).
+    // joined; one still running is detached (the ring holds its worker on the heap and never destroys it while running).
     ~AtlasWorker() { if (thread.joinable()) { if (exited.load()) thread.join(); else thread.detach(); } }
     AtlasWorker(const AtlasWorker&) = delete;
     AtlasWorker& operator=(const AtlasWorker&) = delete;
-    // Frame thread, at the session or the Lab's On edge: starts the worker, which runs compose->Setup first.
+    // Frame thread, at the session or the ring's On edge: starts the worker, which runs compose->Setup first.
     void Start(Compose* compose, ID3D12Device* device, ID3D12CommandQueue* queue, int format, Fonts fonts, IconSource source,
                std::function<void()> settle, void (*say)(const char*));
     // Before Start: where the game effect texture cache is read from (default SpellSpriteCache(); the preview: a local copy;
@@ -81,8 +81,8 @@ public:
     std::shared_ptr<const Built> Current(const Compose& compose);
     unsigned Builds() const { return builds.load(); }   // icon builds finished (staged)
     bool Failed() const { return failed.load(); }
-    // Frame thread, the Lab's Off edge (perf R5 must-fix): never waits. The worker leaves its loop (a build in progress
-    // stops at its next stage), then runs `onExit` on its own thread (the Lab frees the compose there, after the GPU).
+    // Frame thread, the ring's Off edge (perf R5 must-fix): never waits. The worker leaves its loop (a build in progress
+    // stops at its next stage), then runs `onExit` on its own thread (the ring frees the compose there, after the GPU).
     void Retire(std::function<void()> onExit);
     bool Exited() const { return exited.load(); }
     // Joins the worker (instant once Exited); OnUiReset and a new Start call it.

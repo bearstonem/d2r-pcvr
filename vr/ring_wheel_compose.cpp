@@ -1,12 +1,12 @@
-// Lab Ring wheel (T025, build steps R4-R5): the compose pass (vr/ring_wheel_compose.h). One pipeline, one draw: every
+// Ring skill menu (T025, build steps R4-R5): the compose pass (vr/ring_wheel_compose.h). One pipeline, one draw: every
 // instance of steamvr/ring_wheel_draw.h is a quad (a 4-vertex strip, instanced), its recipe drawn in the pixel shader
 // inside that quad only. The shaders compile in Setup with the system's d3dcompiler_47 (as ui_blit.cpp and
-// elemental_hands_renderer.cpp do), and Setup runs on the Lab's worker, so the frame thread never waits for it (perf R4
+// elemental_hands_renderer.cpp do), and Setup runs on the ring's worker, so the frame thread never waits for it (perf R4
 // item 1: about 20 ms measured).
 #include "ring_wheel_compose.h"
 #include "../steamvr/ring_wheel_draw.h"
 #include "../steamvr/ring_wheel_shot.h"
-#include "ring_wheel_shader_blob.h"   // generated at build time (steamvr/lab.cmake)
+#include "ring_wheel_shader_blob.h"   // generated at build time (steamvr/ring.cmake)
 #include <windows.h>
 #include <d3d12.h>
 #include <d3dcompiler.h>
@@ -877,7 +877,7 @@ struct Compose::Impl {
 
 Compose::Compose() = default;
 // Review R4 J2: the destructor makes no D3D12 call and logs nothing, since it may run at DLL unload (the loader lock, the
-// device and the logger may be gone). What Release did not free (the Lab's OnUiReset frees it after the GPU is idle) is
+// device and the logger may be gone). What Release did not free (the ring's OnUiReset frees it after the GPU is idle) is
 // left allocated, never freed while the GPU may still read it.
 Compose::~Compose() { (void)impl.release(); }
 uint64_t Compose::Submitted() const { return Ready() ? impl->value : 0; }
@@ -1352,7 +1352,7 @@ const char* Compose::Shot(const ContentRect& content, const Instance* list, int 
     if (FAILED(s.list->Close())) { s.at = p.value; p.parked.push_back(std::move(s)); return "the readback list failed"; }   // the Draw is already submitted: the GPU may hold the target
     ID3D12CommandList* lists[] = {s.list.Get()};
     p.queue->ExecuteCommandLists(1, lists);
-    s.at = ++p.value;   // the Lab fence: Release and the Off edge wait for this copy too
+    s.at = ++p.value;   // the ring fence: Release and the Off edge wait for this copy too
     if (FAILED(p.queue->Signal(p.fence.Get(), s.at))) { p.parked.push_back(std::move(s)); return "the GPU was lost"; }
     if (p.fence->GetCompletedValue() < s.at) {
         const HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);

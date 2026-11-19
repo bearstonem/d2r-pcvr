@@ -1,7 +1,8 @@
 #pragma once
-// Lab Ring wheel (T025): the On / Off edge's log lines, as plain data (ring-wheel-test). The On line says the Lab's state
+// Ring skill menu (T025): the On / Off edge's log lines, as plain data (ring-wheel-test). The On line says the ring's state
 // at that moment (the rows that decide what the player sees), not a build step, so a log read later tells what was tested.
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 namespace framevr::ringwheel {
@@ -36,7 +37,7 @@ inline std::string ClosedLine(const char* reason, double openS, const char* page
     return line;
 }
 // The trace for audit 2026-11-10 bug 6 (both sticks clicked nearly together swap the wheel's hand): the stick-click edges the
-// Lab saw that frame, the time since this open and since the last switch in it (under 0: none yet). Log only.
+// ring saw that frame, the time since this open and since the last switch in it (under 0: none yet). Log only.
 inline std::string SwitchedLine(int hand, const bool click[2], double sinceOpenMs, double sinceSwitchMs) {
     char last[48];
     if (sinceSwitchMs < 0) std::snprintf(last, sizeof last, "the first switch of this open");
@@ -48,7 +49,7 @@ inline std::string SwitchedLine(int hand, const bool click[2], double sinceOpenM
 }
 // Audit 2026-11-10 bug 8: every release of a ring swapchain says so (the session's end said nothing). where: "Off edge",
 // "session end", or a kept one's later release; ms under 0: not timed.
-// Where a swapchain freed in the Lab's Reap went (review N3). Reap waiting is the session's end, whichever of its two steps
+// Where a swapchain freed in the ring's Reap went (review N3). Reap waiting is the session's end, whichever of its two steps
 // frees it: one kept at an Off edge, or one whose GPU finished between the session's Retire and its Reap, is then the
 // session's. Not waiting: a kept one's later release, by the step that found it.
 enum class ReapStep { GpuDone, WorkerGone };
@@ -61,5 +62,20 @@ inline std::string ReleasedLine(const char* where, double ms) {
     if (ms < 0) std::snprintf(line, sizeof line, "Frame ring wheel: swapchain destroyed (%s, the frame thread)", where);
     else std::snprintf(line, sizeof line, "Frame ring wheel: swapchain destroyed ms=%.1f (%s, the frame thread)", ms, where);
     return line;
+}
+// The quiet log (Jeff's rule for a PR: a low level that cannot touch the game). Every "Frame ring wheel:" line the ring says goes
+// through this: the ring's On / Off edge, a button put on or taken off a menu, and every refusal or failure pass; everything else
+// (pages, pointing, placement, per-open and per-pick lines, the 10 s line, icon and layer counts) is said only with
+// [debug] ring_wheel_log=1 in d2r_pcvr.ini (off by default, in every build). A line that is not the ring's own passes unchanged.
+inline bool KeepQuietLine(const char* line) {
+    constexpr const char prefix[] = "Frame ring wheel: ";
+    if (!line) return false;
+    if (std::strncmp(line, prefix, sizeof prefix - 1) != 0) return true;
+    const char* body = line + sizeof prefix - 1;
+    if (std::strncmp(body, "On", 2) == 0 || std::strncmp(body, "Off", 3) == 0 || std::strncmp(body, "bind ", 5) == 0) return true;
+    for (const char* mark : {"refused", "failed", "not put on", "not opened", "swapchain kept", "swapchain waits", "missing", "taken off", "let go of",
+                             "(its button", "fx textures 0/8", "dropped"})
+        if (std::strstr(body, mark)) return true;
+    return false;
 }
 }  // namespace framevr::ringwheel

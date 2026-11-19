@@ -1,4 +1,4 @@
-// Lab Ring wheel (T025, build steps R4-R5): ring-wheel-preview [--out <folder>] [--icons <icon cache folder>] [--kit <kit folder>] [--badges <folder>] [--t036 <folder>].
+// Ring skill menu (T025, build steps R4-R5): ring-wheel-preview [--out <folder>] [--icons <icon cache folder>] [--kit <kit folder>] [--badges <folder>] [--t036 <folder>].
 // By hand, never in ctest: --shot-ms <folder> [--adapter hardware] times a screenshot of the full ring at 150% (1296 x 1320), the
 // frame's half and the worker's, beside the old all-on-the-frame save (round 2026-11-12 Job B); its PNGs go into <folder>.
 // The compose pass (vr/ring_wheel_compose.cpp) and the atlases (vr/ring_wheel_atlas.cpp) on WARP, plus the design notes
@@ -11,7 +11,7 @@
 #include "ring_wheel_pages.h"
 #include "../vr/ring_wheel_compose.h"
 #include "../vr/ring_wheel_atlas.h"
-#include "ring_wheel_shader_blob.h"   // generated at build time (steamvr/lab.cmake)
+#include "ring_wheel_shader_blob.h"   // generated at build time (steamvr/ring.cmake)
 #include "ring_wheel_png.h"
 #include "ring_wheel_shot.h"
 #include "ring_wheel_menu_art.h"   // T036 (2026-11-16): the sub-menus' pictures (ring_wheel_menu_art.rc is linked in)
@@ -97,7 +97,7 @@ struct Fixture {
         Need(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&list)), "list");
         Need(list->Close(), "close");
         Need(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)), "fence");
-        // The Lab's layer swapchain's size (plan E3), made once; the content at the render scale sits at its top left.
+        // the ring's layer swapchain's size (plan E3), made once; the content at the render scale sits at its top left.
         D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_DEFAULT;
         D3D12_RESOURCE_DESC d{};
         d.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D; d.Width = rw::SwapchainW; d.Height = rw::SwapchainH; d.DepthOrArraySize = 1;
@@ -630,7 +630,7 @@ int main(int argc, char** argv) {
         if (real) icons::Directory(iconDir.wstring());
         rw::IconSource source = real ? rw::IconSource([](int id) { return icons::Get("s" + std::to_string(id)); })
                                      : rw::IconSource([](int id) { return id == 105 ? nullptr : SyntheticIcon(id); });
-        source = [inner = source](int id) {   // T036 (2026-11-16): the sub-menus' own pictures, from this exe's copy of the plugin's .rc (as the Lab's worker)
+        source = [inner = source](int id) {   // T036 (2026-11-16): the sub-menus' own pictures, from this exe's copy of the plugin's .rc (as the ring's worker)
             const int t = rw::menuart::ThirdOfArt(id);
             if (rw::treeart::SlotOfArt(id) >= 0) return rw::treeart::Picture(GetModuleHandleW(nullptr), id);   // T025: a painted tree square, a cell of the sheet
             if (rw::glyphart::SlotOfArt(id) >= 0) return rw::glyphart::Picture(GetModuleHandleW(nullptr), id);   // Glyph icon: a painted glyph or sigil square, a cell of its sheet
@@ -788,7 +788,7 @@ int main(int argc, char** argv) {
             }
             (void)compose.TakeWindow();   // these pictures are not in the cost window the R4 check below reads
         }
-        {   // T025 (Lab > Ring wheel > Layers > Tree icon): a Sorceress page with the tree marks painted, circle
+        {   // T025 (ring > Ring wheel > Layers > Tree icon): a Sorceress page with the tree marks painted, circle
             // and square, at 50, 100 and 200%, then Drawn at 100% and Hidden, at the panel's real size. Checked every run; saved with --tree <folder>.
             // The squares: the built sheet's (tools/ring_tree_sheet.py) when it holds any; else a stand-in sheet of three flat-colored plates
             // (the proof of the drawing, not of the art: its file names say stand-in).
@@ -855,7 +855,7 @@ int main(int argc, char** argv) {
             }
             if (standIn) { ta::SetMask(0); ta::SetSheet(nullptr); }
         }
-        {   // Glyph icon (Lab > Ring wheel > Center > Glyph icon): the Glyphs page's eight shapes and the main
+        {   // Glyph icon (ring > Ring wheel > Center > Glyph icon): the Glyphs page's eight shapes and the main
             // page's center sigils (star, hand) drawn, painted circle at 50 / 100 / 200 / 300% and painted square. Checked every run; saved with
             // --glyph <folder>. The squares: the built sheet's (tools/ring_glyph_sheet.py) when it holds any; else a stand-in sheet of twelve
             // flat rust plates with a silver disc (the proof of the drawing, not of the art: its file names say stand-in).
@@ -949,7 +949,7 @@ int main(int argc, char** argv) {
             for (int t = 0; t < rw::ThirdCount; ++t) { d.in.push_back({rw::MenuEntryId(t), -1, -1}); d.names.push_back(rw::MenuEntryName[t]); }
             Seats st = Lay(d, rw::TreeLayout::Shown, 100);
             st.request.classId = cls;
-            // 2026-11-16: the sub-menu entries ask for their own pictures by their ids (as the Lab asks), the thirds use the same cells
+            // 2026-11-16: the sub-menu entries ask for their own pictures by their ids (as the ring asks), the thirds use the same cells
             worker.Want(st.request);
             std::shared_ptr<const rw::AtlasWorker::Built> built;
             if (!PumpUntil(compose, [&] { built = worker.Current(compose); return built && built->request == st.request; }, 60000)) Check(false, "T036 the atlases");
@@ -964,7 +964,7 @@ int main(int argc, char** argv) {
                     rw::Scene s; s.open = true; s.layout = &st.layout; s.atlasPct = built->icons.scalePct; s.cells = built->icons.cellOf.data(); s.metrics = &built->metrics;
                     s.initials = st.initialPtr.data(); s.elements = el.data(); s.seatMark = mark.data(); s.skillClass = cls; s.hasMotions = true; s.tMs = 4000;
                     s.anim = rw::PresetAnim(rw::Preset::Hover); s.anim.floats = false;   // a still picture: the floats' drift is Float's own test
-                    s.layers = {true, true, false, false}; s.thirds = true;   // the Lab's defaults: Element frame and Animation Off
+                    s.layers = {true, true, false, false}; s.thirds = true;   // the ring's defaults: Element frame and Animation Off
                     for (int t = 0; t < rw::ThirdCount; ++t) s.thirdCell[size_t(t)] = int16_t(rw::CellOfSkill(st.request.ids.data(), built->icons.cellOf.data(), st.request.n, rw::menuart::ArtId(t)));
                     s.footer = {true, ia::MenuPage::Spells, false, false, true};
                     for (int t = 0; t < rw::Trees; ++t) s.treeNames[size_t(t)] = framevr::skillcategories::Name(cls, rw::PageAt(cls, t) + 1);
@@ -1059,7 +1059,7 @@ int main(int argc, char** argv) {
                     const float a = rw::ThirdMidDeg[rw::ThirdQuick] * rw::Pi / 180, x = rw::CanvasCx + 145 * std::cos(a), y = rw::CanvasCy + 145 * std::sin(a);
                     Check(At(pq, c.w, x, y, c, 3) > 100 && At(rest, c.w, x, y, c, 3) < 60, "T036 the Quick cast third grown: its slice at 145 px");
                 }
-                {   // 2026-11-16: Quick cast's switch Off: the pointed third's second line differs ("Off in the Lab", muted), its name the same
+                {   // 2026-11-16: Quick cast's switch Off: the pointed third's second line differs ("Off in the ring", muted), its name the same
                     double diff = 0;
                     for (float y = rw::CanvasCy + 5; y <= rw::CanvasCy + 30; y += 1) for (float x = rw::CanvasCx - 90; x <= rw::CanvasCx + 90; x += 1) diff += std::abs(At(pqOff, c.w, x, y, c, 0) - At(pq, c.w, x, y, c, 0));
                     Check(diff > 500 && nameAt(pqOff) > 15, "Quick cast Off: its third says so under its name");
@@ -1927,9 +1927,9 @@ int main(int argc, char** argv) {
                 if (!sprites.empty()) Check(PumpUntil(compose, [&] { return compose.HasAtlas(rw::AtlasKind::FxTex); }, 20000), "stage 3a: the game effect textures in (--sprites)");
                 std::vector<rw::RestGlow> rest(size_t(shown.layout.count)), none(size_t(shown.layout.count));
                 std::vector<uint8_t> el(size_t(shown.layout.count));
-                std::vector<int8_t> ci(size_t(shown.layout.count), int8_t(-1)); int nc = 0;   // designer S3a: the crawl's index, as the Lab
+                std::vector<int8_t> ci(size_t(shown.layout.count), int8_t(-1)); int nc = 0;   // designer S3a: the crawl's index, as the ring
                 int fromKit = 0;
-                for (int i = 0; i < shown.layout.count; ++i) {   // the Lab's own fill (vr/ring_wheel.cpp Seats)
+                for (int i = 0; i < shown.layout.count; ++i) {   // the ring's own fill (vr/ring_wheel.cpp Seats)
                     const auto& seat = shown.layout.seats[size_t(i)];
                     rest[size_t(i)] = rw::RestGlowOf(seat.id, cls, seat.tree); el[size_t(i)] = uint8_t(rw::ElementOfGlow(rest[size_t(i)]));
                     if (rw::CrawlsAtRest(rest[size_t(i)]) && nc < 127) ci[size_t(i)] = int8_t(nc++);
@@ -2396,7 +2396,7 @@ int main(int argc, char** argv) {
                 std::printf("X1 WaitIdle, GPU let go at 4 ms, 7 tries, %d idle: median %.1f ms after the fence, worst %.1f ms (slowest wait %.1f ms)\n", idleTries, median, worst, slowestTotal);
                 Check(honest && (idleTries < 3 || median < 20), "X1 WaitIdle returns when the GPU finishes (median " + std::to_string(median) + " ms after the fence, worst " + std::to_string(worst) + ", " + std::to_string(idleTries) + " of 7 idle; slowest wait " + std::to_string(slowestTotal) + " ms of a 500 ms bound)");
             }
-            // Round 2026-11-12 Job B: the Lab going Off with a save pending. The save holds the filled readback buffer and
+            // Round 2026-11-12 Job B: the ring going Off with a save pending. The save holds the filled readback buffer and
             // nothing else, so the compose pass is freed under it (what the Off edge's worker does), the buffer is read after
             // that, and the file still comes out whole.
             rw::shot::SaveQueue saver;
