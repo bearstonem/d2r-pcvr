@@ -10038,6 +10038,9 @@ std::atomic<bool> g_ceilBiome{false};   // the area's biome is on [ceiling] biom
 // its own), its walls' top as the installer measured it (0: not measured) and its own height_<biome> (0: not set)
 std::atomic<int> g_gameCeilKind{-1};
 std::atomic<float> g_wallsTopHere{0.0f}, g_ownHeightHere{0.0f};
+// The area's first entry in gameceiling::kClearances (-1: none), and the hero's level as last read (the state sample reads 0 while
+// stale: the last one read stands in, so the ceiling does not jump between the level's height and the area's)
+std::atomic<int> g_clearAreaHere{-1}, g_ceilLevel{0};
 // A file of the mod's data as text (at most 1 MiB), from its .mpq folder (PluginContext::modDirectory): "" none
 std::string ModDataText(const char* rel) {
     if (!g_ctx || !g_ctx->modDirectory) return std::string();
@@ -11060,6 +11063,7 @@ void SkyTick() {
         const int kind = world && IsGameCeilingBiome(biome) ? gameceiling::KindOf(biome) : -1;
         g_gameCeilKind.store(kind);
         g_ownHeightHere.store(world ? OwnCeilingHeight(biome) : 0.0f);
+        g_clearAreaHere.store(kind >= 0 ? gameceiling::ClearanceArea(biome) : -1);
         {
             ceilmeasure::Measures ms;
             const bool have = kind >= 0 && ceilmeasure::Parse(ModDataText(ceilmeasure::kFile), &ms);
@@ -11460,6 +11464,11 @@ void GameCeilingInputs(engineunits::CeilingIn* c) {
     c->heightFrom = own > 0.0f ? "the area's height_<biome>"
                     : fromWalls && walls > 0.0f ? "on the area's walls' top - the game's own pieces, [ceiling] height_from_walls"
                                                 : "no height of its own, its walls not measured";
+    // Over the area's tallest pieces where they stand far above its walls (Baal's and Mephisto's rooms: gameceiling::kClearances)
+    if (const int read = interactionstate::CurrentLevel(gamestate::LocalPlayer(), GetTickCount64())) g_ceilLevel.store(read);
+    const gameceiling::Clearance* clear = gameceiling::ClearanceAt(g_clearAreaHere.load(), g_ceilLevel.load());
+    const float raised = gameceiling::HeightOver(c->height, own, clear);
+    if (raised != c->height) { c->height = raised; c->heightFrom = clear->over; }
     c->height += CeilingLift(c->hero[1]);   // its top over the level's highest floor, not the lowest he has stood on
     c->reach = gameceiling::WallReach(c->height, g_set.ceilFloor.load());
 }
