@@ -553,6 +553,20 @@ int main() {
             w.in.trigger = 0; w.Step();
             assert(w.last.done == BindWatch::Done::Refused && w.b.buttons.Of(16) == -1 && w.b.buttons.Of(0) == 3);   // refused: nothing kept
         }
+        {   // the game applied a bind but no weapon set is known: nothing kept, and told apart from the game's refusal
+            Binder b; ia::Reply reply{};
+            ia::Request r{}; r.action = ia::Action::BindSkill; r.skill = ItemId; r.skillOwner = -1; r.index = 2; r.sequence = 9; r.bank = -1;
+            assert(b.After(nullptr, &r, &reply, 0).took);
+            reply = ia::Reply{9, 10, ia::Result::Applied};
+            ia::Request none{};
+            const auto o = b.After(nullptr, &none, &reply, 10);
+            assert(o.done == BindWatch::Done::Refused && o.unkept && o.slot == 2 && !b.buttons.Any());
+            ia::Request r2{}; r2.action = ia::Action::BindSkill; r2.skill = ItemId; r2.skillOwner = -1; r2.index = 2; r2.sequence = 11; r2.bank = 0;
+            b.After(nullptr, &r2, &reply, 20);
+            reply = ia::Reply{11, 10, ia::Result::Refused};
+            const auto g = b.After(nullptr, &none, &reply, 30);
+            assert(g.done == BindWatch::Done::Refused && !g.unkept);
+        }
         {   // no army, or no hand wheel: no entry
             Wheel w(0);
             ia::Snapshot s = w.in.snapshot;

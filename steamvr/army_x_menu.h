@@ -89,6 +89,7 @@ struct Binder {
     struct Result {
         bool took = false; int tookSlot = -1, cleared = -1;      // this frame's request was the entry's pick (a clear now)
         BindWatch::Done done = BindWatch::Done::None; int slot = -1, set = -1;   // the game's answer to it
+        bool unkept = false;   // the game applied it, but with no weapon set known the mod kept nothing (done reads Refused)
     };
     void Before(interaction::Input& in) noexcept {
         listed = Offer(in.snapshot, in.wheelHand);
@@ -104,7 +105,7 @@ struct Binder {
         if (o.done == BindWatch::Done::None) return o;
         o.set = watchSet; watchSet = -1;
         if (o.done == BindWatch::Done::Applied) {
-            if (o.set < 0 || o.slot < 0 || o.slot >= skills::Count) o.done = BindWatch::Done::Refused;   // no weapon set known: nothing kept
+            if (o.set < 0 || o.slot < 0 || o.slot >= skills::Count) { o.done = BindWatch::Done::Refused; o.unkept = true; }   // no weapon set known: nothing kept
             else { buttons.slot[o.set] = o.slot; boundAtMs = nowMs; }
         }
         return o;

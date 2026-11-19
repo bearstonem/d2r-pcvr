@@ -346,6 +346,7 @@ void Request(seam::WheelRequestFrame f) {
     if (ok) SaveButton(o.set, o.slot);
     char line[200];
     if (ok) std::snprintf(line, sizeof line, "Frame army x menu: on: slot %d is its button in weapon set %s ([wheel] %ls saved)", o.slot, o.set ? "II" : "I", ButtonKey[o.set]);
+    else if (o.unkept) std::snprintf(line, sizeof line, "Frame army x menu: bind not kept by the mod: the weapon set was not known; slot %d is not its button (bind it again)", o.slot);
     else std::snprintf(line, sizeof line, "Frame army x menu: bind refused by the game: slot %d keeps what it had", o.slot);
     if (f.say) f.say(line);
 }
