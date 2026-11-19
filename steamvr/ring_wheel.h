@@ -482,7 +482,7 @@ struct StepIn {
     int slotPressed = -1;
     std::array<int, Slots> bound{-1, -1, -1, -1, -1};
     double lastHitMs = -1e18;       // the last hit the hero took (no pick within HitPickMs)
-    bool glyphClickSpent = false;   // the player #3: the trigger was held on the Glyphs half past the tap limit: its release opens nothing
+    bool glyphClickSpent = false;   // the trigger was held on the Glyphs half past the tap limit: its release opens nothing
 };
 enum class Event { None, Pick, Cancel, Bind, Clear, Upstream, OpenQuick };   // OpenQuick: the Quick cast third's click
 struct StepOut {
@@ -719,7 +719,7 @@ inline interaction::Request BindRequest(const interaction::Snapshot& s, int inde
     return r;
 }
 
-// the player #3: this button draws glyphs, as upstream's button picker sends it (interactions.h, skill.id == GlyphDrawId): the
+// this button draws glyphs, as upstream's button picker sends it (interactions.h, skill.id == GlyphDrawId): the
 // transport saves [glyphs] draw_slot first, then clears the button's game skill. So it is never sent when that clear could not
 // pass (upstream's own gate: fresh and editable): the setting must not change for a bind that is then refused.
 inline interaction::Request GlyphDrawRequest(const interaction::Snapshot& s, int index, uint64_t number, uint64_t session, uint64_t now) {
@@ -754,7 +754,7 @@ struct QuickIn {
     double lastHitMs = -1e18;        // no assign within 300 ms of a hit; a cast is never blocked
     bool thirds = false;             // the Gestures and Quick cast thirds take presses too (their pseudo seats)
 };
-// the player #3: the Glyphs half of the center takes a press like a seat does, under this pseudo seat (no real seat has it).
+// the Glyphs half of the center takes a press like a seat does, under this pseudo seat (no real seat has it).
 // the Gestures and Quick cast thirds likewise: a tap opens the sub-menu, a hold puts that sub-menu on the button.
 constexpr int GlyphsSeat = MaxSeats, GesturesSeat = MaxSeats + 1, QuickSeat = MaxSeats + 2;
 inline int ThirdSeat(int third) { return third >= 0 && third < ThirdCount ? GlyphsSeat + third : -1; }

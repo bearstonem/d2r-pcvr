@@ -339,7 +339,7 @@ int main() {
         Sim s; s.Fill(3); s.in.down = true; s.now += 11; s.in.nowMs = s.now; s.in.held = 5;
         CHECK(s.c.Step(s.in, s.ring, s.t).event == Event::None && !s.c.Open());
     }
-    // 5. (2026-11-16) The edit ring and its Add page retired: the ring menu's Quick cast page fills the ring (ring-wheel-test,
+    // 5. The edit ring and its Add page retired: the ring menu's Quick cast page fills the ring (ring-wheel-test,
     // section 3c above: PutAt, ClearAt). The hold ring never edits: no trigger, no Done.
     {
         Sim s; s.Fill(3); s.Press(); s.Stick(-1, 0); s.Step();
@@ -421,7 +421,7 @@ int main() {
         framevr::skills::QuickCast q;   // upstream's eight LT shortcuts: the class is upstream's, untouched (quick-cast-test runs it)
         CHECK(q.Capture(true, 1.f, 1) && q.Layer());
     }
-    // 11. Items (2026-11-15): exact entries use only their code; family entries follow Potion order; belt bottom first, then
+    // 11. Items: exact entries use only their code; family entries follow Potion order; belt bottom first, then
     // the inventory; the belt key never reaches a potion above the bottom; counts are belt + inventory; the save text.
     {
         using framevr::interaction::Code;
@@ -480,7 +480,7 @@ int main() {
         CHECK(Encode(r) == "64,i:rvs,f:1");
         Ring back; CHECK(Decode("64,i:rvs,f:1", back) && back == r);
         CHECK(!Decode("i:", back) && !Decode("f:9", back) && !Decode("64,i:rvs,i:rvs", back));
-        // (2026-11-16) items reach the ring from the ring menu's Quick cast chooser, its potions and scrolls row (a family id each)
+        // items reach the ring from the ring menu's Quick cast chooser, its potions and scrolls row (a family id each)
         Ring viaMenu; CHECK(PutAt(viaMenu, 0, {FamilyId(FamHealth), -1}) && viaMenu.items[0].skill == FamilyId(FamHealth));
         // exact items: the kind page offers each exact one the hero carries, belt and inventory, each code
         // once, strongest first; a plain Rejuvenation put exactly never drinks the Full one.
@@ -495,7 +495,7 @@ int main() {
         CHECK(n == 2 && got[0] == ExactId(tbk) && got[1] == ExactId(tsc));
         CHECK(CarriedOf(FamThawing, belt, inv, 3, got, 12) == 0 && CarriedOf(FamNone, belt, inv, 3, got, 12) == 0);
         CHECK(CarriedOf(FamStamina, belt, inv, 3, got, 12) == 1 && got[0] == ExactId(vps));   // a stack of 0 still listed: the code is carried
-        // Potion choice (2026-11-17): Healing, Mana and Rejuvenation always offer Best plus every tier the game has (carried or not,
+        // Potion choice: Healing, Mana and Rejuvenation always offer Best plus every tier the game has (carried or not,
         // strongest first); Antidote, Thawing and Stamina have one potion: no page, no "(best)", the family goes straight in.
         {
             int t[16] = {};

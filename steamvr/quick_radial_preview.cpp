@@ -91,7 +91,7 @@ void Blit(Image& im, const std::vector<uint8_t>& region, int rw, qr::atlas::Rect
 }
 // The case: a mode, the items and what is pointed; painted, then its Draw list laid out with degrees as pixels.
 struct Case { const char* file; const char* caption; int items; int pick; int demo = 0; bool hold = false; bool fixed = false; };   // fixed: Quick cast layout Fixed places (items at 3 and 9 o'clock)
-// Items (2026-11-15): a ring of 3 skills and 5 items (the game's own item pictures by code).
+// Items: a ring of 3 skills and 5 items (the game's own item pictures by code).
 struct Demo { const char* name; uint32_t code; int count; bool dim; const char* why; };
 using framevr::interaction::Code;
 const Demo RingItems[] = {{"Healing (best)", Code('h', 'p', '4'), 9, false, ""}, {"Full Rejuvenation Potion", Code('r', 'v', 'l'), 2, false, ""},
@@ -117,7 +117,7 @@ Image Render(const Case& c, std::vector<uint8_t>& outA, std::vector<uint8_t>& ou
     if (c.demo == 1) for (int i = 0; i < int(std::size(RingItems)); ++i) ring.Add({qr::ExactId(RingItems[i].code), -1});
     t.toggle = !c.hold;
     t.fixed = c.fixed;
-    if (c.fixed) { ring = {}; ring.Set(3, {Sorc[3].id, -1}); ring.Set(9, {Sorc[9].id, -1}); }   // 2026-11-17: places 3 and 9 only
+    if (c.fixed) { ring = {}; ring.Set(3, {Sorc[3].id, -1}); ring.Set(9, {Sorc[9].id, -1}); }   // places 3 and 9 only
     const auto es = qr::EntriesFor(qr::Mode::Cast, ring, c.fixed);
     qr::paint::Job job; job.t = t; job.srgb = false; job.key = 1;
     for (int i = 0; i < es.n; ++i) {
@@ -211,9 +211,9 @@ int main(int argc, char** argv) {
         {"ring-6.png", "6 items: sixths, re-spaced (two added). Stick at 4 o'clock: Blizzard (item 3).", 6, 2},
         {"ring-12.png", "12 items (the most): twelfths, smaller plates. Nothing picked: the hint (Toggle: Point, back: cast). Item 11 dim.", 12, -1},
         {"ring-12-hold.png", "Open by Hold: the same ring, its hint Point the stick (the release casts).", 12, -1, 0, true},
-        {"ring-empty.png", "An empty ring: where to fill it (ring menu > Quick cast: its 12 places, 2026-11-16).", 0, -1},
+        {"ring-empty.png", "An empty ring: where to fill it (ring menu > Quick cast: its 12 places).", 0, -1},
         {"ring-items.png", "Items: Healing (best) picked, 9 in all; Stamina dim (none left), Super Mana dim (only up a belt column).", 3, 3, 1},
-        {"ring-fixed-3-9.png", "Quick cast layout Fixed places (2026-11-17): items at 3 and 9 o'clock only, the 10 empty places faint sockets; 9 picked.", 0, 9, 0, false, true},
+        {"ring-fixed-3-9.png", "Quick cast layout Fixed places: items at 3 and 9 o'clock only, the 10 empty places faint sockets; 9 picked.", 0, 9, 0, false, true},
     };
     struct Done { Image im; const char* caption; };
     std::vector<Done> done;

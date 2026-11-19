@@ -1354,7 +1354,7 @@ int main(int argc, char** argv) {
                         const uint8_t* b = &base[(size_t(py) * c.w + size_t(pxx)) * 4];
                         const float dd = std::hypot(c.x0 + pxx + .5f - x, c.y0 + py + .5f - y);
                         if ((q[3] > 5 || std::max({q[0], q[1], q[2]}) > 5) && dd > worst) { worst = dd; worstKind = k; }
-                        if (dd >= rw::IconPx / 2 && dd <= 1.3f * rw::IconPx / 2) {   /* the S1 band, 1.0-1.3 r */
+                        if (dd >= rw::IconPx / 2 && dd <= 1.3f * rw::IconPx / 2) {   /* the rest-glow band, 1.0-1.3 r */
                             const double l = .2126 * q[0] + .7152 * q[1] + .0722 * q[2], l0 = .2126 * b[0] + .7152 * b[1] + .0722 * b[2];
                             band[size_t(k)] += std::max(0.0, l - l0); ++bandN[size_t(k)];
                         }
@@ -1726,7 +1726,7 @@ int main(int argc, char** argv) {
                     int rimA = 0;   // stage 1: the glow's brightest place round the rim (poison's blobs sit at four places)
                     for (int k = 0; k < 24; ++k)   // stage 1b: the light (the kit's lighter layers are additive: rgb, no alpha)
                         for (int ch = 0; ch < 4; ++ch) rimA = std::max<int>(rimA, At(a, c.w, sx + rw::IconPx * .6f * std::cos(k * rw::Tau / 24), sy + rw::IconPx * .6f * std::sin(k * rw::Tau / 24), c, ch));
-                    Check(a == b && (e == int(rw::Element::Phys) || rimA > 8)   /* stage 1: the S1-fitted levels (arcane is the kit's dimmest) */, "R8 glow " + std::to_string(e) + " Off: a steady rim, the same each frame");
+                    Check(a == b && (e == int(rw::Element::Phys) || rimA > 8)   /* stage 1: the fitted levels (arcane is the kit's dimmest) */, "R8 glow " + std::to_string(e) + " Off: a steady rim, the same each frame");
                 }
                 // Hover effects: the pointed icon, one per element, 6 frames over 2.2 s.
                 for (int e = 0; e < int(rw::Element::Count); ++e) {
@@ -2013,7 +2013,7 @@ int main(int argc, char** argv) {
                                                 darker += d < -1; lit += d > 8;
                                             }
                                         }
-                                    Check(darker == 0 && lit > 0, "S3a: " + std::string(nm) + ": the poison over the face only adds light (" + std::to_string(darker) + " darker, " + std::to_string(lit) + " lit)");
+                                    Check(darker == 0 && lit > 0, "" + std::string(nm) + ": the poison over the face only adds light (" + std::to_string(darker) + " darker, " + std::to_string(lit) + " lit)");
                                 }
                             }
                         }
@@ -2056,7 +2056,7 @@ int main(int argc, char** argv) {
                         char line[160];
                         std::snprintf(line, sizeof line, "%s\t%d\t%d\t%.1f\t%.1f", title.c_str(), page + 1, sn, smean, shigh);
                         tableShown << line << "\r\n";
-                        std::printf("stage 1 S1 shown %s\n", line);
+                        std::printf("stage 1 shown %s\n", line);
                     }
                     const float rm = refMean[cls][page], rh = refHigh[cls][page];
                     const bool pass = rm < 0 || (mean <= rm * 1.10 && high <= rh * 1.10 && mean >= rm * 0.70);   // a match, not only a ceiling (>= 0.7 x)
@@ -2064,10 +2064,10 @@ int main(int argc, char** argv) {
                     char line[200];
                     std::snprintf(line, sizeof line, "%s\t%d\t%d\t%.1f\t%.1f\t%.1f\t%.1f\t%s", title.c_str(), page + 1, nSeats, mean, high, rm, rh, rm < 0 ? "no reference" : pass ? "pass" : "FAIL");
                     table << line << "\r\n";
-                    std::printf("stage 1 S1 %s\n", line);
+                    std::printf("stage 1 %s\n", line);
                 }
             }
-            Check(s1Bad == 0, "stage 1 S1: every class and tree's rest band light within 0.70-1.10 x the reference's (" + std::to_string(s1Bad) + " over)");
+            Check(s1Bad == 0, "every class and tree's rest band light within 0.70-1.10 x the reference's (" + std::to_string(s1Bad) + " over)");
         }
         // Feedback 1 items 3 and 5: the bound-button badges on WARP, Sorceress Trees shown at 100% and 150% with
         // the kit's stand-in binds (qbauto: A B RT gA gB X Y LT gX gY spread over the trees). Each kind's pixels against the
