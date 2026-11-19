@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (T025, review-r6 X4): waiting for the reply to a ring bind, assign or glyph, as plain data. Pure and
+// Ring skill menu (, review-r6 X4): waiting for the reply to a ring bind, assign or glyph, as plain data. Pure and
 // Windows-free (ring-wheel-test).
 //
 // Transport's request queue (interactionstate::Request) drops a request silently while another is queued or waiting, so a

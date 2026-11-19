@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (T025, build step R5): text as data (plan E2 text, L1 type, L3 the center blurb). Pure and Windows-free:
+// Ring skill menu (, build step R5): text as data (plan E2 text, L1 type, L3 the center blurb). Pure and Windows-free:
 // the glyph metrics the atlas worker measures (vr/ring_wheel_atlas.cpp), clean strings, widths, the center blurb's
 // shaped box (the kit's blurbLines, ported), and glyph quads for a line or an arc. Laid out only when the pointed skill
 // changes (BlurbCache); a frame only copies the cached glyph quads.

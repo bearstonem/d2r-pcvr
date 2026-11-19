@@ -1,9 +1,9 @@
 #pragma once
-// Ring skill menu: pointing with either hand (T025 job B; the design notes item 1; Jeff 2026-11-07: "laser from either
+// Ring skill menu: pointing with either hand (job B; the design notes item 1; the player 2026-11-07: "laser from either
 // hand, go"). Either hand's laser can point at the ring; one hand owns it at a time:
 //  - With no owner, a hand claims it by moving its ray 1.5 deg within 300 ms, or by pressing its trigger, with its ray on the
 //    panel. A trigger press also takes the wheel at once from an owner with no button down (a held button pins its owner until
-//    it is let go). A move takes it from an owner only when deliberate (T025 round 2026-11-08 #5; Jeff's log: 361 of 420
+//    it is let go). A move takes it from an owner only when deliberate (round 2026-11-08 #5; the player's log: 361 of 420
 //    owner changes under 50 ms apart, the two hands' small moves trading it every frame): TakeDeg within MoveMs, TakeRatio x
 //    the owner's own turn (no ratio when the owner's ray is off the panel), and the owner has held it OwnMinMs.
 //    After an idle owner lets go, the other hand also needs TakeDeg to claim while that last hand stays tracked and allowed
@@ -12,7 +12,7 @@
 //    its buttons or a hold is down (critic FB1: a 1 s hold-to-assign or a long blurb read never loses it). Its 1 s release
 //    timer runs only while its ray is off the panel or on nothing.
 //  - It is lost at once when its aim is untracked, the "Pointing hand" row forbids that hand, or the wheel closes.
-//  - With no owner there is no hover and no laser. B / X still close the wheel (Jeff's closing rule, 2026-11-08).
+//  - With no owner there is no hover and no laser. B / X still close the wheel (the player's closing rule, 2026-11-08).
 // Pure (no game, no clock): the ring feeds each frame's facts and its milliseconds; ring_wheel_test.cpp drives it.
 #include <algorithm>
 #include <array>

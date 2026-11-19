@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (T025, build step R7): the Glyphs and Gestures pages (plan E6; look L3 "Glyphs page", "Gestures page",
+// Ring skill menu (, build step R7): the Glyphs and Gestures pages (plan E6; look L3 "Glyphs page", "Gestures page",
 // "Glyph Choose a skill state"). Pure and Windows-free. Upstream keeps both pages' data and actions: the ring only draws
 // them in its own look and turns a release into upstream's cell for one frame (a gesture card, Back, the other hand), or,
 // for a glyph's skill, into a BindGlyph request (upstream's paged picker never opens; the picker's list is upstream's rule).
@@ -17,12 +17,12 @@
 
 namespace framevr::ringwheel {
 // A kind whose entry means "the best one carried": only one with tiers (quick_radial.h HasTiers). Antidote, Thawing and Stamina
-// have one potion each, so no "Best" pill and no "best one" line (Jeff's headset 2026-11-17).
+// have one potion each, so no "Best" pill and no "best one" line (the player's headset 2026-11-17).
 inline bool BestSeat(int id) { return KindSeat(id) && framevr::quickradial::HasTiers(id & 0xffff); }
-// T035/T036 (2026-11-16, Jeff: "ring menu > quick cast / ring menu > gestures / ring menu > glyph"; "the edit mode is when the user
+// (2026-11-16, the player: "ring menu > quick cast / ring menu > gestures / ring menu > glyph"; "the edit mode is when the user
 // is in the ring menu"): Quick cast is a sub-menu of the ring as Glyphs is. Quick: its 12 places (ring Quick cast radial's ring, in
 // order) round the ring, center Back; QuickChoose: the class's skill layout to choose what goes in a place, its potions and
-// scrolls on the shelf row, center Back / Clear (as the glyph chooser). QuickKind (review 2026-11-16, Jeff: "if they have normal
+// scrolls on the shelf row, center Back / Clear (as the glyph chooser). QuickKind (review 2026-11-16, the player: "if they have normal
 // rejuv and a full rejuv, and they select the normal rejuv, it should not drink a full rejuv"): a kind picked on the chooser's row
 // while the hero carries some: the kind (the best one, when cast), then each exact one carried, round the ring as Quick's places,
 // center Back to the chooser. All the ring's own pages over upstream's Spells page.
@@ -40,7 +40,7 @@ static_assert(MaxItems >= glyphs::ShapeCount);
 inline interaction::MenuPage UpstreamPage(RingPage p) {
     return p == RingPage::Gestures ? interaction::MenuPage::Motions : p == RingPage::Main || QuickPage(p) ? interaction::MenuPage::Spells : interaction::MenuPage::Glyphs;
 }
-// T036: a sub-menu wanted (its bound button, its shelf entry's tap) from upstream's page, once a frame until Done: Glyphs and
+// a sub-menu wanted (its bound button, its shelf entry's tap) from upstream's page, once a frame until Done: Glyphs and
 // Gestures are upstream's own pages (from Spells their center cells; from the other page back to Spells first). Quick cast's page
 // is the ring's own (RingPage::Quick, over Spells): Done at once. Fire: release `cell` to upstream this frame (as a click), then ask
 // again. Wait: an editor or another page the ring does not draw (the caller gives up after a while).
@@ -104,7 +104,7 @@ inline const interaction::Skill* ChoiceOf(const std::vector<interaction::Skill>&
     for (const auto& k : list) if (k.id == id && k.owner == owner) return &k;
     return nullptr;
 }
-// The chooser's seats from the main ring's and that list (Jeff's pick, 2026-11-14; the designer's sheet B). With no order on
+// The chooser's seats from the main ring's and that list (the player's pick, 2026-11-14; the designer's sheet B). With no order on
 // the list: the main layout exactly, as before. With orders: every tree seat stays where it is (same index, same place);
 // the shelf row becomes the shelf skills a glyph can take, a gap, then the orders in upstream's order, centered on C at the
 // shelf's own height and pitch. Shelf skills a glyph cannot take step out (they were drawn at 25% there). ChooserRow: the same
@@ -188,7 +188,7 @@ inline int AddOrderIcons(int* ids, int n, int cap) {
     }
     return n;
 }
-// ---- A button on an order (Jeff's pick B, 2026-11-14) ----
+// ---- A button on an order (the player's pick B, 2026-11-14) ----
 // On the chooser an order takes presses as a main-ring seat does, through the same QuickCast: held to Hold to assign it
 // goes on that button; the pointing hand's trigger released under the Tap limit picks it for the glyph; a release between
 // the two does nothing. Any other button's tap does nothing (no order is given from the chooser). A skill's seat there
@@ -204,7 +204,7 @@ inline OrderAct OrderActOf(const QuickOut& e, int pointer) {
     if (e.event == Quick::QuickCast) return e.slot == 0 && e.hand == pointer ? OrderAct::Pick : OrderAct::None;
     return OrderAct::None;
 }
-// The hold ring on an order shows from the first frame of the press (Jeff, 2026-11-14), filling to Hold to assign; a seat
+// The hold ring on an order shows from the first frame of the press (the player, 2026-11-14), filling to Hold to assign; a seat
 // on the main ring shows it from the Tap limit (QuickOut::holdFrac). Hold to assign Off: no ring.
 inline float OrderHoldFrac(const QuickOut& e, int holdMs, int tapMs) {
     const int full = EffectiveHoldMs(holdMs, tapMs);

@@ -1,8 +1,8 @@
-// Ring skill menu (T025, build step R5): the atlases on the ring's worker (vr/ring_wheel_atlas.h).
+// Ring skill menu (, build step R5): the atlases on the ring's worker (vr/ring_wheel_atlas.h).
 #include "ring_wheel_atlas.h"
 #include "../steamvr/spell_sprites.h"   // stage 3a: upstream's spell sprite cache reader (pure)
-#include "../steamvr/ring_wheel_unbake.h"   // T036: the clean icon's key (pure)
-#include "../steamvr/ring_wheel_tree_art.h"   // T025: a painted tree square's atlas id (pure)
+#include "../steamvr/ring_wheel_unbake.h"   // the clean icon's key (pure)
+#include "../steamvr/ring_wheel_tree_art.h"   // a painted tree square's atlas id (pure)
 #include "../steamvr/ring_wheel_glyph_art.h"   // Glyph icon: a painted glyph or sigil square's atlas id (pure)
 #include <windows.h>
 #include <dwrite_3.h>
@@ -202,11 +202,11 @@ void BuildIcons(const int* ids, int n, int scalePct, const IconSource& source, c
         for (int i = 0; i < n; ++i) if (ids[i] == unique[u]) pack.cellOf[size_t(i)] = int16_t(cell);
         // Area-average the icon in linear light, premultiplied. R8 match stage 1: the kit's crop (wheel.js drawIcon: 104 px from
         // (14, 13) of the 132 x 130 skill frame), as fractions of the frame upstream's cache stores, fills the art square.
-        // T036: a sub-menu's own picture (ring_wheel_menu_art.h) is framed already: the whole of it.
-        const bool whole = MenuOfEntry(unique[u]) >= 0 || treeart::SlotOfArt(unique[u]) >= 0 || glyphart::SlotOfArt(unique[u]) >= 0;   // T025: a painted tree square is the whole plate (the face crops its inside)
+        // a sub-menu's own picture (ring_wheel_menu_art.h) is framed already: the whole of it.
+        const bool whole = MenuOfEntry(unique[u]) >= 0 || treeart::SlotOfArt(unique[u]) >= 0 || glyphart::SlotOfArt(unique[u]) >= 0;   // a painted tree square is the whole plate (the face crops its inside)
         const float cx0 = whole ? 0.f : im->width * (14.f / 132), cy0 = whole ? 0.f : im->height * (13.f / 130);
         const float kx = (whole ? float(im->width) : im->width * (104.f / 132)) / art, ky = (whole ? float(im->height) : im->height * (104.f / 130)) / art;
-        // T036 (ring_wheel_unbake.h): the clean icon, the glyph keyed out of the game's plate per source pixel, its tint pulled
+        // (ring_wheel_unbake.h): the clean icon, the glyph keyed out of the game's plate per source pixel, its tint pulled
         // to gray; our own art and a remapped icon (Kick while ring Kick icon is On) stay whole.
         const bool key = unbake::Keyed(unique[u], variant);
         if (key) ++pack.keyed;

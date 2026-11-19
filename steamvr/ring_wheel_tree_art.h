@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu > Layers > Tree icon (T025, Jeff 2026-11-17 late: "change these to be sizable and have gpt draw them"): the tree
+// Ring skill menu > Layers > Tree icon (, the player 2026-11-17 late: "change these to be sizable and have gpt draw them"): the tree
 // mark's picture, one painted rust square per skill tree (24: 8 classes x 3 trees), our own art,
 // in full color. Today's mark is the kit's drawn glyph (TreeGlyphOf, RecipeTreeGlyph); this header is the painted picture's side:
 //   - the slot of a (class, position): class x 3 + the tree's skillcategories page (PageAt), -1 for an unknown class;

@@ -1,6 +1,6 @@
 #pragma once
-// Ring skill menu (T025, feedback 1 items 3 and 5; build-plan L4 rows 16-18): the bound-button badge beside each skill, as
-// plain data. Pure and Windows-free (ring-wheel-test). One badge per bound slot, in Jeff's button style (the design notes
+// Ring skill menu (, feedback 1 items 3 and 5; build-plan L4 rows 16-18): the bound-button badge beside each skill, as
+// plain data. Pure and Windows-free (ring-wheel-test). One badge per bound slot, in the player's button style (the design notes
 // item 3; the kit's badges=quest, drawQuestBadge): a dark disc with the face letter (A / B
 // right, X / Y left on Quest), a gold coin with a dark letter for the grip layer, a dark rounded square R / L for the
 // trigger; a free skill has none. Placed by the kit's badgePlaces search, once per layout, bind or row change, never per
@@ -38,7 +38,7 @@ inline char BadgeLetter(controllers::Layout layout, int hand, int slot) {
     if (layout == controllers::Layout::Frame && hand) return secondary ? 'U' : 'D';
     return secondary ? '2' : '1';
 }
-// Job B (2026-11-18, Jeff: the badges "sometimes change from A, B to 1, 2"): a controller that sleeps or loses tracking reports
+// Job B (2026-11-18, the player: the badges "sometimes change from A, B to 1, 2"): a controller that sleeps or loses tracking reports
 // no interaction profile, which transport reads as Layout::Generic ("Unknown"; the logs show `Frame controllers: right=Touch
 // left=Unknown` dozens of times a session), and Generic's faces are 1 / 2. The badges keep the last real layout of that hand
 // instead. Only in Automatic: a chosen layout (Button names row) is the player's and is shown as it is.

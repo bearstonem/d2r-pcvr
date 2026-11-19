@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (T025, build steps R4-R5): the compose pass. It draws steamvr/ring_wheel_draw.h's instance list into a
+// Ring skill menu (, build steps R4-R5): the compose pass. It draws steamvr/ring_wheel_draw.h's instance list into a
 // target (the ring's own layer swapchain in the game from R6, a WARP texture in ring-wheel-preview). Plan E3, E4,
 // the design notes sections 2, 3 and 6:
 //  - Setup runs on the ring's worker (vr/ring_wheel_atlas.h), never on the frame thread: shader compile (about 20 ms),

@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (T025): the On / Off edge's log lines, as plain data (ring-wheel-test). The On line says the ring's state
+// Ring skill menu (): the On / Off edge's log lines, as plain data (ring-wheel-test). The On line says the ring's state
 // at that moment (the rows that decide what the player sees), not a build step, so a log read later tells what was tested.
 #include <cstdio>
 #include <cstring>
@@ -63,7 +63,7 @@ inline std::string ReleasedLine(const char* where, double ms) {
     else std::snprintf(line, sizeof line, "Frame ring wheel: swapchain destroyed ms=%.1f (%s, the frame thread)", ms, where);
     return line;
 }
-// The quiet log (Jeff's rule for a PR: a low level that cannot touch the game). Every "Frame ring wheel:" line the ring says goes
+// The quiet log (the player's rule for a PR: a low level that cannot touch the game). Every "Frame ring wheel:" line the ring says goes
 // through this: the ring's On / Off edge, a button put on or taken off a menu, and every refusal or failure pass; everything else
 // (pages, pointing, placement, per-open and per-pick lines, the 10 s line, icon and layer counts) is said only with
 // [debug] ring_wheel_log=1 in d2r_pcvr.ini (off by default, in every build). A line that is not the ring's own passes unchanged.

@@ -1,7 +1,7 @@
-"""Dev only (Lab > Ring wheel > Layers > Tree icon, T025): builds steamvr/assets/ring-wheel/ring-tree-sheet.png, the painted tree squares
+"""development only (ring > Ring wheel > Layers > Tree icon, ): builds steamvr/assets/ring-wheel/ring-tree-sheet.png, the painted tree squares
 on one sheet, and steamvr/ring_wheel_tree_sheet.h, the mask of which cells are painted.
 
-Jeff 2026-11-17: "change these to be sizable and have gpt draw them (the icons for the skill tree like fire, lightning, ice) ...
+the player 2026-11-17: "change these to be sizable and have gpt draw them (the icons for the skill tree like fire, lightning, ice) ...
 the rust background square we use for normal skills ... a color instead of the silver". One square per skill tree, 24 in all, our
 own art: tools/ring_tree_squares/tree-<class>-<tree>.png (384 px, borderless full-bleed rust (no frame, bevel or rivets; motif in the middle 80%), trimmed to its alpha box in case of a margin, straight alpha; the 1024 px masters
 stay with the artist).

@@ -1,7 +1,7 @@
-"""Dev only (Lab > Ring wheel > Center > Glyph icon): builds steamvr/assets/ring-wheel/ring-glyph-sheet.png, the painted glyph and sigil squares
+"""development only (ring > Ring wheel > Center > Glyph icon): builds steamvr/assets/ring-wheel/ring-glyph-sheet.png, the painted glyph and sigil squares
 on one sheet, and steamvr/ring_wheel_glyph_sheet.h, the mask of which cells are painted.
 
-Jeff 2026-11-18: "glyph icons are claude drawings, lets see what gpt can do to make them look d2 style with the rust and silver, we
+the player 2026-11-18: "glyph icons are claude drawings, lets see what gpt can do to make them look d2 style with the rust and silver, we
 need the square as the basic, and then we need to make a circle version for our ring menu". Twelve squares, our own art:
 tools/ring_glyph_squares/<kind>-<name>.png (384 px, borderless full-bleed desaturated rust, silver motif in the middle 80%, trimmed to
 its alpha box in case of a margin, straight alpha; the 1024 px masters stay with the artist): the eight

@@ -1,12 +1,12 @@
 #pragma once
-// Ring skill menu (T025; ring > Experiment: Ring wheel, exp.ring_wheel): the wheel's geometry, hit test and input state,
+// Ring skill menu (; ring > Experiment: Ring wheel, exp.ring_wheel): the wheel's geometry, hit test and input state,
 // pure and Windows-free so every number is unit-tested (ring_wheel_test.cpp). Build step R2 (E2, E5; look L1, L2).
 //
 // Coordinates: "wheel px" are the design kit's (the design kit's wheel.js): the 768 x 800 wheel region, its center
 // C = (384, 384), the shelf row at y 760. "Canvas px" are the 1024 x 1024 canvas the region sits in, at (128, 112); the
 // footer is in canvas px (upstream's FooterBounds, v = y / 1024). 960 canvas px a meter, so 15 px a degree at 0.9 m.
 //
-// Layout e, both Tree layouts (Jeff has not picked one, 2026-11-07; the default is Trees shown):
+// Layout e, both Tree layouts (the player has not picked one, 2026-11-07; the default is Trees shown):
 //  - Trees shown (kit idle=all): every tree's skills at fixed seats in its own 110 deg sector (10 deg gutters), three
 //    loose bands at r 190 / 232 / 270, relaxed to 70 px apart, clamped to r 184-274; pointing a tree fades the others.
 //  - Tree orbs (kit idle=orbs): one orb per tree at r 128; the pointed tree fans its skills over 110 deg, bands 204 / 248
@@ -163,7 +163,7 @@ inline bool SeatsFrom(const interaction::Snapshot& s, std::array<SeatIn, MaxSeat
     });
     return true;
 }
-// Another ring's bindable entry (headset fixes 2026-11-15: ring Army X menu, T033, through the FilterRingEntry seam): one more
+// Another ring's bindable entry (headset fixes 2026-11-15: ring Army X menu, , through the FilterRingEntry seam): one more
 // General seat on the shelf, after the hero's own general skills (owner -1, no tree), so Build places it on the shelf row.
 // id < 0, no room, or already there: unchanged. Returns the new count.
 inline int AddShelfEntry(std::array<SeatIn, MaxSeats>& in, int n, int id) {
@@ -174,7 +174,7 @@ inline int AddShelfEntry(std::array<SeatIn, MaxSeats>& in, int n, int id) {
 }
 
 // ---- Pointing ----
-enum class Kind { None, Gap, Seat, Tree, Glyphs, Gestures, Footer, Back, Hand, Quick };   // Back, Hand: the Glyphs and Gestures pages' center (R7); Quick: the center's third third (T036)
+enum class Kind { None, Gap, Seat, Tree, Glyphs, Gestures, Footer, Back, Hand, Quick };   // Back, Hand: the Glyphs and Gestures pages' center (R7); Quick: the center's third third ()
 struct Target {
     Kind kind = Kind::None;
     int index = -1;   // Seat: the seat; Tree: the tree; Footer: upstream's cell id
@@ -189,14 +189,14 @@ inline int FooterAt(float cx, float cy, bool developer, bool fullWidth, interact
     for (int i = 0; i < tabs; ++i) if (interaction::FooterBounds(i, page, developer).Contains(u, v)) return interaction::FooterCell(i, page);
     return -1;
 }
-// ---- T036: the center in thirds (Jeff, 2026-11-15) ----
+// ---- the center in thirds (the player, 2026-11-15) ----
 // Glyphs upper left, Gestures upper right, Quick cast at the bottom: three 120 deg slices split by spokes at 12, 4 and 8
 // o'clock, each spoke a 6 px dead band (CenterDeadBand on each side) that keeps the slice pointed last. The pointed slice
 // reaches its grow past the center's edge (11%: 151 px grown), so the laser keeps it there; the other two dim (draw only).
 enum Third { ThirdGlyphs, ThirdGestures, ThirdQuick, ThirdCount };
 constexpr float ThirdMidDeg[ThirdCount] = {-150, -30, 90};   // canvas y down: upper left, upper right, bottom
 constexpr float SpokeDeg[ThirdCount] = {-90, 30, 150};       // 12, 4 and 8 o'clock
-constexpr float ThirdGrowDefault = 11, ThirdDimDefault = 70;  // the mockup's numbers (Jeff's picks): the slice +11%, the others at 70%
+constexpr float ThirdGrowDefault = 11, ThirdDimDefault = 70;  // the mockup's numbers (the player's picks): the slice +11%, the others at 70%
 constexpr const char* ThirdName[ThirdCount] = {"Glyphs", "Gestures", "Quick cast"};
 inline Kind ThirdKind(int t) { return t == ThirdGlyphs ? Kind::Glyphs : t == ThirdGestures ? Kind::Gestures : t == ThirdQuick ? Kind::Quick : Kind::None; }
 inline int ThirdOf(Kind k) { return k == Kind::Glyphs ? ThirdGlyphs : k == Kind::Gestures ? ThirdGestures : k == Kind::Quick ? ThirdQuick : -1; }
@@ -234,9 +234,9 @@ struct Settings {
     bool hasMotions = true;     // spellmotion::HasMotions: false (the Warlock) = one Glyphs center
     int growMs = 150;           // P10: the center grows after the laser is this long inside it (a sweep through never grows it)
     int blurbMs = 100;          // P11: a skill held this long shows its blurb (its highlight is at once)
-    bool quickCast = false;     // R6Q (Jeff's design): seats take slot presses (QuickCast below); the trigger's release on a seat picks nothing
-    bool thirds = false;        // T036: the center in thirds (the main page); false: the two halves (the glyph chooser's Back / Clear)
-    float thirdGrowPct = ThirdGrowDefault;   // T036: the pointed third's reach past the center's edge (Center > Pointed third grows)
+    bool quickCast = false;     // R6Q (the player's design): seats take slot presses (QuickCast below); the trigger's release on a seat picks nothing
+    bool thirds = false;        // the center in thirds (the main page); false: the two halves (the glyph chooser's Back / Clear)
+    float thirdGrowPct = ThirdGrowDefault;   // the pointed third's reach past the center's edge (Center > Pointed third grows)
 };
 // No pick within this long of a hit taken (L2 Hit; the fight dim is R8, the rule is here).
 constexpr double HitPickMs = 300;
@@ -256,7 +256,7 @@ inline Float FloatAt(int id, double tMs) {
     const double vy = bob + dy2, len = std::hypot(dx, vy), k = len > 5 ? 5 / len : 1;
     return {float(dx * k), float(vy * k), float(rot)};
 }
-// Row 1, Animation (L4; Jeff 2026-11-07, four levels: Off / Floating icons / Effect on hover / All effects), and rows 2-7
+// Row 1, Animation (L4; the player 2026-11-07, four levels: Off / Floating icons / Effect on hover / All effects), and rows 2-7
 // it sets. Glow: 0 Off (a steady colored rim), 1 Pointed only, 2 Everywhere. Off also stops redraws
 // (still: a compose only on a change). Custom shows when a row 2-7 differs from all three.
 enum class Preset { Off, Floating, Hover, All, Custom };
@@ -482,9 +482,9 @@ struct StepIn {
     int slotPressed = -1;
     std::array<int, Slots> bound{-1, -1, -1, -1, -1};
     double lastHitMs = -1e18;       // the last hit the hero took (no pick within HitPickMs)
-    bool glyphClickSpent = false;   // Jeff 2026-11-08 #3: the trigger was held on the Glyphs half past the tap limit: its release opens nothing
+    bool glyphClickSpent = false;   // the player 2026-11-08 #3: the trigger was held on the Glyphs half past the tap limit: its release opens nothing
 };
-enum class Event { None, Pick, Cancel, Bind, Clear, Upstream, OpenQuick };   // OpenQuick (T036): the Quick cast third's click (2026-11-16: its page in the ring)
+enum class Event { None, Pick, Cancel, Bind, Clear, Upstream, OpenQuick };   // OpenQuick (): the Quick cast third's click (2026-11-16: its page in the ring)
 struct StepOut {
     Target under, pressed;          // under the laser; held down on (Kind::None when not pressed)
     int tree = -1;                  // the pointed tree (-1 none)
@@ -535,7 +535,7 @@ public:
     Target HitTest(float cx, float cy, const Settings& s) const {
         if (const int cell = FooterAt(cx, cy, s.developer, s.footerFull); cell >= 0) return {Kind::Footer, cell};
         const float x = cx - CanvasX, y = cy - CanvasY, r = std::hypot(x - C, y - C);
-        if (s.thirds) {   // T036: by angle; the slice pointed last keeps its grown reach; a spoke's dead band keeps the last
+        if (s.thirds) {   // by angle; the slice pointed last keeps its grown reach; a spoke's dead band keeps the last
             const int last = ThirdOf(lastUnder.kind), t = ThirdAt(x - C, y - C);
             if (r <= (grown ? CenterGrownR : CenterR) || (last >= 0 && t == last && r <= ThirdReach(grown, s.thirdGrowPct))) {
                 if (t == ThirdGestures && !s.hasMotions) return {Kind::Gap};   // a class with no gestures: that third is shut
@@ -570,7 +570,7 @@ public:
         const Target under = in.hit ? HitTest(in.x, in.y, s) : Target{};
         lastUnder = under; out.under = under;
         // The center grows after P10 inside it, or for a blurb (a seat held P11); a sweep through does neither.
-        const bool inCenter = in.hit && (ThirdOf(under.kind) >= 0 ||   // T036: a third's grown reach counts as the center
+        const bool inCenter = in.hit && (ThirdOf(under.kind) >= 0 ||   // a third's grown reach counts as the center
             (std::hypot(in.x - CanvasCx, in.y - CanvasCy) <= (grown ? CenterGrownR : CenterR) && under.kind == Kind::Gap));
         if (inCenter) { if (centerSince < 0) centerSince = in.nowMs; } else centerSince = -1;
         if (under.kind == Kind::Seat) { if (seatHeld != under.index) { seatHeld = under.index; seatSince = in.nowMs; } } else seatHeld = -1;
@@ -606,7 +606,7 @@ public:
         if (fall && held.kind != Kind::None) { if (held == under) fired = held; held = {}; }
         out.pressed = held;
         if (s.quickCast && (fired.kind == Kind::Seat || fired.kind == Kind::Gap || fired.kind == Kind::Tree)) fired = {};   // QuickCast owns seat presses
-        if (in.glyphClickSpent && ThirdOf(fired.kind) >= 0) fired = {};   // a hold on the Glyphs half (#3) or a third (T036), not a click
+        if (in.glyphClickSpent && ThirdOf(fired.kind) >= 0) fired = {};   // a hold on the Glyphs half (#3) or a third (), not a click
         if (fired.kind == Kind::Seat) {
             if (picked == fired.index) { picked = -1; out.event = Event::Cancel; }
             else if (in.nowMs - in.lastHitMs >= HitPickMs) { picked = fired.index; out.event = Event::Pick; }
@@ -719,7 +719,7 @@ inline interaction::Request BindRequest(const interaction::Snapshot& s, int inde
     return r;
 }
 
-// Jeff 2026-11-08 #3: this button draws glyphs, as upstream's button picker sends it (interactions.h, skill.id == GlyphDrawId): the
+// the player 2026-11-08 #3: this button draws glyphs, as upstream's button picker sends it (interactions.h, skill.id == GlyphDrawId): the
 // transport saves [glyphs] draw_slot first, then clears the button's game skill. So it is never sent when that clear could not
 // pass (upstream's own gate: fresh and editable): the setting must not change for a bind that is then refused.
 inline interaction::Request GlyphDrawRequest(const interaction::Snapshot& s, int index, uint64_t number, uint64_t session, uint64_t now) {
@@ -729,7 +729,7 @@ inline interaction::Request GlyphDrawRequest(const interaction::Snapshot& s, int
     return r;
 }
 
-// ---- R6Q: quick cast and hold to assign (Jeff's design; plan E5 "Quick cast and hold to assign", eval #9) ----
+// ---- R6Q: quick cast and hold to assign (the player's design; plan E5 "Quick cast and hold to assign", eval #9) ----
 // Any of the ten slots (either hand: trigger, primary, secondary, grip + primary, grip + secondary) pressed with the laser
 // on a seat: released under the tap limit (P14) = QuickCast; held to full (P13, Hold to assign) = Assign at once; released
 // between = NoChange; after full a release does nothing. The seat is the one under the laser 80 ms before the press (a
@@ -752,15 +752,15 @@ struct QuickIn {
     std::array<std::array<int, Slots>, 2> bound{};   // the skill on each hand's slot (-1 none)
     int holdMs = 1000, tapMs = 350;  // P13, P14
     double lastHitMs = -1e18;        // R8: no assign within 300 ms of a hit (L2 Hit); a cast is never blocked
-    bool thirds = false;             // T036: the Gestures and Quick cast thirds take presses too (their pseudo seats)
+    bool thirds = false;             // the Gestures and Quick cast thirds take presses too (their pseudo seats)
 };
-// Jeff 2026-11-08 #3: the Glyphs half of the center takes a press like a seat does, under this pseudo seat (no real seat has it).
-// T036: the Gestures and Quick cast thirds likewise: a tap opens the sub-menu, a hold puts that sub-menu on the button.
+// the player 2026-11-08 #3: the Glyphs half of the center takes a press like a seat does, under this pseudo seat (no real seat has it).
+// the Gestures and Quick cast thirds likewise: a tap opens the sub-menu, a hold puts that sub-menu on the button.
 constexpr int GlyphsSeat = MaxSeats, GesturesSeat = MaxSeats + 1, QuickSeat = MaxSeats + 2;
 inline int ThirdSeat(int third) { return third >= 0 && third < ThirdCount ? GlyphsSeat + third : -1; }
 inline int SeatThird(int seat) { return seat >= GlyphsSeat && seat < GlyphsSeat + ThirdCount ? seat - GlyphsSeat : -1; }
 inline bool IsThirdSeat(int seat) { return SeatThird(seat) >= 0; }
-// MenuTap / MenuAssign (T036): the Gestures or Quick cast third (QuickOut::seat says which); Glyphs keeps GlyphTap / GlyphAssign.
+// MenuTap / MenuAssign (): the Gestures or Quick cast third (QuickOut::seat says which); Glyphs keeps GlyphTap / GlyphAssign.
 enum class Quick { None, QuickCast, Assign, NoChange, Close, GlyphTap, GlyphAssign, MenuTap, MenuAssign };
 struct QuickOut {
     Quick event = Quick::None;
@@ -804,7 +804,7 @@ inline std::string WasText(Held held, const char* skillName) {
 // #3: the pointing hand's trigger is also the engine's click, so a release after the tap limit must not open the Glyphs page too.
 // heldMs is the hold's own time on QuickCast's clock (the shown one, ring_wheel_close.h), never compared with the real clock.
 inline bool GlyphClickSpent(const QuickOut& last, int pointer, int holdMs, int tapMs) {
-    return IsThirdSeat(last.holding) && last.slot == 0 && last.hand == pointer && EffectiveHoldMs(holdMs, tapMs) > 0 && last.heldMs >= tapMs;   // T036: any third
+    return IsThirdSeat(last.holding) && last.slot == 0 && last.hand == pointer && EffectiveHoldMs(holdMs, tapMs) > 0 && last.heldMs >= tapMs;   // any third
 }
 // #3: a tap on the Glyphs half opens the page. The pointing hand's trigger already did, through the engine's click.
 inline bool GlyphTapClicks(int hand, int slot, int pointer) { return !(slot == 0 && hand == pointer); }
@@ -839,7 +839,7 @@ public:
                 const int was = in.bound[size_t(hold.hand)][size_t(hold.slot)];
                 out.seat = hold.seat; out.hand = hold.hand; out.slot = hold.slot;
                 if (hold.seat == GlyphsSeat) { out.event = Quick::GlyphAssign; out.replaced = was; return out; }   // #3: this button draws glyphs
-                if (IsThirdSeat(hold.seat)) { out.event = Quick::MenuAssign; out.replaced = was; return out; }   // T036: this button opens that sub-menu
+                if (IsThirdSeat(hold.seat)) { out.event = Quick::MenuAssign; out.replaced = was; return out; }   // this button opens that sub-menu
                 out.event = Quick::Assign;
                 out.replaced = was >= 0 && was != l.seats[size_t(hold.seat)].id ? was : -1;
                 return out;
@@ -878,7 +878,7 @@ public:
         return out;
     }
 };
-// ---- T036: each sub-menu on a button (Jeff: "bindable to a button from the General row, as Army X menu is") ----
+// ---- each sub-menu on a button (the player: "bindable to a button from the General row, as Army X menu is") ----
 // The three sub-menus' entries on the General shelf (AddShelfEntry). Never a game skill id (those stay under 400; upstream's
 // Draw glyph is 9000, ring Army X menu 9001). A hold there, or on the sub-menu's third (Gestures, Quick cast), sends upstream's
 // own clear of that button's game skill (BindSkill, skill -1, as Draw glyph's pick does); on its Applied the ring keeps the slot.
@@ -927,7 +927,7 @@ inline MenuPress MenuPressed(const MenuButtons& b, const bool down[2][3], const 
     return p;
 }
 
-// ---- T035/T036 headset fixes (2026-11-16, headset test) ----
+// ---- headset fixes (2026-11-16, headset test) ----
 // Bug 1: a sub-menu's button pressed while the open ring's main page has a seat or a center third under the laser is the ring's
 // press, as every other button's (a tap casts that seat; a hold of Hold to assign, about 1 s, puts the seat on this button, so the
 // menu's own button can always be rebound). Anywhere else (the wheel shut, another page, the laser off the seats) it opens its
@@ -945,7 +945,7 @@ inline MovedTo WhereMoved(int was, int newSlot, int oldSlot, int oldSlotSkill, b
     if (oldSlot >= 0 && oldSlot < skills::Count && oldSlot != newSlot && oldSlotSkill < 0 && !oldSlotGlyph) return MovedTo::OldButton;
     return quickCastTakes ? MovedTo::QuickCast : MovedTo::Dropped;
 }
-// The retired Quick cast menu button (T036's exp.ring_wheel.quick_button, slot + 1) becomes Quick cast's own button
+// The retired Quick cast menu button ('s exp.ring_wheel.quick_button, slot + 1) becomes Quick cast's own button
 // (exp.ideas.quick_radial.button) once, unless Quick cast has a button already or it is a trigger (review N2: a trigger stored
 // before review F1 stays the attack): the stored value it gets (0: none to move).
 inline float MovedQuickButton(float oldMenuButton, float quickCastButton) {
@@ -954,11 +954,11 @@ inline float MovedQuickButton(float oldMenuButton, float quickCastButton) {
     return oldMenuButton >= .5f && quickCastButton < .5f ? oldMenuButton : 0.f;
 }
 // Review F1 (2026-11-16 fresh review): Quick cast put on a button from the center's third, why not (nullptr: it may). The trigger
-// first, as every sub-menu (review F1 of T036: the attack, and the ring's own click), then the switch, the class, Draw glyph.
+// first, as every sub-menu (review F1 of the attack, and the ring's own click), then the switch, the class, Draw glyph.
 // slot: the hand's button (0 trigger .. 4 grip + secondary).
 inline const char* QuickBindRefusal(int slot, bool on, bool classKnown, bool drawsGlyph) {
     if (slot <= 0) return "never a trigger (the attack, and the ring's click)";   // as ring_wheel_pages.h MenuButtonAllowed
-    if (!on) return "Quick cast is Off";
+    if (!on) return "Quick cast is Off (VR Settings > Menus > Ring skill menu)";
     if (!classKnown) return "this class keeps upstream's buttons";
     if (drawsGlyph) return "that button draws glyphs (put a skill on it first)";
     return nullptr;

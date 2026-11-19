@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (T036, Jeff 2026-11-15: "clean icons only (silver glyph on our dark disc; game plate gone)"): the clean icon,
+// Ring skill menu (, the player 2026-11-15: "clean icons only (silver glyph on our dark disc; game plate gone)"): the clean icon,
 // keyed out of the cached game picture once per icon on the atlas worker (vr/ring_wheel_atlas.cpp BuildIcons), never per
 // frame. Pure and Windows-free (ring-wheel-test).
 //
@@ -15,7 +15,7 @@
 //
 // Skipped (Keyed false): our own art (ids 9000 and up: Draw glyph, ring Army X menu, the sub-menu entries) and an icon a ring
 // remaps while its remap is On (ring Kick icon's s1, its variant bit): any colored part of those would be keyed out, and Kick's
-// art is not proven against the key (Jeff: skip it until checked).
+// art is not proven against the key (the player: skip it until checked).
 #include <algorithm>
 #include <cstdint>
 #include <vector>

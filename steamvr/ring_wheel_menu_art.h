@@ -1,7 +1,7 @@
 #pragma once
-// Ring skill menu (T036, Jeff 2026-11-16: "the Gestures, Glyphs and Quick cast icons show gold; they must match the Diablo
+// Ring skill menu (, the player 2026-11-16: "the Gestures, Glyphs and Quick cast icons show gold; they must match the Diablo
 // silver-on-rust set"): the three sub-menus' own pictures, our ChatGPT art (the design kit, icon-glyphs-v3b,
-// icon-gestures-v2, icon-quick-cast-v2), made offline the way the ring shows a game icon after the T036 key: the silver motif
+// icon-gestures-v2, icon-quick-cast-v2), made offline the way the ring shows a game icon after the key: the silver motif
 // keyed out of its rust plate, its tint pulled to gray, on transparent, 144 px (the atlas art square at 150%), framed so the motif
 // fills the disc like a game glyph (make-ring-menu-icons.py there). Embedded by steamvr/ring_wheel_menu_art.rc
 // (steamvr/assets/ring-wheel/ring-menu-*.png). The atlas worker packs them whole (no game-frame crop, no key: ids 9000 and up), and the

@@ -1,10 +1,10 @@
-// Dev only: Lab Ring wheel's three sub-menu pictures (Glyphs, Gestures, Quick cast; T036, steamvr/ring_wheel_menu_art.h), embedded
-// in the plugin as upstream embeds its own pictures (interaction_assets.rc), so Install-Dev needs no loose file. Our art, not
+// development only: Ring skill menu's three sub-menu pictures (Glyphs, Gestures, Quick cast; , steamvr/ring_wheel_menu_art.h), embedded
+// in the plugin as upstream embeds its own pictures (interaction_assets.rc), so Install-development needs no loose file. Our art, not
 // game-derived (steamvr/assets/lab/README.md).
 D2RVR_LAB_RING_MENU_GLYPHS RCDATA "assets/ring-wheel/ring-menu-glyphs.png"
 D2RVR_LAB_RING_MENU_GESTURES RCDATA "assets/ring-wheel/ring-menu-gestures.png"
 D2RVR_LAB_RING_MENU_QUICK_CAST RCDATA "assets/ring-wheel/ring-menu-quick-cast.png"
-// Lab Ring wheel > Layers > Tree icon (T025, steamvr/ring_wheel_tree_art.h): the 24 painted tree squares on one sheet (tools/ring_tree_sheet.py).
+// Ring skill menu > Layers > Tree icon (, steamvr/ring_wheel_tree_art.h): the 24 painted tree squares on one sheet (tools/ring_tree_sheet.py).
 D2RVR_LAB_RING_TREE_SHEET RCDATA "assets/ring-wheel/ring-tree-sheet.png"
-// Lab Ring wheel > Center > Glyph icon (steamvr/ring_wheel_glyph_art.h): the 12 painted glyph and sigil squares on one sheet (tools/ring_glyph_sheet.py).
+// Ring skill menu > Center > Glyph icon (steamvr/ring_wheel_glyph_art.h): the 12 painted glyph and sigil squares on one sheet (tools/ring_glyph_sheet.py).
 D2RVR_LAB_RING_GLYPH_SHEET RCDATA "assets/ring-wheel/ring-glyph-sheet.png"

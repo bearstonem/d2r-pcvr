@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (T025, round 2026-11-08 item 4): a screenshot's picture of the ring's layer, as data. The compose pass writes
+// Ring skill menu (, round 2026-11-08 item 4): a screenshot's picture of the ring's layer, as data. The compose pass writes
 // premultiplied color into an 8-bit target; a layer PNG (layer_shot.h, upstream's) is sRGB with straight alpha. Pure and
 // Windows-free. Runs only on a screenshot's frame.
 // Round 2026-11-12 Job B (audit bug 4: the save's 42-58 ms sat on the frame): the frame thread only hands the filled
@@ -83,8 +83,8 @@ inline double NowMs() { return std::chrono::duration<double, std::milli>(std::ch
 class SaveQueue {
 public:
     static constexpr int MaxWaiting = 4;   // the one being written and three behind it (about 7 MB each at 150%); a fifth is refused, never queued
-    struct Ticket { double at = 0; int behind = 0; double begun = 0; };   // when Push took it (NowMs), the saves not finished then, when the worker began it
-    using Job = std::function<void(const Ticket&)>;
+    struct task { double at = 0; int behind = 0; double begun = 0; };   // when Push took it (NowMs), the saves not finished then, when the worker began it
+    using Job = std::function<void(const task&)>;
     SaveQueue() = default;
     // Never a blocking join here (as AtlasWorker, review R5 K3: it may run at DLL unload, under the loader lock): the ring
     // holds its queue on the heap and never destroys it; a test calls Drain first.
@@ -112,15 +112,15 @@ public:
     // Shutdown: every save taken is written before this returns (the thread joined). Nothing waiting: returns at once.
     void Drain() { if (thread.joinable()) thread.join(); }
 private:
-    struct Item { Job job; Ticket ticket; };
+    struct Item { Job job; task task; };
     void Run() {
         std::unique_lock lock(mutex);
         while (!jobs.empty()) {
             Item item = std::move(jobs.front());
             jobs.pop_front();
             lock.unlock();
-            item.ticket.begun = NowMs();
-            try { item.job(item.ticket); } catch (...) {}
+            item.task.begun = NowMs();
+            try { item.job(item.task); } catch (...) {}
             item.job = nullptr;   // its pixels freed here, not under the mutex
             lock.lock();
             --waiting;
@@ -137,10 +137,10 @@ private:
 
 // The worker's half of a screenshot, after it copied the rows out: the picture from them, the file, then the one log line,
 // with the frame thread's ms (from `frameT0`, a NowMs the hook took first, to the Push) and the worker's (from the
-// ticket's `begun`, so the rows' copy counts). `write(file, rgba, w, h)`: true when the file is written (png::Save);
+// task's `begun`, so the rows' copy counts). `write(file, rgba, w, h)`: true when the file is written (png::Save);
 // `say(const char*)`: the log. Rows that are not whole (the copy failed): no file, and the line says so.
 template <class Write, class Say>
-void Finish(const Raw& raw, const std::wstring& file, double frameT0, const SaveQueue::Ticket& t, Write&& write, Say&& say) {
+void Finish(const Raw& raw, const std::wstring& file, double frameT0, const SaveQueue::task& t, Write&& write, Say&& say) {
     bool saved = false;
     try {
         const auto rgba = Picture(raw);
@@ -169,7 +169,7 @@ const char* Queue(SaveQueue*& queue, double frameT0, const wchar_t* file, Take&&
         if (why) return why;
         if (!read) return "no picture taken";
         if (!queue) queue = new (std::nothrow) SaveQueue;
-        if (!queue || !queue->Push([read = std::move(read), name = std::wstring(file ? file : L""), frameT0, write, say, begin](const SaveQueue::Ticket& t) {
+        if (!queue || !queue->Push([read = std::move(read), name = std::wstring(file ? file : L""), frameT0, write, say, begin](const SaveQueue::task& t) {
                 begin();
                 Raw raw;
                 read(raw);   // a failed read leaves no rows, and Finish says so

@@ -1,4 +1,4 @@
-// Ring skill menu (T025, build step R2; steamvr/ring_wheel.h): the seats of both Tree layouts against the kit's numbers,
+// Ring skill menu (, build step R2; steamvr/ring_wheel.h): the seats of both Tree layouts against the kit's numbers,
 // the hit test (nearest wins, hysteresis, faded trees take no hits, the center halves, the footer remap onto upstream's
 // cells), the tree dwell and hold, fire on release, the page lockout, and pick / bind / clear.
 #include <algorithm>
@@ -328,7 +328,7 @@ int main() {
         Check(maxOff <= 5.0001f && maxOff >= 4, "#3 float reaches near its 5 px cap and never past it");
         Check(maxSpeed / 15 <= .5f, "#3 peak speed at most 0.5 deg/s at 15 px/deg");
         Check(inStep <= 2, "#3 neighbors (ids n and n + 1) never in step");
-        // the Animation row (L4 table, Jeff 2026-11-07: Off / Floating icons / Effect on hover / All effects, default Effect on hover)
+        // the Animation row (L4 table, the player 2026-11-07: Off / Floating icons / Effect on hover / All effects, default Effect on hover)
         const auto off = rw::PresetAnim(rw::Preset::Off), flo = rw::PresetAnim(rw::Preset::Floating), hov = rw::PresetAnim(rw::Preset::Hover), all = rw::PresetAnim(rw::Preset::All);
         Check(!off.floats && off.glow == rw::GlowOff && !off.hoverFx && !off.faceFx && !off.burst && off.crawlS == 0 && off.still, "#3 Off: rows 2-7 off, redraw only on a change");
         Check(flo.floats && flo.glow == rw::GlowOff && !flo.hoverFx && !flo.faceFx && flo.burst && flo.crawlS == 0 && !flo.still, "#3 Floating icons: float and burst only");
@@ -707,7 +707,7 @@ int main() {
         const auto r = rw::BindRequest(s, index, 47, -1, 5, 77, 1200);
         Check(r.action == ia::Action::BindSkill && (r.sequence >> 63) == 1 && r.index == index && r.skill == 47 && r.previousSkill == 36,
               "R6: a BindSkill with the slot, the skill, the slot's old skill, the sequence's high bit (never upstream's)");
-        Check(ia::CanBind(s, r, 1200), "R6: upstream's CanBind takes the Lab's bind");
+        Check(ia::CanBind(s, r, 1200), "R6: upstream's CanBind takes the ring's bind");
         Check(!ia::CanBind(s, r, 1000 + 651), "R6: a stale snapshot refuses it (upstream's rule stands)");
         auto other = s; other.skills[size_t(index)].id = 39;
         Check(!ia::CanBind(other, r, 1200), "R6: the slot changed under it: refused");
@@ -715,7 +715,7 @@ int main() {
         Check(clear.skill == -1 && clear.skillOwner == -1 && ia::CanBind(s, clear, 1200), "R6: a clear (skill -1) passes CanBind with owner -1");
         Check(rw::BindRequest(s, -1, 47, -1, 7, 77, 1200).action == ia::Action::None && rw::BindRequest(s, framevr::skills::Count, 47, -1, 7, 77, 1200).action == ia::Action::None,
               "R6: a slot out of range sends nothing");
-        {   // Jeff 2026-11-08 #3: the Draw glyph request is upstream's picker's (skill_categories_test): skill -1, the old skill, CanBind passes
+        {   // the player 2026-11-08 #3: the Draw glyph request is upstream's picker's (skill_categories_test): skill -1, the old skill, CanBind passes
             const auto d = rw::GlyphDrawRequest(s, index, 8, 77, 1200);
             Check(d.action == ia::Action::BindGlyphDraw && d.index == index && d.skill == -1 && d.skillOwner == -1 && d.bank == s.bindingBank && d.previousSkill == 36 && (d.sequence >> 63) == 1, "#3 Draw glyph: upstream's BindGlyphDraw for this slot, its game skill cleared");
             Check(ia::CanBind(s, d, 1200), "#3 Draw glyph: the clear it asks for passes upstream's CanBind");
@@ -725,7 +725,7 @@ int main() {
             Check(rw::GlyphDrawRequest(s, framevr::skills::Count, 8, 77, 1200).action == ia::Action::None, "#3 a slot out of range: nothing sent");
         }
     }
-    {   // #9 (R6Q, Jeff's design): quick cast and hold to assign
+    {   // #9 (R6Q, the player's design): quick cast and hold to assign
         const int per[3] = {10, 10, 10};
         const auto l = ClassLayout(1, per, rw::TreeLayout::Shown);
         const rw::Target seatA{rw::Kind::Seat, 4}, seatB{rw::Kind::Seat, 12}, gap{rw::Kind::Gap}, off{};
@@ -759,7 +759,7 @@ int main() {
         Check(only(run(0, 1, 520, seatA, 500, 400), rw::Quick::NoChange) && only(run(0, 1, -1, seatA, 500, 400, true, 200 + 551), rw::Quick::Assign),
               "#9 the clamp: hold 500 with tap 400 assigns at 550, not 500");
         Check(only(run(0, 1, 2000, seatA, 0), rw::Quick::QuickCast), "#9 Hold to assign Off: every press a QuickCast, however long");
-        {   // Jeff 2026-11-08 #3: the Glyphs half of the center takes a press like a skill: a tap opens its page, a hold assigns Draw glyph
+        {   // the player 2026-11-08 #3: the Glyphs half of the center takes a press like a skill: a tap opens its page, a hold assigns Draw glyph
             const rw::Target glyphsHalf{rw::Kind::Glyphs}, gesturesHalf{rw::Kind::Gestures};
             Check(only(run(0, 1, 349, glyphsHalf), rw::Quick::GlyphTap), "#3 a tap on the Glyphs half: GlyphTap (no cast)");
             Check(only(run(0, 1, 351, glyphsHalf), rw::Quick::NoChange), "#3 released between the tap limit and full: no change");
@@ -927,7 +927,7 @@ int main() {
         {
             FakeCast c;
             const auto [r, w] = go(c, 47, false);
-            Check(!r.started && !r.refused && !w.on && c.begins == 0, "perf R6Q: the Lab Off with a cast queued: it is dropped, never fires");
+            Check(!r.started && !r.refused && !w.on && c.begins == 0, "perf R6Q: the ring Off with a cast queued: it is dropped, never fires");
         }
         // One tap = one Begin: the quick cast state machine emits one QuickCast, and StartCast runs it once.
         {
@@ -994,7 +994,7 @@ int main() {
             q.nowMs = 100; q.trigger = true; l.Step(q, set); q.nowMs = 120; q.trigger = false;
             Check(l.Step(q, set).event == rw::PageEvent::None, "R7 a press inside the 250 ms lockout fires nothing");
         }
-        {   // 2026-11-16 (Jeff: "ring menu > quick cast / ring menu > gestures / ring menu > glyph"): Quick cast's page, its 12 places
+        {   // 2026-11-16 (the player: "ring menu > quick cast / ring menu > gestures / ring menu > glyph"): Quick cast's page, its 12 places
             // on r 205 open the chooser for that place, the whole center is Back (the ring's page: no upstream cell), the footer upstream's Spells
             rw::PageEngine e; double t = 0; settle(e, rw::RingPage::Quick, rw::QuickPlaces, t);
             for (int i = 0; i < rw::QuickPlaces; ++i) {
@@ -1026,7 +1026,7 @@ int main() {
             rw::PageView none; rw::FillQuick(none, nullptr, 5, [](int) { return std::string(); }, [](int) { return -1; });
             Check(!none.has[0] && none.count == 12, "Quick cast page view: no ids: all empty, never read");
             Check(v.best[1] && !v.best[0] && !v.best[2] && !v.best[3], "Quick cast page view: a kind's place wears Best, a skill's or an exact one's never");
-            {   // Jeff's headset 2026-11-17: Antidote, Thawing and Stamina have no better version, so no Best pill (only kinds with tiers)
+            {   // the player's headset 2026-11-17: Antidote, Thawing and Stamina have no better version, so no Best pill (only kinds with tiers)
                 const int fam[6] = {(2 << 28) | 1, (2 << 28) | 2, (2 << 28) | 3, (2 << 28) | 4, (2 << 28) | 5, (2 << 28) | 6};   // Healing, Mana, Rejuvenation, Antidote, Thawing, Stamina
                 rw::PageView fv2; rw::FillQuick(fv2, fam, 6, [](int) { return std::string("x"); }, [](int) { return -1; });
                 Check(fv2.best[0] && fv2.best[1] && fv2.best[2] && !fv2.best[3] && !fv2.best[4] && !fv2.best[5] && rw::BestSeat(fam[2]) && !rw::BestSeat(fam[5]) &&
@@ -1062,7 +1062,7 @@ int main() {
             Check(em.bottomHelp == "Fill a place first", "Quick cast page view: an empty ring: nothing to move");
             rw::PageView kd; rw::FillQuickKind(kd, ids, 3, 0, "x", [](int) { return std::string(); }, [](int) { return -1; }); Check(kd.bottom.empty(), "Quick cast kind page: no Move");
         }
-        {   // Review 2026-11-16 (exact items, Jeff: "if they have normal rejuv and a full rejuv, and they select the normal rejuv, it should
+        {   // Review 2026-11-16 (exact items, the player: "if they have normal rejuv and a full rejuv, and they select the normal rejuv, it should
             // not drink a full rejuv"): a kind's page: the kind, then each exact one carried, round Quick's ring; the whole center Back
             const int kind = (2 << 28) | 3, rvl = (1 << 28) | 0x6c7672, rvs = (1 << 28) | 0x737672, ids[3] = {kind, rvl, rvs};
             rw::PageEngine e; double t = 0; settle(e, rw::RingPage::QuickKind, 3, t);
@@ -1163,7 +1163,7 @@ int main() {
             std::sort(upstream.begin(), upstream.end()); std::sort(ours.begin(), ours.end());
             Check(!upstream.empty() && upstream == ours, ("R7 #20 the glyph list == upstream's picker (Engine::OpenGlyphSkills), class " + std::to_string(cls)).c_str());
         }
-        {   // The Commander orders' row on the glyph chooser (2026-11-14, upstream v0.3.35 #439; Jeff's picks; the designer's sheet B).
+        {   // The Commander orders' row on the glyph chooser (2026-11-14, upstream v0.3.35 #439; the player's picks; the designer's sheet B).
             namespace od = rw::orders;
             namespace cp = framevr::companions;
             // A hero: the class's 30 skills (its army summons left out when asked), the shelf's five, a live army or not.
@@ -1477,7 +1477,7 @@ int main() {
                 for (int id = od::First; id <= od::Last; ++id) each = each && std::count(ids, ids + n, od::IconSkill(id)) == 1;
                 Check(each && rw::AddOrderIcons(ids, n, 40) == n && rw::AddOrderIcons(ids, 3, 5) == 5, "orders header: each order's icon is asked for once, within the request's room");
             }
-            {   // A button on an order (Jeff's pick B): upstream's real nothing here, the ring's real Engine and QuickCast, 5 ms frames.
+            {   // A button on an order (the player's pick B): upstream's real nothing here, the ring's real Engine and QuickCast, 5 ms frames.
                 const auto h = hero(2, true, false);
                 const auto cl = rw::ChooserLayout(mainOf(h, rw::TreeLayout::Shown), rw::GlyphChoices(h));
                 int order = -1, skill = -1;
@@ -1595,7 +1595,7 @@ int main() {
         auto pillAt = [&](int k) { float x, y; rw::RingPos(k, 4, rw::GestureR, x, y); x += rw::CanvasX + 20; y += rw::CanvasY + 20;
             for (int i = 0; i < n; ++i) if (list[i].recipe == rw::RecipeRect && std::fabs(list[i].cx - x) < .01f && std::fabs(list[i].cy - y) < .01f) return true; return false; };
         const int on = iconAt(0), none = iconAt(1), off = iconAt(2), offNone = iconAt(3);
-        Check(on >= 0 && list[on].param == 2 + rw::IconDisc && list[on].a == 1 && !pillAt(0), "item 6 learned and on: in color, full, no pill (T036: on its dark disc, the clean icon's plate)");
+        Check(on >= 0 && list[on].param == 2 + rw::IconDisc && list[on].a == 1 && !pillAt(0), "item 6 learned and on: in color, full, no pill (on its dark disc, the clean icon's plate)");
         Check(none > 0 && list[none].param < 0 && std::fabs(list[none].a - .45f) < 1e-4f && !pillAt(1) && list[none - 1].recipe == rw::RecipeDisc && list[none - 1].r == 0 && list[none - 1].a == 1, "item 6 no points: gray at 45% over a black disc, no Off pill");
         Check(off >= 0 && list[off].param < 0 && list[off].a == .5f && pillAt(2) && offNone >= 0 && list[offNone].param < 0 && list[offNone].a == .5f && pillAt(3), "item 6 turned Off keeps its look: gray at 50% with the pill, learned or not");
     }
@@ -1964,7 +1964,7 @@ int main() {
         s.layout = &o; s.skillClass = 3; s.grow = -1; s.step.under = {}; of(rw::RecipeTreeGlyph, g);
         Check(g.size() == 3 && std::fabs(g[0].u0 - .8f * 34) < .01f, "R7c: Tree orbs, the glyph inside each orb (0.8 of r 34)");
     }
-    {   // Round 2026-11-08 #1, Jeff's rule for closing (ring_wheel_close.h). Upstream's real HandControls and interaction::Engine,
+    {   // Round 2026-11-08 #1, the player's rule for closing (ring_wheel_close.h). Upstream's real HandControls and interaction::Engine,
         // fed as transport feeds them (handInput.active, interactionInput.tracked, the close at transport:4760), through closing::Hold.
         namespace sk = framevr::skills;
         namespace cl = rw::closing;
@@ -2040,11 +2040,11 @@ int main() {
         }
         {   // ring Off: upstream's rules, as before
             Frame f; f.labOn = false; f.Click(1); f.Step(60); f.One(.101);
-            Check(f.hc.Wheel() == -1, "#1 Lab Off: a 101 ms gap closes (upstream)");
+            Check(f.hc.Wheel() == -1, "#1 ring Off: a 101 ms gap closes (upstream)");
             Frame g; g.labOn = false; g.Click(1); g.Step(60); g.One(.09);
-            Check(g.Open(1), "#1 Lab Off: a 90 ms gap stays open (upstream)");
+            Check(g.Open(1), "#1 ring Off: a 90 ms gap stays open (upstream)");
             Frame h; h.labOn = false; h.Click(1); h.Step(60); h.tracked[0] = false; h.Step();
-            Check(h.hc.Wheel() == -1, "#1 Lab Off: a lost hand closes (upstream)");
+            Check(h.hc.Wheel() == -1, "#1 ring Off: a lost hand closes (upstream)");
         }
         {   // the wheel closed, no offset: every value is upstream's; no other user of HandControls sees a change
             Frame f; bool same = true;
@@ -2274,7 +2274,7 @@ int main() {
                 e.Frame(1, none, nullptr, 10);
                 Check(e.Frame(-1, left, nullptr, 10).reason == "stick-left", "bug 3: a press upstream ignored names no later close");
                 Check(!fc.Step(false, int(ia::MenuPage::Spells), 11, 0, false) && !fc.Step(false, int(ia::MenuPage::Spells), 11, 1, false),
-                      "bug 3: the ring's own page: nothing (the Lab's own write names that close)");
+                      "bug 3: the ring's own page: nothing (the ring's own write names that close)");
             }
             {   // the ring On cost of the one step this adds to every frame (the Request seam): printed for the perf gate
                 rw::FooterClick fc; unsigned seed = 7; int named = 0;
@@ -2323,9 +2323,9 @@ int main() {
             return r.kind == rw::WheelEdges::Closed ? r.reason : std::string("(no close)");
         };
         for (const char* why : {"center", "back", "glyphs", "footer-inventory", "quick-cast", "cancel-off-wheel"})
-            Check(close(why, 0, none, nullptr, 10) == why, std::string("M1: a Lab write the frame before the close names it: ") + why + " (got " + close(why, 0, none, nullptr, 10) + ")");
+            Check(close(why, 0, none, nullptr, 10) == why, std::string("M1: a ring write the frame before the close names it: ") + why + " (got " + close(why, 0, none, nullptr, 10) + ")");
         Check(close("center", 1, none, nullptr, 10) == "upstream", "M1: a write two frames back is not the reason");
-        Check(close("center", 0, left, "panel", 11) == "center", "M1: the Lab's write wins over a click, a safety reason and a session");
+        Check(close("center", 0, left, "panel", 11) == "center", "M1: the ring's write wins over a click, a safety reason and a session");
         Check(close(nullptr, 0, left, nullptr, 10) == "stick-left" && close(nullptr, 0, right, nullptr, 10) == "stick-right", "M1: a stick click edge");
         Check(close(nullptr, 0, none, "load", 11) == "load", "#1: a safety reason is named ahead of the session");
         Check(close(nullptr, 0, none, nullptr, 11) == "session", "M1: a new session");
@@ -2334,7 +2334,7 @@ int main() {
         Check(e.Frame(0, none, nullptr, 10).kind == rw::WheelEdges::Opened && e.Frame(1, none, nullptr, 10).kind == rw::WheelEdges::Switched &&
               e.Frame(1, none, nullptr, 10).kind == rw::WheelEdges::None && e.Open(), "M1: switched hands; a steady frame is no edge");
         e.Off();
-        Check(!e.Open() && e.Frame(-1, none, nullptr, 10).kind == rw::WheelEdges::None, "M1: after the Lab's Off edge no second close is logged");
+        Check(!e.Open() && e.Frame(-1, none, nullptr, 10).kind == rw::WheelEdges::None, "M1: after the ring's Off edge no second close is logged");
     }
     {   // Audit 2026-11-10 bug 2: the input cleared outside a focused frame closes the wheel there, and its line is written there.
         const bool none[2]{}, left[2]{false, true};
@@ -2349,7 +2349,7 @@ int main() {
             Check(e.Frame(0, none, nullptr, 10).kind == rw::WheelEdges::Opened && e.Frame(-1, left, nullptr, 10).reason == "stick-left", std::string("bug 2: the reopen and its close are normal: ") + why);
         }
         { auto e = opened(); Check(e.Cleared("headset-focus", false).kind == rw::WheelEdges::Closed && rw::WheelEdges().Cleared("headset-focus", false).kind == rw::WheelEdges::None, "bug 2: a closed wheel: no line"); }
-        { auto e = opened(); e.Wrote("quick-cast"); Check(e.Cleared("headset-focus", true).reason == "quick-cast", "bug 2: the Lab's own close one frame before the clear keeps its name"); }
+        { auto e = opened(); e.Wrote("quick-cast"); Check(e.Cleared("headset-focus", true).reason == "quick-cast", "bug 2: the ring's own close one frame before the clear keeps its name"); }
         { auto e = opened(); Check(e.Cleared("headset-focus", true).reason == "upstream", "bug 2: upstream closed the wheel one frame before the clear: not the clear's name"); }
         { auto e = opened(); e.Wrote("center"); e.Frame(1, none, nullptr, 10); Check(e.Cleared("session-end", false).reason == "session-end", "bug 2: a stale write is not the reason"); }
         // Review N1: no Frame runs during a focus blip, so a write upstream ignored on the last focused frame is still there at the
@@ -2850,7 +2850,7 @@ int main() {
             Check(badOrder == 0 && bodiesMissing == 0, "batch 3: every badge body after every effect, the face-cut quad included" + (firstBad.empty() ? std::string() : " (first: " + firstBad + ")"));
             Check(maxRuns <= 4, "batch 3: badges on top still cost no draw past 4 (" + std::to_string(maxRuns) + ")");
         }
-        {   // Jeff 2026-11-08 #3 (designer): the wheel hand's Draw glyph button on the Glyphs half
+        {   // the player 2026-11-08 #3 (designer): the wheel hand's Draw glyph button on the Glyphs half
             const std::array<int, 2> slots{rw::SlotOf(0, 1), rw::SlotOf(1, 3)};
             const auto r = rw::DrawBadgeFor(slots, 0, L::Touch, 28), left = rw::DrawBadgeFor(slots, 1, L::Touch, 22);
             Check(r.on && r.kind == rw::BadgeKind::Disc && r.letter == 'A' && r.sizePx == 28, "#3 badge: the right wheel hand's own button (A, a disc)");
@@ -3033,7 +3033,7 @@ int main() {
             t.h[0].anyDown = false; t.h[1].trigger = false; t.Step(); t.h[1].trigger = true; t.Step();
             Check(t.Owner() == 1, "job B: once let go, the other hand's trigger takes it");
         }
-        {   // T025 round 2026-11-08 #5 (Jeff's log: 361 of 420 owner changes under 50 ms apart): the owner changes only on a deliberate move
+        {   // round 2026-11-08 #5 (the player's log: 361 of 420 owner changes under 50 ms apart): the owner changes only on a deliberate move
             for (const double hz : {90.0, 28.6}) {
                 const std::string at = std::to_string(int(hz)) + " Hz";
                 auto start = [&](Sim& s) { s.stepMs = 1000 / hz; s.Step(5); s.Turn(0, 3, 150); s.h[0].onTarget = s.h[1].onTarget = true; s.Step(int(hz)); };
@@ -3132,7 +3132,7 @@ int main() {
             s.wheel = 1; s.Step(30);
             Check(s.Owner() == -1, "job B: reopened, no owner until a hand moves");
         }
-        {   // Jeff's closing rule (FS1 dropped): B / X with no laser on the wheel closes it, an owner or none
+        {   // the player's closing rule (FS1 dropped): B / X with no laser on the wheel closes it, an owner or none
             const int per[3] = {4, 4, 4};
             const auto l = ClassLayout(1, per, rw::TreeLayout::Shown);
             rw::QuickCast qc; rw::QuickIn q; q.main = true; q.nowMs = 1000; q.under = {};
@@ -3149,7 +3149,7 @@ int main() {
                   "job B beam: full, a zero limit, a limit of 2: skipped");
             Check(pt::BeamFor(true, true, true, 0xFFFFFFFFu, 0xFFFFFFFFu) == B::NoSlot, "job B beam: no overflow at the top of the range");
             Check(pt::BeamFor(false, true, true, 0, 32) == B::LabOff && pt::BeamFor(false, false, false, 0, 32) == B::LabOff,
-                  "job B beam: the Lab's Off edge never draws, even with a beam written this frame (should-fix 2)");
+                  "job B beam: the ring's Off edge never draws, even with a beam written this frame (should-fix 2)");
             Check(pt::BeamFor(true, false, true, 0, 32) == B::Closed && pt::BeamFor(true, true, false, 0, 32) == B::None,
                   "job B beam: the wheel's laser not showing, or no beam written: none");
         }
@@ -3485,7 +3485,7 @@ int main() {
         for (int i = 0; i < 60; ++i) onFrame(i % 2 == 0);   // On, Off, On, Off ... every frame
         for (int i = 0; i < 10; ++i) onFrame(true);
         most = std::max(most, chains);
-        Check(most <= 1, "X6 rapid On / Off with a busy GPU: never two Lab swapchains at once (most " + std::to_string(most) + ")");
+        Check(most <= 1, "X6 rapid On / Off with a busy GPU: never two ring swapchains at once (most " + std::to_string(most) + ")");
         Check(waited > 0 && made > 3 && live && chains == 1, "X6 an On edge with a retired swapchain alive waits, then makes its own (" + std::to_string(waited) + " waits, " + std::to_string(made) + " made)");
         list.Reap(true, [](Side*) { return true; }, [](Side*) {}, [&](Side* s) { if (s->chain) { s->chain = false; --chains; } }, [](Side* s) { delete s; });
         delete live;
@@ -3581,7 +3581,7 @@ int main() {
         q.Push(7); q.Push(8);
         Check(q.Pop(out) && out == 7 && q.Pop(out) && out == 8, "send queue: order kept across the wrap");
         q.Push(1); q.Clear();
-        Check(q.Size() == 0 && !q.Pop(out), "send queue: Clear (Lab Off, reset) empties it");
+        Check(q.Size() == 0 && !q.Pop(out), "send queue: Clear (ring Off, reset) empties it");
         // The bug: bind A in flight, then assigns B and C made before A's reply. Each must go out, in order, each answered.
         using R = ia::Result;
         rw::SendQueue<int> pend; rw::ReplyWait bind, glyph;
@@ -3605,7 +3605,7 @@ int main() {
     }
     {   // Round 2026-11-12 Job B (audit bug 4: the PNG save sat on the frame): the save queue and the worker's half
         namespace sh = rw::shot;
-        using Ticket = sh::SaveQueue::Ticket;
+        using task = sh::SaveQueue::task;
         // A save held on the worker until the test lets it go. 3 s at most: a queue that ran the job on the caller fails, not hangs.
         struct Gate {
             std::mutex m; std::condition_variable cv; bool open = false; std::atomic<int> timedOut{0};
@@ -3623,7 +3623,7 @@ int main() {
             sh::SaveQueue q; Gate gate;
             std::mutex m; std::vector<int> ran, behind; std::vector<std::thread::id> on;
             bool times = true;
-            auto job = [&](int k) { return [&, k](const Ticket& t) { gate.Wait(); std::lock_guard l(m); ran.push_back(k); behind.push_back(t.behind); on.push_back(std::this_thread::get_id()); times = times && t.at > 0 && t.begun >= t.at; }; };
+            auto job = [&](int k) { return [&, k](const task& t) { gate.Wait(); std::lock_guard l(m); ran.push_back(k); behind.push_back(t.behind); on.push_back(std::this_thread::get_id()); times = times && t.at > 0 && t.begun >= t.at; }; };
             const bool a = q.Push(job(1)), b = q.Push(job(2));
             bool none; { std::lock_guard l(m); none = ran.empty(); }
             Check(a && b && none && q.Waiting() == 2 && !q.Idle() && !gate.timedOut, "save queue: Push returns with both saves unwritten (the frame thread never writes one)");
@@ -3641,7 +3641,7 @@ int main() {
         }
         {   // full: one more than MaxWaiting is refused, neither queued nor run; room again once the saves are written
             sh::SaveQueue q; Gate gate; std::atomic<int> ran{0};
-            auto job = [&](const Ticket&) { gate.Wait(); ++ran; };
+            auto job = [&](const task&) { gate.Wait(); ++ran; };
             int taken = 0;
             for (int i = 0; i < sh::SaveQueue::MaxWaiting; ++i) taken += q.Push(job);
             Check(taken == sh::SaveQueue::MaxWaiting && q.Full() && !q.Push(job) && q.Waiting() == sh::SaveQueue::MaxWaiting, "save queue: full at MaxWaiting; one more is refused at once, not queued");
@@ -3652,13 +3652,13 @@ int main() {
         }
         {   // Shutdown: Drain returns only when every save it took is written
             sh::SaveQueue q; std::atomic<int> ran{0};
-            for (int i = 0; i < 3; ++i) q.Push([&](const Ticket&) { std::this_thread::sleep_for(std::chrono::milliseconds(15)); ++ran; });
+            for (int i = 0; i < 3; ++i) q.Push([&](const task&) { std::this_thread::sleep_for(std::chrono::milliseconds(15)); ++ran; });
             q.Drain();
             Check(ran == 3 && q.Idle() && q.Waiting() == 0, "save queue: Drain (Shutdown) returns after every pending save is written");
         }
         {   // a save that throws does not take the next one with it
             sh::SaveQueue q; std::atomic<int> ran{0};
-            q.Push([](const Ticket&) { throw 1; }); q.Push([&](const Ticket&) { ++ran; }); q.Drain();
+            q.Push([](const task&) { throw 1; }); q.Push([&](const task&) { ++ran; }); q.Drain();
             Check(ran == 1 && q.Waiting() == 0 && q.Idle(), "save queue: a save that throws is dropped; the next is written");
         }
         {   // the rows the frame thread hands over
@@ -3679,27 +3679,27 @@ int main() {
             auto starts = [&](const char* s) { return line.rfind(s, 0) == 0; };
             auto ends = [&](const std::string& s) { return line.size() >= s.size() && line.compare(line.size() - s.size(), s.size(), s) == 0; };
             const std::wstring name = L"C:\\shots\\Frame-pair-1-ring-wheel.png";
-            sh::Finish(raw, name, 1000.0, Ticket{1003.5, 0, sh::NowMs()}, write, say);
+            sh::Finish(raw, name, 1000.0, task{1003.5, 0, sh::NowMs()}, write, say);
             Check(writes == 1 && got == want && got == sh::Picture(raw) && file == name && gw == 5 && gh == 2, "shot save: the worker makes the picture from the rows (sRGB, straight alpha) and writes it under the shot's name");
             Check(starts("Frame capture: ring wheel saved C:\\shots\\Frame-pair-1-ring-wheel.png (5x2, 3.5 ms on the frame, ") && ends(" ms on the worker)"), "shot save: the saved line keeps its start and gives the frame's ms and the worker's (" + line + ")");
-            { const double now = sh::NowMs(); sh::Finish(raw, name, 1000.0, Ticket{now - 40.25, 1, now}, write, say); }
+            { const double now = sh::NowMs(); sh::Finish(raw, name, 1000.0, task{now - 40.25, 1, now}, write, say); }
             Check(line.find(" ms on the worker, after 40.2 ms behind 1 other save)") != std::string::npos || ends(" ms on the worker, after 40.3 ms behind 1 other save)"), "shot save: a save that waited behind another says so, and for how long (" + line + ")");
-            { const double now = sh::NowMs(); sh::Finish(raw, name, 1000.0, Ticket{now - 40, 2, now}, write, say); }
+            { const double now = sh::NowMs(); sh::Finish(raw, name, 1000.0, task{now - 40, 2, now}, write, say); }
             Check(ends(" ms behind 2 other saves)"), "shot save: behind two (" + line + ")");
             {   // the worker's ms run from when it began the save, so its copy of the rows counts
-                const double now = sh::NowMs(); sh::Finish(raw, name, 1000.0, Ticket{1003.5, 0, now - 250}, write, say);
+                const double now = sh::NowMs(); sh::Finish(raw, name, 1000.0, task{1003.5, 0, now - 250}, write, say);
                 const size_t at = line.find(" ms on the frame, ");
                 const double worker = at == std::string::npos ? 0 : std::atof(line.c_str() + at + 18);
                 Check(worker >= 250 && worker < 2000, "shot save: the worker's ms count from when it began the save (" + line + ")");
             }
             ok = false;
-            sh::Finish(raw, name, 1000.0, Ticket{1003.5, 0, sh::NowMs()}, write, say);
+            sh::Finish(raw, name, 1000.0, task{1003.5, 0, sh::NowMs()}, write, say);
             Check(starts("Frame capture: ring wheel not saved (cannot write the file C:\\shots\\Frame-pair-1-ring-wheel.png; 3.5 ms on the frame, ") && ends(" ms on the worker)"), "shot save: a file that cannot be written is said, with both times (" + line + ")");
             ok = true; writes = 0; line.clear();
-            sh::Finish(raw, name, 1000.0, Ticket{1003.5, 0, sh::NowMs()}, [&](const wchar_t*, const std::vector<uint8_t>&, unsigned, unsigned) -> bool { throw 1; }, say);
+            sh::Finish(raw, name, 1000.0, task{1003.5, 0, sh::NowMs()}, [&](const wchar_t*, const std::vector<uint8_t>&, unsigned, unsigned) -> bool { throw 1; }, say);
             Check(starts("Frame capture: ring wheel not saved (cannot write the file "), "shot save: a write that throws is a not-saved line, not a crash");
             raw.rows.resize(43); line.clear();
-            sh::Finish(raw, name, 1000.0, Ticket{1003.5, 0, sh::NowMs()}, write, say);
+            sh::Finish(raw, name, 1000.0, task{1003.5, 0, sh::NowMs()}, write, say);
             Check(writes == 0 && starts("Frame capture: ring wheel not saved (the picture could not be read back for C:\\shots\\Frame-pair-1-ring-wheel.png; 3.5 ms on the frame, "), "shot save: rows that are not whole write no file and say so (" + line + ")");
         }
         {   // the frame thread's half, as the ring's hook runs it: take, queue, and nothing of the save on the caller
@@ -3754,7 +3754,7 @@ int main() {
               b.find("render 100%") != std::string::npos, "On line: changed rows show their new values (" + b + ")");
         st.worldLock = false;
         Check(rw::OnLine(st).find("upstream's wheel on its hand anchor") != std::string::npos, "On line: Stays in the room Off says the ring is not drawn");
-        {   // the quiet log (Jeff's PR rule): edges, refusals and failures pass; per-open, per-pick, pointer and periodic lines do not
+        {   // the quiet log (the player's PR rule): edges, refusals and failures pass; per-open, per-pick, pointer and periodic lines do not
             auto keep = [](const char* l) { return rw::KeepQuietLine(l); };
             Check(keep(rw::OnLine(st).c_str()) && keep(rw::OffLine()) && keep("Frame ring wheel: bind Fireball -> right A (applied)") && keep("Frame ring wheel: bind Fireball -> right A (refused: 3 already waiting to be sent)") && keep("Frame ring wheel: compose setup failed: x") && keep("Frame ring wheel: Quick cast not put on right A: Quick cast is Off") && keep("Frame ring wheel: swapchain kept: the GPU still busy after 10 ms"), "quiet log: edges, binds, refusals and failures are kept");
             Check(!keep("Frame ring wheel: opened right hand's wheel, page Spells") && !keep("Frame ring wheel: page Spells") && !keep("Frame ring wheel: pointer owner=right why=row") && !keep("Frame ring wheel: 10 s: composes=1") && !keep("Frame ring wheel: placed 0.90 m ahead") && !keep("Frame ring wheel: tap cast Fireball slot=A") && !keep("Frame ring wheel: layers icon=x") && !keep("Frame ring wheel: assign Fireball -> A held=500 ms") && !keep("Frame ring wheel: closed reason=back after 1.0 s"), "quiet log: opens, pages, pointing, placement, picks and the 10 s line are not said");
@@ -3763,51 +3763,51 @@ int main() {
         Check(a.size() < 400 && a.rfind("Frame ring wheel: On", 0) == 0 && std::string(rw::OffLine()).rfind("Frame ring wheel: Off", 0) == 0,
               "On / Off lines keep the tag and fit the buffer");
     }
-    // ---- T036: the center in thirds, the sub-menus, the Quick
+    // ---- the center in thirds, the sub-menus, the Quick
     // cast page and its stick select, the clean icon's key, the layers ----
     {   // The thirds' hit test: by angle, Glyphs upper left, Gestures upper right, Quick cast at the bottom; 6 px dead bands on the spokes
         auto at = [](float deg, float r) { const float a = deg * rw::Pi / 180; return std::array<float, 2>{r * std::cos(a), r * std::sin(a)}; };
         for (int t = 0; t < rw::ThirdCount; ++t) for (const float r : {10.f, 40.f, 79.f}) for (const float off : {-55.f, 0.f, 55.f}) {
             const auto p = at(rw::ThirdMidDeg[t] + off, r);
-            Check(rw::ThirdAt(p[0], p[1]) == t || (r < 10.1f && std::fabs(off) > 50), "T036 ThirdAt: third " + std::to_string(t) + " at r " + std::to_string(int(r)) + ", " + std::to_string(int(off)) + " deg off its middle");
+            Check(rw::ThirdAt(p[0], p[1]) == t || (r < 10.1f && std::fabs(off) > 50), "ThirdAt: third " + std::to_string(t) + " at r " + std::to_string(int(r)) + ", " + std::to_string(int(off)) + " deg off its middle");
         }
         for (const float s : rw::SpokeDeg) for (const float r : {20.f, 60.f, 130.f}) {
             const float a = s * rw::Pi / 180, nx = -std::sin(a), ny = std::cos(a);
             for (const float side : {-1.f, 1.f}) {
-                Check(rw::ThirdAt(r * std::cos(a) + side * 2.9f * nx, r * std::sin(a) + side * 2.9f * ny) == -1, "T036 2.9 px from a spoke: the dead band");
-                Check(rw::ThirdAt(r * std::cos(a) + side * 3.2f * nx, r * std::sin(a) + side * 3.2f * ny) >= 0, "T036 3.2 px from a spoke: a third (the band is 6 px wide)");
+                Check(rw::ThirdAt(r * std::cos(a) + side * 2.9f * nx, r * std::sin(a) + side * 2.9f * ny) == -1, "2.9 px from a spoke: the dead band");
+                Check(rw::ThirdAt(r * std::cos(a) + side * 3.2f * nx, r * std::sin(a) + side * 3.2f * ny) >= 0, "3.2 px from a spoke: a third (the band is 6 px wide)");
             }
         }
-        Check(rw::ThirdAt(0, 0) == -1 && rw::ThirdAt(1, 1) == -1, "T036 the very middle is a dead band (every spoke meets there)");
-        Check(std::fabs(rw::ThirdReach(true, 11) - 136 * 1.11f) < .01f && rw::ThirdReach(false, 0) == rw::CenterR && rw::ThirdReach(true, -5) == rw::CenterGrownR, "T036 the reach: the center's radius plus the row's percent, never under it");
+        Check(rw::ThirdAt(0, 0) == -1 && rw::ThirdAt(1, 1) == -1, "the very middle is a dead band (every spoke meets there)");
+        Check(std::fabs(rw::ThirdReach(true, 11) - 136 * 1.11f) < .01f && rw::ThirdReach(false, 0) == rw::CenterR && rw::ThirdReach(true, -5) == rw::CenterGrownR, "the reach: the center's radius plus the row's percent, never under it");
         // The engine: thirds on (the main page)
         const int per[3] = {10, 10, 10};
         const auto l = ClassLayout(1, per, rw::TreeLayout::Shown, 3, 1);
         rw::Settings s; s.thirds = true; s.growMs = 150;
         rw::Engine e; e.Reset(l);
         auto kindAt = [&](rw::Engine& en, float deg, float r) { const auto p = at(deg, r); return en.HitTest(p[0] + rw::CanvasCx, p[1] + rw::CanvasCy, s).kind; };
-        Check(kindAt(e, -150, 50) == rw::Kind::Glyphs && kindAt(e, -30, 50) == rw::Kind::Gestures && kindAt(e, 90, 50) == rw::Kind::Quick, "T036 engine: each third at r 50");
-        Check(kindAt(e, 90, 85) != rw::Kind::Quick, "T036 engine: at rest nothing past r 80 is a third (no third pointed yet)");
+        Check(kindAt(e, -150, 50) == rw::Kind::Glyphs && kindAt(e, -30, 50) == rw::Kind::Gestures && kindAt(e, 90, 50) == rw::Kind::Quick, "engine: each third at r 50");
+        Check(kindAt(e, 90, 85) != rw::Kind::Quick, "engine: at rest nothing past r 80 is a third (no third pointed yet)");
         {   // pointed and grown: the pointed slice reaches its grow; a spoke keeps it; the others stay at the center's edge
             double t = 0;
             for (; t <= 300; t += 10) { const auto p = at(90, 50); e.Step(At(t, p[0] + rw::C, p[1] + rw::C), s); }
             const auto o = e.Step(At(t, at(90, 50)[0] + rw::C, at(90, 50)[1] + rw::C), s);
-            Check(o.under.kind == rw::Kind::Quick && o.centerGrown, "T036 the Quick cast third pointed 300 ms: the center grown");
-            Check(kindAt(e, 90, 150) == rw::Kind::Quick && kindAt(e, 90, 152) != rw::Kind::Quick, "T036 grown and pointed: the slice reaches 151 px (11%), not 152");
-            Check(kindAt(e, -30, 140) != rw::Kind::Gestures, "T036 another third has no grown reach: past 136 it is not hit");
+            Check(o.under.kind == rw::Kind::Quick && o.centerGrown, "the Quick cast third pointed 300 ms: the center grown");
+            Check(kindAt(e, 90, 150) == rw::Kind::Quick && kindAt(e, 90, 152) != rw::Kind::Quick, "grown and pointed: the slice reaches 151 px (11%), not 152");
+            Check(kindAt(e, -30, 140) != rw::Kind::Gestures, "another third has no grown reach: past 136 it is not hit");
             const auto sp = at(150, 60);   // on the 8 o'clock spoke, the edge between Glyphs and Quick cast
-            Check(e.HitTest(sp[0] + rw::CanvasCx, sp[1] + rw::CanvasCy, s).kind == rw::Kind::Quick, "T036 on a spoke's dead band: the third pointed last stays");
+            Check(e.HitTest(sp[0] + rw::CanvasCx, sp[1] + rw::CanvasCy, s).kind == rw::Kind::Quick, "on a spoke's dead band: the third pointed last stays");
         }
         {
             rw::Engine fresh; fresh.Reset(l);
             const auto sp = at(-90, 40);
-            Check(fresh.HitTest(sp[0] + rw::CanvasCx, sp[1] + rw::CanvasCy, s).kind == rw::Kind::Gap, "T036 on a spoke with nothing pointed: a gap (never a guess)");
+            Check(fresh.HitTest(sp[0] + rw::CanvasCx, sp[1] + rw::CanvasCy, s).kind == rw::Kind::Gap, "on a spoke with nothing pointed: a gap (never a guess)");
             rw::Settings noMotions = s; noMotions.hasMotions = false;
             const auto g = at(-30, 40);
-            Check(fresh.HitTest(g[0] + rw::CanvasCx, g[1] + rw::CanvasCy, noMotions).kind == rw::Kind::Gap, "T036 a class with no gestures: its Gestures third is shut");
+            Check(fresh.HitTest(g[0] + rw::CanvasCx, g[1] + rw::CanvasCy, noMotions).kind == rw::Kind::Gap, "a class with no gestures: its Gestures third is shut");
             rw::Settings halves = s; halves.thirds = false;
             const auto q = at(90, 40);
-            Check(fresh.HitTest(q[0] + rw::CanvasCx, q[1] + rw::CanvasCy, halves).kind == rw::Kind::Gestures, "T036 thirds off (the glyph chooser): the two halves as before");
+            Check(fresh.HitTest(q[0] + rw::CanvasCx, q[1] + rw::CanvasCy, halves).kind == rw::Kind::Gestures, "thirds off (the glyph chooser): the two halves as before");
         }
         // 11% keeps 6 px from every seat's ring, every class, both layouts (the mockup's measure: the seat's ring outer edge)
         float worst = 1e9f;
@@ -3816,7 +3816,7 @@ int main() {
             for (int i = 0; i < cl.count; ++i) if (cl.seats[size_t(i)].tree >= 0)
                 worst = std::min(worst, std::hypot(cl.seats[size_t(i)].x - rw::C, cl.seats[size_t(i)].y - rw::C) - rw::IconPx / 2 - 3.5f - rw::ThirdReach(true, rw::ThirdGrowDefault));
         }
-        Check(worst >= 6, "T036 the grown third (11%) stays 6 px clear of every seat's ring: " + std::to_string(worst) + " px");
+        Check(worst >= 6, "the grown third (11%) stays 6 px clear of every seat's ring: " + std::to_string(worst) + " px");
         // Fire on release: Glyphs and Gestures release upstream's cells, Quick cast the ring's OpenQuick (2026-11-16: its page in the ring)
         auto click = [&](float deg) {
             rw::Engine en; en.Reset(l); rw::StepOut last{};
@@ -3825,14 +3825,14 @@ int main() {
             return last;
         };
         const auto cg = click(-150), cm = click(-30), cq = click(90);
-        Check(cg.event == rw::Event::Upstream && cg.cell == ia::GlyphsCell, "T036 the trigger released on Glyphs: upstream's Glyphs cell");
-        Check(cm.event == rw::Event::Upstream && cm.cell == ia::MotionsCell, "T036 the trigger released on Gestures: upstream's Motions cell");
-        Check(cq.event == rw::Event::OpenQuick, "T036 the trigger released on Quick cast: OpenQuick (its page in the ring, 2026-11-16)");
+        Check(cg.event == rw::Event::Upstream && cg.cell == ia::GlyphsCell, "the trigger released on Glyphs: upstream's Glyphs cell");
+        Check(cm.event == rw::Event::Upstream && cm.cell == ia::MotionsCell, "the trigger released on Gestures: upstream's Motions cell");
+        Check(cq.event == rw::Event::OpenQuick, "the trigger released on Quick cast: OpenQuick (its page in the ring, 2026-11-16)");
         {   // a hold on a third that ran past the tap limit opens nothing on its release (the press assigned or did nothing)
             rw::Engine en; en.Reset(l); rw::StepOut last{}; bool any = false;
             const auto p = at(90, 50);
             for (double t = 0; t <= 400; t += 10) { auto in = At(t, p[0] + rw::C, p[1] + rw::C, t >= 100 && t < 300); in.glyphClickSpent = true; last = en.Step(in, s); any |= last.event != rw::Event::None; }
-            Check(!any, "T036 a spent click on a third (a hold past the tap limit) opens nothing");
+            Check(!any, "a spent click on a third (a hold past the tap limit) opens nothing");
         }
     }
     {   // The thirds' pseudo seats: a tap opens the sub-menu (MenuTap), a hold puts it on the button (MenuAssign); Glyphs keeps Draw glyph
@@ -3853,74 +3853,74 @@ int main() {
         };
         const rw::Target ges{rw::Kind::Gestures}, qc{rw::Kind::Quick}, gl{rw::Kind::Glyphs};
         auto tapG = run(ges, 100, true), tapQ = run(qc, 100, true), tapGl = run(gl, 100, true);
-        Check(tapG.size() == 1 && tapG[0].event == rw::Quick::MenuTap && tapG[0].seat == rw::GesturesSeat, "T036 a tap on the Gestures third: MenuTap on its pseudo seat");
-        Check(tapQ.size() == 1 && tapQ[0].event == rw::Quick::MenuTap && rw::SeatThird(tapQ[0].seat) == rw::ThirdQuick, "T036 a tap on the Quick cast third: MenuTap");
-        Check(tapGl.size() == 1 && tapGl[0].event == rw::Quick::GlyphTap, "T036 Glyphs keeps its GlyphTap");
+        Check(tapG.size() == 1 && tapG[0].event == rw::Quick::MenuTap && tapG[0].seat == rw::GesturesSeat, "a tap on the Gestures third: MenuTap on its pseudo seat");
+        Check(tapQ.size() == 1 && tapQ[0].event == rw::Quick::MenuTap && rw::SeatThird(tapQ[0].seat) == rw::ThirdQuick, "a tap on the Quick cast third: MenuTap");
+        Check(tapGl.size() == 1 && tapGl[0].event == rw::Quick::GlyphTap, "Glyphs keeps its GlyphTap");
         auto holdQ = run(qc, -1, true, 1, 200 + 1001), holdGl = run(gl, -1, true, 1, 200 + 1001);
         Check(holdQ.size() == 1 && holdQ[0].event == rw::Quick::MenuAssign && holdQ[0].seat == rw::QuickSeat && holdQ[0].slot == 1 && holdQ[0].replaced == 39,
-              "T036 held to full on Quick cast: MenuAssign on that button, the skill it replaces named");
-        Check(holdGl.size() == 1 && holdGl[0].event == rw::Quick::GlyphAssign, "T036 held on Glyphs: Draw glyph, as before");
-        Check(run(qc, 100, false).empty() && run(ges, -1, false, 1, 200 + 1001).empty(), "T036 thirds off (halves): Gestures and Quick cast take no press");
+              "held to full on Quick cast: MenuAssign on that button, the skill it replaces named");
+        Check(holdGl.size() == 1 && holdGl[0].event == rw::Quick::GlyphAssign, "held on Glyphs: Draw glyph, as before");
+        Check(run(qc, 100, false).empty() && run(ges, -1, false, 1, 200 + 1001).empty(), "thirds off (halves): Gestures and Quick cast take no press");
         Check(std::string(rw::EmptyHoldStatus(rw::QuickSeat)) == "Quick cast" && std::string(rw::EmptyHoldStatus(rw::GesturesSeat)) == "Gestures menu" &&
-              std::string(rw::EmptyHoldStatus(rw::GlyphsSeat)) == "Draw glyph", "T036 the hold says what goes on the button");
+              std::string(rw::EmptyHoldStatus(rw::GlyphsSeat)) == "Draw glyph", "the hold says what goes on the button");
         rw::QuickOut spent; spent.holding = rw::QuickSeat; spent.slot = 0; spent.hand = 1; spent.heldMs = 400;
-        Check(rw::GlyphClickSpent(spent, 1, 1000, 350) && !rw::GlyphClickSpent(spent, 0, 1000, 350), "T036 the pointing trigger's hold on any third spends its click");
+        Check(rw::GlyphClickSpent(spent, 1, 1000, 350) && !rw::GlyphClickSpent(spent, 0, 1000, 350), "the pointing trigger's hold on any third spends its click");
     }
     {   // Each sub-menu on a button: the slot kept, one button one thing, dropped when a skill or Draw glyph takes it, its press edge
         rw::MenuButtons b;
-        Check(rw::ButtonSlotOf(0) == -1 && rw::ButtonSlotOf(1) == 0 && rw::ButtonSlotOf(10) == 9 && rw::ButtonSlotOf(11) == -1, "T036 the key holds slot + 1, 0 none");
+        Check(rw::ButtonSlotOf(0) == -1 && rw::ButtonSlotOf(1) == 0 && rw::ButtonSlotOf(10) == 9 && rw::ButtonSlotOf(11) == -1, "the key holds slot + 1, 0 none");
         b = rw::Assigned(b, rw::ThirdQuick, 6);
-        Check(b.slot[2] == 6 && b.MenuOf(6) == rw::ThirdQuick && b.MenuOf(5) == -1 && b.Any(), "T036 Quick cast on slot 6");
+        Check(b.slot[2] == 6 && b.MenuOf(6) == rw::ThirdQuick && b.MenuOf(5) == -1 && b.Any(), "Quick cast on slot 6");
         b = rw::Assigned(b, rw::ThirdGestures, 6);
-        Check(b.slot[1] == 6 && b.slot[2] == -1, "T036 a second sub-menu on the same button takes it (one button, one thing)");
+        Check(b.slot[1] == 6 && b.slot[2] == -1, "a second sub-menu on the same button takes it (one button, one thing)");
         std::array<int, framevr::skills::Count> game{}; game.fill(-1);
-        Check(rw::Kept(b, game, {-1, -1}) == b, "T036 a free button keeps its sub-menu");
+        Check(rw::Kept(b, game, {-1, -1}) == b, "a free button keeps its sub-menu");
         game[6] = 40;
-        Check(rw::Kept(b, game, {-1, -1}).slot[1] == -1, "T036 a skill put on the button takes it back");
+        Check(rw::Kept(b, game, {-1, -1}).slot[1] == -1, "a skill put on the button takes it back");
         game[6] = -1;
-        Check(rw::Kept(b, game, {6, -1}).slot[1] == -1, "T036 Draw glyph put on the button takes it back");
+        Check(rw::Kept(b, game, {6, -1}).slot[1] == -1, "Draw glyph put on the button takes it back");
         // the press: Quick cast on the left hand's grip + secondary (upstream slot 9)
         rw::MenuButtons q = rw::Assigned({}, rw::ThirdQuick, framevr::skills::HandSlot(1, 4));
         bool held[2][3] = {}, down[2][3] = {}, grip[2] = {false, true};
         down[1][2] = true;
         auto p = rw::MenuPressed(q, down, grip, held);
-        Check(p.third == rw::ThirdQuick && p.hand == 1, "T036 left grip + Y: the Quick cast button's press");
+        Check(p.third == rw::ThirdQuick && p.hand == 1, "left grip + Y: the Quick cast button's press");
         p = rw::MenuPressed(q, down, grip, held);
-        Check(p.third == -1, "T036 held down: no second press until it is let go");
+        Check(p.third == -1, "held down: no second press until it is let go");
         down[1][2] = false; rw::MenuPressed(q, down, grip, held);
         grip[1] = false; down[1][2] = true;
-        Check(rw::MenuPressed(q, down, grip, held).third == -1, "T036 the same face without the grip is another slot: no press");
+        Check(rw::MenuPressed(q, down, grip, held).third == -1, "the same face without the grip is another slot: no press");
         // the shelf entries' ids never meet a game skill, Draw glyph or Army X menu
-        for (int t = 0; t < rw::ThirdCount; ++t) Check(rw::MenuEntryId(t) > 9001 && rw::MenuOfEntry(rw::MenuEntryId(t)) == t && rw::MenuOfEntry(9001) == -1 && rw::MenuOfEntry(40) == -1, "T036 entry ids are their own");
+        for (int t = 0; t < rw::ThirdCount; ++t) Check(rw::MenuEntryId(t) > 9001 && rw::MenuOfEntry(rw::MenuEntryId(t)) == t && rw::MenuOfEntry(9001) == -1 && rw::MenuOfEntry(40) == -1, "entry ids are their own");
     }
     {   // Where a sub-menu asked for leads from upstream's page, one cell a frame
         using P = ia::MenuPage;
         auto n = rw::NavigateTo(rw::ThirdGlyphs, P::Spells);
-        Check(n.nav == rw::Nav::Fire && n.cell == ia::GlyphsCell, "T036 Glyphs from Spells: its cell");
+        Check(n.nav == rw::Nav::Fire && n.cell == ia::GlyphsCell, "Glyphs from Spells: its cell");
         n = rw::NavigateTo(rw::ThirdGestures, P::Spells);
-        Check(n.nav == rw::Nav::Fire && n.cell == ia::MotionsCell, "T036 Gestures from Spells: its cell");
+        Check(n.nav == rw::Nav::Fire && n.cell == ia::MotionsCell, "Gestures from Spells: its cell");
         Check(rw::NavigateTo(rw::ThirdQuick, P::Spells).nav == rw::Nav::Done && rw::NavigateTo(rw::ThirdQuick, P::Glyphs).nav == rw::Nav::Done,
-              "2026-11-16 Quick cast's page is the Lab's own (over Spells): nothing to navigate upstream, done at once");
+              "2026-11-16 Quick cast's page is the ring's own (over Spells): nothing to navigate upstream, done at once");
         n = rw::NavigateTo(rw::ThirdGlyphs, P::Motions);
-        Check(n.nav == rw::Nav::Fire && n.cell == rw::SpellsTabCell, "T036 Glyphs from Gestures: back to Spells first");
-        Check(rw::NavigateTo(rw::ThirdGestures, P::Motions).nav == rw::Nav::Done, "T036 already there: done");
-        Check(rw::NavigateTo(rw::ThirdGlyphs, P::EditSlots).nav == rw::Nav::Wait, "T036 an editor open: wait (the Lab gives up after a second)");
+        Check(n.nav == rw::Nav::Fire && n.cell == rw::SpellsTabCell, "Glyphs from Gestures: back to Spells first");
+        Check(rw::NavigateTo(rw::ThirdGestures, P::Motions).nav == rw::Nav::Done, "already there: done");
+        Check(rw::NavigateTo(rw::ThirdGlyphs, P::EditSlots).nav == rw::Nav::Wait, "an editor open: wait (the ring gives up after a second)");
     }
     {   // 2026-11-16: the Quick cast page went (one quick cast: ring Quick cast radial); its shared pieces stay tested here
         constexpr int Eight = 8;
-        {   // T035/T036 one stick-select rule (steamvr/stick_select.h) over eight items, with the shared feel's defaults
+        {   // one stick-select rule (steamvr/stick_select.h) over eight items, with the shared feel's defaults
             namespace ss = framevr::stickselect;
             const ss::Feel feel;
             auto pick = [&](float x, float y) { ss::Selector s; s.Step(x, y, Eight, 0, feel); return s.pick; };
-            Check(pick(0, 1) == 0 && pick(1, 0) == 2 && pick(0, -1) == 4 && pick(-1, 0) == 6, "T036 stick: up item 1, right item 3, down item 5, left item 7 (clockwise from 12)");
-            Check(pick(.2f, .2f) == -1 && pick(.3f, .3f) == 1, "T036 stick: the shared dead zone (0.35)");
+            Check(pick(0, 1) == 0 && pick(1, 0) == 2 && pick(0, -1) == 4 && pick(-1, 0) == 6, "stick: up item 1, right item 3, down item 5, left item 7 (clockwise from 12)");
+            Check(pick(.2f, .2f) == -1 && pick(.3f, .3f) == 1, "stick: the shared dead zone (0.35)");
             auto dir = [](float deg) { const float a = deg * rw::Pi / 180; return std::array<float, 2>{std::sin(a), std::cos(a)}; };
             ss::Selector s; s.Step(dir(0)[0], dir(0)[1], Eight, 0, feel);
             s.Step(dir(27)[0], dir(27)[1], Eight, 10, feel); const bool held = s.pick == 0;
             s.Step(dir(33)[0], dir(33)[1], Eight, 20, feel); const bool moved = s.pick == 1;
-            Check(held && moved, "T036 stick: no flicker between two items (the shared pick hold, 8 deg)");
+            Check(held && moved, "stick: no flicker between two items (the shared pick hold, 8 deg)");
             s.Step(0, 0, Eight, 30, feel); const bool kept = s.pick == 1; s.Step(0, 0, Eight, 30 + feel.centerMs, feel);
-            Check(kept && s.pick == -1, "T036 stick: the shared center hold (a flick let go as the thumb returns still counts)");
+            Check(kept && s.pick == -1, "stick: the shared center hold (a flick let go as the thumb returns still counts)");
             ss::Hold h; h.Start(.9f, 0); const bool a1 = h.Step(.9f, 0), a2 = h.Step(.6f, 0), a3 = !h.Step(.1f, 0), a4 = !h.Step(.9f, 0);
             Check(a1 && a2 && a3 && a4, "review S3: after a cast or Back the pushed stick stays the menu's until it is back in the middle");
         }
@@ -4005,19 +4005,19 @@ int main() {
     }
     {   // The clean icon (ring_wheel_unbake.h): the rust plate keyed out, the silver glyph kept and grayed, speckles cleaned
         namespace ub = rw::unbake;
-        Check(ub::Alpha(.45f, .28f, .16f) < .01f && ub::Alpha(.30f, .20f, .12f) < .01f, "T036 key: the rust plate (saturated brown) is out");
-        Check(ub::Alpha(.80f, .80f, .82f) > .99f && ub::Alpha(.55f, .53f, .50f) > .99f, "T036 key: the silver glyph stays");
-        Check(ub::Alpha(.08f, .08f, .08f) < .01f && ub::Alpha(.19f, .19f, .19f) > .4f && ub::Alpha(.19f, .19f, .19f) < .6f, "T036 key: near-black out, soft from 0.14 to 0.24");
+        Check(ub::Alpha(.45f, .28f, .16f) < .01f && ub::Alpha(.30f, .20f, .12f) < .01f, "key: the rust plate (saturated brown) is out");
+        Check(ub::Alpha(.80f, .80f, .82f) > .99f && ub::Alpha(.55f, .53f, .50f) > .99f, "key: the silver glyph stays");
+        Check(ub::Alpha(.08f, .08f, .08f) < .01f && ub::Alpha(.19f, .19f, .19f) > .4f && ub::Alpha(.19f, .19f, .19f) < .6f, "key: near-black out, soft from 0.14 to 0.24");
         float r = .7f, g = .6f, bl = .5f; ub::Gray(r, g, bl);
-        Check(std::fabs(r - bl) < .2f * .35f + 1e-4f && r > bl, "T036 the glyph's tint pulled 65% toward gray");
-        Check(ub::Keyed(40, 0) && !ub::Keyed(9001, 0) && !ub::Keyed(9101, 0) && ub::Keyed(1, 0) && !ub::Keyed(1, 1) && ub::Keyed(2, 1), "T036 keyed: game icons; never our art (9000 up) or Kick while remapped");
+        Check(std::fabs(r - bl) < .2f * .35f + 1e-4f && r > bl, "the glyph's tint pulled 65% toward gray");
+        Check(ub::Keyed(40, 0) && !ub::Keyed(9001, 0) && !ub::Keyed(9101, 0) && ub::Keyed(1, 0) && !ub::Keyed(1, 1) && ub::Keyed(2, 1), "keyed: game icons; never our art (9000 up) or Kick while remapped");
         std::vector<float> px(size_t(9 * 9 * 4), 0.f);
         auto A = [&](int x, int y) -> float& { return px[(size_t(y) * 9 + size_t(x)) * 4 + 3]; };
         A(1, 1) = .6f;   // a lone fleck
         for (int y = 4; y < 9; ++y) for (int x = 4; x < 9; ++x) A(x, y) = 1;   // a solid glyph part ...
         A(6, 6) = .1f;   // ... with a pinhole
         const int changed = ub::Despeckle(px, 9, 9);
-        Check(A(1, 1) == 0 && A(6, 6) > .9f && A(8, 8) == 1 && changed == 2, "T036 cleanup: the lone fleck gone, the pinhole filled, the rest as it was");
+        Check(A(1, 1) == 0 && A(6, 6) > .9f && A(8, 8) == 1 && changed == 2, "cleanup: the lone fleck gone, the pinhole filled, the rest as it was");
     }
     {   // The layers: each its own switch, Off removes only that layer
         const int per[3] = {4, 4, 4};
@@ -4029,29 +4029,29 @@ int main() {
         auto seatFlags = [](const rw::Instance& i) { return int(std::fabs(i.param)) / 16; };
         rw::SeatLayers all{true, true, true, true};
         const auto base = scene(all);
-        Check(count(base, [&](const rw::Instance& i) { return i.recipe == rw::RecipeFrame; }) == l.count, "T036 Element frame On: one band per seat");
-        Check(count(base, [&](const rw::Instance& i) { return i.recipe == rw::RecipeSeat && seatFlags(i) == 0; }) == l.count, "T036 all On: every seat with its art and ring");
+        Check(count(base, [&](const rw::Instance& i) { return i.recipe == rw::RecipeFrame; }) == l.count, "Element frame On: one band per seat");
+        Check(count(base, [&](const rw::Instance& i) { return i.recipe == rw::RecipeSeat && seatFlags(i) == 0; }) == l.count, "all On: every seat with its art and ring");
         auto noIcon = all; noIcon.icon = false;
         Check(count(scene(noIcon), [&](const rw::Instance& i) { return i.recipe == rw::RecipeSeat && (seatFlags(i) & rw::SeatNoArt); }) == l.count &&
-              count(scene(noIcon), [&](const rw::Instance& i) { return i.recipe == rw::RecipeFrame; }) == l.count, "T036 Icon Off: no art on any seat; the frame stays");
+              count(scene(noIcon), [&](const rw::Instance& i) { return i.recipe == rw::RecipeFrame; }) == l.count, "Icon Off: no art on any seat; the frame stays");
         auto noRing = all; noRing.ring = false;
-        Check(count(scene(noRing), [&](const rw::Instance& i) { return i.recipe == rw::RecipeSeat && (seatFlags(i) & rw::SeatNoRing) && !(seatFlags(i) & rw::SeatNoArt); }) == l.count, "T036 Color ring Off: the ring gone, the art kept");
+        Check(count(scene(noRing), [&](const rw::Instance& i) { return i.recipe == rw::RecipeSeat && (seatFlags(i) & rw::SeatNoRing) && !(seatFlags(i) & rw::SeatNoArt); }) == l.count, "Color ring Off: the ring gone, the art kept");
         auto noFrame = all; noFrame.frame = false;
-        Check(count(scene(noFrame), [&](const rw::Instance& i) { return i.recipe == rw::RecipeFrame; }) == 0 && count(scene(noFrame), [&](const rw::Instance& i) { return i.recipe == rw::RecipeSeat; }) == l.count, "T036 Element frame Off: no band, the seats as they were");
+        Check(count(scene(noFrame), [&](const rw::Instance& i) { return i.recipe == rw::RecipeFrame; }) == 0 && count(scene(noFrame), [&](const rw::Instance& i) { return i.recipe == rw::RecipeSeat; }) == l.count, "Element frame Off: no band, the seats as they were");
         auto noFx = all; noFx.fx = false;
         auto restFx = [](const rw::Instance& i) { return i.recipe == rw::RecipeFx && (int(i.param) / 256 == 0 || int(i.param) / 256 == 2) && uint32_t(i.param) < rw::PointedOverFace; };
-        Check(count(base, restFx) > 0 && count(scene(noFx), restFx) == 0, "T036 Animation Off: no rest glow and no glow over a face");
+        Check(count(base, restFx) > 0 && count(scene(noFx), restFx) == 0, "Animation Off: no rest glow and no glow over a face");
         auto neither = all; neither.icon = false; neither.ring = false;
-        Check(count(scene(neither), [&](const rw::Instance& i) { return i.recipe == rw::RecipeSeat; }) == 0, "T036 Icon and Color ring Off: nothing of the seat's own drawn");
+        Check(count(scene(neither), [&](const rw::Instance& i) { return i.recipe == rw::RecipeSeat; }) == 0, "Icon and Color ring Off: nothing of the seat's own drawn");
         // the frame fits the seat pitch: 44 px + its ring + 8 px each side stays inside 70 px
-        Check(2 * (rw::IconPx / 2 + 4 + rw::FrameBandPx) <= rw::MinPitch, "T036 a framed seat fits the 70 px pitch");
+        Check(2 * (rw::IconPx / 2 + 4 + rw::FrameBandPx) <= rw::MinPitch, "a framed seat fits the 70 px pitch");
         // the key changes with each layer (a flip redraws)
-        Check(!(rw::KeyOf(scene(all)) == rw::KeyOf(scene(noFx))) && !(rw::KeyOf(scene(all)) == rw::KeyOf(scene(noIcon))), "T036 a layer flip changes the draw key");
+        Check(!(rw::KeyOf(scene(all)) == rw::KeyOf(scene(noFx))) && !(rw::KeyOf(scene(all)) == rw::KeyOf(scene(noIcon))), "a layer flip changes the draw key");
         // Float: the Effects rows' floats (the Layers page's Float row): Off, every seat at its rest place
         auto still = scene(all); still.anim.floats = false;
         bool atRest = true; const int n = rw::Build(still, list);
         for (int i = 0; i < n; ++i) if (list[i].recipe == rw::RecipeSeat) { bool on = false; for (int k = 0; k < l.count; ++k) on |= std::fabs(list[i].cx - (l.seats[size_t(k)].x + rw::CanvasX)) < .01f && std::fabs(list[i].cy - (l.seats[size_t(k)].y + rw::CanvasY)) < .01f; atRest &= on; }
-        Check(atRest, "T036 Float Off: every seat at its rest place");
+        Check(atRest, "Float Off: every seat at its rest place");
     }
     {   // The center's draw in thirds: the pointed third's slice (and only then), the others dimmed, the marks
         const int per[3] = {4, 4, 4};
@@ -4059,21 +4059,21 @@ int main() {
         static rw::Instance list[rw::MaxDraw];
         rw::Scene sc; sc.open = true; sc.layout = &l; sc.thirds = true; sc.hasMotions = true; sc.layers = {true, true, false, false};
         auto sectors = [&](const rw::Scene& x) { int c = 0, th = -1; const int n = rw::Build(x, list); for (int i = 0; i < n; ++i) if (list[i].recipe == rw::RecipeSector) { ++c; th = int(list[i].param) & 3; } return std::make_pair(c, th); };
-        Check(sectors(sc).first == 0, "T036 rest: no slice lit");
+        Check(sectors(sc).first == 0, "rest: no slice lit");
         sc.step.under = {rw::Kind::Quick}; sc.step.centerGrown = true;
         const auto q = sectors(sc);
-        Check(q.first == 5 && q.second == rw::ThirdQuick, "T036 Quick cast pointed: its backing, the three fills, its outline last");
+        Check(q.first == 5 && q.second == rw::ThirdQuick, "Quick cast pointed: its backing, the three fills, its outline last");
         float reach = 0; const int n = rw::Build(sc, list);
         for (int i = 0; i < n; ++i) if (list[i].recipe == rw::RecipeSector) reach = std::max(reach, list[i].w / 2);
-        Check(std::fabs(reach - 136 * 1.11f) < .1f, "T036 the slice reaches 151 px grown (11%)");
+        Check(std::fabs(reach - 136 * 1.11f) < .1f, "the slice reaches 151 px grown (11%)");
         sc.thirdGrowPct = 0;
         int nb = rw::Build(sc, list); reach = 0;
         for (int i = 0; i < nb; ++i) if (list[i].recipe == rw::RecipeSector) reach = std::max(reach, list[i].w / 2);
-        Check(std::fabs(reach - 136) < .1f, "T036 grow Off: the slice stays at the center's edge");
+        Check(std::fabs(reach - 136) < .1f, "grow Off: the slice stays at the center's edge");
         sc.thirds = false;
-        Check(sectors(sc).first == 0, "T036 thirds off: no slice (the halves' look)");
+        Check(sectors(sc).first == 0, "thirds off: no slice (the halves' look)");
     }
-    {   // 2026-11-16 (Jeff: the Gestures, Glyphs and Quick cast marks showed gold): each third's mark is its own picture (a seat's
+    {   // 2026-11-16 (the player: the Gestures, Glyphs and Quick cast marks showed gold): each third's mark is its own picture (a seat's
         // icon: RecipeSeat at the mark, 36 px at rest), before every badge body; a picture missing: the drawn mark in silver,
         // never gold. A sub-menu shelf entry with a cell draws it as any icon.
         int per[3] = {4, 4, 4};
@@ -4086,7 +4086,7 @@ int main() {
         std::vector<uint8_t> mark(size_t(l.count), 0);
         int entry = -1;
         for (int i = 0; i < l.count; ++i) if (rw::MenuOfEntry(l.seats[size_t(i)].id) == rw::ThirdGlyphs) { entry = i; mark[size_t(i)] = 1 + rw::ThirdGlyphs; cells[size_t(i)] = 40; }
-        Check(entry >= 0, "T036 pictures: the Glyphs menu entry is on the shelf");
+        Check(entry >= 0, "pictures: the Glyphs menu entry is on the shelf");
         rw::Scene sc; sc.open = true; sc.layout = &l; sc.thirds = true; sc.hasMotions = true; sc.layers = {true, true, false, false};
         sc.cells = cells.data(); sc.seatMark = mark.data(); sc.atlasPct = 100; sc.thirdCell = {41, 42, 43};
         sc.anim.floats = false;   // every seat at its rest place
@@ -4108,11 +4108,11 @@ int main() {
         const float ex = l.seats[size_t(entry)].x + rw::CanvasX, ey = l.seats[size_t(entry)].y + rw::CanvasY;
         float eu0, ev0, eu1, ev1; rw::CellRect(40, 100, eu0, ev0, eu1, ev1);
         for (int i = 0; i < n; ++i) if (list[i].recipe == rw::RecipeSeat && at(list[i], ex, ey) && std::fabs((list[i].u0 + list[i].u1) / 2 - (eu0 + eu1) / 2) < 1e-4f && list[i].param > 0) ++entryArt;
-        Check(art == 3 && artBeforeBadge == 3 && firstBadge >= 0, "T036 pictures: each third's mark is its picture (a seat's icon, 36 px at rest), under the badges");
-        Check(goldStroke == 0, "T036 pictures: no gold stroke on any mark");
-        Check(entryArt == 1, "T036 pictures: the Glyphs menu entry draws its picture as an icon");
+        Check(art == 3 && artBeforeBadge == 3 && firstBadge >= 0, "pictures: each third's mark is its picture (a seat's icon, 36 px at rest), under the badges");
+        Check(goldStroke == 0, "pictures: no gold stroke on any mark");
+        Check(entryArt == 1, "pictures: the Glyphs menu entry draws its picture as an icon");
         auto k1 = rw::KeyOf(sc); auto s2 = sc; s2.thirdCell[1] = -1;
-        Check(!(rw::KeyOf(s2) == k1), "T036 pictures: a third's picture coming or going redraws");
+        Check(!(rw::KeyOf(s2) == k1), "pictures: a third's picture coming or going redraws");
         // Missing pictures: the drawn marks (strokes) in silver, never gold; the shelf entry's mark too.
         sc.thirdCell = {-1, -1, -1}; cells[size_t(entry)] = -1;
         rw::text::Metrics m{}; m.ok = true; sc.metrics = &m;   // the marks' fallback draws in the text pass
@@ -4129,71 +4129,71 @@ int main() {
         }
         int entrySilver = 0;
         for (int i = 0; i < n; ++i) if (list[i].recipe == rw::RecipeRect && std::hypot(list[i].cx - ex, list[i].cy - ey) < 20 && std::fabs(list[i].r - rw::MarkSilver.r) < .01f) ++entrySilver;
-        Check(silverStroke > 0 && goldStroke == 0, "T036 no pictures: the thirds' drawn marks in silver, no gold");
-        Check(entrySilver > 0, "T036 no pictures: the Glyphs menu entry's drawn mark in silver");
+        Check(silverStroke > 0 && goldStroke == 0, "no pictures: the thirds' drawn marks in silver, no gold");
+        Check(entrySilver > 0, "no pictures: the Glyphs menu entry's drawn mark in silver");
     }
-    {   // T025 (Jeff 2026-11-17: "sizable and have gpt draw them"): the tree marks' painted pictures, the sheet's cell lookup, the size
+    {   // (the player 2026-11-17: "sizable and have gpt draw them"): the tree marks' painted pictures, the sheet's cell lookup, the size
         // clamp and the fallback to the drawn glyph, with 0, 3 and 24 squares in the sheet.
         namespace ta = framevr::ringwheel::treeart;
         const uint32_t builtMask = ta::MaskRef();
         // the cell lookup: each class x position is one slot, by its skillcategories page, all 24 distinct
         bool distinct = true; std::array<int, ta::Count> seen{};
         for (int c = 0; c < 8; ++c) for (int p = 0; p < 3; ++p) { const int s = ta::Slot(c, p); distinct = distinct && s >= 0 && s < ta::Count && !seen[size_t(s)]++ && s / 3 == c && s % 3 == rw::PageAt(c, p); }
-        Check(distinct, "T025 slots: 8 classes x 3 positions are 24 distinct slots, class x 3 + the tree's page");
-        Check(ta::Slot(1, 0) == 3 && ta::Slot(1, 1) == 4 && ta::Slot(1, 2) == 5, "T025 slots: Sorceress Fire, Lightning, Cold are slots 3, 4, 5");
-        Check(ta::Slot(0, 1) == 2 && ta::Slot(0, 2) == 1, "T025 slots: Amazon's position 1 holds Javelin and Spear (slot 2), position 2 Passive and Magic (slot 1)");
-        Check(ta::Slot(3, 0) == 10 && ta::Slot(4, 0) == 13 && ta::Slot(7, 2) == 23, "T025 slots: Paladin's top is Offensive Auras, Barbarian's Combat Masteries, Warlock's last Chaos");
-        Check(ta::Slot(-1, 0) == -1 && ta::Slot(8, 0) == -1 && ta::Slot(99, 1) == -1 && ta::Slot(1, -1) == -1 && ta::Slot(1, 3) == -1, "T025 slots: an unknown class or position has none");
+        Check(distinct, "slots: 8 classes x 3 positions are 24 distinct slots, class x 3 + the tree's page");
+        Check(ta::Slot(1, 0) == 3 && ta::Slot(1, 1) == 4 && ta::Slot(1, 2) == 5, "slots: Sorceress Fire, Lightning, Cold are slots 3, 4, 5");
+        Check(ta::Slot(0, 1) == 2 && ta::Slot(0, 2) == 1, "slots: Amazon's position 1 holds Javelin and Spear (slot 2), position 2 Passive and Magic (slot 1)");
+        Check(ta::Slot(3, 0) == 10 && ta::Slot(4, 0) == 13 && ta::Slot(7, 2) == 23, "slots: Paladin's top is Offensive Auras, Barbarian's Combat Masteries, Warlock's last Chaos");
+        Check(ta::Slot(-1, 0) == -1 && ta::Slot(8, 0) == -1 && ta::Slot(99, 1) == -1 && ta::Slot(1, -1) == -1 && ta::Slot(1, 3) == -1, "slots: an unknown class or position has none");
         Check(ta::SlotOfArt(ta::ArtId(0)) == 0 && ta::SlotOfArt(ta::ArtId(23)) == 23 && ta::SlotOfArt(ta::ArtFirst - 1) == -1 && ta::SlotOfArt(ta::ArtFirst + ta::Count) == -1 &&
-              ta::ArtId(-1) == -1 && ta::ArtId(ta::Count) == -1 && ta::ArtFirst >= 9000 && ta::ArtFirst > rw::MenuEntryFirst + rw::ThirdCount, "T025 ids: slot <-> atlas id, our art (9000 up, clear of the sub-menu entries), none out of range");
-        Check(!rw::unbake::Keyed(ta::ArtId(3), 0),"T025 ids: a painted square is never keyed out of its plate (it keeps its colors)");
+              ta::ArtId(-1) == -1 && ta::ArtId(ta::Count) == -1 && ta::ArtFirst >= 9000 && ta::ArtFirst > rw::MenuEntryFirst + rw::ThirdCount, "ids: slot <-> atlas id, our art (9000 up, clear of the sub-menu entries), none out of range");
+        Check(!rw::unbake::Keyed(ta::ArtId(3), 0),"ids: a painted square is never keyed out of its plate (it keeps its colors)");
         {   // the files the art and the script use
             Check(ta::FileName(3) == "tree-sorceress-fire.png" && ta::FileName(7) == "tree-necromancer-poison-and-bone.png" && ta::FileName(0) == "tree-amazon-bow-and-crossbow.png" &&
-                  ta::FileName(13) == "tree-barbarian-combat-masteries.png" && ta::FileName(23) == "tree-warlock-chaos.png" && ta::FileName(24).empty() && ta::FileName(-1).empty(), "T025 files: tree-<class>-<tree>.png in kebab case");
+                  ta::FileName(13) == "tree-barbarian-combat-masteries.png" && ta::FileName(23) == "tree-warlock-chaos.png" && ta::FileName(24).empty() && ta::FileName(-1).empty(), "files: tree-<class>-<tree>.png in kebab case");
             bool kebab = true;
             for (int s = 0; s < ta::Count; ++s) for (const char ch : ta::FileName(s)) kebab = kebab && (ch == '-' || ch == '.' || (ch >= 'a' && ch <= 'z'));
-            Check(kebab, "T025 files: lower case letters and hyphens only");
+            Check(kebab, "files: lower case letters and hyphens only");
         }
         // the size clamp: 25..300, 0 hides, a value under 25 reads as 25, junk reads as today's 100
         Check(ta::SizePct(0) == 0 && ta::SizePct(-5) == 0 && ta::SizePct(.4f) == 25 && ta::SizePct(24) == 25 && ta::SizePct(25) == 25 && ta::SizePct(100) == 100 &&
-              ta::SizePct(300) == 300 && ta::SizePct(301) == 300 && ta::SizePct(1e9f) == 300 && ta::SizePct(NAN) == 100 && ta::SizeScale(100) == 1.f && ta::SizeScale(50) == .5f && ta::SizeScale(0) == 0.f, "T025 size: 25..300%, 0 hides, 100% is today's, out of range clamps");
-        Check(ta::ModeOf(0) == ta::Mode::Drawn && ta::ModeOf(1) == ta::Mode::Circle && ta::ModeOf(2) == ta::Mode::Square && ta::ModeOf(-1) == ta::Mode::Drawn, "T025 mode: 0 Drawn, 1 Painted circle, 2 Painted square");
+              ta::SizePct(300) == 300 && ta::SizePct(301) == 300 && ta::SizePct(1e9f) == 300 && ta::SizePct(NAN) == 100 && ta::SizeScale(100) == 1.f && ta::SizeScale(50) == .5f && ta::SizeScale(0) == 0.f, "size: 25..300%, 0 hides, 100% is today's, out of range clamps");
+        Check(ta::ModeOf(0) == ta::Mode::Drawn && ta::ModeOf(1) == ta::Mode::Circle && ta::ModeOf(2) == ta::Mode::Square && ta::ModeOf(-1) == ta::Mode::Drawn, "mode: 0 Drawn, 1 Painted circle, 2 Painted square");
         // the sheet with 0, 3 and 24 squares: which trees draw painted, which ids the atlas is asked for
         std::array<int, 81> ids{};
         auto asked = [&](ta::Mode m, int size, int cls) { return ta::AddIcons(m, size, cls, ids.data(), 0, int(ids.size())); };
         ta::SetMask(0);
-        Check(ta::PaintedCount() == 0 && ta::PaintedInClass(1) == 0 && !ta::UsesPainted(ta::Mode::Circle, 1, 0) && asked(ta::Mode::Circle, 100, 1) == 0, "T025 sheet with 0 squares: every tree keeps its drawn glyph, nothing asked of the atlas");
+        Check(ta::PaintedCount() == 0 && ta::PaintedInClass(1) == 0 && !ta::UsesPainted(ta::Mode::Circle, 1, 0) && asked(ta::Mode::Circle, 100, 1) == 0, "sheet with 0 squares: every tree keeps its drawn glyph, nothing asked of the atlas");
         ta::SetMask(0b111000);   // Sorceress: the pilot three
-        Check(ta::PaintedCount() == 3 && ta::PaintedInClass(1) == 3 && ta::PaintedInClass(0) == 0 && ta::PaintedInClass(2) == 0, "T025 sheet with 3 squares: the Sorceress's three");
+        Check(ta::PaintedCount() == 3 && ta::PaintedInClass(1) == 3 && ta::PaintedInClass(0) == 0 && ta::PaintedInClass(2) == 0, "sheet with 3 squares: the Sorceress's three");
         Check(ta::UsesPainted(ta::Mode::Circle, 1, 2) && ta::UsesPainted(ta::Mode::Square, 1, 0) && !ta::UsesPainted(ta::Mode::Drawn, 1, 0) && !ta::UsesPainted(ta::Mode::Circle, 0, 0) && !ta::UsesPainted(ta::Mode::Circle, -1, 0) && !ta::UsesPainted(ta::Mode::Circle, 8, 0),
-              "T025 sheet with 3 squares: the Sorceress paints, Drawn does not, another class or an unknown one keeps the drawn glyph");
+              "sheet with 3 squares: the Sorceress paints, Drawn does not, another class or an unknown one keeps the drawn glyph");
         {
             const int n = asked(ta::Mode::Circle, 100, 1);
-            Check(n == 3 && ids[0] == ta::ArtId(3) && ids[1] == ta::ArtId(4) && ids[2] == ta::ArtId(5), "T025 atlas asks: the Sorceress's three ids, in position order");
-            Check(asked(ta::Mode::Circle, 100, 0) == 0 && asked(ta::Mode::Drawn, 100, 1) == 0 && asked(ta::Mode::Square, 0, 1) == 0 && asked(ta::Mode::Square, 25, 1) == 3, "T025 atlas asks: another class, Drawn and a hidden mark ask for nothing; a 25% mark does");
+            Check(n == 3 && ids[0] == ta::ArtId(3) && ids[1] == ta::ArtId(4) && ids[2] == ta::ArtId(5), "atlas asks: the Sorceress's three ids, in position order");
+            Check(asked(ta::Mode::Circle, 100, 0) == 0 && asked(ta::Mode::Drawn, 100, 1) == 0 && asked(ta::Mode::Square, 0, 1) == 0 && asked(ta::Mode::Square, 25, 1) == 3, "atlas asks: another class, Drawn and a hidden mark ask for nothing; a 25% mark does");
             int k = ta::AddIcons(ta::Mode::Circle, 100, 1, ids.data(), 3, int(ids.size()));
             ids[0] = ta::ArtId(3); ids[1] = 7; ids[2] = 8;
             k = ta::AddIcons(ta::Mode::Circle, 100, 1, ids.data(), 3, int(ids.size()));
-            Check(k == 5 && ids[3] == ta::ArtId(4) && ids[4] == ta::ArtId(5), "T025 atlas asks: an id already asked is not added twice");
-            Check(ta::AddIcons(ta::Mode::Circle, 100, 1, ids.data(), 0, 2) == 2, "T025 atlas asks: never past the request's room");
+            Check(k == 5 && ids[3] == ta::ArtId(4) && ids[4] == ta::ArtId(5), "atlas asks: an id already asked is not added twice");
+            Check(ta::AddIcons(ta::Mode::Circle, 100, 1, ids.data(), 0, 2) == 2, "atlas asks: never past the request's room");
         }
         ta::SetMask((1u << ta::Count) - 1);
         bool all = ta::PaintedCount() == 24;
         for (int c = 0; c < 8; ++c) all = all && ta::PaintedInClass(c) == 3 && asked(ta::Mode::Circle, 100, c) == 3;
-        Check(all, "T025 sheet with 24 squares: every class paints all three trees");
+        Check(all, "sheet with 24 squares: every class paints all three trees");
         // the slice: a cell of the decoded sheet, null when empty or the sheet is not the sheet's shape
         {
             ia::icons::Image sheet; sheet.width = ta::SheetW; sheet.height = ta::SheetH; sheet.rgba.assign(size_t(ta::SheetW) * ta::SheetH * 4, 0);
             int x0, y0; ta::CellOrigin(4, x0, y0);
-            Check(x0 == 4 * ta::CellPx && y0 == 0, "T025 sheet: slot 4 is the fifth cell of the first row");
+            Check(x0 == 4 * ta::CellPx && y0 == 0, "sheet: slot 4 is the fifth cell of the first row");
             int x6, y6; ta::CellOrigin(6, x6, y6);
-            Check(x6 == 0 && y6 == ta::CellPx, "T025 sheet: slot 6 starts the second row");
+            Check(x6 == 0 && y6 == ta::CellPx, "sheet: slot 6 starts the second row");
             for (int y = 0; y < ta::CellPx; ++y) for (int x = 0; x < ta::CellPx; ++x) { uint8_t* p = &sheet.rgba[(size_t(y0 + y) * ta::SheetW + size_t(x0 + x)) * 4]; p[0] = 200; p[1] = 90; p[2] = 30; p[3] = 255; }
             const auto cell = ta::Slice(sheet, 4);
-            Check(cell && cell->width == unsigned(ta::CellPx) && cell->height == unsigned(ta::CellPx) && cell->rgba[0] == 200 && cell->rgba[1] == 90 && cell->rgba[3] == 255 && cell->rgba.back() == 255, "T025 slice: a painted cell comes out whole, as painted");
-            Check(!ta::Slice(sheet, 3) && !ta::Slice(sheet, 5) && !ta::Slice(sheet, -1) && !ta::Slice(sheet, ta::Count), "T025 slice: an empty cell (no square yet) or a slot out of range gives nothing");
+            Check(cell && cell->width == unsigned(ta::CellPx) && cell->height == unsigned(ta::CellPx) && cell->rgba[0] == 200 && cell->rgba[1] == 90 && cell->rgba[3] == 255 && cell->rgba.back() == 255, "slice: a painted cell comes out whole, as painted");
+            Check(!ta::Slice(sheet, 3) && !ta::Slice(sheet, 5) && !ta::Slice(sheet, -1) && !ta::Slice(sheet, ta::Count), "slice: an empty cell (no square yet) or a slot out of range gives nothing");
             ia::icons::Image small = sheet; small.width = 100;
-            Check(!ta::Slice(small, 4), "T025 slice: a sheet of the wrong shape gives nothing");
+            Check(!ta::Slice(small, 4), "slice: a sheet of the wrong shape gives nothing");
         }
         ta::SetMask(0b111000);
         {   // the draw: Sorceress (class 1), painted cells for her three positions
@@ -4212,7 +4212,7 @@ int main() {
                 return c; };
             const float face = 2 * (rw::MarkR - 3.5f);   // today's outer reach kept: 21 px face, 30 px quad
             // Drawn (the default scene, today's look): the disc, ring and glyph at 28 px, no picture
-            Check(count(rw::RecipeDisc, 0, 28) == 1 && count(rw::RecipeRing, 0, 28) == 1 && count(rw::RecipeTreeGlyph, 0) == 1 && count(rw::RecipeSeat, 0) == 0, "T025 Drawn: today's mark exactly (28 px disc and ring, one glyph)");
+            Check(count(rw::RecipeDisc, 0, 28) == 1 && count(rw::RecipeRing, 0, 28) == 1 && count(rw::RecipeTreeGlyph, 0) == 1 && count(rw::RecipeSeat, 0) == 0, "Drawn: today's mark exactly (28 px disc and ring, one glyph)");
             s.treeMode = 1; s.treeCell = {10, 11, 12};
             bool circ = true;
             for (int t = 0; t < 3; ++t) {
@@ -4222,7 +4222,7 @@ int main() {
                 for (int i = 0; i < n; ++i) if (list[i].recipe == rw::RecipeSeat && std::fabs(list[i].cx - x) < .01f && std::fabs(list[i].cy - y) < .01f)
                     circ = circ && std::fabs(list[i].r - acc.r) < .01f && std::fabs(list[i].b - acc.b) < .01f && list[i].param == 2.f;
             }
-            Check(circ, "T025 Painted circle: each mark is one seat-style picture (21 px face) with the accent rim, no disc, ring or glyph");
+            Check(circ, "Painted circle: each mark is one seat-style picture (21 px face) with the accent rim, no disc, ring or glyph");
             {   // the circle's picture is the plate's inside (the skill frame's 104 of 132 crop), the square's the whole plate
                 float x, y; mark(0, x, y); float u0, v0, u1, v1; rw::CellRect(10, 100, u0, v0, u1, v1);
                 const int n = rw::Build(s, list); float halfCircle = 0, halfSquare = 0;
@@ -4231,48 +4231,48 @@ int main() {
                 const int m = rw::Build(s, list);
                 for (int i = 0; i < m; ++i) if (list[i].recipe == rw::RecipeSquare && std::fabs(list[i].cx - x) < .01f && std::fabs(list[i].cy - y) < .01f) halfSquare = (list[i].u1 - list[i].u0) / 2;
                 const float grow = (face + 2 * rw::SeatRingPx) / face, whole = (u1 - u0) / 2 * grow;
-                Check(std::fabs(halfSquare - whole) < 1e-5f && std::fabs(halfCircle - whole * rw::TreeCircleCrop) < 1e-5f && rw::TreeCircleCrop == 1.f && std::fabs(halfCircle - halfSquare) < 1e-5f, "T025 crop: the squares are borderless full-bleed, so the circle and the square both show the whole picture (no bevel crop)");
+                Check(std::fabs(halfSquare - whole) < 1e-5f && std::fabs(halfCircle - whole * rw::TreeCircleCrop) < 1e-5f && rw::TreeCircleCrop == 1.f && std::fabs(halfCircle - halfSquare) < 1e-5f, "crop: the squares are borderless full-bleed, so the circle and the square both show the whole picture (no bevel crop)");
                 s.treeMode = 1;
             }
             s.treeMode = 2;
             bool sq = true;
             for (int t = 0; t < 3; ++t) sq = sq && count(rw::RecipeSquare, t, face + 2 * rw::SeatRingPx) == 1 && count(rw::RecipeSeat, t) == 0 && count(rw::RecipeTreeGlyph, t) == 0 && count(rw::RecipeDisc, t) == 0 && count(rw::RecipeRing, t) == 0;
-            Check(sq, "T025 Painted square: each mark is one square picture, no disc, ring or glyph");
+            Check(sq, "Painted square: each mark is one square picture, no disc, ring or glyph");
             // the fallback: a tree with no cell keeps the drawn glyph, the others paint
             s.treeCell = {10, -1, 12};
-            Check(count(rw::RecipeSquare, 0) == 1 && count(rw::RecipeSquare, 1) == 0 && count(rw::RecipeTreeGlyph, 1) == 1 && count(rw::RecipeDisc, 1, 28) == 1 && count(rw::RecipeRing, 1, 28) == 1 && count(rw::RecipeSquare, 2) == 1, "T025 fallback: a tree with no painted cell keeps today's drawn mark beside painted ones");
+            Check(count(rw::RecipeSquare, 0) == 1 && count(rw::RecipeSquare, 1) == 0 && count(rw::RecipeTreeGlyph, 1) == 1 && count(rw::RecipeDisc, 1, 28) == 1 && count(rw::RecipeRing, 1, 28) == 1 && count(rw::RecipeSquare, 2) == 1, "fallback: a tree with no painted cell keeps today's drawn mark beside painted ones");
             s.treeCell = {-1, -1, -1};
-            Check(count(rw::RecipeTreeGlyph, 0) == 1 && count(rw::RecipeTreeGlyph, 1) == 1 && count(rw::RecipeTreeGlyph, 2) == 1 && count(rw::RecipeSquare, 0) == 0 && count(rw::RecipeSeat, 0) == 0, "T025 fallback: the sheet with no cells (0 squares) draws the three drawn glyphs");
+            Check(count(rw::RecipeTreeGlyph, 0) == 1 && count(rw::RecipeTreeGlyph, 1) == 1 && count(rw::RecipeTreeGlyph, 2) == 1 && count(rw::RecipeSquare, 0) == 0 && count(rw::RecipeSeat, 0) == 0, "fallback: the sheet with no cells (0 squares) draws the three drawn glyphs");
             s.treeCell = {10, 11, 12}; s.treeMode = 7;
-            Check(count(rw::RecipeSeat, 0) == 0 && count(rw::RecipeSquare, 0) == 0 && count(rw::RecipeTreeGlyph, 0) == 1, "T025 mode: a value past the list draws the drawn mark");
+            Check(count(rw::RecipeSeat, 0) == 0 && count(rw::RecipeSquare, 0) == 0 && count(rw::RecipeTreeGlyph, 0) == 1, "mode: a value past the list draws the drawn mark");
             // the size: 100% today's, 200% twice, 50% half, 0 hides the whole mark, in every mode
             s.treeMode = 1;
-            s.treeSizePct = 200; Check(count(rw::RecipeSeat, 0, 2 * face + 2 * rw::SeatRingPx) == 1, "T025 size: 200% doubles the painted face");
-            s.treeSizePct = 50;  Check(count(rw::RecipeSeat, 0, face / 2 + 2 * rw::SeatRingPx) == 1, "T025 size: 50% halves it");
-            s.treeSizePct = 10;  Check(count(rw::RecipeSeat, 0, face / 4 + 2 * rw::SeatRingPx) == 1, "T025 size: under 25 reads as 25");
-            s.treeSizePct = 9999; Check(count(rw::RecipeSeat, 0, 3 * face + 2 * rw::SeatRingPx) == 1, "T025 size: over 300 reads as 300");
+            s.treeSizePct = 200; Check(count(rw::RecipeSeat, 0, 2 * face + 2 * rw::SeatRingPx) == 1, "size: 200% doubles the painted face");
+            s.treeSizePct = 50;  Check(count(rw::RecipeSeat, 0, face / 2 + 2 * rw::SeatRingPx) == 1, "size: 50% halves it");
+            s.treeSizePct = 10;  Check(count(rw::RecipeSeat, 0, face / 4 + 2 * rw::SeatRingPx) == 1, "size: under 25 reads as 25");
+            s.treeSizePct = 9999; Check(count(rw::RecipeSeat, 0, 3 * face + 2 * rw::SeatRingPx) == 1, "size: over 300 reads as 300");
             s.treeSizePct = 0;
-            Check(anyAt(0) == 0 && anyAt(1) == 0 && anyAt(2) == 0, "T025 size 0: the painted mark is hidden");
-            s.treeMode = 0; Check(anyAt(0) == 0 && anyAt(2) == 0, "T025 size 0: the drawn mark is hidden too");
-            s.treeSizePct = 200; Check(count(rw::RecipeDisc, 0, 56) == 1 && count(rw::RecipeRing, 0, 56) == 1 && std::fabs([&] { std::vector<rw::Instance> g; for (int i = 0, n = rw::Build(s, list); i < n; ++i) if (list[i].recipe == rw::RecipeTreeGlyph) g.push_back(list[i]); return g.empty() ? 0.f : g[0].u0; }() - 2 * 16.f / 1.5f) < .01f, "T025 size 200%: the drawn mark doubles too (disc, ring, glyph)");
+            Check(anyAt(0) == 0 && anyAt(1) == 0 && anyAt(2) == 0, "size 0: the painted mark is hidden");
+            s.treeMode = 0; Check(anyAt(0) == 0 && anyAt(2) == 0, "size 0: the drawn mark is hidden too");
+            s.treeSizePct = 200; Check(count(rw::RecipeDisc, 0, 56) == 1 && count(rw::RecipeRing, 0, 56) == 1 && std::fabs([&] { std::vector<rw::Instance> g; for (int i = 0, n = rw::Build(s, list); i < n; ++i) if (list[i].recipe == rw::RecipeTreeGlyph) g.push_back(list[i]); return g.empty() ? 0.f : g[0].u0; }() - 2 * 16.f / 1.5f) < .01f, "size 200%: the drawn mark doubles too (disc, ring, glyph)");
             s.treeSizePct = 100; s.treeMode = 1; s.skillClass = -1; s.treeCell = {-1, -1, -1};
-            Check(count(rw::RecipeSeat, 0) == 0 && count(rw::RecipeSquare, 0) == 0, "T025 unknown class: no picture, upstream's plain mark");
+            Check(count(rw::RecipeSeat, 0) == 0 && count(rw::RecipeSquare, 0) == 0, "unknown class: no picture, upstream's plain mark");
             s.skillClass = 1; s.treeCell = {10, 11, 12};
             // redraw key: a mode, a size or a cell change composes again
             const auto k0 = rw::KeyOf(s);
             auto s1 = s; s1.treeMode = 2; auto s2 = s; s2.treeSizePct = 150; auto s3 = s; s3.treeCell[1] = 40;
-            Check(!(rw::KeyOf(s1) == k0) && !(rw::KeyOf(s2) == k0) && !(rw::KeyOf(s3) == k0) && rw::KeyOf(s) == k0, "T025 key: a new mode, size or picture redraws; nothing changed does not");
+            Check(!(rw::KeyOf(s1) == k0) && !(rw::KeyOf(s2) == k0) && !(rw::KeyOf(s3) == k0) && rw::KeyOf(s) == k0, "key: a new mode, size or picture redraws; nothing changed does not");
             // Tree orbs keep their glyphs (the painted mark is the Trees shown layout's)
             const auto orbs = ClassLayout(1, per, rw::TreeLayout::Orbs);
             rw::Scene so = s; so.layout = &orbs; so.treeMode = 1; so.treeCell = {10, 11, 12};
             int glyphs = 0, seatsAtOrb = 0; const int no = rw::Build(so, list);
             for (int i = 0; i < no; ++i) glyphs += list[i].recipe == rw::RecipeTreeGlyph;
             for (int t = 0; t < 3; ++t) for (int i = 0; i < no; ++i) if (list[i].recipe == rw::RecipeSquare) ++seatsAtOrb;
-            Check(glyphs == 3 && seatsAtOrb == 0, "T025 Tree orbs: they keep their three glyphs and draw no painted square");
+            Check(glyphs == 3 && seatsAtOrb == 0, "Tree orbs: they keep their three glyphs and draw no painted square");
         }
         ta::SetMask(builtMask);
     }
-    {   // Glyph icon (2026-11-18, Jeff 5:49 PM): the Glyphs page's eight shapes and the center split's four sigils as painted squares
+    {   // Glyph icon (2026-11-18, the player 5:49 PM): the Glyphs page's eight shapes and the center split's four sigils as painted squares
         namespace ga = framevr::ringwheel::glyphart;
         const uint32_t builtMask = ga::MaskRef();
         Check(ga::Count == 12 && ga::Shapes == 8 && ga::Sigils == 4 && ga::SheetW == 576 && ga::SheetH == 432 && ga::SlotOfArt(ga::ArtFirst) == 0 && ga::SlotOfArt(ga::ArtFirst + 11) == 11 && ga::SlotOfArt(ga::ArtFirst + 12) < 0 && ga::SlotOfArt(9223) < 0 && ga::SlotOfArt(9103) < 0,

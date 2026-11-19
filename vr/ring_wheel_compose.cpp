@@ -1,4 +1,4 @@
-// Ring skill menu (T025, build steps R4-R5): the compose pass (vr/ring_wheel_compose.h). One pipeline, one draw: every
+// Ring skill menu (, build steps R4-R5): the compose pass (vr/ring_wheel_compose.h). One pipeline, one draw: every
 // instance of steamvr/ring_wheel_draw.h is a quad (a 4-vertex strip, instanced), its recipe drawn in the pixel shader
 // inside that quad only. The shaders compile in Setup with the system's d3dcompiler_47 (as ui_blit.cpp and
 // elemental_hands_renderer.cpp do), and Setup runs on the ring's worker, so the frame thread never waits for it (perf R4
@@ -509,7 +509,7 @@ float4 Badge(float2 p, float d, float Rb, float cr, uint kind, float fw) {
     float body = saturate(-sd / fw + 0.5), halo = 0.7 * saturate(1 - max(d - Rb, 0) / 7);
     return float4(col * body, body + halo * (1 - body));
 }
-// T036: our own dark disc under a clean icon (the game's plate keyed out on the atlas worker, ring_wheel_unbake.h): the mockup's
+// our own dark disc under a clean icon (the game's plate keyed out on the atlas worker, ring_wheel_unbake.h): the mockup's
 // radial gradient, #2C241B up left to #100C08 at the edge, opaque. A keyed icon shows its glyph on it; an opaque picture (an icon
 // the key skips) covers it whole. p: from the face's center, r: the face's radius.
 float4 UnderDisc(float2 p, float r) {
@@ -519,10 +519,10 @@ float4 UnderDisc(float2 p, float r) {
     return float4(col, 1);
 }
 float4 OverDisc(float4 art, float2 p, float r) { return art + UnderDisc(p, r) * (1 - art.a); }
-// T036: the third holding p (0 Glyphs upper left, 1 Gestures upper right, 2 Quick cast bottom; canvas y down), ringwheel::ThirdAt
+// the third holding p (0 Glyphs upper left, 1 Gestures upper right, 2 Quick cast bottom; canvas y down), ringwheel::ThirdAt
 // without the dead bands.
 uint ThirdOfPoint(float2 p) { float a = degrees(atan2(p.y, p.x)); return a >= -90 && a < 30 ? 1 : a >= 30 && a < 150 ? 2 : 0; }
-// T036 Element frame (the mockup's layerFrame): kind = ringwheel::Element; r0 the band's inner radius, b its width; coverage and
+// Element frame (the mockup's layerFrame): kind = ringwheel::Element; r0 the band's inner radius, b its width; coverage and
 // a 0-1 shade (0 the base color, 1 its light) in the band only. Static: no time.
 float2 Frame(uint kind, float2 p, float r0, float b, float fw) {
     float d = length(p), a = atan2(p.y, p.x), t = (d - r0) / max(b, 1), cov = 0, shade = 0;
@@ -569,7 +569,7 @@ float4 PS(V i) : SV_Target {
     if (recipe == 8) {   // R8 icon art motion: a face copy moved by (dx, dy) = tint.rg, cut to its seat's circle (kit: clipped to the icon)
         float4 art = gIcons.SampleGrad(gLinear, i.uv, dx, dy);
         if (linearOut > 0.5) art.rgb = ToLinear(art.rgb / max(art.a, 1.0 / 255)) * art.a;
-        art = OverDisc(art, i.local, R);   // T036: the copy carries its disc (the seat under it draws only its shade and rings)
+        art = OverDisc(art, i.local, R);   // the copy carries its disc (the seat under it draws only its shade and rings)
         c = art * saturate((R - d) / fw + 0.5) * saturate((R - length(i.local + i.tint.rg)) / fw + 0.5);
     } else if (recipe == 0) {
         float4 art = gIcons.SampleGrad(gLinear, i.uv, dx, dy);   // premultiplied in gamma, read through a UNORM view
@@ -578,7 +578,7 @@ float4 PS(V i) : SV_Target {
         if (linearOut > 0.5) art.rgb = ToLinear(art.rgb / max(art.a, 1.0 / 255)) * art.a;
         if (i.shape.y < 0) art.rgb = dot(art.rgb, float3(0.299, 0.587, 0.114));   // a negative rim: the art in gray (an Off gesture, R7 RS1)
         float pw = abs(i.shape.y);
-        if (pw >= 16) { pw -= 16; art = OverDisc(art, i.local, R); }   // T036: +-(rim + 16): a clean icon on our dark disc
+        if (pw >= 16) { pw -= 16; art = OverDisc(art, i.local, R); }   // +-(rim + 16): a clean icon on our dark disc
         float rim = saturate((d - (R - pw)) / fw + 0.5);
         c = lerp(art, float4(i.tint.rgb, 1), rim) * saturate((R - d) / fw + 0.5);
     } else if (recipe == 7) {   // (recipe 6, the effects: PSFx)   // the lightning face crawl: two bolts across the face, new every 70 ms (uv.x = the step), clipped to it
@@ -588,7 +588,7 @@ float4 PS(V i) : SV_Target {
         float core = saturate(1.6 - b), glow = saturate(1 - b / 5) * 0.5;
         c = float4(lerp(float3(1, 0.85, 0.3) * glow, float3(1, 0.98, 0.88), core), max(core, glow)) * saturate((R - d) / fw + 0.5);
     } else if (recipe == 11) {   // R8 match stage 1: a seat's icon as the kit's drawIcon (art to r, rim shade, dark line, rim outside)
-        // T036 layers: param = +-(width + 16 x flags), 1 no art (the Icon layer Off: no disc, art or shade), 2 no ring (Color ring Off:
+        // layers: param = +-(width + 16 x flags), 1 no art (the Icon layer Off: no disc, art or shade), 2 no ring (Color ring Off:
         // no dark line or rim). The art sits on our dark disc (a clean icon).
         float pv = abs(i.shape.y);
         uint flags = (uint)(pv / 16);
@@ -606,7 +606,7 @@ float4 PS(V i) : SV_Target {
         float dark = ringOn ? saturate((1.5 - abs(d - (r + 1))) / fw + 0.5) : 0, rim = ringOn ? saturate((w * 0.5 - abs(d - (r + 1.5 + w * 0.5))) / fw + 0.5) : 0;
         c = float4(0.027, 0.020, 0.016, 1) * dark + c * (1 - dark);   // 3 px #070504 on r + 1
         c = float4(i.tint.rgb, 1) * rim + c * (1 - rim);               // the rim (or the hover ring)
-    } else if (recipe == 15) {   // T025 a tree mark's painted square (the art is borderless full-bleed rust, so the plate's frame is drawn here): the cell as a
+    } else if (recipe == 15) {   // a tree mark's painted square (the art is borderless full-bleed rust, so the plate's frame is drawn here): the cell as a
         // rounded square (half side R - 4.5), a bevel (a lit upper left edge, a shaded lower right, 2 px wide) over it, a 3 px #070504 line, the rim in the tint
         float r = R - 4.5, cr = 0.14 * r;
         float2 q = abs(i.local) - (r - cr);
@@ -623,7 +623,7 @@ float4 PS(V i) : SV_Target {
         float dark = saturate((1.5 - abs(sd - 1)) / fw + 0.5), rim = saturate((w * 0.5 - abs(sd - (1.5 + w * 0.5))) / fw + 0.5);
         c = float4(0.027, 0.020, 0.016, 1) * dark + c * (1 - dark);
         c = float4(i.tint.rgb, 1) * rim + c * (1 - rim);
-    } else if (recipe == 13) {   // T036 a third of the center: param = the third (+ 4: solid, the backing; + 8: its fill, a light
+    } else if (recipe == 13) {   // a third of the center: param = the third (+ 4: solid, the backing; + 8: its fill, a light
         // ramp outward from 70%; else its 2.5 px outline), uv.x = its inner radius
         uint p = (uint)(i.shape.y + 0.5), t = p & 3;
         float r0 = i.uv.x, inSlice = ThirdOfPoint(i.local) == t ? 1 : 0;
@@ -635,12 +635,12 @@ float4 PS(V i) : SV_Target {
             float e = min(min(R - d, d - r0), d * sin(radians(clamp(min(rel, 120 - rel), 0, 90))));
             c = float4(i.tint.rgb, 1) * cover * saturate((2.5 - e) / fw + 0.5);
         }
-    } else if (recipe == 14) {   // T036 Element frame: param = the element, uv = (inner radius, width)
+    } else if (recipe == 14) {   // Element frame: param = the element, uv = (inner radius, width)
         float2 f = Frame((uint)(i.shape.y + 0.5), i.local, i.uv.x, i.uv.y, fw);
         float3 col = lerp(i.tint.rgb, lerp(i.tint.rgb, float3(1, 0.97, 0.88), 0.55), f.y);
         c = float4(col, 1) * f.x;
     } else if (recipe == 9) {   // R7c the rune band: uv = (the hash seed, the dimmed half: 1 top, 2 bottom)
-        // T036: 4 + third + 3 x percent: the thirds, that third full and the others at the percent
+        // 4 + third + 3 x percent: the thirds, that third full and the others at the percent
         uint dim = (uint)(i.uv.y + 0.5);
         float k = (dim == 1 && i.local.y < 0) || (dim == 2 && i.local.y > 0) ? 0.55 : 1;
         if (dim >= 4) k = ThirdOfPoint(i.local) == (dim - 4) % 3 ? 1 : ((dim - 4) / 3) / 100.0;

@@ -1,4 +1,4 @@
-// Ring skill menu (ring > Experiment: Ring wheel; exp.ring_wheel, Dev only; ticket T025, 2026-11-07). Jeff: "let's also add a
+// Ring skill menu (ring > Experiment: Ring wheel; exp.ring_wheel, development only; task , 2026-11-07). the player: "let's also add a
 // new ring item for turn on the new skill menu ... the class skills are broken into 3 sections on the screen. When you mouse
 // over one areas the other two tree skills fade away ... The center of the skill tree menu would give the helper text for the
 // mouse over skill ... One side to open glyphs and the other gestures". Plan: the design notes
@@ -8,12 +8,12 @@
 // pages, the footer, editors and every request; this ring moves the panel, turns laser hits into upstream cells or ring-only
 // events, queues BindSkill requests upstream's dispatch already takes, and swaps the wheel quad's picture.
 //
-// T036 (ring tree cleanup): each skill circle in layers, each
+// (ring tree cleanup): each skill circle in layers, each
 // its own row on Ring wheel > Layers (Icon: the clean icon, keyed on the atlas worker; Color ring; Element frame; Float;
 // Animation: the old rest glows, over-face passes and crawl); the center in thirds (Glyphs, Gestures, Quick cast; ring_wheel.h
 // ThirdAt), each third a pseudo seat (a tap opens it, a hold puts that sub-menu on the button); Glyphs and Gestures on the General
 // shelf (Center > Sub-menus on the shelf); a sub-menu's button opens its wheel there (FilterRingHands).
-// T035 + T036 headset fixes (2026-11-16, Jeff: "ONE quick cast"): the Quick cast page (upstream's eight button slots) is gone. The
+// + headset fixes (2026-11-16, the player: "ONE quick cast"): the Quick cast page (upstream's eight button slots) is gone. The
 // Quick cast third is ring Quick cast radial: a tap opens its page in the ring (12 places, a chooser each; 2026-11-16), a hold puts the radial on that
 // button (its own bind, as its shelf entry's); its switch Off, the third says so and does nothing. A seat or third under the laser
 // takes a sub-menu button's press like any other button's (a hold rebinds it); a ring menu bound over a game skill moves that skill
@@ -26,7 +26,7 @@
 // actions underneath (a shape's other hand, a gesture card, Back: upstream's cell for one frame); a shape's skill chosen on
 // the three trees filtered to upstream's glyph picker list, sent as upstream's BindGlyph (its paged picker never opens).
 // The center halves' grow delay and the blurb's hold are rows (Placement P10, P11).
-// Build step R6Q: Jeff's quick cast. On the ring, any of the ten buttons (either hand) pressed on a skill:
+// Build step R6Q: the player's quick cast. On the ring, any of the ten buttons (either hand) pressed on a skill:
 // a tap casts it and closes the wheel (upstream's center cell for one frame, then upstream's own glyph press through the
 // OnRingCast seam, so mana, cast rate and aim stay the game's and the player's); held to Hold to assign, it goes on that
 // button (BindSkill); released between, no change. The plain cancel button (right B, left X) with the laser off the wheel
@@ -53,7 +53,7 @@
 //  - VetoWheelBlip       transport Input, before the unfocused ClearInput: a blip under 250 ms keeps the open wheel.
 //  - OnWheelBeam         transport EndPair, after the laser's if (job B): the non-owner hand's thin beam, no dot.
 //  - OnLayerShot         transport EndPair, a screenshot's frame only: the ring's layer as its own picture (round 2026-11-08 item 4).
-//  - FilterRingHands     transport Input, before HandControls steps (T036): a sub-menu's button opens that hand's wheel (its stick
+//  - FilterRingHands     transport Input, before HandControls steps (): a sub-menu's button opens that hand's wheel (its stick
 //                        click's toggle) and the wheel goes to that sub-menu (not while a seat or third is under the laser).
 //  Job B (pointing with either hand, ring_wheel_pointing.h): FilterWheelPointer gets both aims and the stepped buttons; the
 //  owner gets upstream's beam, dot, hover and hit, its trigger is the click; row Pointing hand.
@@ -81,13 +81,13 @@
 #include "ring_wheel_compose.h"
 #include "ring_wheel_atlas.h"
 #include "../steamvr/quick_radial_link.h"
-#include "../steamvr/quick_radial.h"   // T035: a tap on Quick cast (its third, its shelf entry) opens its page; the radial's ring (link)
+#include "../steamvr/quick_radial.h"   // a tap on Quick cast (its third, its shelf entry) opens its page; the radial's ring (link)
 #include "../steamvr/ring_wheel_draw.h"
 #include "../steamvr/ring_wheel_pages.h"
 #include "../steamvr/ring_wheel_iconbox.h"
-#include "../steamvr/ring_wheel_menu_art.h"   // T036 (2026-11-16): the sub-menus' own pictures
+#include "../steamvr/ring_wheel_menu_art.h"   // (2026-11-16): the sub-menus' own pictures
 #include "../steamvr/ring_wheel_glyph_art_decode.h"   // Glyph icon: the painted glyph and sigil squares (the sheet's decode)
-#include "../steamvr/ring_wheel_tree_art_decode.h"   // T025: the tree marks' painted pictures (the sheet's decode; the pure side comes with ring_wheel_draw.h)
+#include "../steamvr/ring_wheel_tree_art_decode.h"   // the tree marks' painted pictures (the sheet's decode; the pure side comes with ring_wheel_draw.h)
 #include "../steamvr/ring_wheel_close.h"
 #include "../steamvr/hand_controls.h"
 #include "../steamvr/gameplay.h"
@@ -176,7 +176,7 @@ rw::ComposePolicy policy;
 tx::BlurbCache blurbs;
 int blurbSeat = -1;
 // A bind for FilterWheelRequest, and the one in flight.
-// draw: the #3 Draw glyph button; menu (T036): a sub-menu's button (the clear first). A ring menu's bind (a sub-menu, Quick cast,
+// draw: the #3 Draw glyph button; menu (): a sub-menu's button (the clear first). A ring menu's bind (a sub-menu, Quick cast,
 // Army X menu; 2026-11-16 bug 4): was / wasOwner the game skill that button held, oldSlot the menu's button before, labName its name.
 struct Bind { bool queued = false; int index = -1, skill = -1, owner = -1, slot = -1, hand = 0, layout = 0; bool draw = false; int menu = -1;
               int was = -1, wasOwner = -1, oldSlot = -1; const char* labName = nullptr; };
@@ -263,7 +263,7 @@ rw::PageView view;
 uint64_t viewKey = ~0ull;
 uint32_t viewRevision = 0;
 int choose = -1;                 // the shape whose skill the chooser picks (-1: none)
-// 2026-11-16 (Jeff: "ring menu > quick cast / ring menu > gestures / ring menu > glyph"; "the edit mode is when the user is in the
+// 2026-11-16 (the player: "ring menu > quick cast / ring menu > gestures / ring menu > glyph"; "the edit mode is when the user is in the
 // ring menu"): Quick cast's page (its 12 places) over upstream's Spells page while quickPageOn; quickChoose: the place its chooser
 // fills (-1: the page). chooseQuick: the chooser's seats are Quick cast's (BuildChooser), not the glyphs'.
 bool quickPageOn = false, chooseQuick = false;
@@ -300,9 +300,9 @@ std::string chooseTitle, clearLine, topCount, bottomCount;
 uint64_t countKey = ~0ull;
 int wheelHandNow = 0, glyphHandNow = 0, motionsOffNow = 0;
 // ---- Extra entries on the General shelf (headset fixes 2026-11-15) ----
-// Entries: an entry on the General shelf (Jeff assigns skills here, hold to assign, and never saw it
+// Entries: an entry on the General shelf (the player assigns skills here, hold to assign, and never saw it
 // in upstream's Edit Slots). Its id joins the seats' key (a change rebuilds the layout); dim and slot are draw-only.
-// T035 (2026-11-15): a second ring's entry, ring Quick cast radial's, beside the Army X menu's (FilterRingEntry): slot 0 Army X
+// (2026-11-15): a second ring's entry, ring Quick cast radial's, beside the Army X menu's (FilterRingEntry): slot 0 Army X
 // menu through its key-gated seam, slot 1 Quick cast radial read from its pure header while its switch is On (no row free).
 struct Entry { int id = -1; const char* name = nullptr; const char* help = nullptr; bool dim = false; int slot = -1; };
 constexpr int EntryCount = 2;
@@ -323,7 +323,7 @@ int EntryOf(int id, int owner) {
     return -1;
 }
 bool IsEntry(int id, int owner) { return EntryOf(id, owner) >= 0; }
-// ---- T036: the layers, the center's thirds, each sub-menu on a button ----
+// ---- the layers, the center's thirds, each sub-menu on a button ----
 struct WantMenu { int third = -1, hand = -1; double since = 0; };
 WantMenu wantMenu;                // a sub-menu asked for (its button, a tap on its shelf entry) until upstream's page is there
 constexpr double WantMenuMs = 1000;   // a wheel that never got there (busy hands, an editor, clicks ignored): given up this long after the ask or the last page change, or after FireGate::MaxFires clicks on one page (S-B)
@@ -371,7 +371,7 @@ const ia::Skill* MenuSkill(int third) {
     }
     return &k;
 }
-void AskOtherLabs(const ia::Snapshot& s, void (*say)(const char*)) {
+void RefreshEntries(const ia::Snapshot& s, void (*say)(const char*)) {
     std::array<Entry, EntryCount> got;
     if (framevr::quickradial::Enabled()) {   // Quick cast's entry on the General shelf (slot 1; slot 0 stays free for the Army X menu's, another PR)
         const auto q = framevr::quickradial::ShelfEntryFor(true, s.skillClass, framevr::quickradial::ButtonValue(), framevr::skills::Count);
@@ -425,7 +425,7 @@ const rw::BadgeSet* Badges(const ia::Snapshot& s, double nowMs, const rw::Layout
             b.id[size_t(h)][size_t(k)] = s.skills[size_t(slot)].id; b.owner[size_t(h)][size_t(k)] = s.skills[size_t(slot)].owner;
             for (const Entry& entry : entries)   // an entry's button (its slot's game skill cleared)
                 if (slot == entry.slot && entry.id >= 0 && b.id[size_t(h)][size_t(k)] < 0) { b.id[size_t(h)][size_t(k)] = entry.id; b.owner[size_t(h)][size_t(k)] = -1; }
-            if (const int t = buttonsNow.MenuOf(slot); t >= 0 && menuEntriesNow && b.id[size_t(h)][size_t(k)] < 0) { b.id[size_t(h)][size_t(k)] = rw::MenuEntryId(t); b.owner[size_t(h)][size_t(k)] = -1; }   // T036: a sub-menu's button on its shelf entry
+            if (const int t = buttonsNow.MenuOf(slot); t >= 0 && menuEntriesNow && b.id[size_t(h)][size_t(k)] < 0) { b.id[size_t(h)][size_t(k)] = rw::MenuEntryId(t); b.owner[size_t(h)][size_t(k)] = -1; }   // a sub-menu's button on its shelf entry
         }
     const rw::BadgeLook look = BadgeLookNow();
     if (badges.Update(l, key, b, framevr::controllers::Layout(ctrlLayoutNow), look, nowMs) && say) {
@@ -495,7 +495,7 @@ bool Ready() {
 // The Tree layout row (plan E7 #10, L4 row 10): Trees shown (0, the default) or Tree orbs (1).
 rw::TreeLayout LayoutNow() { return cfg::On(cfg::TreeLayout) ? rw::TreeLayout::Orbs : rw::TreeLayout::Shown; }
 int layoutSaid = -1;   // the Tree layout last logged
-// T025 Tree icon (Layers page): the rows' reading, one branch each. Off (the master, or Drawn): today's frame, no picture asked for.
+// Tree icon (Layers page): the rows' reading, one branch each. Off (the master, or Drawn): today's frame, no picture asked for.
 rw::treeart::Mode TreeMode() { return rw::treeart::ModeOf(cfg::Value(cfg::TreeIcon)); }
 int TreeSizePct() { return rw::treeart::SizePct(cfg::Value(cfg::TreeIconSize)); }
 bool TreePictures() { return TreeMode() != rw::treeart::Mode::Drawn && TreeSizePct() > 0; }   // the atlas holds the class's painted squares only then
@@ -509,10 +509,10 @@ int pageIconsSay = -1;  // item 6: the page cards just added to the atlas reques
 void Seats(const ia::Snapshot& s) {
     uint64_t h = 1469598103934665603ull;
     auto mix = [&](int64_t v) { h ^= uint64_t(v); h *= 1099511628211ull; };
-    mix(s.skillClass); mix(s.skillCount); mix(RenderPct()); mix(int(LayoutNow())); mix(TreePictures()); mix(int(GlyphMode()));   // T025: the class's painted squares join the atlas request
+    mix(s.skillClass); mix(s.skillCount); mix(RenderPct()); mix(int(LayoutNow())); mix(TreePictures()); mix(int(GlyphMode()));   // the class's painted squares join the atlas request
     for (unsigned i = 0; i < s.skillCount && i < s.catalog.size(); ++i) { mix(s.catalog[i].id); mix(s.catalog[i].owner); }
-    for (const Entry& entry : entries) mix(entry.id);   // headset fixes 2026-11-15: the other Labs' shelf entries come and go with their switches (not with the army)
-    const bool menus = cfg::On(cfg::MenuEntries);   // T036: the sub-menus' entries come and go with their row
+    for (const Entry& entry : entries) mix(entry.id);   // headset fixes 2026-11-15: the other modules' shelf entries come and go with their switches (not with the army)
+    const bool menus = cfg::On(cfg::MenuEntries);   // the sub-menus' entries come and go with their row
     mix(menus);
     // Review M1: the summon army is watched beside this key, never mixed into it (a key change resets the main ring).
     const auto army = armyWatch.Step(s, h);
@@ -528,8 +528,8 @@ void Seats(const ia::Snapshot& s) {
     std::array<rw::SeatIn, rw::MaxSeats> in{};
     int n = 0;
     seatsValid = rw::SeatsFrom(s, in, n) && n > 0;
-    if (seatsValid) for (const Entry& entry : entries) n = rw::AddShelfEntry(in, n, entry.id);   // headset fixes 2026-11-15: the other Labs' entries, General shelf
-    if (seatsValid && menus) for (int t = 0; t < rw::ThirdCount; ++t) if (t != rw::ThirdQuick) n = rw::AddShelfEntry(in, n, rw::MenuEntryId(t));   // T036: the sub-menus, General shelf (Quick cast: the radial's own entry, 2026-11-16)
+    if (seatsValid) for (const Entry& entry : entries) n = rw::AddShelfEntry(in, n, entry.id);   // headset fixes 2026-11-15: the other modules' entries, General shelf
+    if (seatsValid && menus) for (int t = 0; t < rw::ThirdCount; ++t) if (t != rw::ThirdQuick) n = rw::AddShelfEntry(in, n, rw::MenuEntryId(t));   // the sub-menus, General shelf (Quick cast: the radial's own entry, 2026-11-16)
     menuEntriesNow = menus;
     seatClass = s.skillClass;
     engineOpen = false; blurbs.Reset(); blurbKey = ~0ull; blurbSeat = -1; ++revision;
@@ -541,7 +541,7 @@ void Seats(const ia::Snapshot& s) {
     for (int i = 0; i < layout.count; ++i) {
         const auto& seat = layout.seats[size_t(i)];
         request.ids[size_t(i)] = seat.id;
-        if (const int t = seat.owner == -1 ? rw::MenuOfEntry(seat.id) : -1; t >= 0) {   // T036: a sub-menu's entry draws its picture (its id is its art's, 2026-11-16); its mark if none
+        if (const int t = seat.owner == -1 ? rw::MenuOfEntry(seat.id) : -1; t >= 0) {   // a sub-menu's entry draws its picture (its id is its art's, 2026-11-16); its mark if none
             if (mainMark.empty()) mainMark.assign(size_t(layout.count), 0);
             mainMark[size_t(i)] = uint8_t(1 + t);
             continue;
@@ -565,11 +565,11 @@ void Seats(const ia::Snapshot& s) {
                 break;
             }
     }
-    for (int t = 0; t < rw::ThirdCount; ++t) {   // T036 (2026-11-16): the center thirds' pictures, right after the seats (the main page shows them: first in a full atlas)
+    for (int t = 0; t < rw::ThirdCount; ++t) {   // (2026-11-16): the center thirds' pictures, right after the seats (the main page shows them: first in a full atlas)
         const int id = rw::menuart::ArtId(t);
         if (request.n < int(request.ids.size()) && std::find(request.ids.data(), request.ids.data() + request.n, id) == request.ids.data() + request.n) request.ids[size_t(request.n++)] = id;
     }
-    request.n = rw::treeart::AddIcons(TreeMode(), TreeSizePct(), s.skillClass, request.ids.data(), request.n, int(request.ids.size()));   // T025: the class's painted tree squares (up to three; none while Drawn or hidden)
+    request.n = rw::treeart::AddIcons(TreeMode(), TreeSizePct(), s.skillClass, request.ids.data(), request.n, int(request.ids.size()));   // the class's painted tree squares (up to three; none while Drawn or hidden)
     request.n = rw::glyphart::AddIcons(GlyphMode(), request.ids.data(), request.n, int(request.ids.size()));   // Glyph icon: the painted shapes and sigils (up to 12; none while Drawn)
     request.n = rw::AddGesturePageIcons(s.skillClass, request.ids.data(), request.n, int(request.ids.size()));   // item 6: only here, when the seats changed
     if (army.icons) request.n = rw::AddOrderIcons(request.ids.data(), request.n, int(request.ids.size()));   // the chooser's order row has its icons ready
@@ -600,7 +600,7 @@ void Seats(const ia::Snapshot& s) {
 const ia::Skill* SkillOf(const ia::Snapshot& s, int id, int owner) {
     for (unsigned k = 0; k < s.skillCount && k < s.catalog.size(); ++k) if (s.catalog[k].id == id && s.catalog[k].owner == owner) return &s.catalog[k];
     if (const int k = EntryOf(id, owner); k >= 0) return &entrySkills[size_t(k)];   // headset fixes 2026-11-15: another ring's shelf entry (Army X menu, Quick cast radial)
-    if (owner == -1 && rw::MenuOfEntry(id) >= 0) return MenuSkill(rw::MenuOfEntry(id));   // T036: a sub-menu's shelf entry
+    if (owner == -1 && rw::MenuOfEntry(id) >= 0) return MenuSkill(rw::MenuOfEntry(id));   // a sub-menu's shelf entry
     if (owner == -1 && rw::orders::Is(id)) {   // a Commander order is no catalog skill: upstream's own entry for it (its name in the blurb, the hold and the log)
         static ia::Skill made[rw::orders::Count];
         auto& order = made[size_t(id - rw::orders::First)];
@@ -674,7 +674,7 @@ int KindPage(const ia::Snapshot& s, int family) {
     quickKindN = 1 + tiers; quickKind = family;
     return tiers;
 }
-// T036: each sub-menu's button, from its key, kept only while the button holds no game skill and draws no glyph (a skill put
+// each sub-menu's button, from its key, kept only while the button holds no game skill and draws no glyph (a skill put
 // there later, or Draw glyph, shuts it while it is there: said, the key kept for when the button is free again, review S5). Judged on a fresh snapshot only, and not in
 // the 2 s after a sub-menu's own clear was applied (the snapshot catches up with it).
 ULONGLONG keptHoldUntil = 0;
@@ -770,7 +770,7 @@ void MoveDisplaced(const Bind& b, const ia::Snapshot& s, void (*say)(const char*
     }
     if (say && line[0]) say(line);
 }
-// T036: a hold to assign on a sub-menu's third or shelf entry: upstream's own clear of that button's game skill (as Draw glyph's
+// a hold to assign on a sub-menu's third or shelf entry: upstream's own clear of that button's game skill (as Draw glyph's
 // pick, and Army X menu's), and on its Applied the sub-menu keeps the button (Request). A button that draws glyphs is refused out
 // loud: the clear would leave Draw glyph on it. Quick cast's third (2026-11-16): ring Quick cast radial's own bind (QuickBind).
 void QuickBind(const rw::QuickOut& e, int layout, const ia::Snapshot& s, void (*say)(const char*));
@@ -876,7 +876,7 @@ HMODULE Module() {
     GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(&Module), &m);
     return m;
 }
-// T036 (2026-11-16): a sub-menu's picture for the atlas worker (its icon source; never the frame thread): decoded from the
+// (2026-11-16): a sub-menu's picture for the atlas worker (its icon source; never the frame thread): decoded from the
 // plugin once a process (ring_wheel_menu_art.h), said once each ("Frame ring wheel: sub-menu picture").
 std::shared_ptr<const ia::icons::Image> MenuArt(int third, void (*say)(const char*)) {
     static std::atomic<bool> said[rw::ThirdCount] = {};
@@ -927,7 +927,7 @@ void Setup(host::LayerFrame& f) {
     rw::Fonts fonts;
     const bool fontsOk = rw::FontsFromModule(Module(), fonts);
     g->worker.Start(&g->compose, f.device, static_cast<ID3D12CommandQueue*>(f.queue), f.format, std::move(fonts),
-        [g, say = f.say](int id) { const int t = rw::menuart::ThirdOfArt(id); return t >= 0 ? MenuArt(t, say) : rw::treeart::SlotOfArt(id) >= 0 ? rw::treeart::Picture(Module(), id) : rw::glyphart::SlotOfArt(id) >= 0 ? rw::glyphart::Picture(Module(), id) : g->icons.Take(id); }, [g] { g->icons.Settle(2500); }, f.say);   // X3: no upstream call on the worker; T036: our sub-menu pictures; T025: our painted tree squares
+        [g, say = f.say](int id) { const int t = rw::menuart::ThirdOfArt(id); return t >= 0 ? MenuArt(t, say) : rw::treeart::SlotOfArt(id) >= 0 ? rw::treeart::Picture(Module(), id) : rw::glyphart::SlotOfArt(id) >= 0 ? rw::glyphart::Picture(Module(), id) : g->icons.Take(id); }, [g] { g->icons.Settle(2500); }, f.say);   // X3: no upstream call on the worker; our sub-menu pictures; our painted tree squares
     gpu = g;
     seatsKey = 0;   // ask the worker for the current seats
     if (f.say) {
@@ -1131,7 +1131,7 @@ void Pointer(host::PointerFrame f) {
 }
 
 // ---- Bug 9: the world-locked ring keeps the wheel open while the resting wheel hand is out of view;
-// every open and close is logged with its reason (Jeff: "why did it close?") ----
+// every open and close is logged with its reason (the player: "why did it close?") ----
 int pageWas = -1;                         // last frame's upstream page (the Input seam's)
 ULONGLONG openedAt = 0, trackSaidAt = 0;
 double openedMs = 0, switchedMs = -1;     // the trace for audit bug 6: this open and its last switch on the fine clock (under 0: none)
@@ -1140,7 +1140,7 @@ uint64_t sessionWas = 0;
 bool clickWas[2]{};
 rw::WheelEdges edges;                     // opened / switched / closed and the close's reason (review-bug9 M1: pure, tested)
 const char* pausedSaid = nullptr;         // the last "ring paused:" reason said this open (review-bug9 S2: only on a change)
-// Round 2026-11-08 #1 (Jeff's rule for closing; ring_wheel_close.h)
+// Round 2026-11-08 #1 (the player's rule for closing; ring_wheel_close.h)
 rw::closing::Hold hold; rw::closing::FocusBlip focusBlip;
 const char* focusWhy = nullptr;   // the clear's name (headset-focus, session-end, xr-sync-failed, copy-failed), from Blip to Cleared in one ClearInput
 bool shutBeforeClear = false;     // HandControls had no wheel at that Blip: upstream closed it on the last focused frame
@@ -1263,12 +1263,12 @@ void FillQuick(rw::QuickIn& q, const host::InputFrame& f, const ia::Snapshot& s,
     }
     for (int h = 0; h < 2; ++h) for (int k = 0; k < rw::Slots; ++k) { const int slot = rw::SlotOf(h, k); q.bound[size_t(h)][size_t(k)] = slot >= 0 ? s.skills[size_t(slot)].id : -1; }
 }
-// The Quick cast third tapped (its trigger click, a tap of any button), or its shelf entry (2026-11-16, Jeff: "ring menu > quick
+// The Quick cast third tapped (its trigger click, a tap of any button), or its shelf entry (2026-11-16, the player: "ring menu > quick
 // cast"): its page opens inside the ring, as Glyphs and Gestures do. Its switch Off or a class that keeps upstream: nothing opens,
 // three short pulses, said.
 void OpenQuickCast(int hand, const ia::Snapshot& s, host::InputFrame& f, double heldMs, const char* how) {
     char line[240];
-    const char* no = !framevr::quickradial::Enabled() ? "Quick cast is Off (VR Settings > Combat > Quick cast)"
+    const char* no = !framevr::quickradial::Enabled() ? "Quick cast is Off (VR Settings > Menus > Ring skill menu)"
                    : !framevr::quickradial::ClassKnown(s.skillClass) ? "this class keeps upstream" : nullptr;
     if (no) {
         QueuePulses(hand, 3, .35f);
@@ -1321,7 +1321,7 @@ void Input(host::InputFrame f) {
         char line[96]; std::snprintf(line, sizeof line, "Frame ring wheel: tree layout=%s%s", mode ? "Tree orbs" : "Trees shown", layoutSaid < 0 ? "" : " (changed: new layout)");
         f.say(line); layoutSaid = mode;
     }
-    AskOtherLabs(s, f.say);   // headset fixes 2026-11-15: Army X menu's shelf entry, the icon remaps (Kick icon); dark seams: one branch each
+    RefreshEntries(s, f.say);   // the General shelf's extra entries
     Seats(s);
     if (!restSaid && f.say) {   // R8 match stage 1: where each seat's rest glow came from, once a layout
         char line[112]; std::snprintf(line, sizeof line, "Frame ring wheel: rest glow kit=%d tree=%d (per skill from the kit; tree: not in the kit table)", restFromKit, restByTree);
@@ -1329,7 +1329,7 @@ void Input(host::InputFrame f) {
     }
     if (gpu && !gpu->icons.Done())   // X3: the frame thread asks upstream's icon cache (as its Prefetch does), only until the set is in
         gpu->icons.Poll([](int id) -> std::shared_ptr<const ia::icons::Image> {
-            if (rw::menuart::ThirdOfArt(id) >= 0 || rw::treeart::SlotOfArt(id) >= 0 || rw::glyphart::SlotOfArt(id) >= 0) {   // (Glyph icon: and its squares) T036: our sub-menu pictures (T025: and tree squares) come from the plugin on the worker (MenuArt), never upstream's cache
+            if (rw::menuart::ThirdOfArt(id) >= 0 || rw::treeart::SlotOfArt(id) >= 0 || rw::glyphart::SlotOfArt(id) >= 0) {   // (Glyph icon: and its squares) our sub-menu pictures (and tree squares) come from the plugin on the worker (MenuArt), never upstream's cache
                 static const auto ours = std::make_shared<const ia::icons::Image>();   // "in" for the box; the worker never takes it
                 return ours;
             }
@@ -1348,7 +1348,7 @@ void Input(host::InputFrame f) {
         }
     }
     if (f.wheelHand < 0 || f.page != int(ia::MenuPage::Glyphs)) choose = -1;   // the chooser lives on upstream's open Glyphs page
-    KeepButtons(s, f.say);   // T036: each sub-menu's button, for the Hands seam (next frame) and the badges
+    KeepButtons(s, f.say);   // each sub-menu's button, for the Hands seam (next frame) and the badges
     fireGate.Watch(f.wheelHand, f.page, rw::NowMs());   // S-B: every frame, the wheel's hand and page
     if (wantMenu.third >= 0 && fireGate.GaveUp(rw::NowMs(), WantMenuMs)) {   // the wheel never got there: given up, said once
         if (f.say) { char line[200]; std::snprintf(line, sizeof line, "Frame ring wheel: sub-menu %s not opened: the wheel did not get there (%d clicks on page %s, %.0f ms since the ask or a page change)", rw::ThirdName[wantMenu.third], fireGate.fires, UpPageName(f.page), rw::NowMs() - fireGate.sinceMs); f.say(line); }
@@ -1378,7 +1378,7 @@ void Input(host::InputFrame f) {
     set.hasMotions = rp == rw::RingPage::GlyphChoose || rp == rw::RingPage::QuickChoose || framevr::spellmotion::HasMotions(s.skillClass);   // the choosers: Back / Clear
     set.growMs = int(std::lround(cfg::Value(cfg::GrowMs)));
     set.blurbMs = int(std::lround(cfg::Value(cfg::BlurbMs)));
-    set.thirds = rp == rw::RingPage::Main;   // T036: the center in thirds (the chooser keeps its Back / Clear halves)
+    set.thirds = rp == rw::RingPage::Main;   // the center in thirds (the chooser keeps its Back / Clear halves)
     set.thirdGrowPct = cfg::Value(cfg::ThirdGrow);
     if (pageIconsSay >= 0 && f.say) {
         char line[96]; std::snprintf(line, sizeof line, "Frame ring wheel: gesture page icons: %d seats + %d more for the cards", layout.count, pageIconsSay);
@@ -1426,7 +1426,7 @@ void Input(host::InputFrame f) {
     f.hover = -1; f.trigger = 0;
     const int pointer = pointerOwner >= 0 ? pointerOwner : 1 - f.wheelHand;   // the laser's hand (job B: the owner)
     char pageLine[220];
-    if (wantMenu.third >= 0 && rp != rw::RingPage::GlyphChoose && !rw::QuickPage(rp)) {   // T036: a sub-menu asked for: upstream's page there first, one cell a frame
+    if (wantMenu.third >= 0 && rp != rw::RingPage::GlyphChoose && !rw::QuickPage(rp)) {   // a sub-menu asked for: upstream's page there first, one cell a frame
         const rw::NavStep nav = rw::NavigateTo(wantMenu.third, ia::MenuPage(f.page));
         if (nav.nav == rw::Nav::Fire) {   // review F2: a click is one frame at 1 and a frame at 0 (upstream needs the edge and rearm)
             if (fireGate.Step(in.nowMs)) { f.hover = nav.cell; f.trigger = 1; edges.Wrote(CellWhy(nav.cell)); }
@@ -1582,7 +1582,7 @@ void Input(host::InputFrame f) {
         pages.Reset();   // back on a page: its lockout and let-go (PageEngine sees the change)
         const rw::Layout& cl = chooseLayout;
         step = engine.Step(in, set);
-        // The Commander orders' row (Jeff's pick B, 2026-11-14; ring_wheel_pages.h): an order takes button presses as a
+        // The Commander orders' row (the player's pick B, 2026-11-14; ring_wheel_pages.h): an order takes button presses as a
         // main-ring seat does, through the same QuickCast; a skill's seat keeps the engine's pick at any press length.
         rw::QuickIn q;
         FillQuick(q, f, s, in.nowMs); q.under = rw::OrderUnder(cl, step.under);
@@ -1630,7 +1630,7 @@ void Input(host::InputFrame f) {
     step = engine.Step(in, set);
     if (step.event == rw::Event::Upstream && step.cell >= 0) { f.hover = step.cell; f.trigger = 1; edges.Wrote(CellWhy(step.cell)); }
     if (step.event == rw::Event::OpenQuick) OpenQuickCast(pointer, s, f, 0, "the trigger");   // 2026-11-16: the Quick cast third's click: its page
-    if (const int t = rw::ThirdOf(step.under.kind); t != thirdSaid) {   // T036: each change of the pointed third (and its end), once
+    if (const int t = rw::ThirdOf(step.under.kind); t != thirdSaid) {   // each change of the pointed third (and its end), once
         if (f.say && (t >= 0 || thirdSaid >= 0)) {
             if (t >= 0) { std::snprintf(pageLine, sizeof pageLine, "Frame ring wheel: center %s pointed (grow %.0f%%, others %.0f%%)", rw::ThirdName[t], set.thirdGrowPct, cfg::Value(cfg::ThirdDim)); f.say(pageLine); }
             else f.say("Frame ring wheel: center none pointed");
@@ -1639,7 +1639,7 @@ void Input(host::InputFrame f) {
     }
     // R6Q: both hands' ten slots (upstream's rule, hand_controls.h): trigger, primary, secondary, grip + primary, grip + secondary.
     rw::QuickIn q;
-    FillQuick(q, f, s, in.nowMs); q.under = step.under; q.thirds = set.thirds;   // T036: the thirds' pseudo seats
+    FillQuick(q, f, s, in.nowMs); q.under = step.under; q.thirds = set.thirds;   // the thirds' pseudo seats
     {   // feedback 1 item 3: the badges' letters; job B: a hand that reads Unknown (asleep) keeps its last real layout, never 1 / 2
         const bool automatic = int(vrsettings::Read().values[framevr::settings::ControllerLabels]) == int(framevr::controllers::Choice::Automatic);
         const int now = int(letterHold.Step(f.wheelHand == 1 ? 1 : 0, framevr::controllers::Layout(f.layout), automatic));
@@ -1663,13 +1663,13 @@ void Input(host::InputFrame f) {
     switch (e.event) {
     case rw::Quick::QuickCast: {   // close through upstream's center, then cast through upstream's glyph press (OnRingCast)
         const auto& st = layout.seats[size_t(e.seat)];
-        if (const int k = EntryOf(st.id, st.owner); k == 1 && !entries[1].dim) { OpenQuickCast(e.hand, s, f, e.heldMs, "its shelf entry"); break; }   // T035: a tap opens its page
+        if (const int k = EntryOf(st.id, st.owner); k == 1 && !entries[1].dim) { OpenQuickCast(e.hand, s, f, e.heldMs, "its shelf entry"); break; }   // a tap opens its page
         if (const int k = EntryOf(st.id, st.owner); k >= 0) {   // headset fixes 2026-11-15: another ring's entry casts nothing; the wheel stays open
             QueuePulses(e.hand, 2, .25f);
             if (f.say) { std::snprintf(line, sizeof line, "Frame ring wheel: tap on %s: nothing to cast (hold a button on it to put it there) held=%.0f ms", entrySkills[size_t(k)].name, e.heldMs); f.say(line); }
             break;
         }
-        if (const int t = st.owner == -1 ? rw::MenuOfEntry(st.id) : -1; t >= 0) {   // T036: a sub-menu's shelf entry: a tap opens it
+        if (const int t = st.owner == -1 ? rw::MenuOfEntry(st.id) : -1; t >= 0) {   // a sub-menu's shelf entry: a tap opens it
             wantMenu = {t, e.hand, in.nowMs}; fireGate.Ask(rw::NowMs()); QueuePulses(e.hand, 1, .2f);
             if (f.say) { std::snprintf(line, sizeof line, "Frame ring wheel: sub-menu %s asked (its shelf entry, held=%.0f ms)", rw::ThirdName[t], e.heldMs); f.say(line); }
             break;
@@ -1683,7 +1683,7 @@ void Input(host::InputFrame f) {
         break;
     case rw::Quick::Assign: {
         const auto& st = layout.seats[size_t(e.seat)];
-        if (const int t = st.owner == -1 ? rw::MenuOfEntry(st.id) : -1; t >= 0) { MenuBind(t, e, f.layout, s, f.say); break; }   // T036: a sub-menu's shelf entry
+        if (const int t = st.owner == -1 ? rw::MenuOfEntry(st.id) : -1; t >= 0) { MenuBind(t, e, f.layout, s, f.say); break; }   // a sub-menu's shelf entry
         {
             Pending p; p.bind = {true, rw::SlotOf(e.hand, e.slot), st.id, st.owner, e.slot, e.hand, f.layout};
             if (const int k = EntryOf(st.id, st.owner); k >= 0)   // another ring's menu (Army X menu, Quick cast): bug 4, the skill it clears moves
@@ -1709,14 +1709,14 @@ void Input(host::InputFrame f) {
         QueuePulses(e.hand, 1, .6f);
         break;
     }
-    case rw::Quick::MenuTap: {   // T036: a tap on the Gestures or Quick cast third opens it (the pointing hand's trigger already clicked, through the engine)
+    case rw::Quick::MenuTap: {   // a tap on the Gestures or Quick cast third opens it (the pointing hand's trigger already clicked, through the engine)
         const int t = rw::SeatThird(e.seat);
         if (!rw::GlyphTapClicks(e.hand, e.slot, pointerOwner)) break;
         if (t == rw::ThirdGestures) { f.hover = ia::MotionsCell; f.trigger = 1; edges.Wrote(CellWhy(ia::MotionsCell)); }
         else if (t == rw::ThirdQuick) OpenQuickCast(e.hand, s, f, e.heldMs, "a tap");   // 2026-11-16: its page
         break;
     }
-    case rw::Quick::MenuAssign:   // T036: that sub-menu on this button
+    case rw::Quick::MenuAssign:   // that sub-menu on this button
         MenuBind(rw::SeatThird(e.seat), e, f.layout, s, f.say);
         break;
     case rw::Quick::NoChange:
@@ -1727,7 +1727,7 @@ void Input(host::InputFrame f) {
     }
 }
 
-// T036 FilterRingHands: transport Input, before HandControls steps (one frame ahead of this frame's Input seam). A sub-menu's
+// FilterRingHands: transport Input, before HandControls steps (one frame ahead of this frame's Input seam). A sub-menu's
 // button opens that hand's wheel there (its click set for this frame, HandControls' own toggle; with a wheel open already, the
 // open wheel goes there) and the press is spent (no hold to assign starts on it). Headset 2026-11-16 bug 1: with the ring's main
 // page open and a seat or a center third under the laser (last frame's step), the press is the ring's instead, as any button's: a
@@ -1777,7 +1777,7 @@ void Request(host::RequestFrame f) {
     auto bindDone = [&](rw::ReplyEnd e) {
         if (e == rw::ReplyEnd::None) return;
         if (rw::IsRefusal(e)) { engine.Refused(); QueuePulses(bindSent.hand, 3, .35f); }
-        if (e == rw::ReplyEnd::Applied && bindSent.menu >= 0 && bindSent.menu < rw::ThirdCount) {   // T036: the button is that sub-menu's now
+        if (e == rw::ReplyEnd::Applied && bindSent.menu >= 0 && bindSent.menu < rw::ThirdCount) {   // the button is that sub-menu's now
             const rw::MenuButtons b = rw::Assigned(ReadButtons(), bindSent.menu, bindSent.index);
             buttons::Claim(bindSent.index, bindSent.menu == rw::ThirdGlyphs ? buttons::Owner::Glyphs : bindSent.menu == rw::ThirdGestures ? buttons::Owner::Gestures : buttons::Owner::QuickCast, f.say);   // review S1: one ring per button (Army X menu, Quick cast radial)
             for (int t = 0; t < rw::ThirdCount; ++t) cfg::Set(MenuKey(t), float(b.slot[size_t(t)] + 1));
@@ -1869,7 +1869,7 @@ void Layer(host::LayerFrame f) {
     Setup(f);
     if (!gpu) return;
     gpu->compose.Pump();
-    if (!f.open || !placed || !f.palette) { treeSaid = false; glyphSaid = false; policy.Want(rw::Scene{}); pointedFx.Reset(); return; }   // T025: the next open says its tree icons line
+    if (!f.open || !placed || !f.palette) { treeSaid = false; glyphSaid = false; policy.Want(rw::Scene{}); pointedFx.Reset(); return; }   // the next open says its tree icons line
     auto& q = *static_cast<XrCompositionLayerQuad*>(f.palette);
     if (!ringActive) {   // upstream's picture at the ring's pose and width (R3)
         if (q.subImage.swapchain != XR_NULL_HANDLE) q.size = {placedWidth, placedWidth};
@@ -1885,7 +1885,7 @@ void Layer(host::LayerFrame f) {
     rw::Scene scene;
     scene.open = true; scene.layout = &shown; scene.step = step; scene.tMs = double(f.nowMs);
     scene.anim = ReadAnim();
-    scene.layers = ReadLayers();   // T036: ring > Experiment: Ring wheel > Layers
+    scene.layers = ReadLayers();   // ring > Experiment: Ring wheel > Layers
     if (const ULONGLONG t = GetTickCount64(); f.say && (!layersSaid || !(scene.layers == layersTold)) && t - layersSaidAt > 1000) {   // the first frame and each change, at most once a second
         layersTold = scene.layers; layersSaid = true; layersSaidAt = t;
         char line[200];
@@ -1894,7 +1894,7 @@ void Layer(host::LayerFrame f) {
                       scene.layers.fx ? "on" : "off", built->icons.keyed, built->icons.despeckled);
         f.say(line);
     }
-    scene.thirds = ringPage == rw::RingPage::Main;   // T036: the center in thirds; the chooser keeps its halves
+    scene.thirds = ringPage == rw::RingPage::Main;   // the center in thirds; the chooser keeps its halves
     scene.thirdGrowPct = cfg::Value(cfg::ThirdGrow); scene.thirdDimPct = cfg::Value(cfg::ThirdDim);
     scene.quickWord = rw::QuickThirdWord(framevr::quickradial::Enabled(), framevr::quickradial::ClassKnown(s.skillClass));   // 2026-11-16, review N1: Off, or not this class
     // feedback 1 item 4: upstream's footer tabs from the hit test's numbers (the same developer flag as the quad, review R6 X2)
@@ -1925,9 +1925,9 @@ void Layer(host::LayerFrame f) {
     scene.hasMotions = framevr::spellmotion::HasMotions(s.skillClass);
     scene.atlasPct = built->icons.scalePct; scene.cells = built->icons.cellOf.data(); scene.metrics = &built->metrics;
     scene.initials = initialPtr.data();
-    if (scene.thirds && built->icons.cellOf.size() == size_t(request.n))   // T036 (2026-11-16): the thirds' pictures' cells (3 scans of at most 81 ids, open main page only)
+    if (scene.thirds && built->icons.cellOf.size() == size_t(request.n))   // (2026-11-16): the thirds' pictures' cells (3 scans of at most 81 ids, open main page only)
         for (int t = 0; t < rw::ThirdCount; ++t) scene.thirdCell[size_t(t)] = int16_t(rw::CellOfSkill(request.ids.data(), built->icons.cellOf.data(), request.n, rw::menuart::ArtId(t)));
-    {   // T025 Tree icon: the mode, the size and each tree position's painted picture (an atlas cell; -1 keeps the drawn glyph). Off (Drawn): nothing looked up.
+    {   // Tree icon: the mode, the size and each tree position's painted picture (an atlas cell; -1 keeps the drawn glyph). Off (Drawn): nothing looked up.
         const rw::treeart::Mode tm = TreeMode(); const int tp = TreeSizePct();
         scene.treeMode = int(tm); scene.treeSizePct = tp;
         int found = 0;
@@ -1984,7 +1984,7 @@ void Layer(host::LayerFrame f) {
     if (!onPage && !anyChooser) {   // feedback 1 item 3: main page only (FS7)
         scene.badges = Badges(s, double(f.nowMs), layout, seatsKey, f.say);
         scene.drawBadge = rw::DrawBadgeFor(glyphDrawNow, wheelHandNow, framevr::controllers::Layout(ctrlLayoutNow), BadgeLookNow().sizePx);   // #3: upstream's own draw slot
-        const int sizePx = BadgeLookNow().sizePx;   // T036: each sub-menu's button on its third's mark (the Size row applies, Angle and Depth do not)
+        const int sizePx = BadgeLookNow().sizePx;   // each sub-menu's button on its third's mark (the Size row applies, Angle and Depth do not)
         const int quickSlot = scene.quickWord ? -1 : framevr::quickradial::ButtonSlot();   // 2026-11-16: Quick cast's third shows the radial's button
         for (int t = 0; t < rw::ThirdCount && sizePx > 0; ++t) {
             const int slot = t == rw::ThirdQuick ? (quickSlot >= 0 && s.skills[size_t(quickSlot)].id < 0 ? quickSlot : -1) : buttonsNow.slot[size_t(t)];
@@ -1992,7 +1992,7 @@ void Layer(host::LayerFrame f) {
                 if (slot >= 0 && rw::SlotOf(h, k) == slot)
                     scene.menuBadge[size_t(t)] = {true, rw::BadgeKindOf(k), rw::BadgeLetter(framevr::controllers::Layout(ctrlLayoutNow), h, k), sizePx};
         }
-        if (mainMark.size() == size_t(layout.count)) scene.seatMark = mainMark.data();   // T036: the sub-menus' shelf entries
+        if (mainMark.size() == size_t(layout.count)) scene.seatMark = mainMark.data();   // the sub-menus' shelf entries
     }
     auto cellOf = [&](int id) -> int {
         return built->icons.cellOf.size() == size_t(request.n) ? rw::CellOfSkill(request.ids.data(), built->icons.cellOf.data(), request.n, qr::PictureId(id)) : -1;   // item 6: the page's cards too (a kind: its picture's)
@@ -2067,7 +2067,7 @@ void Layer(host::LayerFrame f) {
                 // An order (designer gate D3): every line whole, the short title when the long one does not fit.
                 if (order) blurbs.Get(built->metrics, key, tx::WholeBlurb(built->metrics, {k->name, sub, rw::orders::Help(seat.id), rw::orders::ChooserAction()}, rw::orders::Short(seat.id)));
                 else if (other) blurbs.Get(built->metrics, key, {k->name, otherDim ? EntryDimBlurb[ek] : "General", "", chooser ? "Not for glyphs" : "Hold a button on it to assign"});
-                else if (rw::MenuOfEntry(seat.id) >= 0 && seat.owner == -1) blurbs.Get(built->metrics, key, {k->name, "Sub-menu", "", "Tap opens, hold assigns"});   // T036
+                else if (rw::MenuOfEntry(seat.id) >= 0 && seat.owner == -1) blurbs.Get(built->metrics, key, {k->name, "Sub-menu", "", "Tap opens, hold assigns"});   // 
                 else if (quickChooser) blurbs.Get(built->metrics, key, {k->name, sub, "", listed ? "Trigger puts it in " + chooseTitle : std::string("Not one Quick cast casts")});   // 2026-11-16
                 else blurbs.Get(built->metrics, key, {k->name, sub, "", !chooser ? "Tap casts, hold assigns" : listed ? "Trigger puts it on the glyph" : "Needs a target: not for glyphs"});
             }

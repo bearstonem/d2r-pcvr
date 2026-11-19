@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (T025 round 2026-11-08 #1, Jeff's rule for closing): with the ring On the wheel closes only on a deliberate
+// Ring skill menu (round 2026-11-08 #1, the player's rule for closing): with the ring On the wheel closes only on a deliberate
 // action or a named safety reason. A hitch of any length, a lost hand, a lost laser or the headset's tracking never closes it.
 // Upstream closes the wheel on an input gap over 100 ms (hand_controls.h:44) and the engine resets on one over 150 ms
 // (interactions.h:787); the ring shows both a clock that never makes a step that long while the wheel is open. Pure: the ring

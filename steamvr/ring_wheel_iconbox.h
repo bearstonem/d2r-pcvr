@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (T025, review R6 X3): the icons the ring's atlas worker reads. The frame thread fetches them from upstream's
+// Ring skill menu (, review R6 X3): the icons the ring's atlas worker reads. The frame thread fetches them from upstream's
 // icon cache (interaction::icons::Get, as upstream's own Prefetch does) until every one is in or 2 s pass; the worker only
 // reads this box. So the worker never calls upstream: at session end upstream's icons::Shutdown runs before OnUiReset, and
 // a Get from our worker after it would start upstream's icon worker again (a thread left running at exit).

@@ -1,11 +1,11 @@
 #pragma once
-// Ring skill menu (T025, build-plan L1b "Tree orbs: open-tree state", Boss decision on Q1, 2026-11-07): the Tree orbs layout's
+// Ring skill menu (, build-plan L1b "Tree orbs: open-tree state", Boss decision on Q1, 2026-11-07): the Tree orbs layout's
 // orbs, their closed names and the center while a tree is open, as plain data (kit wheel.js drawOrb, runeRing, the layout e
 // readout). Pure and Windows-free, like ring_wheel_draw.h, and drawn only with its recipes (disc, ring, rune band, tree glyph,
 // the glyph atlas): no new shader code. Every function draws nothing unless the wheel is open in the Tree orbs layout, so
 // Trees shown (the default) is untouched.
 //
-// Wiring (engine-dev): Build calls PushOrbs in place of its own orb branch and OrbTexts with the other text; while CenterOpen
+// Wiring: Build calls PushOrbs in place of its own orb branch and OrbTexts with the other text; while CenterOpen
 // is true it draws PushOpenCenter in place of its center rings and skips the split. OrbGlow is the orb's rest glow for the
 // under-face effect pass. CenterBacking and PushGesturesMark are the designer's two Trees shown notes (r8-match-spec, stage 1
 // redo): the kit's backing (75% black to r 84, gone by r 88) and the kit's Gestures mark.
@@ -229,7 +229,7 @@ inline CenterPlace CenterLayout(const text::Metrics& m, const Lines& name, const
     return {};
 }
 // The text: each closed orb's tree name (hidden on the open orb: the fan names it), and while CenterOpen the open tree's name
-// with "Point at a skill" under it. Names come from Scene::treeNames (upstream's short names until Jeff picks). Returns the
+// with "Point at a skill" under it. Names come from Scene::treeNames (upstream's short names until the player picks). Returns the
 // glyphs pushed.
 inline int OrbTexts(const Scene& s, const text::Metrics& m, Instance* out, int& n, int max) {
     if (!Active(s) || !m.ok) return 0;

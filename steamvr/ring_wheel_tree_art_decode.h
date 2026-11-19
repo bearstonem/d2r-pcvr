@@ -1,5 +1,5 @@
 #pragma once
-// The painted tree sheet's decode (T025; the pure side: steamvr/ring_wheel_tree_art.h): the embedded PNG decoded once on the atlas worker's
+// The painted tree sheet's decode (; the pure side: steamvr/ring_wheel_tree_art.h): the embedded PNG decoded once on the atlas worker's
 // thread, never the frame thread, and the atlas id's picture cut from it. Kept apart so ring_wheel_draw.h and the unit tests stay free of WIC.
 #include <windows.h>
 #include <wincodec.h>

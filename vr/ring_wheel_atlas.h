@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (T025, build step R5): the atlases (plan E4, E2 text; frame-budget section 2). Everything here runs on the
+// Ring skill menu (, build step R5): the atlases (plan E4, E2 text; frame-budget section 2). Everything here runs on the
 // ring's one worker thread, never on the frame thread:
 //  - the compose pass's Setup (shader compile, GPU objects; perf R4 item 1),
 //  - the glyph atlas: upstream's menu fonts (Cinzel 700, Alegreya Sans 500 / 700; SIL OFL) at the render scale through
@@ -33,9 +33,9 @@ bool BuildGlyphs(const Fonts& fonts, int scalePct, AtlasImage& out, text::Metric
 // The icon atlas: `ids[i]` the skill id for seat i (-1 none). `source` returns a decoded icon or null (not cached yet, or
 // none); `settle` waits for the decodes `source` queued (interaction::icons::Wait).
 using IconSource = std::function<std::shared_ptr<const interaction::icons::Image>(int skill)>;
-// keyed, despeckled (T036): the icons cut clean (steamvr/ring_wheel_unbake.h) and the pixels the cleanup pass changed.
+// keyed, despeckled (): the icons cut clean (steamvr/ring_wheel_unbake.h) and the pixels the cleanup pass changed.
 struct IconPack { std::vector<int16_t> cellOf; std::vector<int> missing; int wanted = 0, found = 0, scalePct = 100, keyed = 0, despeckled = 0; };
-// variant: the icon Labs' remaps On (Request::iconVariant): a remapped icon keeps its own art (unbake::Keyed).
+// variant: the icon modules' remaps On (Request::iconVariant): a remapped icon keeps its own art (unbake::Keyed).
 void BuildIcons(const int* ids, int n, int scalePct, const IconSource& source, const std::function<void()>& settle, AtlasImage& out, IconPack& pack, uint32_t variant = 0);
 // R8 match stage 3a: the game effect texture atlas (AtlasKind::FxTex) from upstream's spell sprite cache file (sprites.ssp,
 // steamvr/spell_sprites.h): the fire plates 03 and 04, the smoke atlas, the arc flipbook and the glow card, BC4 decoded on
@@ -52,7 +52,7 @@ public:
     struct Request {
         int classId = -1, scalePct = 150, n = 0;
         std::array<int, MaxSeats + ExtraIcons> ids{};   // the seats, then the Gestures page's other cards (round 2026-11-08 item 6)
-        uint32_t iconVariant = 0;   // the icon Labs' remaps (IconVariant, headset fixes 2026-11-15): a change is a new build
+        uint32_t iconVariant = 0;   // the icon modules' remaps (IconVariant, headset fixes 2026-11-15): a change is a new build
         bool operator==(const Request&) const = default;
     };
     struct Built {

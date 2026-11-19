@@ -1,8 +1,8 @@
 #pragma once
-// Ring skill menu (T025, 2026-11-14): the 7 Commander orders (upstream v0.3.35, #439: Commander of the Dead) as the ring
+// Ring skill menu (, 2026-11-14): the 7 Commander orders (upstream v0.3.35, #439: Commander of the Dead) as the ring
 // shows them. THE ONE FILE for an order's picture and words: every draw site, blurb and log line reads them here, so new
 // drawn formation icons are a change to IconSkill alone.
-// Jeff's pick (2026-11-14): upstream's text and its shared icon for now. Which orders exist, when they show and what they
+// the player's pick (2026-11-14): upstream's text and its shared icon for now. Which orders exist, when they show and what they
 // do stay upstream's (summon_commander.h, interaction::HasSummonArmy, interaction::MakeCommanderSkill): never copied here.
 #include <cstring>
 #include <string>

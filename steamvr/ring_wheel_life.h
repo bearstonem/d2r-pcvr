@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (T025, review-r6 X1 / X6): the ring swapchain's life after an Off edge, as plain data. Pure and Windows-free
+// Ring skill menu (, review-r6 X1 / X6): the ring swapchain's life after an Off edge, as plain data. Pure and Windows-free
 // (ring-wheel-test runs it with fake GPU sides and a real worker thread).
 //
 // X1: the ring's worker frees only the GPU side (Compose::Release waits for the GPU there, off the frame thread). The
