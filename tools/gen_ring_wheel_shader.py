@@ -44,7 +44,7 @@ def fnv64(data):
 
 def listing_numbers(text, entry):
     """A pixel shader's instruction slots and temps from fxc's /Fc listing. A listing without the slot line (an fxc that
-    words it otherwise) fails the build: read as 0 it would pass any budget (review N7)."""
+    words it otherwise) fails the build: read as 0 it would pass any budget."""
     m = re.search(r'Approximately (\d+) instruction slots', text)
     if not m:
         raise SystemExit(f'ring wheel compose: no instruction-slot line in fxc\'s listing for {entry} (tools/gen_ring_wheel_shader.py)')
@@ -77,7 +77,7 @@ def find_fxc():
 
 
 def shader_constants():
-    """Review N1: the HLSL's copies of ring_wheel_draw.h's constants, the same line as the C++ ShaderConstants()."""
+    """The HLSL's copies of ring_wheel_draw.h's constants, the same line as the C++ ShaderConstants()."""
     text = (ROOT / 'steamvr' / 'ring_wheel_draw.h').read_text('ascii')
     v = {}
     for name in ('PointedReachPx', 'PointedEdgePx'):
