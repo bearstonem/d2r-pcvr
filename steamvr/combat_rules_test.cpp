@@ -177,5 +177,16 @@ int main() {
         assert(DamageOverTime(false,false));
         assert(!DamageOverTime(true,false)&&!DamageOverTime(false,true)&&!DamageOverTime(true,true));
     }
+    {   // Leech diagnostics: each carried record has exactly one fate, in the order the game reads it.
+        assert(LeechOutcome(false,false,true,true,true)==LeechFate::None);          // no steal anywhere
+        assert(LeechOutcome(true,false,false,true,false)==LeechFate::NotOnRecord);  // the hero has steal, the hit carried none
+        assert(LeechOutcome(true,true,true,false,false)==LeechFate::OnHitOff);      // zeroed at 44CE80 entry
+        assert(LeechOutcome(true,true,true,true,true)==LeechFate::OnHitOff);        // the earlier gate is the one that took it
+        assert(LeechOutcome(true,true,false,false,false)==LeechFate::NotReached);   // 450C90 never ran on it
+        assert(LeechOutcome(true,true,false,true,true)==LeechFate::WouldMiss);
+        assert(LeechOutcome(true,true,false,true,false)==LeechFate::LetThrough);
+        assert(LeechOutcome(false,true,false,true,false)==LeechFate::LetThrough);   // carried steal counts whatever the stat read said
+        assert(StatGain(100,356)==256&&StatGain(356,100)==0&&StatGain(5,5)==0);
+    }
     std::puts("Combat rules: local ownership, guaranteed accuracy, subsequent random-stream, swing damage, on-hit and would-hit gate tests passed");
 }

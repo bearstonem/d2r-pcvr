@@ -1581,7 +1581,11 @@ and trigger/button melee were:
     other contact applies none. The game's
     own roll sites are checked at start (`Frame on-hit gate:`); a part not
     found stays native. `[debug] melee_trace=1` adds `onhit=1/0` to each
-    traced contact.
+    traced contact. `Frame leech:` (every build, while you hit with life or
+    mana steal) counts your melee hits with steal: those this gate or the
+    would-have-hit gate switched off, those the game's own leech ran on and the
+    mana and life it gave, any it never reached, and swings whose hit carried
+    no steal although the hero has it.
   - **Would-have-hit gate:** a contact's effects other than its damage also
     need the swing's native roll to have hit (below, *Would-have-hit gate*),
     so a full-cycle stroke at 60% attack rating chance carries them about 60%
