@@ -5,8 +5,10 @@
 namespace framevr::dualwield {
 struct Equipment {
     uint32_t id[2]{},type[2]{},displayed[2]{};
+    bool flail[2]{};   // by body slot, as type: a flail (weapon_reach.h FlailCode), whose contact reaches its head
     int BodyHand(int hand) const {return hand>=0&&hand<2&&displayed[hand]?(displayed[hand]==id[0]?0:displayed[hand]==id[1]?1:-1):-1;}
     uint32_t Type(int hand) const {const int body=BodyHand(hand);return body>=0?type[body]:0;}
+    bool Flail(int hand) const {const int body=BodyHand(hand);return body>=0&&flail[body];}
 };
 inline bool MeleeType(uint32_t type) {
     switch(type) {
