@@ -211,6 +211,17 @@ std::atomic<unsigned> gatedMeleeDamage{0},gatedMeleeAttack{0},gatedLeech{0},gate
 struct TapScope {uintptr_t striker=0,struck=0;bool gated=false;};
 thread_local TapScope tapScope;
 std::atomic<unsigned> gatedTap{0},passedTap{0};
+// Leech diagnostics (combat_rules.h LeechOutcome; Report: "Frame leech:", every build).
+// A player found a mana-steal mace gave no mana in VR, and no counter showed whether the
+// gates, the game's leech or something else took it. ApplyDamage opens a probe for the
+// local player's melee record that carries steal; DamageEffects says whether 450C90 ran
+// on it and what the hero's mana and life rose by inside it (256ths of a point). A hit
+// whose record carried none while the hero has steal is counted too (NotOnRecord).
+struct LeechProbe {bool open=false,reached=false,wouldMiss=false;int mana=0,life=0;};
+thread_local LeechProbe leechProbe;
+std::atomic<unsigned> leechCarried{0},leechNotOnRecord{0},leechOnHitOff{0},leechNotReached{0},leechWouldMiss{0},leechLetThrough{0},leechNoGain{0};
+std::atomic<int64_t> leechMana{0},leechLife{0};
+std::atomic<int> lastStealLife{0},lastStealMana{0},lastStealPhysical{0};
 bool hitReactions=false;   // ApplyDamage clears a quiet contact's reaction flags (Install)
 // Unleashed would-have-hit gate (Cal, 2026-10-22; combat_rules.h WouldHit). Every
 // forced contact - a monster's melee hit or missile on the local player
@@ -740,8 +751,9 @@ void ClearRecordDots(uintptr_t record) {
     if(cleared)++dotCleared;
 }
 uint64_t DamageEffects(uintptr_t game,uintptr_t attacker,uintptr_t defender,uintptr_t record) {
+    bool wouldMiss=false;
     if(record) {
-        const bool wouldMiss=MissGated(attacker,defender);
+        wouldMiss=MissGated(attacker,defender);
         if(wouldMiss) {
             // Leech/drain, stun, chill, freeze and absorb heal: only a landed hit's.
             static constexpr int Fields[]={0x118,0x11c,0x120,0x124,0x128,0x12c,0x130};
@@ -755,7 +767,16 @@ uint64_t DamageEffects(uintptr_t game,uintptr_t attacker,uintptr_t defender,uint
         // The on-hit gate is melee's: a spell inside a trigger hit's window keeps its poison.
         if(!DamageOverTime(wouldMiss,damageFlag==0&&OnHitOff(attacker,defender)))ClearRecordDots(record);
     }
-    return originalEffects(game,attacker,defender,record);
+    // Leech diagnostics: the game's leech runs on the probed record; the hero's mana and
+    // life just before and after it say what it actually gave (nothing else runs in between).
+    if(!leechProbe.open||leechProbe.reached)return originalEffects(game,attacker,defender,record);
+    leechProbe.reached=true;leechProbe.wouldMiss=wouldMiss;
+    if(int32_t physical=0;Read(record+0x18,physical))lastStealPhysical=physical;
+    const auto stat=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva));
+    const int mana=stat(attacker,8,0),life=stat(attacker,6,0);
+    const uint64_t result=originalEffects(game,attacker,defender,record);
+    leechProbe.mana=StatGain(mana,stat(attacker,8,0));leechProbe.life=StatGain(life,stat(attacker,6,0));
+    return result;
 }
 uint64_t MonsterOnHit(uintptr_t game,uintptr_t monster) {
     // The attacking monster's mods' on-hit functions (MonUMod), on its landed hit only.
@@ -919,12 +940,30 @@ uint64_t HitChance(uintptr_t game,uintptr_t attacker,uintptr_t defender,int chan
 uint64_t ApplyDamage(uintptr_t game,uintptr_t attacker,uintptr_t defender,int flag,uintptr_t damage) {
     const auto savedDefender=damageDefender;damageDefender=defender;
     struct Restore {uintptr_t v;~Restore(){damageDefender=v;}} restoreDefender{savedDefender};
+    // Leech diagnostics: the local player's melee record on a monster, and the life or mana
+    // steal it carries (+0x120 / +0x124, read before any gate); without any, on a physical
+    // swing's own monster (not an aura or spell landing meanwhile), whether the hero has
+    // steal (stats 60 / 62) right now. Only with the leech hook in, which reports whether
+    // the game's leech ran. A nested application keeps its own probe.
+    const LeechProbe outerProbe=leechProbe;leechProbe={};
+    int32_t steal[2]{};uint32_t localId=0,striker[3]{},struck[3]{};
+    const bool mine=!flag&&damage&&effectsIn&&LocalPlayerId(localId)&&
+                    Read(attacker,striker)&&Read(defender,struck)&&PlayerContact(localId,striker[0],striker[2],struck[0]);
+    const bool carried=mine&&Read(damage+0x120,steal)&&(steal[0]||steal[1]);
+    bool heroSteal=carried;
+    if(mine&&!carried&&swingTarget!=NoSwing&&struck[2]==swingTarget) {
+        const auto stat=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva));
+        const int life=stat(attacker,60,0),mana=stat(attacker,62,0);
+        if(life>0||mana>0){heroSteal=true;steal[0]=life;steal[1]=mana;}
+    }
     // Unleashed on-hit gate: a gated swing (or trigger hit) leeches nothing (450C90 reads these two).
+    bool stealOff=false;
     if(!flag&&leechGate&&damage&&OnHitOff(attacker,defender)) {
         int32_t leech[2]{};const int32_t none[2]{};
         if(framevr::ReadMemory(leech,reinterpret_cast<const void*>(damage+0x120),sizeof leech)&&(leech[0]||leech[1])&&
-           framevr::WriteMemory(reinterpret_cast<void*>(damage+0x120),none,sizeof none))++gatedLeech;
+           framevr::WriteMemory(reinterpret_cast<void*>(damage+0x120),none,sizeof none)){++gatedLeech;stealOff=true;}
     }
+    leechProbe.open=carried&&!stealOff;
     const auto saved=damageRecord;const auto savedAttacker=damageAttacker;damageRecord=damage;damageAttacker=attacker;
     const int savedFlag=damageFlag;damageFlag=flag;
     // A damage application nested in a Life Tap scope (e.g. a reflect onto the player
@@ -976,6 +1015,22 @@ uint64_t ApplyDamage(uintptr_t game,uintptr_t attacker,uintptr_t defender,int fl
         if(Read(defender,hero)&&hero[0]==0&&LocalPlayerId(id)&&hero[2]==id&&Read(damage+0x134,dealt)&&dealt>0)projectiles::CombatWalk(1);
     }
     if(cleared)++quietHits;
+    if(heroSteal) {
+        lastStealLife=steal[0];lastStealMana=steal[1];
+        switch(LeechOutcome(heroSteal,carried,stealOff,leechProbe.reached,leechProbe.wouldMiss)) {
+            case LeechFate::NotOnRecord:++leechNotOnRecord;break;
+            case LeechFate::OnHitOff:++leechOnHitOff;break;
+            case LeechFate::NotReached:++leechNotReached;break;
+            case LeechFate::WouldMiss:++leechWouldMiss;break;
+            case LeechFate::LetThrough:
+                ++leechLetThrough;leechMana+=leechProbe.mana;leechLife+=leechProbe.life;
+                if(!leechProbe.mana&&!leechProbe.life)++leechNoGain;
+                break;
+            case LeechFate::None:break;
+        }
+        ++leechCarried;
+    }
+    leechProbe=outerProbe;
     tapScope=savedTap;damageFlag=savedFlag;
     damageRecord=saved;damageAttacker=savedAttacker;return result;
 }
@@ -1813,6 +1868,17 @@ void Report() {
                   ab=absorbScaled.exchange(0);ih||im||sh||sm||th||tm||vu||ds||ab) {
         char line[300];snprintf(line,sizeof line,"Frame would-hit gate: incoming would hit=%u would miss=%u swings would hit=%u would miss=%u shots would hit=%u would miss=%u unknown=%u damage over time off=%u absorbs scaled=%u",
             ih,im,sh,sm,th,tm,vu,ds,ab);
+        framevr::logging::Write(line);
+    }
+    // Leech on the local player's melee hits (every build): each hit that carried life or
+    // mana steal, which gate switched it off, or what the game's leech gave the hero.
+    if(const auto lc=leechCarried.exchange(0),lt=leechLetThrough.exchange(0),ng=leechNoGain.exchange(0),oh=leechOnHitOff.exchange(0),
+                  wm=leechWouldMiss.exchange(0),nr=leechNotReached.exchange(0),no=leechNotOnRecord.exchange(0);lc||lt||ng||oh||wm||nr||no) {
+        const auto mana=leechMana.exchange(0),life=leechLife.exchange(0);
+        char line[480];snprintf(line,sizeof line,"Frame leech: your melee hits with life or mana steal=%u; let through to the game's leech=%u "
+            "(mana +%.2f, life +%.2f, nothing gained=%u); switched off by the on-hit gate (in-between stroke, cleave follow-up)=%u, "
+            "by the would-hit gate=%u; the game's leech never ran=%u; the hit carried no steal=%u; last steal mana %d%% life %d%%, physical damage %.1f",
+            lc,lt,double(mana)/256,double(life)/256,ng,oh,wm,nr,no,lastStealMana.load(),lastStealLife.load(),lastStealPhysical.load()/256.);
         framevr::logging::Write(line);
     }
     if(const auto ss=shotScaled.exchange(0),su=shotUnseen.exchange(0);ss||su) {
