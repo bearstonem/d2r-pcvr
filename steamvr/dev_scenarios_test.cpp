@@ -63,7 +63,8 @@ static Items::Result __cdecl RemoveToken(const PluginContext*,PlayerHandle playe
     ++tokenRemoves;tokenLive=false;return Items::Result::Success;
 }
 static Items::Result __cdecl ItemsCall(const PluginContext*,const Items::Transaction* t,Items::TransactionResult* r) noexcept {
-    ++itemCalls;assert(t->player==local&&(t->outputCount==1||t->outputCount==2||(t->outputCount>=5&&t->outputCount<=10)));
+    ++itemCalls;assert(t->player==local&&(t->outputCount==1||t->outputCount==2||(t->outputCount>=5&&t->outputCount<=10)||
+                     (t->outputCount==4&&t->outputs[0].code==Items::MakeItemCode("fla"))));   // (4: the flails kit only)
     if(t->outputCount==1)assert(t->outputs[0].code==Items::MakeItemCode("buc")||t->outputs[0].code==Items::MakeItemCode("clb"));
     if(t->outputCount==5){   // the throwing kit, or the item-fired bows kit (#432)
         constexpr const char* throwing[]={"jav","pil","glv","tkf","tax"},*bowKit[]={"hbw","lbw","8rx","aqv","cqv"};
@@ -86,8 +87,15 @@ static Items::Result __cdecl ItemsCall(const PluginContext*,const Items::Transac
         const bool torch=t->outputCount==6&&t->outputs[0].code==Items::MakeItemCode("clb");
         const bool loot=t->outputCount==10&&t->outputs[0].code==Items::MakeItemCode("rin")&&t->outputs[1].code==Items::MakeItemCode("amu");
         const bool itemBows=t->outputCount==5&&t->outputs[0].code==Items::MakeItemCode("hbw");
-        const bool starter=((t->outputCount<9&&t->outputCount>2)||potions)&&!itemBows;
-        if(itemBows) {   // #432: Witherstring, Raven Claw and Demon Machine forced by row; arrows and bolts plain
+        const bool flails=t->outputCount==4&&t->outputs[0].code==Items::MakeItemCode("fla")&&t->outputs[1].code==Items::MakeItemCode("mst");
+        const bool starter=((t->outputCount<9&&t->outputCount>2)||potions)&&!itemBows&&!flails;
+        if(flails) {   // 2026-11-19: Tan Do Li Ga and Bloodrise forced by row at 99; the two flails normal at 1
+            constexpr uint32_t rows[]={21,20};
+            if(i<2)assert(s.quality==Items::Quality::Unique&&s.qualityRecordId==rows[i]&&s.itemLevel==99&&
+                          s.flags==Items::ItemCreateFlagBit(Items::ItemCreateFlag::AllowDuplicateUnique));
+            else assert(s.quality==Items::Quality::Normal&&s.qualityRecordId==Items::RandomQualityRecord&&s.itemLevel==1&&s.flags==0);
+            assert(s.stateFlags==Items::ItemStateIdentified);
+        } else if(itemBows) {   // #432: Witherstring, Raven Claw and Demon Machine forced by row; arrows and bolts plain
             constexpr uint32_t rows[]={60,61,199};
             if(i<3)assert(s.quality==Items::Quality::Unique&&s.qualityRecordId==rows[i]&&s.itemLevel==99&&
                           s.flags==Items::ItemCreateFlagBit(Items::ItemCreateFlag::AllowDuplicateUnique));
@@ -228,7 +236,7 @@ int main(){
                 assert(commands[start+PreparationCount+i]==expected);
             }
         }
-        for(int choice:{1,2,CrossbowChoice,BowChoice,SmallShieldChoice,StarterPrimaryChoice,StarterAlternateChoice,ThrowingChoice,PotionsChoice,TorchChoice,ThrowingPotionsChoice,LootBeamsChoice,ItemBowsChoice}) {
+        for(int choice:{1,2,CrossbowChoice,BowChoice,SmallShieldChoice,StarterPrimaryChoice,StarterAlternateChoice,ThrowingChoice,PotionsChoice,TorchChoice,ThrowingPotionsChoice,LootBeamsChoice,ItemBowsChoice,FlailsChoice}) {
             const auto commandCount=commands.size();
             devscenarios::Request(Make(choice));assert(tasks.back().game);Run(tasks.size()-1);
             assert(devscenarios::Status().result==Result::Applied&&!tokenLive);
@@ -293,6 +301,16 @@ int main(){
         std::vector<std::string_view> codes;for(const char* code:Kit(cls,LootBeamsChoice))if(code)codes.push_back(code);
         assert((codes==std::vector<std::string_view>{"rin","amu","rin","amu","dgr","r26","r25","r27","r28","r29"}));
     }
+    // The 2026-11-19 reports' kit on HERO, the same for every class: two named uniques (Tan Do Li Ga's mana steal,
+    // Bloodrise's life steal) by their UniqueItems rows, and two normal flails.
+    assert(IsKit(FlailsChoice)&&!NormalKit(FlailsChoice)&&PageFor(FlailsChoice)==0&&SlotFor(FlailsChoice)==11&&!Choices[FlailsChoice].command);
+    for(int cls=0;cls<8;++cls) {
+        std::vector<std::string_view> codes;for(const char* code:Kit(cls,FlailsChoice))if(code)codes.push_back(code);
+        assert((codes==std::vector<std::string_view>{"fla","mst","fla","7fl"}));
+    }
+    assert(FlailKitUniques[0]==21&&FlailKitUniques[1]==20);
+    for(size_t i=0;i<FlailKit.size();++i)
+        assert((FlailKit[i].quality==KitQuality::Unique)==(i<FlailKitUniques.size())&&FlailKit[i].identified);
     // Unlock quests & waypoints button: sends cheat quests and cheat waypoints via console
     assert(ValidChoice(UnlockQuestsChoice)&&PageFor(UnlockQuestsChoice)==0&&SlotFor(UnlockQuestsChoice)==5);
     const auto beforeQuestCommands = commands.size();
@@ -306,7 +324,7 @@ int main(){
 
     // Failed standalone kits clean up only the generated exchange token.
     failItems=true;
-    for(int choice:{CrossbowChoice,BowChoice,SmallShieldChoice,ThrowingChoice,PotionsChoice,TorchChoice,ThrowingPotionsChoice,LootBeamsChoice,ItemBowsChoice}) {
+    for(int choice:{CrossbowChoice,BowChoice,SmallShieldChoice,ThrowingChoice,PotionsChoice,TorchChoice,ThrowingPotionsChoice,LootBeamsChoice,ItemBowsChoice,FlailsChoice}) {
         const auto beforeCleanup=tokenRemoves;
         devscenarios::Request(Make(choice));Run(tasks.size()-1);
         assert(devscenarios::Status().result==Result::KitRefused&&!tokenLive&&tokenRemoves==beforeCleanup+1);
@@ -328,6 +346,9 @@ int main(){
     // cave and then the Tundra by turns, a press a step; a refused or stale press is no step.
     assert(PageFor(GlacialTrailChoice)==4&&PageFor(FrozenTundraChoice)==4&&PageFor(TundraReproChoice)==4);
     assert(SlotFor(GlacialTrailChoice)==8&&SlotFor(FrozenTundraChoice)==9&&SlotFor(TundraReproChoice)==10);
+    // The Worldstone Keep beside them (2026-11-19, its ceiling): level 1's native arrival.
+    assert(PageFor(WorldstoneKeepChoice)==4&&SlotFor(WorldstoneKeepChoice)==11&&!IsKit(WorldstoneKeepChoice));
+    assert(Choices[WorldstoneKeepChoice].command==std::string_view("goto 128"));
     assert(Choices[GlacialTrailChoice].command==std::string_view("goto 115")&&Choices[FrozenTundraChoice].command==std::string_view("goto 117"));
     assert(!Choices[TundraReproChoice].command&&!IsKit(TundraReproChoice)&&ValidChoice(TundraReproChoice));
     for(unsigned press=0;press<3*TundraReproSteps;++press) {
