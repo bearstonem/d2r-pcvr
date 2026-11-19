@@ -330,7 +330,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Your shout buffs", "Show shout buff effects on your character", L"render",L"player_shout_visual",1,0,1,1},
     {"Friendly shout buffs", "Show shout buff effects on your owned companions", L"render",L"summon_shout_visual",1,0,1,1},
     {"Enemy activation distance", "Room rings for offline enemies and objects; 0 keeps native coverage", L"render",L"subscription_rings",5,0,8,1},
-    {"Ring skill menu", "The skill wheel as three rings of skills round a center that shows the pointed skill; Off: the game's wheel", L"interactions",L"ring_skill_menu",1,0,1,1},
+    {"Ring skill menu", "The skill wheel as three rings of skills round a center that shows the pointed skill; Off: the game's wheel and Quick cast", L"interactions",L"ring_skill_menu",1,0,1,1},
 }};
 using Values=std::array<float,Count>;
 // The setting holding the skill on glyph shape i (glyph_recognizer.h order): the right hand's (0), or the left's (1).

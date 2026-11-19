@@ -1,9 +1,8 @@
-"""development only (ring > Ring wheel > Center > Glyph icon): builds steamvr/assets/ring-wheel/ring-glyph-sheet.png, the painted glyph and sigil squares
+"""Offline tool (not run by the build): builds steamvr/assets/ring-wheel/ring-glyph-sheet.png, the painted glyph and sigil squares
 on one sheet, and steamvr/ring_wheel_glyph_sheet.h, the mask of which cells are painted.
 
-the player 2026-11-18: "glyph icons are claude drawings, lets see what gpt can do to make them look d2 style with the rust and silver, we
-need the square as the basic, and then we need to make a circle version for our ring menu". Twelve squares, our own art:
-tools/ring_glyph_squares/<kind>-<name>.png (384 px, borderless full-bleed desaturated rust, silver motif in the middle 80%, trimmed to
+Twelve painted squares, original art, kept by the artist (not in the repo):
+<squares>/<kind>-<name>.png (384 px, borderless full-bleed desaturated rust, silver motif in the middle 80%, trimmed to
 its alpha box in case of a margin, straight alpha; the 1024 px masters stay with the artist): the eight
 Glyphs-page shapes glyph-{circle,triangle,square,lightning,spiral,v,star,wave} and the four center sigils sigil-{back,clear,star,hand}.
 
@@ -13,7 +12,7 @@ area-averaged to 144 px; a slot with no square yet leaves its cell fully transpa
 keeps that slot's drawn shape or sigil. The sheet and the mask work with 0, 3 or 12 squares, and the same command rebuilds both as
 squares land. The compose pass cuts the circle (RecipeSeat) or draws the plate with a frame in code (RecipeSquare) at draw time.
 
-    python tools/ring_glyph_sheet.py [--squares tools/ring_glyph_squares] [--out <png>] [--mask <h>] [--preview <png>]
+    python tools/ring_glyph_sheet.py [--squares <folder of squares>] [--out <png>] [--mask <h>] [--preview <png>]
     python tools/ring_glyph_sheet.py --import <folder of squares>   (trim + downscale the squares into --squares)
 """
 import argparse, os, re, sys
@@ -89,7 +88,7 @@ def cell_of(path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--squares", default=os.path.join(HERE, "ring_glyph_squares"))
-    ap.add_argument("--out", default=os.path.join(REPO, "steamvr", "assets", "lab", "ring-glyph-sheet.png"))
+    ap.add_argument("--out", default=os.path.join(REPO, "steamvr", "assets", "ring-wheel", "ring-glyph-sheet.png"))
     ap.add_argument("--mask", default=os.path.join(REPO, "steamvr", "ring_wheel_glyph_sheet.h"))
     ap.add_argument("--preview", help="also write a check sheet (the sheet on a dark ground)")
     ap.add_argument("--import", dest="imp", help="trim and downscale the painted squares into --squares, then exit")

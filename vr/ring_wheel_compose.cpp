@@ -1,7 +1,7 @@
-// Ring skill menu (, build steps R4-R5): the compose pass (vr/ring_wheel_compose.h). One pipeline, one draw: every
+// Ring skill menu (build steps -): the compose pass (vr/ring_wheel_compose.h). One pipeline, one draw: every
 // instance of steamvr/ring_wheel_draw.h is a quad (a 4-vertex strip, instanced), its recipe drawn in the pixel shader
 // inside that quad only. The shaders compile in Setup with the system's d3dcompiler_47 (as ui_blit.cpp and
-// elemental_hands_renderer.cpp do), and Setup runs on the ring's worker, so the frame thread never waits for it (perf R4
+// elemental_hands_renderer.cpp do), and Setup runs on the ring's worker, so the frame thread never waits for it (
 // item 1: about 20 ms measured).
 #include "ring_wheel_compose.h"
 #include "../steamvr/ring_wheel_draw.h"
@@ -48,7 +48,7 @@ V VS(uint v : SV_VertexID, uint id : SV_InstanceID) {
     o.shape = float4(min(s.w, s.h) * 0.5, s.param, s.recipe, s.recipe == 6 ? s.u1 : s.u0);   // w: the arc's fill (recipe 5); the rest event's age (6)
     return o;
 }
-// R8 effects (L2 "Animation layers", kit wheel.js FX and hover-defaults.js): pure functions of the time t (s) and a seed,
+// effects: pure functions of the time t (s) and a seed,
 // inside their own quad only; every loop 8 or fewer; nothing faster than 1 Hz pulses (steady brightness).
 float H(float n) { return frac(sin(n * 12.9898) * 43758.5453); }
 float Soft(float2 p, float2 c, float s) { return saturate(1 - length(p - c) / max(s, 0.5)); }
@@ -58,7 +58,7 @@ float Bolt(float2 p, float2 a, float2 b, float seed, float rough) {
     [unroll] for (int i = 1; i <= 7; ++i) { float f = i / 7.0; float2 q = i == 7 ? b : a + dir * f + nrm * (H(seed + i * 31) - 0.5) * rough; m = min(m, Seg(p, prev, q)); prev = q; }
     return m;
 }
-// R8 match stage 1 (r8-match-spec sections 3 and 6.1): the kit's rest FX (wheel.js FX, called from drawIcon) per kind, scaled
+// match stage 1 (r8-match-spec sections 3 and 6.1): the kit's rest FX (wheel.js FX, called from drawIcon) per kind, scaled
 // into one cap: the quad's radius R = 1.3 r, and every layer fades to 0 by R (RestCap). The kit's 'lighter' layers add up;
 // the result stays premultiplied (rgb <= alpha). Orbits lap in 4 s or more, tongues are the kit's x 0.3, nothing re-shapes
 // faster than 3 a second, phases seeded per icon; glints and charge orbs only in their rest event (ev: its age in ms, -1 none).
@@ -71,13 +71,13 @@ static const float RestGain[12] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 void Add(inout float4 acc, float3 col, float a) { a = saturate(a); acc.rgb += col * a; }
 void AddN(inout float4 acc, float3 col, float a) { a = saturate(a); acc = float4(col * a, a) + acc * (1 - a); }   // source-over
 // The kit's charge loop (FX.charge, assassin charge): bead i fades in over 300 ms, 0.9 s after the last, holds, all fade out
-// over 400 ms from 4.4 s; a 5 s loop, its phase seeded per icon. Steady rest glow, outside the event gate (designer, 2026-11-07).
+// over 400 ms from 4.4 s; a 5 s loop, its phase seeded per icon. Steady rest glow, outside the event gate.
 float BeadOn(float t, float seed, int i) {
     float cyc = fmod(t * 1000 + H(seed + 0.71) * 5000, 5000);
     return smoothstep(0, 1, saturate((cyc - i * 900) / 300)) * (1 - smoothstep(0, 1, saturate((cyc - 4400) / 400)));
 }
 // The kit's radial halo: a at ri, 0 at ro r (its createRadialGradient), the rest cap (1.5 r) clipping what lies past it.
-// HaloK: a kit kind's S1 gain (Rest sets it), on its halos only: the figures keep the kit's alpha (designer, F1 recheck).
+// HaloK: a kit kind's gain (Rest sets it), on its halos only: the figures keep the kit's alpha.
 static float HaloK = 1;
 float Halo(float d, float r, float ri, float a, float ro) { return HaloK * a * saturate((ro * r - d) / max(ro * r - ri, 1)); }
 float EllD(float2 q, float2 ab) { float k0 = length(q / ab), k1 = length(q / (ab * ab)); return abs(k0 * (k0 - 1) / max(k1, 1e-4)); }   // ~px to an ellipse
@@ -87,7 +87,7 @@ float3 Ramp3(float u, float3 a, float3 b, float3 c, float3 e, float4 at) {   // 
     return u < at.y ? lerp(a, b, u / at.y) : u < at.z ? lerp(b, c, (u - at.y) / (at.z - at.y)) : lerp(c, e, (u - at.z) / (1 - at.z));
 }
 float Star(float2 q, float s) { q = abs(q); return s <= 0.05 ? 0 : saturate((sqrt(s) - sqrt(q.x) - sqrt(q.y)) * 2.5); }   // the kit's 4-point sparkle
-void Sparkles(inout float4 acc, float2 p, float r, float t, float seed, float3 col, int n) {   // kit sparkle(): 1.4 s lives, a new place each
+void Sparkles(inout float4 acc, float2 p, float r, float t, float seed, float3 col, int n) {   // kit sparkle: 1.4 s lives, a new place each
     [loop] for (int i = 0; i < 4; ++i) {
         if (i >= n) break;
         float u = t + H(seed + i) * 4.2, life = fmod(u, 2.1) / 1.4, slot = floor(u / 2.1);
@@ -101,7 +101,7 @@ void RestFire(inout float4 acc, float2 p, float r, float t, float seed, float k)
     Add(acc, float3(0.91, 0.35, 0.10), k * Halo(d, r, 0.8 * r, 0.62, 1.5));
     [loop] for (int i = 0; i < 14; ++i) {   // tongues from the rim, leaning up, the kit's lengths (the cap clips), 620 ms lives
         float a = i / 14.0 * 6.2831853 + 0.2 * sin(t / 0.9 + i), life = frac(t / 0.62 + H(seed + i));
-        float h = r * (0.45 + 0.5 * VN(t / 0.16 + i * 3.1, seed + i)) * (1 - life * 0.5), ang = a + (-1.5707963 - a) * 0.25;   // F1 recheck: the kit's length
+        float h = r * (0.45 + 0.5 * VN(t / 0.16 + i * 3.1, seed + i)) * (1 - life * 0.5), ang = a + (-1.5707963 - a) * 0.25;   // recheck: the kit's length
         float2 b = float2(cos(a), sin(a)) * r * 0.96, e = b + float2(cos(ang), sin(ang)) * h * (1 + life) - float2(0, life * 4), ba = e - b, pa = p - b;
         float u = saturate(dot(pa, ba) / max(dot(ba, ba), 1e-4)), w = r * 0.26 * (1 - life * 0.6) * (1 - u) * (1 - u) + 0.5;   // the kit's quadratic edge
         float cov = saturate((w - length(pa - ba * u)) / 2 + 0.5);   // a 2 px soft edge
@@ -122,7 +122,7 @@ void RestCold(inout float4 acc, float2 p, float r, float t, float seed, float k)
 void RestLight(inout float4 acc, float2 p, float r, float t, float seed, float k, bool over) {
     float d = length(p);
     if (!over) { Add(acc, float3(1, 0.85, 0.29), k * Halo(d, r, 0.85 * r, 0.45, 1.4)); return; }
-    // the rim arcs, soft and smooth at rest (R2: no dashes, no re-shape), a lap in 4 s, 70%; the short far-side arc the other way
+    // the rim arcs, soft and smooth at rest, a lap in 4 s, 70%; the short far-side arc the other way
     float a = atan2(p.y, p.x), head = t / 4 * 6.2831853 + H(seed) * 6.2831853;
     [loop] for (int j = 0; j < 2; ++j) {
         float hd = j == 0 ? head : -head + 3.14159, span = j == 0 ? 1.9 : 0.9, rc = r + (j == 0 ? 4 : 3.5);   // the kit's r + 3-4, past our rim
@@ -137,7 +137,7 @@ void RestGlint(inout float4 acc, float2 p, float r, float ev) {   // kit FX.phys
     float u = dot(p - a0, dv) / dot(dv, dv);
     Add(acc, float3(1, 0.98, 0.92), 0.35 * saturate(1 - abs(u - 0.5) * 2) * saturate(r - length(p) + 0.5));
 }
-// R8 match stage 1b: a class page's own rest recipe (kit class.js WHEEL_FX_EXTRA) as its layers (RestL, generated from
+// match stage 1b: a class page's own rest recipe (kit class.js WHEEL_FX_EXTRA) as its layers (RestL, generated from
 // tools/ring_wheel_rest_recipes.py: A = type, flags, count, period; B = color, alpha; C = the type's numbers; D = core color
 // or (wobble, its period, -), extra). Lengths are px at r 22, scaled with the icon. Flags: 1 normal blend (else the kit's
 // lighter), 2 a dark under-stroke, 4 only in the icon's rest event, 8 over the face (mode 2), 16 the skill's color (tint).
@@ -159,7 +159,7 @@ static const int2 MarkK[11] = { int2(0, 3), int2(3, 2), int2(5, 1), int2(6, 4), 
 static const float4 MarkE[11] = { float4(0, 0, 0, 0), float4(0, 0, 0, 0), float4(0, 0, 5, 2.8), float4(0, 0, 0, 0), float4(0, 0, 0, 0), float4(0, 0.5, 3, 4.2),
     float4(0, 0, 0, 0), float4(0, 0, 0, 0), float4(0, 0, 4, 4), float4(0, 0, 0, 0), float4(0, 0, 0, 0) };
 void AddK(inout float4 acc, float3 col, float a, bool normal) { if (normal) AddN(acc, col, a); else Add(acc, col, a); }
-float DotA(float u, float a) { return u < 0.35 ? a : u < 1 ? lerp(0.85 * a, 0, (u - 0.35) / 0.65) : 0; }   // the kit's dot(): core, 0.35 color, edge
+float DotA(float u, float a) { return u < 0.35 ? a : u < 1 ? lerp(0.85 * a, 0, (u - 0.35) / 0.65) : 0; }   // the kit's dot: core, 0.35 color, edge
 void RestLayers(inout float4 acc, uint kind, bool over, float2 p, float r, float t, float seed, float ev, float3 tint) {
     const float TAU = 6.2831853, UP = -1.5707963;
     int2 rg = RestK[kind - RestFirstExtra];
@@ -242,7 +242,7 @@ void RestLayers(inout float4 acc, uint kind, bool over, float2 p, float r, float
             float life = frac(t / per + H(seed));
             Add(acc, col, a * (1 - life) * saturate(C.x * s - length(p - float2(sin(seed) * 4 * s, r + (2 + life * 3) * s)) + 0.5));
         } else if (type == 11) Sparkles(acc, p, r, t, seed, col, n);
-        else if (type == 12) {   // n smoke puffs on r + off, size px, lapping, rising up px a cycle (the kit's smoke())
+        else if (type == 12) {   // n smoke puffs on r + off, size px, lapping, rising up px a cycle (the kit's smoke)
             [loop] for (int i = 0; i < 6; ++i) {
                 if (i >= n) break;
                 float aa = ph + t / per * TAU * (i % 2 ? 1 : -0.8) + i * TAU / n;
@@ -294,10 +294,10 @@ void RestLayers(inout float4 acc, uint kind, bool over, float2 p, float r, float
     }
 }
 float4 Rest(uint kind, bool over, float2 p, float R, float t, float seed, float ev, float3 tint) {
-    float r = R / 1.5, d = length(p);   // the quad's radius is the rest cap, 1.5 r (designer, 2026-11-07)
+    float r = R / 1.5, d = length(p);   // the quad's radius is the rest cap, 1.5 r
     float4 acc = 0;
     if (d >= R || (!over && d < r - 1.5)) return acc;   // perf: 44% of a rest quad ((r / 1.5 r) squared) lies under the face; only the over pass reads it
-    // A kit kind's S1 gains: HaloK on its halos, fig on the whole (the figures' own where the halo is gone; the class kinds'
+    // A kit kind's gains: HaloK on its halos, fig on the whole (the figures' own where the halo is gone; the class kinds'
     // are in their tables). The halo's gain is its own: divided by fig, which multiplies everything at the end.
     const float fig = kind < 12 ? RestBuiltinFig[kind] : 1;
     HaloK = kind < 12 ? RestGain[kind] * RestBuiltinGain[kind] / max(fig, 0.01) : 1;
@@ -312,9 +312,9 @@ float4 Rest(uint kind, bool over, float2 p, float R, float t, float seed, float 
         }
         float life = frac(t / 1.8 + H(seed));
         Add(acc, float3(0.78, 1, 0.42), 0.8 * (1 - life) * saturate(2.2 - length(p - float2(sin(seed) * 6, r + life * 4.5)) + 0.5));
-    } else if (kind == 4 && !over) {   // arcane: halo, a SOLID ring on r + 5 (R2: no dashes), 3 sparkles
+    } else if (kind == 4 && !over) {   // arcane: halo, a SOLID ring on r + 5, 3 sparkles
         Add(acc, float3(0.55, 0.47, 1), Halo(d, r, 0.85 * r, 0.3, 1.35));
-        Add(acc, float3(0.78, 0.75, 1), 0.55 * Stroke(d, r + 6, 2));   // the kit's ring on r + 6, solid (R2)
+        Add(acc, float3(0.78, 0.75, 1), 0.55 * Stroke(d, r + 6, 2));   // the kit's ring on r + 6, solid
         Sparkles(acc, p, r, t, seed, float3(0.85, 0.82, 1), 3);
     } else if (kind == 5 && !over) {   // holy: halo, 4 sparkles
         Add(acc, float3(0.95, 0.79, 0.30), Halo(d, r, 0.8 * r, 0.5, 1.4));
@@ -355,7 +355,7 @@ float4 Rest(uint kind, bool over, float2 p, float R, float t, float seed, float 
     acc.rgb = min(acc.rgb * cap * fig, 1);   // the lighter layers add: rgb may pass alpha (premultiplied additive)
     return acc;
 }
-// R8 match stage 2 (r8-match-spec 3 "Pointed effect", chain level 4; 4a): the pointed effect's element default, the kit's
+// match stage 2 (r8-match-spec 3 "Pointed effect", chain level 4; 4a): the pointed effect's element default, the kit's
 // hover-defaults.js as a function of its age t (s); kind: the rest kind 0-11 (ring_wheel_draw.h HoverKindOf); r: the pointed
 // icon's radius; tint: the aura and charge rings' color. Inside the quad (90 px), a 15 px soft edge. Repeats at most 3 a
 // second, each fading in over 100 ms or more (spec 4a): fire 6 embers a 2 s loop (kit 12 a 1.4 s), cold 6 shards a 2 s loop
@@ -380,7 +380,7 @@ void HoverEl(inout float4 acc, uint k, float2 p, float r, float t, float seed, f
             Add(acc, float3(0.78, 0.93, 1), w * 0.9 * sin(q * PI) * saturate(min(min(x + 5, 9 - x), 3 * (9 - x) / 14 - y) + 0.5));
         }
     } else if (k == 3) {   // poison: a green cloud swells and rolls
-        // designer S2-1: at the kit's 0.45 it read too faint over a lit ground (the kit's tendrils carry it there): 0.8
+        // design -1: at the kit's 0.45 it read too faint over a lit ground (the kit's tendrils carry it there): 0.8
         [loop] for (int i = 0; i < 6; ++i) { float q = frac(t / 2 + i / 6.0), a = i * TAU / 6 + t / 3; GlowDot(acc, p, float2(cos(a), sin(a)) * (r + 10 * q), 14 + 18 * q, float3(0.47, 0.86, 0.24), w * 0.8 * sin(q * PI)); }
     } else if (k == 4) {   // arcane: a solid rune ring opens and fades (one a 1.6 s), sparkles
         float q = frac(t / 1.6);
@@ -414,7 +414,7 @@ float4 Hover(uint kind, float2 p, float R, float t, float seed, float r, float3 
     return acc * saturate((R - length(p)) / PointedEdgePx);
 }
 // The lightning default's bolt to a neighbor (kit k.boltPath, #FFFBE0 on #FFD84A): along +x over the quad, L long; a new
-// shape every 333 ms with a 100 ms crossfade (the R8 comfort cap; the kit's is 90 ms).
+// shape every 333 ms with a 100 ms crossfade (the comfort cap; the kit's is 90 ms).
 float4 HoverBolt(float2 p, float L, float t, float seed) {
     float st = floor(t / 0.333), x = saturate((t - st * 0.333) / 0.1);
     float4 acc = 0;
@@ -427,8 +427,8 @@ float4 HoverBolt(float2 p, float L, float t, float seed) {
     }
     return acc;
 }
-// R7c (feedback 1 item 7): a tree mark's glyph (kit glyph()), in units of its size r, canvas y down. The fills (flame, drop,
-// bolt) are the kit's paths as polygons (its beziers sampled; the flame is the designer's tree-mark flame, R7c answer 2); the rest strokes max(2, 0.12 r) px wide with round ends.
+// R7c: a tree mark's glyph (kit glyph), in units of its size r, canvas y down. The fills (flame, drop,
+// bolt) are the kit's paths as polygons (its beziers sampled; the flame is the design's tree-mark flame, R7c answer 2); the rest strokes max(2, 0.12 r) px wide with round ends.
 static const float2 GlyphPoly[28] = {
     float2(-0.309, 0.666), float2(-0.511, 0.467), float2(-0.600, 0.180), float2(-0.572, -0.168), float2(-0.420, -0.550),
     float2(-0.120, -0.180), float2(0.180, -0.900), float2(0.402, -0.549), float2(0.523, -0.177), float2(0.514, 0.185), float2(0.349, 0.504), float2(0.000, 0.750),   // fire (the tree-mark flame)
@@ -458,7 +458,7 @@ float TreeGlyph(uint kind, float2 p, float r, float fw) {
     else if (kind == 5) sd = min(Seg(q, float2(0, -0.7), float2(0, 0.7)), Seg(q, float2(-0.45, -0.2), float2(0.45, -0.2))) - lw;
     else if (kind == 7) sd = max(length(q) - 0.6, -(length(q - float2(0.28, -0.15)) - 0.52));
     else if (kind == 6) { float m = 1e9; [unroll] for (int k = 0; k < 8; ++k) { float a = k * 0.7853982; float2 v = float2(cos(a), sin(a)); m = min(m, Seg(q, v * 0.35, v * 0.7)); } sd = min(m - lw, length(q) - 0.22); }
-    else if (kind == 9) {   // bone (R7c TS3, kit 'bone'): a shaft max(2 px, 0.22 r) wide, two 0.2 r knobs at each end (+-0.113 r on both axes, 0.1 r out)
+    else if (kind == 9) {   // bone: a shaft max(2 px, 0.22 r) wide, two 0.2 r knobs at each end (+-0.113 r on both axes, 0.1 r out)
         float sw = max(2.0, r * 0.22) * 0.5 / max(r, 1), m = Seg(q, float2(-0.5, 0.5), float2(0.5, -0.5)) - sw;
         [unroll] for (int k = -1; k <= 1; k += 2) {
             m = min(m, length(q - float2(-0.6 + k * 0.1131, 0.6 + k * 0.1131)) - 0.2);
@@ -566,28 +566,28 @@ float4 PS(V i) : SV_Target {
     float2 dx = ddx(i.uv), dy = ddy(i.uv);
     uint recipe = (uint)i.shape.z;
     float4 c;   // premultiplied, before the opacity
-    if (recipe == 8) {   // R8 icon art motion: a face copy moved by (dx, dy) = tint.rg, cut to its seat's circle (kit: clipped to the icon)
+    if (recipe == 8) {   // icon art motion: a face copy moved by (dx, dy) = tint.rg, cut to its seat's circle (kit: clipped to the icon)
         float4 art = gIcons.SampleGrad(gLinear, i.uv, dx, dy);
         if (linearOut > 0.5) art.rgb = ToLinear(art.rgb / max(art.a, 1.0 / 255)) * art.a;
         art = OverDisc(art, i.local, R);   // the copy carries its disc (the seat under it draws only its shade and rings)
         c = art * saturate((R - d) / fw + 0.5) * saturate((R - length(i.local + i.tint.rg)) / fw + 0.5);
     } else if (recipe == 0) {
         float4 art = gIcons.SampleGrad(gLinear, i.uv, dx, dy);   // premultiplied in gamma, read through a UNORM view
-        // An sRGB target blends in linear light: undo the alpha, decode, premultiply again (review R5 K4: a _SRGB view
+        // An sRGB target blends in linear light: undo the alpha, decode, premultiply again (a _SRGB view
         // would decode the premultiplied value and darken every soft edge).
         if (linearOut > 0.5) art.rgb = ToLinear(art.rgb / max(art.a, 1.0 / 255)) * art.a;
-        if (i.shape.y < 0) art.rgb = dot(art.rgb, float3(0.299, 0.587, 0.114));   // a negative rim: the art in gray (an Off gesture, R7 RS1)
+        if (i.shape.y < 0) art.rgb = dot(art.rgb, float3(0.299, 0.587, 0.114));   // a negative rim: the art in gray (an Off gesture, RS1)
         float pw = abs(i.shape.y);
         if (pw >= 16) { pw -= 16; art = OverDisc(art, i.local, R); }   // +-(rim + 16): a clean icon on our dark disc
         float rim = saturate((d - (R - pw)) / fw + 0.5);
         c = lerp(art, float4(i.tint.rgb, 1), rim) * saturate((R - d) / fw + 0.5);
-    } else if (recipe == 7) {   // (recipe 6, the effects: PSFx)   // the lightning face crawl: two bolts across the face, new every 70 ms (uv.x = the step), clipped to it
+    } else if (recipe == 7) {   // (recipe 6, the effects: PSFx) // the lightning face crawl: two bolts across the face, new every 70 ms (uv.x = the step), clipped to it
         float st = i.uv.x, a0 = H(st) * 6.2831853, a1 = a0 + 3.14159 * (0.7 + 0.5 * H(st * 3));
         float2 p0 = float2(cos(a0), sin(a0)) * R * 0.9, p1 = float2(cos(a1), sin(a1)) * R * 0.9, m0 = float2(cos(a0), sin(a0)) * R * 0.2;
         float b = min(Bolt(i.local, p0, p1, st * 11, R * 0.55), Bolt(i.local, m0, float2(cos(a1 + 1), sin(a1 + 1)) * R * 0.85, st * 17, R * 0.4));
         float core = saturate(1.6 - b), glow = saturate(1 - b / 5) * 0.5;
         c = float4(lerp(float3(1, 0.85, 0.3) * glow, float3(1, 0.98, 0.88), core), max(core, glow)) * saturate((R - d) / fw + 0.5);
-    } else if (recipe == 11) {   // R8 match stage 1: a seat's icon as the kit's drawIcon (art to r, rim shade, dark line, rim outside)
+    } else if (recipe == 11) {   // match stage 1: a seat's icon as the kit's drawIcon (art to r, rim shade, dark line, rim outside)
         // layers: param = +-(width + 16 x flags), 1 no art (the Icon layer Off: no disc, art or shade), 2 no ring (Color ring Off:
         // no dark line or rim). The art sits on our dark disc (a clean icon).
         float pv = abs(i.shape.y);
@@ -659,7 +659,7 @@ float4 PS(V i) : SV_Target {
             float a = atan2(i.local.x, -i.local.y) / 6.2831853;
             cover *= (a < 0 ? a + 1 : a) <= i.shape.w ? 1 : 0;
         }
-        else if (recipe == 1 && i.shape.w > 0) {   // dashed (R7 RS5): u0 = the period in px along the ring, 60% drawn
+        else if (recipe == 1 && i.shape.w > 0) {   // dashed: u0 = the period in px along the ring, 60% drawn
             float a = atan2(i.local.x, -i.local.y) + 3.14159265;
             cover *= frac(a * (R - i.shape.y * 0.5) / i.shape.w) < 0.6 ? 1 : 0;
         }
@@ -667,11 +667,11 @@ float4 PS(V i) : SV_Target {
         c = float4(i.tint.rgb, 1) * cover;
     }
     c = saturate(c) * i.tint.a;
-    clip(max(c.a, max(c.r, max(c.g, c.b))) - 1.0 / 255);   // keep additive light (R8 match 1b: rgb with no alpha)
+    clip(max(c.a, max(c.r, max(c.g, c.b))) - 1.0 / 255);   // keep additive light
     return c;
 }
-// R8 match stage 3a (r8-match-spec 'Stage 3a plan'): the kit's level 3 (hover-game.js), with the game's own effect
-// textures from upstream's spell sprite cache (d2r_vr_spell_sprites, read at run time on the worker, never shipped): one R8
+// match stage 3a (r8-match-spec 'Stage 3a plan'): the kit's level 3 (hover-game.js), with the game's own effect
+// textures from upstream's spell sprite cache (d2r_vr_spell_sprites, read at run time on the worker, never shipped): one
 // atlas (FxTexPx = 1024), white art whose value is its alpha. Cells (uv): the fire plates 03 and 04, the smoke atlas (2 x 2
 // puffs: the kit's chunky cloud stands in), the lightning arc flipbook (4 x 2 frames along x: the kit's single-arc atlas
 // stands in) and the soft glow card.
@@ -682,7 +682,7 @@ float FxT(float4 cell, float2 uv, float pxSpan) {   // uv 0-1 over the cell; pxS
     float lod = max(0, log2(cell.z * 1024 / max(pxSpan, 1)));
     return gFxTex.SampleLevel(gLinear, cell.xy + clamp(uv, 0.002, 0.998) * cell.zw, lod);
 }
-// kit flames(): the fire plate 1.6 x the pad tall, scrolled up a pad per `speed` ms, through the glow card, gain 4, tinted.
+// kit flames: the fire plate 1.6 x the pad tall, scrolled up a pad per `speed` ms, through the glow card, gain 4, tinted.
 void Flames(inout float4 acc, float2 p, float ageMs, float x, float y, float w, float h, float3 col, float speed, float seed, float k) {
     float2 q = (p - float2(x, y)) / float2(w, h);
     if (any(q < 0) || any(q > 1)) return;
@@ -711,8 +711,8 @@ float4 HoverGame(uint kind, float2 p, float R, float t, float seed, float r) {
     }
     return acc * saturate((R - length(p)) / PointedEdgePx);
 }
-// kit arcTo(): a game arc frame stretched along the bolt (+x, L long), a 46 px yellow glow and a 22 px white core, gain 2; a
-// new frame every 333 ms with a 100 ms crossfade (the R8 cap; the kit's 90 ms).
+// kit arcTo: a game arc frame stretched along the bolt (+x, L long), a 46 px yellow glow and a 22 px white core, gain 2; a
+// new frame every 333 ms with a 100 ms crossfade (the cap; the kit's 90 ms).
 float4 HoverBoltTex(float2 p, float L, float t, float seed) {
     float st = floor(t / 0.333), x = saturate((t - st * 0.333) / 0.1), u = p.x / L + 0.5;
     float4 acc = 0;
@@ -728,7 +728,7 @@ float4 HoverBoltTex(float2 p, float L, float t, float seed) {
     }
     return acc;
 }
-// R8 match stage 2 (Boss, review S1): the effects (recipe 6) in their own pixel shader, so each shader keeps its slot
+// match stage 2 (Boss): the effects (recipe 6) in their own pixel shader, so each shader keeps its slot
 // budget as the recipes grow; Draw switches pipelines per run of instances (the list's order, so the layering, is kept).
 // param = kind + 256 x mode (0 rest, 1 pointed, 2 rest over the face, 3 a pointed bolt, 4 a pointed game-texture default,
 // 5 a game-texture bolt) + 4096 for a pointed default's part over its own face; uv = (time s, seed).
@@ -737,7 +737,7 @@ float4 PSFx(V i) : SV_Target {
     // Designer S3a FIX: the kit draws the pointed effect after the face (the flames lick up over its lower third). The over
     // pass repeats it on a quad the size of the face, cut to the face (a = 4096); the under pass keeps the rest (spec 4a).
     bool face = p >= 4096;
-    float R = face ? PointedReachPx : i.shape.x;   // the effect's own reach, not the small quad's (review N1: from the C++ constant)
+    float R = face ? PointedReachPx : i.shape.x;   // the effect's own reach, not the small quad's
     float4 c;
     if (mode == 1) c = Hover(p & 255, i.local, R, i.uv.x, i.uv.y, i.shape.w, i.tint.rgb);
     else if (mode == 3) c = HoverBolt(i.local, i.shape.w, i.uv.x, i.uv.y);
@@ -750,7 +750,7 @@ float4 PSFx(V i) : SV_Target {
     clip(max(c.a, max(c.r, max(c.g, c.b))) - 1.0 / 255);
     return c;
 }
-// Perf (the design notes "R8 stage 1b check" finding 1): with no offline blob, the effects draw nothing until the worker has
+// Perf (the design notes "stage 1b check" finding 1): with no offline blob, the effects draw nothing until the worker has
 // compiled PSFx (the slow one); icons, rims and text (PS) show at once.
 float4 PSFxNone(V i) : SV_Target { clip(-1); return 0; }
 )";
@@ -803,7 +803,7 @@ struct Compose::Impl {
     uint64_t value = 0;
     HANDLE event = nullptr;
     unsigned preciseWaits = 0;        // WaitIdle waits ended by the high-resolution timer path (the test's proof)
-    // A screenshot's resources the GPU still held when its wait ended (item 4): freed once the fence passes `at`.
+    // A screenshot's resources the GPU still held when its wait ended: freed once the fence passes `at`.
     struct ShotParked { ComPtr<ID3D12Resource> target, buffer; ComPtr<ID3D12CommandAllocator> allocator; ComPtr<ID3D12GraphicsCommandList> list; uint64_t at = 0; };
     std::vector<ShotParked> parked;
     bool shotDraw = false;            // Draw is a screenshot's: kept out of the 10 s cost window (TakeWindow)
@@ -837,7 +837,7 @@ struct Compose::Impl {
     size_t maxSlice = 0;
     ~Impl() { if (event) CloseHandle(event); }
     int Mips(int kind) const { return kind == int(AtlasKind::Icons) ? IconMips : kind == int(AtlasKind::FxTex) ? FxTexMips : 1; }
-    // Reads every compose whose timestamps completed and are not read yet, oldest first (perf R4 item 4).
+    // Reads every compose whose timestamps completed and are not read yet, oldest first.
     void ReadGpu() {
         if (tickMs <= 0) return;
         const uint64_t done = fence->GetCompletedValue();
@@ -867,7 +867,7 @@ struct Compose::Impl {
         if (FAILED(s.list->Close())) return false;
         ID3D12CommandList* lists[] = {s.list.Get()};
         queue->ExecuteCommandLists(1, lists);
-        // Marked before the Signal (review R4): a failed Signal (a removed device) leaves the slot busy for good, so its
+        // Marked before the Signal: a failed Signal (a removed device) leaves the slot busy for good, so its
         // allocator is never reset while the GPU may hold it.
         s.fence = ++value; s.timed = timed;
         ring.Submitted(slot, value);
@@ -876,7 +876,7 @@ struct Compose::Impl {
 };
 
 Compose::Compose() = default;
-// Review R4 J2: the destructor makes no D3D12 call and logs nothing, since it may run at DLL unload (the loader lock, the
+// the destructor makes no D3D12 call and logs nothing, since it may run at DLL unload (the loader lock, the
 // device and the logger may be gone). What Release did not free (the ring's OnUiReset frees it after the GPU is idle) is
 // left allocated, never freed while the GPU may still read it.
 Compose::~Compose() { (void)impl.release(); }
@@ -904,14 +904,14 @@ unsigned long long ShaderSourceHash(const std::string& s) {   // FNV-1a 64, as t
     return h;
 }
 bool ComposeForceCompile = false;
-// Review N1: the HLSL's copies of the C++ constants, written ahead of the source (tools/gen_ring_wheel_shader.py writes the same
+// the HLSL's copies of the C++ constants, written ahead of the source (tools/gen_ring_wheel_shader.py writes the same
 // line from ring_wheel_draw.h; the source hash check fails the preview if the two ever differ).
 static_assert(PointedReachPx == float(int(PointedReachPx)) && PointedEdgePx == float(int(PointedEdgePx)), "whole px: the line prints them as integers");
 std::string ShaderConstants() {
     return "static const float PointedReachPx = " + std::to_string(int(PointedReachPx)) + ", PointedEdgePx = " + std::to_string(int(PointedEdgePx)) + ";\n";
 }
 std::string ComposeShaderSource() { return ShaderConstants() + RestLayersHlsl + Source; }
-// Perf (the design notes "R8 stage 1b check" finding 2): one tiny draw with each pipeline into a 1 x 1 target on the worker,
+// Perf (the design notes "stage 1b check" finding 2): one tiny draw with each pipeline into a 1 x 1 target on the worker,
 // waited on its fence, so a driver's lazy compile at first use lands here and not on the frame thread's first compose.
 // Uses slot 0 before Setup publishes (no Draw can run yet). The ms, or -1 when it could not run (the first compose pays).
 double Warm(Compose::Impl& p);
@@ -932,7 +932,7 @@ bool Compose::Setup(ID3D12Device* device, ID3D12CommandQueue* queue, int format,
         const auto serialize = d12 ? reinterpret_cast<decltype(&D3D12SerializeRootSignature)>(GetProcAddress(d12, "D3D12SerializeRootSignature")) : nullptr;
         Require(compile && serialize, "shader compiler unavailable");
         ComPtr<ID3DBlob> vs, ps, psFx, errors;
-        const std::string source = ComposeShaderSource();   // the constants (N1), then the class recipes' layer table (stage 1b)
+        const std::string source = ComposeShaderSource();   // the constants, then the class recipes' layer table (stage 1b)
         // Perf: the bytecode compiled offline (tools/gen_ring_wheel_shader.py) when it
         // was made from this exact source: no compile on the On edge. A stale blob: compile here (15-20 s) and say so.
         const auto t0 = std::chrono::steady_clock::now();
@@ -970,7 +970,7 @@ bool Compose::Setup(ID3D12Device* device, ID3D12CommandQueue* queue, int format,
         params[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE; params[3].DescriptorTable = {1, &fxRange};
         params[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
         D3D12_STATIC_SAMPLER_DESC sampler{};
-        sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;   // trilinear: no shimmer when an icon floats (plan E4)
+        sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;   // trilinear: no shimmer when an icon floats
         sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         sampler.MaxLOD = D3D12_FLOAT32_MAX; sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
         sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
@@ -1034,7 +1034,7 @@ bool Compose::Setup(ID3D12Device* device, ID3D12CommandQueue* queue, int format,
             h.ptr += size_t(((fi + 1) * 3 + (fg + 1)) * 2) * p->srvStride;
             D3D12_SHADER_RESOURCE_VIEW_DESC d{};
             d.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; d.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            d.Format = DXGI_FORMAT_R8G8B8A8_UNORM; d.Texture2D.MipLevels = IconMips;   // always UNORM: the shader decodes (K4)
+            d.Format = DXGI_FORMAT_R8G8B8A8_UNORM; d.Texture2D.MipLevels = IconMips;   // always UNORM: the shader decodes
             device->CreateShaderResourceView(fi >= 0 ? p->tex[0][fi].Get() : nullptr, &d, h);   // a null view reads 0
             h.ptr += p->srvStride;
             d.Format = DXGI_FORMAT_R8G8_UNORM; d.Texture2D.MipLevels = 1;
@@ -1114,7 +1114,7 @@ double Warm(Compose::Impl& p) {
         ID3D12CommandList* lists[] = {cl};
         p.queue->ExecuteCommandLists(1, lists);
         s.fence = ++p.value;
-        p.ring.Submitted(0, p.value);   // review S1: the ring knows slot 0 is busy (a failed wait must not let Draw reset it)
+        p.ring.Submitted(0, p.value);   // the ring knows slot 0 is busy (a failed wait must not let Draw reset it)
         Check(p.queue->Signal(p.fence.Get(), p.value), "warm signal");
         if (p.fence->GetCompletedValue() < p.value) {
             Check(p.fence->SetEventOnCompletion(p.value, p.event), "warm event");
@@ -1185,7 +1185,7 @@ size_t Compose::Pump() {
     if (!Ready()) return 0;
     auto& p = *impl;
     int st = stage.load(std::memory_order_acquire);
-    if (st == 0) return 0;   // nothing staged: no fence read (perf R5 should-fix)
+    if (st == 0) return 0;   // nothing staged: no fence read
     const uint64_t done = p.fence->GetCompletedValue();
     if (st == 2 && p.up.done) {   // the last slice completed: the staging is the worker's again
         if (done >= p.up.fence) stage.store(0, std::memory_order_release);
@@ -1381,7 +1381,7 @@ bool Compose::WaitIdle(unsigned waitMs) {
     auto& p = *impl;
     if (p.fence->GetCompletedValue() >= p.value) return true;
     // The fence's own event. A wait the timer ends leaves it armed for this value; nothing is drawn after the Off edge, so
-    // Release (the worker, next) waits for the same value and skips its wait once it is reached. Round 2026-11-08 (review W1):
+    // Release (the worker, next) waits for the same value and skips its wait once it is reached.
     // a screenshot waits here during play, so an earlier wait's leftover (the event set, or armed for an older value) must not
     // end this one early: cleared first, and a wake before the fence reached the value waits on.
     if (!waitMs) return p.fence->GetCompletedValue() >= p.value;

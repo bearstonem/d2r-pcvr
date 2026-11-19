@@ -4,12 +4,12 @@
 // Ring skill menu Off every one returns at its first line and upstream's wheel runs exactly as it always did.
 // The frame structs hold transport's own values by plain pointers: OpenXR's types stay out of this header (poses and the quad
 // are untyped pointers to transport's XrPosef and XrCompositionLayerQuad; the request and reply are interaction::Request and
-// interaction::Reply). wheelHand: handControls.Wheel() (0 right, 1 left, -1 closed); page: int(interactions.Page()).
+// interaction::Reply). wheelHand: handControls.Wheel (0 right, 1 left, -1 closed); page: int(interactions.Page).
 #include <cstdint>
 #include <d3d12.h>
 
 namespace framevr::ringwheel::host {
-// Pointer: transport Input, the line after MotionPointer(): the pointer as MotionPointer left it, edited in place. palettePose,
+// Pointer: transport Input, the line after MotionPointer: the pointer as MotionPointer left it, edited in place. palettePose,
 // beamPose, dotPose: XrPosef*; beamLength (m); pointerHit; hover: motionInput.hover (an upstream WheelCell id, -1 none); time:
 // motionInput.time (s); head, aim: the head and the pointer hand's aim ray, room meters as x,y,z then x,y,z,w; pointerVisible: the
 // beam shown; cell: upstream's WheelCell for this frame's page and state at (u, v) of upstream's 768 px picture; aims / aimsTracked
@@ -49,7 +49,8 @@ struct LayerFrame { bool open; void* palette; uint64_t nowMs; void (*say)(const 
                     const void* session; const void* create; const void* destroy; const void* enumerate;
                     const void* acquire; const void* wait; const void* release;
                     ID3D12Device* device; void* queue; int format; void* palettePose; const void* output; const void* snapshot;
-                    void* quadCtx; void (*quad)(void* ctx, void* q, const float* pose, float w, float h, const int* rect, uint64_t chain); };
+                    void* quadCtx; void (*quad)(void* ctx, void* q, const float* pose, float w, float h, const int* rect, uint64_t chain);
+                    bool swapchainsShort = false; };   // transport's swapchainsShort: the runtime has no swapchain left for a panel (the ring gives its own back)
 // Beam: transport EndPair, its own statement right after the if that submits the laser and its dot, once a headset frame: the
 // non-owner hand's thin beam. open: the wheel's laser could show; quadCtx / quad: motionQuad (the last argument: premultiplied);
 // chain: pointerChain; beamRect: the beam's place in the pointer atlas (x, y, w, h); count / limit: the frame's layers so far and
@@ -72,6 +73,7 @@ struct CastFrame {
 // sticks, edited in place. say: transport's Say.
 struct HandsFrame { void* hands; int wheelHand; int16_t& lx; int16_t& ly; int16_t& rx; int16_t& ry; void (*say)(const char*); };
 
+bool Active();    // transport calls a door only while this is true: the setting is On, or the ring still has state to drain after an Off edge (Off: one cached read a frame)
 bool Enabled();   // the Ring skill menu setting (VR Settings > Menus): Off is upstream's wheel exactly
 void Pointer(PointerFrame f);
 void Input(InputFrame f);

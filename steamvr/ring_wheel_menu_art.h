@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (, the player 2026-11-16: "the Gestures, Glyphs and Quick cast icons show gold; they must match the Diablo
+// Ring skill menu (the player "the Gestures, Glyphs and Quick cast icons show gold; they must match the Diablo
 // silver-on-rust set"): the three sub-menus' own pictures, our ChatGPT art (the design kit, icon-glyphs-v3b,
 // icon-gestures-v2, icon-quick-cast-v2), made offline the way the ring shows a game icon after the key: the silver motif
 // keyed out of its rust plate, its tint pulled to gray, on transparent, 144 px (the atlas art square at 150%), framed so the motif
@@ -19,13 +19,13 @@
 
 namespace framevr::ringwheel::menuart {
 using Image = interaction::icons::Image;
-inline constexpr const wchar_t* ResourceName[ThirdCount] = {L"D2RVR_LAB_RING_MENU_GLYPHS", L"D2RVR_LAB_RING_MENU_GESTURES", L"D2RVR_LAB_RING_MENU_QUICK_CAST"};
+inline constexpr const wchar_t* ResourceName[ThirdCount] = {L"D2RVR_RING_MENU_GLYPHS", L"D2RVR_RING_MENU_GESTURES", L"D2RVR_RING_MENU_QUICK_CAST"};
 // The atlas id of each sub-menu's picture: its shelf entry's id (MenuEntryId; Quick cast's 9103 is asked for the radial's entry
 // and the center's third, never a shelf seat of its own).
 inline int ArtId(int third) { return MenuEntryId(third); }
 inline int ThirdOfArt(int id) { return MenuOfEntry(id); }
 
-// The picture's bytes in `module` (the plugin, or ring-wheel-preview, which links the same .rc). False: not there.
+// The picture's bytes in `module` (the plugin, or ring-wheel-preview, which links the same.rc). False: not there.
 inline bool Bytes(HMODULE module, int third, const void*& data, size_t& size) {
     data = nullptr; size = 0;
     if (third < 0 || third >= ThirdCount) return false;

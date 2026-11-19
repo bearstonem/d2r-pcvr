@@ -1,6 +1,6 @@
-// Ring skill menu (, build steps R4-R5): ring-wheel-preview [--out <folder>] [--icons <icon cache folder>] [--kit <kit folder>] [--badges <folder>] [--t036 <folder>].
+// Ring skill menu (build steps -): ring-wheel-preview [--out <folder>] [--icons <icon cache folder>] [--kit <kit folder>] [--badges <folder>] [--t036 <folder>].
 // By hand, never in ctest: --shot-ms <folder> [--adapter hardware] times a screenshot of the full ring at 150% (1296 x 1320), the
-// frame's half and the worker's, beside the old all-on-the-frame save (round 2026-11-12 Job B); its PNGs go into <folder>.
+// frame's half and the worker's, beside the old all-on-the-frame save; its PNGs go into <folder>.
 // The compose pass (vr/ring_wheel_compose.cpp) and the atlases (vr/ring_wheel_atlas.cpp) on WARP, plus the design notes
 // items 14-16. With no arguments (the test): synthetic icons (numbered colored discs, no game art), upstream's menu fonts
 // from the source tree, made-up text. Local only, never in a test or a commit: --icons reads the player's own icon cache
@@ -14,7 +14,7 @@
 #include "ring_wheel_shader_blob.h"   // generated at build time (steamvr/ring.cmake)
 #include "ring_wheel_png.h"
 #include "ring_wheel_shot.h"
-#include "ring_wheel_menu_art.h"   // (2026-11-16): the sub-menus' pictures (ring_wheel_menu_art.rc is linked in)
+#include "ring_wheel_menu_art.h"   //: the sub-menus' pictures (ring_wheel_menu_art.rc is linked in)
 #include "ring_wheel_glyph_art_decode.h"   // Glyph icon: the painted glyph and sigil squares (the sheet is in ring_wheel_menu_art.rc)
 #include "ring_wheel_tree_art_decode.h"   // the painted tree squares (the sheet is in ring_wheel_menu_art.rc)
 #include <d3d12.h>
@@ -97,7 +97,7 @@ struct Fixture {
         Need(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&list)), "list");
         Need(list->Close(), "close");
         Need(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)), "fence");
-        // the ring's layer swapchain's size (plan E3), made once; the content at the render scale sits at its top left.
+        // the ring's layer swapchain's size, made once; the content at the render scale sits at its top left.
         D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_DEFAULT;
         D3D12_RESOURCE_DESC d{};
         d.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D; d.Width = rw::SwapchainW; d.Height = rw::SwapchainH; d.DepthOrArraySize = 1;
@@ -226,7 +226,7 @@ void Save(const std::filesystem::path& folder, const std::string& name, const st
     framevr::ringwheel::png::Save((folder / (name + ".png")).c_str(), straight, UINT(w), UINT(h));
     framevr::ringwheel::png::Save((folder / (name + "-on-dark.png")).c_str(), dark, UINT(w), UINT(h));
 }
-// R8 match stage 1b (the design notes): the kit's busy stand-in ground (r8-match/busy-plate-1x.png, its grout transparent),
+// match stage 1b (the design notes): the kit's busy stand-in ground (r8-match/busy-plate-1x.png, its grout transparent),
 // put on black and premultiplied, 768 x 800 wheel px; empty when the file is missing.
 std::vector<uint8_t> ReadPng(const std::filesystem::path& file, int& w, int& h);
 std::vector<uint8_t> LoadPlate(const std::filesystem::path& file, int& w, int& h) {
@@ -336,12 +336,12 @@ int main(int argc, char** argv) {
         const std::string a = argv[i];
         if (a == "--fallback") fallback = true;   // perf 1b finding 1: time the no-fxc path (manual: its compile is too slow for ctest)
         if (a == "--out") out = argv[i + 1]; else if (a == "--icons") iconDir = argv[i + 1]; else if (a == "--kit") kit = argv[i + 1];
-        else if (a == "--frames") frames = argv[i + 1];   // R8: the animation layers' frames (contact sheets: make-sheets.py)
+        else if (a == "--frames") frames = argv[i + 1];   // the animation layers' frames (contact sheets: make-sheets.py)
         else if (a == "--footer") footerOut = argv[i + 1];   // feedback 1 item 4: the footer at 5 and 6 tabs
         else if (a == "--r7c") r7cOut = argv[i + 1];   // R7c: every class's tree marks and the rune band
         else if (a == "--sprites") sprites = argv[i + 1];   // stage 3a: <folder>\sprites.ssp (never the game folder)
-        else if (a == "--match") matchOut = argv[i + 1];   // R8 match spec: every class on real icons (needs --icons, a local cache)
-        else if (a == "--orders") ordersOut = argv[i + 1];   // 2026-11-14: the Commander orders' row on the glyph chooser (3 classes, with and without an army)
+        else if (a == "--match") matchOut = argv[i + 1];   // match spec: every class on real icons (needs --icons, a local cache)
+        else if (a == "--orders") ordersOut = argv[i + 1];   // the Commander orders' row on the glyph chooser (3 classes, with and without an army)
         else if (a == "--t036") t036Out = argv[i + 1];   // the five layers, the center in thirds, the Quick cast page
         else if (a == "--tree") treeOut = argv[i + 1];   // the Sorceress page's painted tree icons at 50, 100 and 200%, circle and square, drawn; saved there
         else if (a == "--glyph") glyphOut = argv[i + 1];   // Glyph icon: the Glyphs page and the center's sigils painted, circle and square, at 50-300%; saved there
@@ -391,7 +391,7 @@ int main(int argc, char** argv) {
             for (int t = 0; t < rw::Trees; ++t) s.treeNames[size_t(t)] = data.trees[t];
             static rw::Instance list[rw::MaxDraw];
             const int n = rw::Build(s, list);
-            const auto c = rw::Content(864, 150);   // the 864 footer: 1296 x 1320, the size of the audit's five shots
+            const auto c = rw::Content(864, 150);   // the 864 footer: 1296 x 1320, the size of the 's five shots
             std::printf("shot-ms: the full ring, %d instances, %d x %d\n", n, c.w, c.h);
             rw::shot::SaveQueue saver;
             const int Shots = 9;   // the first is the cold one (the codec's and the driver's first use), listed apart
@@ -446,7 +446,7 @@ int main(int argc, char** argv) {
     }
     if (!frames.empty()) std::filesystem::create_directories(frames);
     if (!out.empty()) std::filesystem::create_directories(out);
-    // ---- Pure: the content rectangle at each render scale (plan E3) ----
+    // ---- Pure: the content rectangle at each render scale ----
     {
         const auto a = rw::Content(768, 100), b = rw::Content(768, 125), c = rw::Content(1024, 150), d = rw::Content(864, 150);
         Check(a.w == 768 && a.h == 880 && a.x0 == 128 && a.y0 == 112, "#14 render 100%: 768 x 880 from canvas (128, 112)");
@@ -472,7 +472,7 @@ int main(int argc, char** argv) {
         const int n = rw::Build(busy, list);
         Check(big.count == rw::MaxSeats && n <= rw::MaxInstances && n > rw::MaxSeats, "#14 64 seats pointed: within the 128 instances");
         Check(rw::Build(busy, list, 10) == 10, "#14 the cap holds at any size");
-        // The designer's R4 sigil fix (L1): the sigil fades by half the center's grow, gone at g 0.5 (r 108).
+        // The design's sigil fix: the sigil fades by half the center's grow, gone at g 0.5 (r 108).
         auto sigil = [&](float g) {
             rw::Scene s; s.open = true; s.layout = &layout; s.grow = g;
             const int n = rw::Build(s, list);
@@ -484,7 +484,7 @@ int main(int argc, char** argv) {
         Check(sigil(0) > .99f && sigil(.25f) > .4f && sigil(.25f) < .6f && sigil(.5f) == 0 && sigil(1) == 0,
             "L1 R4 fix: a tree's sigil fades with the center's grow, gone by half of it");
     }
-    // ---- Pure: when a frame composes (frame-budget section 2; perf R4 item 3) ----
+    // ---- Pure: when a frame composes (frame-budget section 2; item 3) ----
     {
         const auto layout = rw::Build(test.in.data(), int(test.in.size()), rw::TreeLayout::Shown);
         rw::Scene s; s.layout = &layout;
@@ -502,19 +502,19 @@ int main(int argc, char** argv) {
         Check(still.Want(s) && still.busy == 1, "perf R4 #3: the ring was busy: the change stays due the next frame");
         still.Done(true);
         Check(!still.Want(s), "#14 Animation Off: composed, then rests");
-        s.wheelAlpha = .5f;   // review R4 J5: a field Build reads, changed alone
+        s.wheelAlpha = .5f;   // a field Build reads, changed alone
         Check(still.Want(s), "J5 Animation Off: the wheel's fade alone redraws");
         still.Done(true);
         s.step.pressed = {rw::Kind::Seat, 3};
         Check(still.Want(s), "J5 Animation Off: a press alone redraws");
         still.Done(true);
-        s.step.picked = 4;   // review R5 K1 (d)
+        s.step.picked = 4;   // (d)
         Check(still.Want(s), "J5 Animation Off: a pick alone redraws");
         still.Done(true);
         s.step.locked = true;
         Check(still.Want(s), "J5 Animation Off: the page lockout alone redraws");
         still.Done(true);
-        s.revision = 9;   // review R5 K6: seats or atlas rebuilt in place
+        s.revision = 9;   // seats or atlas rebuilt in place
         Check(still.Want(s), "K6 Animation Off: a data revision alone redraws");
         still.Done(true);
         s.holdFrac = .3f;
@@ -613,7 +613,7 @@ int main(int argc, char** argv) {
             bool premul = true;
             for (size_t i = 0; i < image.data.size(); i += 4) if (image.data[i] > image.data[i + 3] || image.data[i + 1] > image.data[i + 3] || image.data[i + 2] > image.data[i + 3]) { premul = false; break; }
             Check(premul, "#15 the icon atlas (all mips) is premultiplied");
-            // Round 2026-11-08 item 6: the fullest wheel and every page card, every class: all packed, inside the atlas
+            // item 6: the fullest wheel and every page card, every class: all packed, inside the atlas
             for (int cls = 0; cls < 8; ++cls) {
                 std::array<int, rw::MaxSeats + rw::ExtraIcons> full{};
                 for (int i = 0; i < rw::MaxSeats; ++i) full[size_t(i)] = 5000 + i;
@@ -630,7 +630,7 @@ int main(int argc, char** argv) {
         if (real) icons::Directory(iconDir.wstring());
         rw::IconSource source = real ? rw::IconSource([](int id) { return icons::Get("s" + std::to_string(id)); })
                                      : rw::IconSource([](int id) { return id == 105 ? nullptr : SyntheticIcon(id); });
-        source = [inner = source](int id) {   // (2026-11-16): the sub-menus' own pictures, from this exe's copy of the plugin's .rc (as the ring's worker)
+        source = [inner = source](int id) {   //: the sub-menus' own pictures, from this exe's copy of the plugin's.rc (as the ring's worker)
             const int t = rw::menuart::ThirdOfArt(id);
             if (rw::treeart::SlotOfArt(id) >= 0) return rw::treeart::Picture(GetModuleHandleW(nullptr), id);   // a painted tree square, a cell of the sheet
             if (rw::glyphart::SlotOfArt(id) >= 0) return rw::glyphart::Picture(GetModuleHandleW(nullptr), id);   // Glyph icon: a painted glyph or sigil square, a cell of its sheet
@@ -639,7 +639,7 @@ int main(int argc, char** argv) {
         worker.SetFxTexCache(sprites.empty() ? std::filesystem::path{} : sprites / "sprites.ssp");   // never next to the exe
         worker.Start(&compose, f.device.Get(), f.queue.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, fonts, source, [real] { if (real) icons::Wait(3000); }, Say);
         Check(PumpUntil(compose, [&] { return compose.Ready() || worker.Failed(); }, 20000) && compose.Ready(), "compose setup on the worker");
-        {   // The Commander orders' row on the glyph chooser (2026-11-14; rw::GlyphChoices, rw::ChooserLayout): a Necromancer,
+        {   // The Commander orders' row on the glyph chooser: a Necromancer,
             // a Druid and an Amazon, each with and without a summon army, at the panel's real size. Checked every run;
             // saved with --orders <folder>. Which skills are dimmed is illustrative (every third needs a target here).
             namespace ia = framevr::interaction;
@@ -699,7 +699,7 @@ int main(int argc, char** argv) {
                 std::vector<uint8_t> restPx;
                 for (int held = 0; held <= army; ++held) {   // at rest; with an army also a button held on an order
                     const int heldSeat = firstOrder + 3;
-                    if (held) {   // as the game has it: the ray on the held order (designer gate D1: marked, and named in the center)
+                    if (held) {   // as the game has it: the ray on the held order
                         m.holdFrac = .5f; m.holdSeat = heldSeat; m.holdSlot = "Right trigger"; m.holdTop = "Replaces"; m.holdStatus = "Bone Armor"; m.step.centerGrown = true;
                         m.step.under = {rw::Kind::Seat, heldSeat}; m.holdName = rw::orders::Short(cl.seats[size_t(heldSeat)].id);
                     }
@@ -716,7 +716,7 @@ int main(int argc, char** argv) {
                     }
                     Check(Bright(px, c.w, c, rw::CanvasCx - 200, rw::CanvasCy - 335, rw::CanvasCx + 200, rw::CanvasCy - 290) > 60, shot + ": the chooser's title on the top arc");
                     if (army && !held) restPx = px;
-                    if (held && restPx.size() == px.size()) {   // designer gate D1: the hold picture differs from the rest one in the row, at the held order only
+                    if (held && restPx.size() == px.size()) {   // the hold picture differs from the rest one in the row, at the held order only
                         const auto& hs = cl.seats[size_t(heldSeat)];
                         const float k = c.w / c.canvasW, ringR = rw::IconPx * 1.3f / 2 + 3;   // the 3 px hover ring's middle
                         auto changed = [&](float from, float to) {
@@ -740,11 +740,11 @@ int main(int argc, char** argv) {
                     std::printf("%s: %d instances, %d seats\n", shot.c_str(), count2, cl.count);
                     if (!ordersOut.empty()) Save(ordersOut, shot, px, c.w, c.h);
                 }
-                float widest = 0;   // designer gate D1: every order's short name fits the hold's center line
+                float widest = 0;   // every order's short name fits the hold's center line
                 for (int id = rw::orders::First; id <= rw::orders::Last; ++id) widest = std::max(widest, tx::Width(built->metrics, tx::Body22, rw::orders::Short(id)) + 5);
                 Check(widest <= 207, name + ": the widest short name fits the hold's line (" + std::to_string(widest) + " of 207 px)");
-                int allFour = 0; std::string limited;   // designer gate D3: how many orders show all four parts
-                if (army && hero.cls == 2) for (int j = 0; j < rw::orders::Count; ++j) {   // designer gate D3: each order pointed, its blurb whole
+                int allFour = 0; std::string limited;   // how many orders show all four parts
+                if (army && hero.cls == 2) for (int j = 0; j < rw::orders::Count; ++j) {   // each order pointed, its blurb whole
                     const int at = firstOrder + j, id = cl.seats[size_t(at)].id;
                     std::string slug = rw::orders::Short(id);
                     for (auto& ch : slug) ch = ch == ' ' ? '-' : char(std::tolower(static_cast<unsigned char>(ch)));
@@ -782,11 +782,11 @@ int main(int argc, char** argv) {
                 }
                 if (army && hero.cls == 2) {
                     std::printf("orders blurbs: %d of %d show all four parts%s%s\n", allFour, rw::orders::Count, limited.empty() ? "" : "; without the line under the name: ", limited.c_str());
-                    // The designer's rule (gate D3): all four parts for all seven. The longer action line left Hold Ground at 9 lines.
+                    // The design's rule (gate D3): all four parts for all seven. The longer action line left Hold Ground at 9 lines.
                     Check(allFour == rw::orders::Count && limited.empty(), "orders blurbs: every order shows its name, the line under it, the whole help line and the action line (" + std::to_string(allFour) + " of 7" + (limited.empty() ? "" : "; not: " + limited) + ")");
                 }
             }
-            (void)compose.TakeWindow();   // these pictures are not in the cost window the R4 check below reads
+            (void)compose.TakeWindow();   // these pictures are not in the cost window the check below reads
         }
         {   // (ring > Ring wheel > Layers > Tree icon): a Sorceress page with the tree marks painted, circle
             // and square, at 50, 100 and 200%, then Drawn at 100% and Hidden, at the panel's real size. Checked every run; saved with --tree <folder>.
@@ -938,7 +938,7 @@ int main(int argc, char** argv) {
         }
         {   // the five layers one at a time, the center in
             // thirds (rest, each third pointed, grow Off, dim Off and Hidden, a bound Quick cast badge, Quick cast Off; the Quick cast page
-            // went 2026-11-16). A Sorceress with the three sub-menu entries on the General row. Checked every run; saved with --t036 <folder>
+            // went). A Sorceress with the three sub-menu entries on the General row. Checked every run; saved with --t036 <folder>
             // (with --icons the player's own icons: keep those pictures private).
             namespace ia = framevr::interaction;
             if (!t036Out.empty()) std::filesystem::create_directories(t036Out);
@@ -949,7 +949,7 @@ int main(int argc, char** argv) {
             for (int t = 0; t < rw::ThirdCount; ++t) { d.in.push_back({rw::MenuEntryId(t), -1, -1}); d.names.push_back(rw::MenuEntryName[t]); }
             Seats st = Lay(d, rw::TreeLayout::Shown, 100);
             st.request.classId = cls;
-            // 2026-11-16: the sub-menu entries ask for their own pictures by their ids (as the ring asks), the thirds use the same cells
+            // the sub-menu entries ask for their own pictures by their ids (as the ring asks), the thirds use the same cells
             worker.Want(st.request);
             std::shared_ptr<const rw::AtlasWorker::Built> built;
             if (!PumpUntil(compose, [&] { built = worker.Current(compose); return built && built->request == st.request; }, 60000)) Check(false, "the atlases");
@@ -1015,9 +1015,9 @@ int main(int argc, char** argv) {
                 { auto s = pointed(rw::Kind::Quick); s.thirdDimPct = 100; draw(s, "t036-center-6-dim-off"); }
                 { auto s = pointed(rw::Kind::Quick); s.thirdDimPct = 0; draw(s, "t036-center-7-dim-hidden"); }
                 { auto s = base(); s.menuBadge[rw::ThirdQuick] = {true, rw::BadgeKind::Coin, 'Y'}; draw(s, "t036-center-8-quick-cast-on-a-button"); }
-                const auto pqOff = [&] { auto s = pointed(rw::Kind::Quick); s.quickWord = rw::QuickThirdWord(false, true); return draw(s, "t036-center-9-quick-cast-off"); }();   // 2026-11-16: its switch Off
-                { auto s = pointed(rw::Kind::Quick); s.quickWord = rw::QuickThirdWord(true, false); draw(s, "t036-center-10-quick-cast-not-this-class"); }   // review N1
-                {   // 2026-11-16 (the player: the sub-menu marks showed gold): each third's mark and each sub-menu shelf entry is its own picture,
+                const auto pqOff = [&] { auto s = pointed(rw::Kind::Quick); s.quickWord = rw::QuickThirdWord(false, true); return draw(s, "t036-center-9-quick-cast-off"); }();   // its switch Off
+                { auto s = pointed(rw::Kind::Quick); s.quickWord = rw::QuickThirdWord(true, false); draw(s, "t036-center-10-quick-cast-not-this-class"); }
+                {   // each third's mark and each sub-menu shelf entry is its own picture,
                     // silver on our dark disc; a picture missing: the drawn mark in silver. Never gold: no bright pixel with red far over blue.
                     std::vector<int16_t> noArt(built->icons.cellOf.begin(), built->icons.cellOf.end());
                     for (int i = 0; i < st.layout.count; ++i) if (rw::MenuOfEntry(st.layout.seats[size_t(i)].id) >= 0) noArt[size_t(i)] = -1;
@@ -1059,7 +1059,7 @@ int main(int argc, char** argv) {
                     const float a = rw::ThirdMidDeg[rw::ThirdQuick] * rw::Pi / 180, x = rw::CanvasCx + 145 * std::cos(a), y = rw::CanvasCy + 145 * std::sin(a);
                     Check(At(pq, c.w, x, y, c, 3) > 100 && At(rest, c.w, x, y, c, 3) < 60, "the Quick cast third grown: its slice at 145 px");
                 }
-                {   // 2026-11-16: Quick cast's switch Off: the pointed third's second line differs ("Off in the ring", muted), its name the same
+                {   // Quick cast's switch Off: the pointed third's second line differs ("Off in the ring", muted), its name the same
                     double diff = 0;
                     for (float y = rw::CanvasCy + 5; y <= rw::CanvasCy + 30; y += 1) for (float x = rw::CanvasCx - 90; x <= rw::CanvasCx + 90; x += 1) diff += std::abs(At(pqOff, c.w, x, y, c, 0) - At(pq, c.w, x, y, c, 0));
                     Check(diff > 500 && nameAt(pqOff) > 15, "Quick cast Off: its third says so under its name");
@@ -1067,7 +1067,7 @@ int main(int argc, char** argv) {
             }
             (void)compose.TakeWindow();
         }
-        {   // R8 match stage 1a perf fix: the On edge loads the build's bytecode, no compile
+        {   // match stage 1a perf fix: the On edge loads the build's bytecode, no compile
             const auto st = compose.Stats();
             std::printf("compose shaders: %s, %.0f ms, pixel shaders %u + effects %u instructions, %u + %u slots (budget %u each)\n", st.embedded ? "built offline" : "compiled",
                 st.compileMs, st.psInstructions, st.fxInstructions, rw::ShaderBlobPsSlots, rw::ShaderBlobPsFxSlots, rw::ShaderBlobSlotBudget);
@@ -1137,7 +1137,7 @@ int main(int argc, char** argv) {
                 const std::string name = std::string(shot.name) + "-" + std::to_string(pct);
                 Check(DrawWait(compose, f.target.Get(), c, list, n) == rw::Compose::Result::Composed, name + ": composed");
                 const auto px = f.Read(c.w, c.h);
-                // Premultiplied everywhere but the effects' light: the kit's lighter layers are premultiplied additive (R8 match
+                // Premultiplied everywhere but the effects' light: the kit's lighter layers are premultiplied additive (match
                 // stage 1b), so pixels within a seat's rest cap (+ the float's 5 px and a grown icon) are not held to rgb <= alpha.
                 const auto& lay = seats.layout;
                 const float scale = float(c.w) / c.canvasW;
@@ -1178,7 +1178,7 @@ int main(int argc, char** argv) {
                 std::printf("%s: %d instances, %d x %d\n", name.c_str(), n, c.w, c.h);
                 if (!out.empty()) Save(out, name, px, c.w, c.h);
             }
-            {   // R6Q2: the hold ring half full (L2: r 145, 12 px, hover ring color from the top clockwise, a head dot, the track at 45%)
+            {   // R6Q2: the hold ring half full
                 rw::Scene s; s.open = true; s.layout = &shown.layout; s.anim = rw::PresetAnim(rw::Preset::Off);
                 s.atlasPct = built->icons.scalePct; s.cells = built->icons.cellOf.data(); s.metrics = &built->metrics;
                 s.step.under = {rw::Kind::Seat, 3}; s.holdFrac = .5f; s.holdSeat = 3; s.holdSlot = "Right A"; s.holdTop = "Replaces"; s.holdStatus = "Fire Bolt";
@@ -1203,7 +1203,7 @@ int main(int argc, char** argv) {
         std::printf("composes %u: cpu mean %.3f max %.3f p95 %.3f ms; WARP gpu %u samples mean %.3f ms (a software device: not the headset's number)\n",
             w.composes, w.cpuMean, w.cpuMax, w.cpuP95, w.gpuSamples, w.gpuMean);
         Check(w.composes == 10 && (w.gpuSamples == 0 || w.gpuSamples == 10), "perf R4 #4: the window holds every compose");
-        {   // Round 2026-11-08 item 4: a screenshot's picture: right pixels straight after composes that may still be in flight
+        {   // item 4: a screenshot's picture: right pixels straight after composes that may still be in flight
             const rw::ContentRect c{256, 128, 0, 0, 256};
             rw::Instance list[2];
             list[0] = {40, 60, 60, 60, 0, 0, 0, 0, 0, .5f, .25f, .75f, 1, rw::RecipeRect, 0};
@@ -1244,7 +1244,7 @@ int main(int argc, char** argv) {
                 for (size_t i = 0; i < whole.size(); ++i) differ += whole[i] != image.rgba[i];
                 Check(differ == 0, "shot: every texel as the swapchain's picture (" + std::to_string(differ) + " bytes differ)");
             }
-            {   // Round 2026-11-12 Job B (audit bug 4): the frame's half ends with the rows handed over; the PNG is the worker's.
+            {   // Job B: the frame's half ends with the rows handed over; the PNG is the worker's.
                 // The worker is held at a gate, so both shots' frame halves are back before any file exists; then both files
                 // are whole (read back: the picture's own pixels) and each has its line. A second shot while one is pending.
                 rw::shot::SaveQueue saver;
@@ -1290,7 +1290,7 @@ int main(int argc, char** argv) {
             compose.WaitIdle(5000);
             compose.TakeWindow();   // these draws are this block's (the next measured window starts clean)
         }
-        if (!out.empty()) {   // Round 2026-11-08 item 2: the Other trees row at 0, 49, 50 and 100, a tree pointed through the real engine, for the designer
+        if (!out.empty()) {   // item 2: the Other trees row at 0, 49, 50 and 100, a tree pointed through the real engine, for the design
             const auto seats = Lay(data, rw::TreeLayout::Shown, 150);
             worker.Want(seats.request);
             std::shared_ptr<const rw::AtlasWorker::Built> built;
@@ -1317,7 +1317,7 @@ int main(int argc, char** argv) {
             }
             compose.TakeWindow();
         }
-        // R8 match stage 1 (r8-match-spec 7.3, B2): the rest cap in pixels. Every rest kind, under and over the face, on one
+        // match stage 1 (r8-match-spec 7.3, B2): the rest cap in pixels. Every rest kind, under and over the face, on one
         // canvas at 100% (1 px = 1 canvas px), 10 s at 250 ms with its rest event cycling: no pixel over 2% alpha farther than
         // 28.6 px from its icon's center, premultiplied (rgb <= alpha). Each kind's mean added luma in the 1.0-1.3 r band
         // over black under the seat's rings (the reference's measure, the design notes; black is its upper bound) printed.
@@ -1369,7 +1369,7 @@ int main(int argc, char** argv) {
             std::printf("stage 1 cap test %.1f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
             compose.TakeWindow();
         }
-        {   // R8 match stage 3a: the BC4 decoder (a0 255, a1 0: eight steps, index i at bits 3i) and the no-cache path
+        {   // match stage 3a: the BC4 decoder (a0 255, a1 0: eight steps, index i at bits 3i) and the no-cache path
             uint8_t b[8] = {255, 0, 0, 0, 0, 0, 0, 0}, v[16];
             uint64_t bits = 0; for (int i = 0; i < 16; ++i) bits |= uint64_t(i % 8) << (3 * i);
             for (int i = 0; i < 6; ++i) b[2 + i] = uint8_t(bits >> (8 * i));
@@ -1384,7 +1384,7 @@ int main(int argc, char** argv) {
                   "stage 3a: no cache, no effect atlas (level 4)");
             if (sprites.empty()) Check(!compose.HasAtlas(rw::AtlasKind::FxTex), "stage 3a: without --sprites the preview never reads a cache");
         }
-        // R8 match stage 2 (r8-match-spec 7.3 "Pointed reach"): every element default (the 12 rest kinds' hover recipes) and
+        // match stage 2 (r8-match-spec 7.3 "Pointed reach"): every element default (the 12 rest kinds' hover recipes) and
         // the farthest lightning bolts the draw list makes, 0-4 s at 100 ms: no pixel over 2% farther than 90 px from the
         // pointed icon's center (the quad's 15 px soft edge included).
         {
@@ -1432,7 +1432,7 @@ int main(int argc, char** argv) {
             Check(worst <= rw::PointedReachPx, "stage 2 pointed reach: nothing past 90 px in 4 s, every element default (farthest " + std::to_string(worst) + " px, kind " + std::to_string(worstKind) + ")");
             compose.TakeWindow();
         }
-        // R7 (plan E9 "preview shots of both pages per class"): the Glyphs and Gestures pages of all 8 classes at 150%, the
+        // the Glyphs and Gestures pages of all 8 classes at 150%, the
         // class's 30 skills as seats (synthetic icons by id unless --icons), upstream's card order; the Warlock: Glyphs only.
         if (!real) {
             const char* const classNames[8] = {"amazon", "sorceress", "necromancer", "paladin", "barbarian", "druid", "assassin", "warlock"};
@@ -1524,7 +1524,7 @@ int main(int argc, char** argv) {
                     const auto& lit = seats.layout.seats[0]; const auto& dimmed = seats.layout.seats[1];
                     Check(At(px, c.w, rw::CanvasX + lit.x, rw::CanvasY + lit.y, c, 3) > At(px, c.w, rw::CanvasX + dimmed.x, rw::CanvasY + dimmed.y, c, 3) + 80, "glyph-chooser: a seat off the glyph list drawn at 25%");
                     if (!out.empty()) Save(out, "glyph-chooser", px, c.w, c.h);
-                    {   // 2026-11-16 (the player: "ring menu > quick cast"): Quick cast's page, three places filled (a potion with no picture: its disc), the
+                    {   // Quick cast's page, three places filled (a potion with no picture: its disc), the
                         // rest empty sockets with their numbers, the center Back and "3 of 12 filled"; then its chooser's words
                         rw::PageView qv; const int qids[3] = {54, k.first + 4, (2 << 28) | 1};
                         rw::FillQuick(qv, qids, 3, [](int id) { return id == 54 ? std::string("Teleport") : std::string("Healing (best)"); }, cellOf);
@@ -1551,7 +1551,7 @@ int main(int argc, char** argv) {
                         Check(Bright(px, c.w, c, rw::CanvasCx - 200, rw::CanvasCy - 335, rw::CanvasCx + 200, rw::CanvasCy - 290) > 60, "quick-cast-chooser: its title on the top arc");
                         { rw::Scene q2 = qm; q2.chooseLead = nullptr; rw::Scene q3 = qm; q3.chooseBack = nullptr; Check(!(rw::KeyOf(qm) == rw::KeyOf(q2)) && !(rw::KeyOf(qm) == rw::KeyOf(q3)), "quick-cast-chooser: its own words redraw (the draw key)"); }
                         if (!out.empty()) Save(out, "quick-cast-chooser", px, c.w, c.h);
-                        // Review 2026-11-16 (exact items): a kind's page: Rejuvenation (Best), then the Full and the plain one carried
+                        // Review (exact items): a kind's page: Rejuvenation (Best), then the Full and the plain one carried
                         const int kids[3] = {(2 << 28) | 3, (1 << 28) | 0x6c7672, (1 << 28) | 0x737672};
                         rw::PageView kv;
                         rw::FillQuickKind(kv, kids, 3, 3, "Rejuvenation", [&](int id) { return id == kids[0] ? std::string("Rejuvenation") : id == kids[1] ? std::string("Full Rejuvenation Potion") : std::string("Rejuvenation Potion"); },
@@ -1569,7 +1569,7 @@ int main(int argc, char** argv) {
                         Check(Bright(px, c.w, c, rw::CanvasCx - 120, rw::CanvasCy - 330, rw::CanvasCx + 120, rw::CanvasCy - 285) > 60, "quick-cast-kind: the kind's name on the top arc");
                         Check(Bright(px, c.w, c, rw::CanvasCx - 80, rw::CanvasCy - 40, rw::CanvasCx + 80, rw::CanvasCy + 40) > 40, "quick-cast-kind: Back in the center");
                         if (!out.empty()) Save(out, "quick-cast-kind", px, c.w, c.h);
-                        {   // Potion choice (2026-11-17): Mana with none carried but Light Mana: Best, then all 5 tiers, the 4 not carried dim
+                        {   // Potion choice: Mana with none carried but Light Mana: Best, then all 5 tiers, the 4 not carried dim
                             const auto mp = [](char d) { return (1 << 28) | int('m') | int('p') << 8 | int(d) << 16; };
                             const int mids[6] = {(2 << 28) | 2, mp('5'), mp('4'), mp('3'), mp('2'), mp('1')};
                             rw::PageView mv;
@@ -1646,7 +1646,7 @@ int main(int argc, char** argv) {
                 }
             }
         }
-        // R8: each animation layer's frames (contact sheets per layer, L5 #6). The Sorceress (fire, lightning, cold trees) and
+        // each animation layer's frames (contact sheets per layer, L5 #6). The Sorceress (fire, lightning, cold trees) and
         // the Paladin (Zeal 106, Charge 107); synthetic icons. Checks: the effects draw outside the icon, the Off glow is still.
         if (!real) for (int cls : {1, 3}) {
             const auto& k = framevr::skillcategories::Classes[size_t(cls)];
@@ -1698,7 +1698,7 @@ int main(int argc, char** argv) {
                     const auto cf = rw::Content(rw::FooterWidth(false, dev ? 6 : 5), 150);
                     static rw::Instance list[rw::MaxDraw];
                     const int n = rw::Build(s, list);
-                    Check(DrawWait(compose, f.target.Get(), cf, list, n) == rw::Compose::Result::Composed, "item 4 footer composed");   // review S2: no raw Draw
+                    Check(DrawWait(compose, f.target.Get(), cf, list, n) == rw::Compose::Result::Composed, "item 4 footer composed");   // no raw Draw
                     const auto px = f.Read(cf.w, cf.h);
                     const auto b = rw::FooterBoxAt(3, P::Spells, dev == 1, false);
                     Check(Bright(px, cf.w, cf, b.x0 + 6, b.y0 + 6, b.x1 - 6, b.y1 - 6) > 40, "item 4: INVENTORY's label drawn in its tab");
@@ -1784,7 +1784,7 @@ int main(int argc, char** argv) {
                 }
             }
         }
-        // R7c (feedback 1 item 7): each class's tree marks (the kit's glyphs) and the center's rune band, Trees shown and Tree
+        // R7c: each class's tree marks (the kit's glyphs) and the center's rune band, Trees shown and Tree
         // orbs, at 150%; every rune of the rest band read back against ringwheel::RuneOf (the shader's hash is the kit's).
         if (!real) {
             const char* const classNames[8] = {"amazon", "sorceress", "necromancer", "paladin", "barbarian", "druid", "assassin", "warlock"};
@@ -1845,11 +1845,11 @@ int main(int argc, char** argv) {
             }
             Check(runeRead == 8 * 36 && runeMiss == 0, "R7c: every rest rune drawn as ringwheel::RuneOf says (" + std::to_string(runeRead - runeMiss) + " of " + std::to_string(runeRead) + ")");
         }
-        // R8 match spec (sections 6 and 7; B1: judged on the real skill icons, --icons: a local icon cache in
+        // match spec (sections 6 and 7; B1: judged on the real skill icons, --icons: a local icon cache in
         // upstream's format, never in git). Stage 1: every class with its per-skill rest glow, seated where the design kit seats
         // it (r8-match/kit-seats.json beside the --match folder's parent, its active skills only: the game's catalog holds no
         // passives), at 1x like the kit's clips: Trees shown at rest, each tree open in Tree orbs, the Assassin's Traps tree
-        // over 2 s at 0.2 s. Then the S1 check (the design notes): per class and tree, the mean added luma in the
+        // over 2 s at 0.2 s. Then the check (the design notes): per class and tree, the mean added luma in the
         // 1.0-1.3 r band around the open tree's icons, with vs without the rest glow, 1 to 11 s at 250 ms, over the kit's busy
         // ground (r8-match/busy-plate-1x.png on black, as the reference), at most the reference's x 1.10, no frame over its highest x 1.10.
         if (real && !matchOut.empty()) {
@@ -1877,7 +1877,7 @@ int main(int argc, char** argv) {
                 if (at == std::string::npos) return out;
                 const size_t end = seatsJson.find("}]", at) + 1;   // the seat list's end (an el list ends in "])
                 const std::string part = seatsJson.substr(at, end - at);
-                // one object per seat; its fields in any order, with or without spaces (the kit added `el` on 2026-11-07)
+                // one object per seat; its fields in any order, with or without spaces (the kit added `el` on)
                 const std::regex obj("\\{[^{}]*\\}"), name("\"name\":\\s*\"([^\"]+)\""), tree("\"tree\":\\s*(\\d+)"), shelf("\"shelf\":\\s*(true|false)"),
                     x("\"x\":\\s*([-\\d.]+)"), y("\"y\":\\s*([-\\d.]+)");
                 for (std::sregex_iterator it(part.begin(), part.end(), obj), stop; it != stop; ++it) {
@@ -1927,7 +1927,7 @@ int main(int argc, char** argv) {
                 if (!sprites.empty()) Check(PumpUntil(compose, [&] { return compose.HasAtlas(rw::AtlasKind::FxTex); }, 20000), "stage 3a: the game effect textures in (--sprites)");
                 std::vector<rw::RestGlow> rest(size_t(shown.layout.count)), none(size_t(shown.layout.count));
                 std::vector<uint8_t> el(size_t(shown.layout.count));
-                std::vector<int8_t> ci(size_t(shown.layout.count), int8_t(-1)); int nc = 0;   // designer S3a: the crawl's index, as the ring
+                std::vector<int8_t> ci(size_t(shown.layout.count), int8_t(-1)); int nc = 0;   // design S3a: the crawl's index, as the ring
                 int fromKit = 0;
                 for (int i = 0; i < shown.layout.count; ++i) {   // the ring's own fill (vr/ring_wheel.cpp Seats)
                     const auto& seat = shown.layout.seats[size_t(i)];
@@ -1955,7 +1955,7 @@ int main(int argc, char** argv) {
                     return f.Read(c.w, c.h);
                 };
                 Save(stageDir, cname + "-rest", render(scene(shown, -1, 2000, rest.data())), c.w, c.h);
-                // S1 (the design notes): the mean added luma in the 1.0-1.3 r band (the reference's band, whatever the rest cap)
+                // (the design notes): the mean added luma in the 1.0-1.3 r band (the reference's band, whatever the rest cap)
                 // around the icons of tree `pos`, with vs without the rest glow, over the busy plate, 1 to 11 s at 250 ms.
                 struct Measured { double mean, high; int seats; };
                 auto measure = [&](const Seats& st, int openTree, int pos) {
@@ -2017,14 +2017,14 @@ int main(int argc, char** argv) {
                                 }
                             }
                         }
-                        for (int i = 0; i < shown.layout.count; ++i) {   // designer: one Trees shown pointed frame per class (the first seat)
+                        for (int i = 0; i < shown.layout.count; ++i) {   // one Trees shown pointed frame per class (the first seat)
                             rw::Scene s = scene(shown, -1, 2800, rest.data());
                             s.step.under.kind = rw::Kind::Seat; s.step.under.index = i; s.fxSeat = i; s.fxAgeMs = 800; s.fxAlpha = 1;
                             framevr::ringwheel::png::Save((stageDir / (cname + "-shown-pointed-on-busy.png")).c_str(), OverPlate(render(s), c.w, c.h, c, plate, pw, ph), UINT(c.w), UINT(c.h));
                             break;
                         }
                     }
-                    if (page == 0) {   // R8 match stage 2: the tree's first two skills pointed (their element defaults), 0.4-1.6 s, on busy and dark
+                    if (page == 0) {   // match stage 2: the tree's first two skills pointed (their element defaults), 0.4-1.6 s, on busy and dark
                         int done = 0;
                         for (int i = 0; i < orbs.layout.count && done < 2; ++i) {
                             if (orbs.layout.seats[size_t(i)].tree != pos) continue;
@@ -2044,11 +2044,11 @@ int main(int argc, char** argv) {
                     }
                     if (cls == 6 && page == 0)   // the Assassin's Traps tree (mixed elements) over 2 s at 0.2 s, for the sheets
                         for (int k = 0; k <= 10; ++k) { char nm[64]; std::snprintf(nm, sizeof nm, "assassin-traps-t%04d", 1000 + k * 200); Save(stageDir, nm, render(scene(orbs, pos, 1000 + k * 200, rest.data())), c.w, c.h); }
-                    {   // the open tree over the busy ground, as the designer's sheets show it; Trees shown too (designer, 2026-11-07)
+                    {   // the open tree over the busy ground, as the design's sheets show it; Trees shown too
                         const auto busy = OverPlate(render(scene(orbs, pos, 2000, rest.data())), c.w, c.h, c, plate, pw, ph);
                         framevr::ringwheel::png::Save((stageDir / (cname + "-orbs-open-" + std::to_string(page + 1) + "-on-busy.png")).c_str(), busy, UINT(c.w), UINT(c.h));
                     }
-                    // S1, Tree orbs with this tree open; then Trees shown at rest, this tree's icons only (no reference yet).
+                    // Tree orbs with this tree open; then Trees shown at rest, this tree's icons only (no reference yet).
                     const auto [mean, high, nSeats] = measure(orbs, pos, pos);
                     if (nSeats == 0) continue;
                     {
@@ -2059,7 +2059,7 @@ int main(int argc, char** argv) {
                         std::printf("stage 1 S1 shown %s\n", line);
                     }
                     const float rm = refMean[cls][page], rh = refHigh[cls][page];
-                    const bool pass = rm < 0 || (mean <= rm * 1.10 && high <= rh * 1.10 && mean >= rm * 0.70);   // designer: a match, not only a ceiling (>= 0.7 x)
+                    const bool pass = rm < 0 || (mean <= rm * 1.10 && high <= rh * 1.10 && mean >= rm * 0.70);   // a match, not only a ceiling (>= 0.7 x)
                     s1Bad += !pass;
                     char line[200];
                     std::snprintf(line, sizeof line, "%s\t%d\t%d\t%.1f\t%.1f\t%.1f\t%.1f\t%s", title.c_str(), page + 1, nSeats, mean, high, rm, rh, rm < 0 ? "no reference" : pass ? "pass" : "FAIL");
@@ -2069,11 +2069,11 @@ int main(int argc, char** argv) {
             }
             Check(s1Bad == 0, "stage 1 S1: every class and tree's rest band light within 0.70-1.10 x the reference's (" + std::to_string(s1Bad) + " over)");
         }
-        // Feedback 1 items 3 and 5 (L4 rows 16-18): the bound-button badges on WARP, Sorceress Trees shown at 100% and 150% with
+        // Feedback 1 items 3 and 5: the bound-button badges on WARP, Sorceress Trees shown at 100% and 150% with
         // the kit's stand-in binds (qbauto: A B RT gA gB X Y LT gX gY spread over the trees). Each kind's pixels against the
         // kit's colors (disc #4A3820 to #14110D, coin #FFF0C4 / #E8C77E / #C9A25E, rim #E8C77E, a dark halo), the coin's letter
         // drawn without the dark outline (as thick as the disc's same letter), every size's widest letter 2 px inside its badge,
-        // size Off draws none. --badges <folder> writes the 12 settings of the kit's contact sheet (the designer's compare).
+        // size Off draws none. --badges <folder> writes the 12 settings of the kit's contact sheet (the design's compare).
         if (!real) {
             if (!badgeOut.empty()) std::filesystem::create_directories(badgeOut);
             const int cls = 1;
@@ -2152,8 +2152,8 @@ int main(int argc, char** argv) {
                         if (pct == 150) SaveCrop(badgeOut, name + "-top-crop", px, c, rw::CanvasCx, rw::CanvasCy - 230, 260);
                     }
                 }
-                {   // #3 (designer): the Draw glyph button's badge and the hold's center text. The Sorceress frames always run (checks); the
-                    // Warlock's and Tree orbs' need their own atlas, so only with --badges <folder> (the designer's frames).
+                {   // #3: the Draw glyph button's badge and the hold's center text. The Sorceress frames always run (checks); the
+                    // Warlock's and Tree orbs' need their own atlas, so only with --badges <folder> (the design's frames).
                     using K = rw::Kind;
                     struct Shot { const char* tag; int cls; rw::TreeLayout mode; int hand, slot, size; float hold; const char* status; K under; bool grown; int tree; };
                     constexpr auto Sh = rw::TreeLayout::Shown;
@@ -2204,7 +2204,7 @@ int main(int argc, char** argv) {
                         if (!badgeOut.empty()) Save(badgeOut, name, px, c.w, c.h);
                     }
                 }
-                {   // #3 (designer): every skill name the game can show fits the hold's line: Width(Body22) + 5 <= 192.8, with the real font
+                {   // #3: every skill name the game can show fits the hold's line: Width(Body22) + 5 <= 192.8, with the real font
                     float widest = 0; std::string widestName; int over = 0;
                     for (const char* nm : rw::AllSkillNames) {
                         const float w = tx::Width(built->metrics, tx::Body22, nm);
@@ -2224,7 +2224,7 @@ int main(int argc, char** argv) {
         }
         worker.Stop();
         if (real) icons::Shutdown();
-        {   // Review R6 X5: the engine's clock moves in sub-millisecond steps (GetTickCount64: about 15.6 ms)
+        {   // the engine's clock moves in sub-millisecond steps (GetTickCount64: about 15.6 ms)
             const double a = rw::NowMs();
             double b = a;
             for (int i = 0; i < 1000000 && b == a; ++i) b = rw::NowMs();
@@ -2233,7 +2233,7 @@ int main(int argc, char** argv) {
             const double c = rw::NowMs() - b;
             Check(c >= 15 && c < 500, "X5 NowMs counts real milliseconds (" + std::to_string(c) + " ms over a 20 ms sleep)");
         }
-        // Review R5 K1: the upload handshake's rules, on a second pass over the same queue.
+        // the upload handshake's rules, on a second pass over the same queue.
         {
             rw::Compose c2;
             Check(c2.Setup(f.device.Get(), f.queue.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, Say), "K1 a second pass");
@@ -2264,7 +2264,7 @@ int main(int argc, char** argv) {
             Check(PumpUntil(c2, [&] { return c2.StagingFree(); }, 5000), "K1 (b) the last slice done: the staging handed back");
             Check(c2.Release(5000), "K1 released");
         }
-        // Review R5 K1: a bright, half-transparent edge stays premultiplied through every mip.
+        // a bright, half-transparent edge stays premultiplied through every mip.
         {
             auto soft = std::make_shared<icons::Image>();
             soft->width = soft->height = 64; soft->rgba.assign(64 * 64 * 4, 255);
@@ -2279,7 +2279,7 @@ int main(int argc, char** argv) {
             }
             Check(partial > 1000 && over == 0, "K1 a white icon with an alpha ramp: premultiplied in every mip (" + std::to_string(partial) + " soft texels)");
         }
-        // Review R5 K4: the game's sRGB target. A mid-gray texel (sRGB 128) at 50% must store sRGB(0.216 x 0.5) = 92, not 64 (a _SRGB view would
+        // the game's sRGB target. A mid-gray texel (sRGB 128) at 50% must store sRGB(0.216 x 0.5) = 92, not 64 (a _SRGB view would
         // decode the premultiplied value and darken it).
         {
             Fixture fs(DXGI_FORMAT_R8G8B8A8_UNORM_SRGB);
@@ -2303,7 +2303,7 @@ int main(int argc, char** argv) {
             fs.Finish();
             Check(cs.Release(5000), "K4 released");
         }
-        // Review R4 J1: the safe free with a compose in flight. The queue waits on a fence only the CPU signals, so the
+        // the safe free with a compose in flight. The queue waits on a fence only the CPU signals, so the
         // compose cannot finish: the bounded wait runs out and nothing is freed; once released, the free goes through.
         {
             ComPtr<ID3D12Fence> blocker;
@@ -2311,10 +2311,10 @@ int main(int argc, char** argv) {
             Need(f.queue->Wait(blocker.Get(), 1), "queue wait");
             rw::Instance one[1] = {{rw::CanvasCx, rw::CanvasCy, 100, 100, 0, 0, 0, 0, 0, 1, 1, 1, 1, rw::RecipeDisc, 2}};
             const auto drawn = compose.Draw(f.target.Get(), rw::Content(768, 100), one, 1);
-            {   // Perf's X1 bound: the Off edge's WaitIdle on a GPU held past the bound: one event wait ended by a high-resolution
+            {   // bound: the Off edge's WaitIdle on a GPU held past the bound: one event wait ended by a high-resolution
                 // timer, false. Timings on a shared CPU only ever grow, so the fastest quiet try is the bound's measure; the
                 // counter proves the precise path ran (the plain, tick-rounded wait fails it every time, not by luck).
-                // Review W1: a load changes from one moment to the next, so one sample cannot say the CPU is quiet. 20 tries, each beside
+                // a load changes from one moment to the next, so one sample cannot say the CPU is quiet. 20 tries, each beside
                 // a bare high-resolution 16 ms timer wait with no GPU in it; the fastest of each is the measure, as a timing can only grow.
                 // Not even one bare timer on time: the CPU was too busy to judge milliseconds (parallel builds; WARP runs on it).
                 const auto bareTimer = [] {
@@ -2358,7 +2358,7 @@ int main(int argc, char** argv) {
             Check(drawn == rw::Compose::Result::Composed && !freed && compose.Ready() && compose.Completed() < compose.Submitted(),
                 "J1 a compose in flight: the bounded wait runs out, nothing freed, the compose kept");
             Check(waited >= 10 && waited < 500, "J1 the wait is bounded (" + std::to_string(int(waited)) + " ms)");
-            {   // the GPU let go during the wait: WaitIdle returns at that moment, not at the bound or the next poll. Review W1: WARP
+            {   // the GPU let go during the wait: WaitIdle returns at that moment, not at the bound or the next poll. WARP
                 // runs the held compose on this same CPU, so one try can lose 100 ms to a build; a wait that sleeps or polls loses it
                 // on every try. So the time from the fence's completion (a thread watching it) to WaitIdle's return is what is
                 // judged: seven tries, each with its own held GPU, the median under 20 ms (it was 100 ms from the wait's start, which
@@ -2396,7 +2396,7 @@ int main(int argc, char** argv) {
                 std::printf("X1 WaitIdle, GPU let go at 4 ms, 7 tries, %d idle: median %.1f ms after the fence, worst %.1f ms (slowest wait %.1f ms)\n", idleTries, median, worst, slowestTotal);
                 Check(honest && (idleTries < 3 || median < 20), "X1 WaitIdle returns when the GPU finishes (median " + std::to_string(median) + " ms after the fence, worst " + std::to_string(worst) + ", " + std::to_string(idleTries) + " of 7 idle; slowest wait " + std::to_string(slowestTotal) + " ms of a 500 ms bound)");
             }
-            // Round 2026-11-12 Job B: the ring going Off with a save pending. The save holds the filled readback buffer and
+            // Job B: the ring going Off with a save pending. The save holds the filled readback buffer and
             // nothing else, so the compose pass is freed under it (what the Off edge's worker does), the buffer is read after
             // that, and the file still comes out whole.
             rw::shot::SaveQueue saver;

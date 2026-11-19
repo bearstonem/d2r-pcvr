@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (, feedback 1 item 2; build-plan E5): grip to move the wheel, as plain data. Pure and Windows-free
+// Ring skill menu (feedback 1 item 2; build-plan): grip to move the wheel, as plain data. Pure and Windows-free
 // (ring-wheel-test). Reuses upstream's panels::Grab unchanged (steamvr/native_panels.h, the VR Settings helper): grip on
 // the panel arms it, 3 cm of hand travel starts the move, the grabbed point stays in the hand (move, angle, tilt, push and
 // pull in one hold), hand roll ignored, tilt clamped, the distance kept 0.40-1.50 m from the head. The result is an offset
@@ -8,10 +8,10 @@
 // The ring's rules on top (the design notes item 2):
 //  - Only the pointing (laser) hand grabs; its grip with a face button or trigger down never starts a move (FS3: the grip
 //    layer's binds and holds keep working); once moving, the ring takes no presses until the grip is up (the caller drops
-//    its events while Moving() is true).
+//    its events while Moving is true).
 //  - A page change or the wheel closing ends a grab (Suspend); the fight fade never does.
 //  - Kept between opens until the game session ends (nothing saved); a Placement row change, the Reset place row or
-//    Remember Off clears it; a remembered place more than 60 deg from the gaze at an open respawns at the default (FS4).
+//    Remember Off clears it; a remembered place more than 60 deg from the gaze at an open respawns at the default.
 //  - Grab to move Off: the spawn pose exactly, as before this step.
 #include <cmath>
 #include "native_panels.h"
@@ -30,11 +30,11 @@ inline float GazeDeg(const interaction::Pose& head, math::Vec at) {
     return std::acos(std::clamp(math::Dot(f, d) / n, -1.f, 1.f)) * 180 / Pi;
 }
 
-// Batch1 merge (review-grip S3): the grabbing hand is job B's pointing owner; with none, the hand not holding the wheel.
-// Review-grip S4: one grip threshold for the grab and the pointing owner's pin (a grip that grabs always keeps its owner).
+// Batch1 merge: the grabbing hand is job B's pointing owner; with none, the hand not holding the wheel.
+// Review-grip one grip threshold for the grab and the pointing owner's pin (a grip that grabs always keeps its owner).
 constexpr float GripDown = .5f;
 inline int GrabHand(int owner, int wheelHand) { return owner == 0 || owner == 1 ? owner : wheelHand == 0 ? 1 : 0; }
-// Review-grip S1: while the wheel moves, upstream's pages (Equipment, DEV, the editors) get no hover and no hit, so a trigger
+// Review-grip while the wheel moves, upstream's pages (Equipment, DEV, the editors) get no hover and no hit, so a trigger
 // squeezed mid-move clicks nothing there. The ring's pages drop their own events in Input (ringPage true: untouched).
 inline void HoldUpstreamWhileMoving(bool moving, bool ringPage, int& hover, bool& pointerHit) {
     if (moving && !ringPage) { hover = -1; pointerHit = false; }
@@ -52,7 +52,7 @@ struct GrabIn {
     bool handTracked = false;
     bool grip = false, hit = false, click = false;   // the pointing hand's grip and trigger; its ray on the panel (last frame)
     bool face = false;            // a face button of the pointing hand is down
-    int handIndex = -1;           // which hand grabs (review-grip S4: a change while not Idle suspends, a fresh grip is needed)
+    int handIndex = -1;           // which hand grabs
 };
 enum class GrabEvent { None, Start, End, Cleared, Respawned };
 struct GrabOut {
@@ -98,7 +98,7 @@ public:
         }
         if (in.pageChanged && grab.state != panels::Grab::State::Idle) grab.Suspend();
         if (in.grip && in.face && grab.state != panels::Grab::State::Moving) grab.Suspend();   // FS3: a grip-layer press, never a move
-        if (in.handIndex != handWas && grab.state != panels::Grab::State::Idle) grab.Suspend();   // S4: the other hand took over: no jump
+        if (in.handIndex != handWas && grab.state != panels::Grab::State::Idle) grab.Suspend();   // the other hand took over: no jump
         handWas = in.handIndex;
         const bool grip = in.grip && in.handTracked;   // a lost hand lets go
         const bool now = grab.Step(grip, in.hit, in.click, PlacementOf(in.hand), PlacementOf(in.base), in.head.p, offset) &&

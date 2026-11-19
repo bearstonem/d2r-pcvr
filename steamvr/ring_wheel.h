@@ -1,12 +1,12 @@
 #pragma once
-// Ring skill menu (; ring > Experiment: Ring wheel, exp.ring_wheel): the wheel's geometry, hit test and input state,
-// pure and Windows-free so every number is unit-tested (ring_wheel_test.cpp). Build step R2 (E2, E5; look L1, L2).
+// Ring skill menu: the wheel's geometry, hit test and input state,
+// pure and Windows-free so every number is unit-tested (ring_wheel_test.cpp).
 //
 // Coordinates: "wheel px" are the design kit's (the design kit's wheel.js): the 768 x 800 wheel region, its center
 // C = (384, 384), the shelf row at y 760. "Canvas px" are the 1024 x 1024 canvas the region sits in, at (128, 112); the
 // footer is in canvas px (upstream's FooterBounds, v = y / 1024). 960 canvas px a meter, so 15 px a degree at 0.9 m.
 //
-// Layout e, both Tree layouts (the player has not picked one, 2026-11-07; the default is Trees shown):
+// Layout e, both Tree layouts:
 //  - Trees shown (kit idle=all): every tree's skills at fixed seats in its own 110 deg sector (10 deg gutters), three
 //    loose bands at r 190 / 232 / 270, relaxed to 70 px apart, clamped to r 184-274; pointing a tree fades the others.
 //  - Tree orbs (kit idle=orbs): one orb per tree at r 128; the pointed tree fans its skills over 110 deg, bands 204 / 248
@@ -15,9 +15,9 @@
 // seeded by skill id (the kit seeds by English name, so seats differ from the kit's pictures by a few px, never in kind).
 //
 // Seats are the hero's learned skills for now (the kit's seats=packed): upstream's catalog has no passive flag, so the
-// unlearned seats of seats=all wait for trace T1 (plan E4). Unknown class (skillcategories::ValidClass false): no ring.
+// unlearned seats of seats=all wait for trace T1. Unknown class (skillcategories::ValidClass false): no ring.
 //
-// Input (plan E5): nearest shown seat within 27 px of its rest position, kept until 27 + hysteresis px; a tree under 50%
+// Input: nearest shown seat within 27 px of its rest position, kept until 27 + hysteresis px; a tree under 50%
 // alpha takes no hits. Tree switching waits the dwell and never comes sooner than the hold after the last switch, with
 // 10 deg of angle hysteresis. Every trigger action fires on release, and only on the target it was pressed on; after a
 // page change presses are locked out for 250 ms and a trigger held through it must be let go first.
@@ -78,7 +78,7 @@ inline float Wrap(float a, float around) { while (a - around > Pi) a -= Tau; whi
 inline void PlaceTree(Seat* mine, int n, float dir, TreeLayout mode) {
     const bool shown = mode == TreeLayout::Shown;
     const float bands[3] = {shown ? 190.f : 204.f, shown ? 232.f : 248.f, shown ? 270.f : 286.f};
-    // Both layouts fan a tree over 110 deg (10 deg gutters; designer 2026-11-07: Tree orbs' 140 deg overlapped the neighbor
+    // Both layouts fan a tree over 110 deg (10 deg gutters; design Tree orbs' 140 deg overlapped the neighbor
     // trees by 20 deg whenever two trees show, the 300 ms switch crossfade and row 13 above 0).
     const float sec = 110.f * Pi / 180, r0 = shown ? 184.f : 198.f, r1 = shown ? 274.f : 286.f;
     const int iterations = shown ? 120 : 80;
@@ -139,9 +139,9 @@ inline Layout Build(const SeatIn* in, int n, TreeLayout mode) {
     }
     return l;
 }
-// Each class's tree placement (the kit's per-class data.order, review G1): position 0 (top), 1 (lower right), 2 (lower left)
+// Each class's tree placement (the kit's per-class data.order): position 0 (top), 1 (lower right), 2 (lower left)
 // holds that skillcategories page (0-2). The kit's data.trees[i] is skillcategories page i + 1 for every class (names and
-// skills checked 2026-11-07). Amazon [0, 2, 1], Barbarian [1, 0, 2], Druid [0, 2, 1], Paladin [1, 0, 2]; the rest as listed.
+// skills checked). Amazon [0, 2, 1], Barbarian [1, 0, 2], Druid [0, 2, 1], Paladin [1, 0, 2]; the rest as listed.
 constexpr int TreeOrder[8][Trees] = {{0, 2, 1}, {0, 1, 2}, {0, 1, 2}, {1, 0, 2}, {1, 0, 2}, {0, 2, 1}, {0, 1, 2}, {0, 1, 2}};
 inline int PageAt(int cls, int position) { return cls >= 0 && cls < 8 && position >= 0 && position < Trees ? TreeOrder[cls][position] : position; }
 inline int PositionOf(int cls, int page) { for (int p = 0; p < Trees; ++p) if (PageAt(cls, p) == page) return p; return -1; }
@@ -163,7 +163,7 @@ inline bool SeatsFrom(const interaction::Snapshot& s, std::array<SeatIn, MaxSeat
     });
     return true;
 }
-// Another ring's bindable entry (headset fixes 2026-11-15: ring Army X menu, , through the FilterRingEntry seam): one more
+// Another ring's bindable entry: one more
 // General seat on the shelf, after the hero's own general skills (owner -1, no tree), so Build places it on the shelf row.
 // id < 0, no room, or already there: unchanged. Returns the new count.
 inline int AddShelfEntry(std::array<SeatIn, MaxSeats>& in, int n, int id) {
@@ -174,29 +174,29 @@ inline int AddShelfEntry(std::array<SeatIn, MaxSeats>& in, int n, int id) {
 }
 
 // ---- Pointing ----
-enum class Kind { None, Gap, Seat, Tree, Glyphs, Gestures, Footer, Back, Hand, Quick };   // Back, Hand: the Glyphs and Gestures pages' center (R7); Quick: the center's third third ()
+enum class Kind { None, Gap, Seat, Tree, Glyphs, Gestures, Footer, Back, Hand, Quick };   // Back, Hand: the Glyphs and Gestures pages' center; Quick: the center's third third
 struct Target {
     Kind kind = Kind::None;
     int index = -1;   // Seat: the seat; Tree: the tree; Footer: upstream's cell id
     bool operator==(const Target&) const = default;
 };
-// The footer's drawn width in canvas px (plan E5 / L1): under the wheel (768, or 864 with developer mode's six
+// The footer's drawn width in canvas px: under the wheel (768, or 864 with developer mode's six
 // tabs) or upstream's full width; then u over that span feeds upstream's FooterBounds unchanged.
 inline float FooterWidth(bool fullWidth, int tabs) { return fullWidth ? CanvasPx : tabs > 5 ? 864.f : 768.f; }
-inline int FooterAt(float cx, float cy, bool developer, bool fullWidth, interaction::MenuPage page = interaction::MenuPage::Spells) {   // R7: its page (review R2 G7)
+inline int FooterAt(float cx, float cy, bool developer, bool fullWidth, interaction::MenuPage page = interaction::MenuPage::Spells) {   // its page
     const int tabs = interaction::FooterCount(page, developer);
     const float w = FooterWidth(fullWidth, tabs), u = (cx - (CanvasPx - w) / 2) / w, v = cy / CanvasPx;
     for (int i = 0; i < tabs; ++i) if (interaction::FooterBounds(i, page, developer).Contains(u, v)) return interaction::FooterCell(i, page);
     return -1;
 }
-// ---- the center in thirds (the player, 2026-11-15) ----
+// ---- the center in thirds ----
 // Glyphs upper left, Gestures upper right, Quick cast at the bottom: three 120 deg slices split by spokes at 12, 4 and 8
 // o'clock, each spoke a 6 px dead band (CenterDeadBand on each side) that keeps the slice pointed last. The pointed slice
 // reaches its grow past the center's edge (11%: 151 px grown), so the laser keeps it there; the other two dim (draw only).
 enum Third { ThirdGlyphs, ThirdGestures, ThirdQuick, ThirdCount };
 constexpr float ThirdMidDeg[ThirdCount] = {-150, -30, 90};   // canvas y down: upper left, upper right, bottom
 constexpr float SpokeDeg[ThirdCount] = {-90, 30, 150};       // 12, 4 and 8 o'clock
-constexpr float ThirdGrowDefault = 11, ThirdDimDefault = 70;  // the mockup's numbers (the player's picks): the slice +11%, the others at 70%
+constexpr float ThirdGrowDefault = 11, ThirdDimDefault = 70;  // the mockup's numbers: the slice +11%, the others at 70%
 constexpr const char* ThirdName[ThirdCount] = {"Glyphs", "Gestures", "Quick cast"};
 inline Kind ThirdKind(int t) { return t == ThirdGlyphs ? Kind::Glyphs : t == ThirdGestures ? Kind::Gestures : t == ThirdQuick ? Kind::Quick : Kind::None; }
 inline int ThirdOf(Kind k) { return k == Kind::Glyphs ? ThirdGlyphs : k == Kind::Gestures ? ThirdGestures : k == Kind::Quick ? ThirdQuick : -1; }
@@ -234,14 +234,14 @@ struct Settings {
     bool hasMotions = true;     // spellmotion::HasMotions: false (the Warlock) = one Glyphs center
     int growMs = 150;           // P10: the center grows after the laser is this long inside it (a sweep through never grows it)
     int blurbMs = 100;          // P11: a skill held this long shows its blurb (its highlight is at once)
-    bool quickCast = false;     // R6Q (the player's design): seats take slot presses (QuickCast below); the trigger's release on a seat picks nothing
+    bool quickCast = false;     // R6Q: seats take slot presses (QuickCast below); the trigger's release on a seat picks nothing
     bool thirds = false;        // the center in thirds (the main page); false: the two halves (the glyph chooser's Back / Clear)
     float thirdGrowPct = ThirdGrowDefault;   // the pointed third's reach past the center's edge (Center > Pointed third grows)
 };
-// No pick within this long of a hit taken (L2 Hit; the fight dim is R8, the rule is here).
+// No pick within this long of a hit taken.
 constexpr double HitPickMs = 300;
 
-// ---- Animation (L2; kit float and PRESET) ----
+// ---- Animation ----
 // A seat's float at time t (ms): bob 3 px, drift 4 and 2 px (layout e's periods x 1.6), tilt 2 deg; the summed offset
 // clamped to 5 px so the picture never leaves its own hit area (critique B2). Seeded per seat, so neighbors differ.
 struct Float { float dx = 0, dy = 0, rot = 0; };
@@ -256,7 +256,7 @@ inline Float FloatAt(int id, double tMs) {
     const double vy = bob + dy2, len = std::hypot(dx, vy), k = len > 5 ? 5 / len : 1;
     return {float(dx * k), float(vy * k), float(rot)};
 }
-// Row 1, Animation (L4; the player 2026-11-07, four levels: Off / Floating icons / Effect on hover / All effects), and rows 2-7
+// Row 1, Animation, and rows 2-7
 // it sets. Glow: 0 Off (a steady colored rim), 1 Pointed only, 2 Everywhere. Off also stops redraws
 // (still: a compose only on a change). Custom shows when a row 2-7 differs from all three.
 enum class Preset { Off, Floating, Hover, All, Custom };
@@ -281,11 +281,11 @@ inline Preset PresetOf(const Anim& a) {
     return Preset::Custom;
 }
 
-// ---- R8: the animation layers (L2 "Animation layers", L4 rows 1-7) ----
-// A skill's element for its glow and effects. Until trace T1 proves the Skills row's element column (plan E4), by its tree:
-// each class's three trees (skillcategories order) mapped by the designer's style guide; shelf skills are steel.
+// ---- the animation layers ----
+// A skill's element for its glow and effects. Until trace T1 proves the Skills row's element column, by its tree:
+// each class's three trees (skillcategories order) mapped by the design's style guide; shelf skills are steel.
 // position: the seat's tree position on the wheel (Seat::tree, TreeOrder), turned into its skillcategories page here (R7c:
-// R8 read the position as the page, so Amazon, Paladin, Barbarian and Druid glowed with another tree's element).
+// read the position as the page, so Amazon, Paladin, Barbarian and Druid glowed with another tree's element).
 enum class Element : uint8_t { Fire, Cold, Light, Poison, Arcane, Holy, Aura, Shadow, Phys, Count };
 inline Element ElementOf(int skillClass, int position) {
     using E = Element;
@@ -302,9 +302,9 @@ inline Element ElementOf(int skillClass, int position) {
     if (skillClass < 0 || skillClass >= 8 || position < 0 || position >= Trees) return E::Phys;
     return table[skillClass][PageAt(skillClass, position)];
 }
-// R7c (feedback 1 item 7, L1 Tree orb): each tree's mark glyph, the kit's sigil() map (skills.js / skills-more.js trees[i].sigil,
-// page i): flame = Fire (the designer's two-tongue flame, TS1), bolt = Light, flake = Cold, hammer = Holy, sun and gear = Aura,
-// shield = Arcane, eye = Shadow, fist = Phys, venom = Bone (TS3). The first nine share Element's numbers (the kit's glyph()
+// R7c: each tree's mark glyph, the kit's sigil map (skills.js / skills-more.js trees[i].sigil,
+// page i): flame = Fire (the design's two-tongue flame, TS1), bolt = Light, flake = Cold, hammer = Holy, sun and gear = Aura,
+// shield = Arcane, eye = Shadow, fist = Phys, venom = Bone (TS3). The first nine share Element's numbers (the kit's glyph
 // kinds); drawn by the compose pass's RecipeTreeGlyph. position as ElementOf; None = no glyph.
 enum class MarkGlyph : uint8_t { Fire, Cold, Light, Poison, Arcane, Holy, Aura, Shadow, Phys, Bone, None };
 inline MarkGlyph TreeGlyphOf(int skillClass, int position) {
@@ -322,18 +322,18 @@ inline MarkGlyph TreeGlyphOf(int skillClass, int position) {
     if (skillClass < 0 || skillClass >= 8 || position < 0 || position >= Trees) return G::None;
     return table[skillClass][PageAt(skillClass, position)];
 }
-// What one icon shows this frame, from the Animation rows (L4 table) and its state. glowMoves false = the glow's frozen
+// What one icon shows this frame, from the Animation rows and its state. glowMoves false = the glow's frozen
 // frame (a steady colored rim, L4 row 3 Off); crawl: the lightning face crawl's strength 0-1.
 struct Layers { bool floats = false, glowMoves = false, hoverFx = false, faceFx = false; float crawl = 0; };
 // crawlIndex / crawlCount: this icon among the lightning icons (the stagger); -1 for a non-lightning icon.
 inline Layers LayersFor(const Anim& a, bool pointed, int crawlIndex, int crawlCount, double tMs) {
     Layers l;
-    l.floats = a.floats && !pointed;   // the pointed icon stops floating (L2)
+    l.floats = a.floats && !pointed;   // the pointed icon stops floating
     l.glowMoves = !a.still && (a.glow == GlowEverywhere || (a.glow == GlowPointed && pointed));
     l.hoverFx = pointed && a.hoverFx && !a.still;
     l.faceFx = pointed && a.faceFx && !a.still;
     if (crawlIndex >= 0 && !a.still) {
-        if (pointed && (a.hoverFx || a.glow != GlowOff)) l.crawl = 1;   // continuous while pointed (L4 row 7, Effect on hover)
+        if (pointed && (a.hoverFx || a.glow != GlowOff)) l.crawl = 1;   // continuous while pointed
         else if (a.crawlS > 0 && crawlCount > 0) {   // at rest: one 300 ms burst per icon every N s, staggered (kit)
             const double per = a.crawlS * 1000.0, dur = std::min(320.0, per / crawlCount * .8), off = crawlIndex * per / crawlCount;
             const double p = std::fmod(std::fmod(tMs - off, per) + per, per);
@@ -370,12 +370,12 @@ inline int FaceCopies(int skill, Element e, double ageMs, float r, FaceCopy out[
         const float k = p < .3 ? float(std::sin(p / .3 * Pi)) : 0.f;
         out[0] = {8 * k, 0, 0, 1 + .06f * k, 1}; return 1;
     }
-    if (e == Element::Shadow) {   // rises in; the art never under 20% (R8 match stage 2, vr-ux cap 6)
+    if (e == Element::Shadow) {   // rises in; the art never under 20%
         const double p = std::min(1.0, ageMs / 700); out[0] = {0, float(r * 1.6 * std::pow(1 - p, 3)), 0, 1, float(std::max(.2, p))}; return 1;
     }
     out[0] = {}; return 1;
 }
-// R8 match stage 2 (r8-match-spec 4a): the pointed effect's lifecycle. The hover ring and the 1.3x grow are immediate; the
+// match stage 2 (r8-match-spec 4a): the pointed effect's lifecycle. The hover ring and the 1.3x grow are immediate; the
 // skill's effect starts 100 ms after the pointer settles on a target and fades in over 100 ms (a sweep across neighbors starts
 // none). On leaving it fades out over 120 ms (the face eases back with it); a new target waits until that fade-out is done
 // (one effect at a time). Re-pointed within 300 ms, the effect goes on from its age. Pure: the ring steps it once a frame.
@@ -408,7 +408,7 @@ struct PointedFx {
     }
     void Reset() { *this = PointedFx{}; }
 };
-// Tree burst (L2, Tree orbs): a seat's way out of its orb, 0-1 (may overshoot), from the tree's open; k its order in the
+// Tree burst: a seat's way out of its orb, 0-1 (may overshoot), from the tree's open; k its order in the
 // tree (28 ms stagger), 340 ms with overshoot. Burst off: a plain 160 ms ease.
 inline float BurstAt(double ageMs, int k, bool burst) {
     if (!burst) { const float x = float(std::clamp(ageMs / 160, 0.0, 1.0)); return x * x * (3 - 2 * x); }
@@ -416,7 +416,7 @@ inline float BurstAt(double ageMs, int k, bool burst) {
     return float(1 + c3 * std::pow(f - 1, 3) + c1 * std::pow(f - 1, 2));   // ease-out-back
 }
 
-// ---- R8: the fight dim and the death / load fade (L2 "Hit"; critique-vr-ux S7; plan "Fight safety", draw only) ----
+// ---- the fight dim and the death / load fade ----
 // A health drop: the wheel (all but the pointed and picked icons) fades to 40% over 150 ms, holds 1.5 s after the last hit,
 // comes back over 300 ms; a new hit extends it and never re-flashes. Death (health <= 0) or a load (the snapshot stale, or
 // its session changed): 15% and no hits until the wheel is closed and opened again.
@@ -448,7 +448,7 @@ public:
     }
 };
 
-// ---- Bind slots (E5): the open hand's five, by upstream's rule (hand_controls.h), named by the controller ----
+// ---- Bind slots: the open hand's five, by upstream's rule (hand_controls.h), named by the controller ----
 // slot: 0 trigger, 1 primary, 2 secondary, 3 grip + primary, 4 grip + secondary.
 inline int SlotOf(int hand, int slot) {
     if (slot < 0 || slot >= Slots) return -1;
@@ -461,7 +461,7 @@ inline std::string SlotName(controllers::Layout layout, int hand, int slot) {
     const std::string face = controllers::Face(layout, hand, slot % 2 == 0);
     return slot >= 3 ? "Grip + " + face : face;
 }
-// Hover-change haptics at most one per gap per hand (P12, 0 = no limit); pick and bind pulses never pass through it.
+// Hover-change haptics at most one per gap per hand; pick and bind pulses never pass through it.
 class HapticGate {
     double at[2] = {-1e18, -1e18};
 public:
@@ -482,19 +482,19 @@ struct StepIn {
     int slotPressed = -1;
     std::array<int, Slots> bound{-1, -1, -1, -1, -1};
     double lastHitMs = -1e18;       // the last hit the hero took (no pick within HitPickMs)
-    bool glyphClickSpent = false;   // the player 2026-11-08 #3: the trigger was held on the Glyphs half past the tap limit: its release opens nothing
+    bool glyphClickSpent = false;   // the player #3: the trigger was held on the Glyphs half past the tap limit: its release opens nothing
 };
-enum class Event { None, Pick, Cancel, Bind, Clear, Upstream, OpenQuick };   // OpenQuick (): the Quick cast third's click (2026-11-16: its page in the ring)
+enum class Event { None, Pick, Cancel, Bind, Clear, Upstream, OpenQuick };   // OpenQuick: the Quick cast third's click
 struct StepOut {
     Target under, pressed;          // under the laser; held down on (Kind::None when not pressed)
     int tree = -1;                  // the pointed tree (-1 none)
-    double treeAgeMs = 1e9;         // R8: since the pointed tree last changed (Tree orbs' burst)
+    double treeAgeMs = 1e9;         // since the pointed tree last changed (Tree orbs' burst)
     std::array<float, Trees> alpha{1, 1, 1};
     int picked = -1;                // the picked seat
     Event event = Event::None;
     int slot = -1, skill = -1, owner = -1, cell = -1;   // Bind / Clear: the slot and skill; Upstream: the cell to fire
-    int movedFrom = -1;             // Bind: another slot of the hand that held this skill (D2R clears that duplicate), -1 none
-    int replaced = -1;              // Bind: the skill the pressed slot held before ("X moved from Fire Wall", review G2), -1 none
+    int movedFrom = -1;             // Bind: another slot of the hand that held this skill, -1 none
+    int replaced = -1;              // Bind: the skill the pressed slot held before ("X moved from Fire Wall"), -1 none
     bool locked = false;            // presses locked out (a page change)
     bool centerGrown = false;       // the center at r 136 (a blurb, or a half held P10)
     int blurb = -1;                 // the seat whose blurb shows (held P11), -1 none
@@ -525,7 +525,7 @@ public:
         if (s.layout == TreeLayout::Orbs || tree < 0 || tree == t) return HitTarget(t, s);
         return std::clamp(s.othersPct, 0.f, 100.f) / 100;
     }
-    // What the laser can hit never depends on the row (Boss, 2026-11-08): a tree takes hits by this gate, which fades as the
+    // What the laser can hit never depends on the row (Boss): a tree takes hits by this gate, which fades as the
     // tree does at row 0 (160 ms; half way it opens or closes), so even a fully visible other tree answers as its third until
     // the dwell and the hold switch to it.
     float HitTarget(int t, const Settings& s) const {
@@ -606,7 +606,7 @@ public:
         if (fall && held.kind != Kind::None) { if (held == under) fired = held; held = {}; }
         out.pressed = held;
         if (s.quickCast && (fired.kind == Kind::Seat || fired.kind == Kind::Gap || fired.kind == Kind::Tree)) fired = {};   // QuickCast owns seat presses
-        if (in.glyphClickSpent && ThirdOf(fired.kind) >= 0) fired = {};   // a hold on the Glyphs half (#3) or a third (), not a click
+        if (in.glyphClickSpent && ThirdOf(fired.kind) >= 0) fired = {};   // a hold on the Glyphs half (#3) or a third, not a click
         if (fired.kind == Kind::Seat) {
             if (picked == fired.index) { picked = -1; out.event = Event::Cancel; }
             else if (in.nowMs - in.lastHitMs >= HitPickMs) { picked = fired.index; out.event = Event::Pick; }
@@ -634,7 +634,7 @@ public:
         return out;
     }
 };
-// ---- Placement (R3; plan E3, L1; the design notes must-fix 1-3) ----
+// ---- Placement ----
 // On open the wheel spawns ahead of the eyes along the heading (yaw only), its center below eye level, its face turned to
 // the eyes; then it stays in the room while open (world-locked). A hand switch or a Placement change respawns it.
 // widthM is the 768 px wheel region's width: 960 canvas px a meter at 0.80 m, 15 px a degree at 0.90 m.
@@ -681,7 +681,7 @@ public:
     void Reset() { open = false; hand = -1; }
 };
 
-// ---- R6: the ring's content quad, the laser's hit on it, the open hand's slot press, the bind request ----
+// ---- the ring's content quad, the laser's hit on it, the open hand's slot press, the bind request ----
 // The content (canvas x0..x0 + canvasW, y0..y0 + rows) as a quad: its size and its center's offset from the wheel's center
 // (the placed pose), meters in the panel's frame (x right, y up).
 struct ContentQuad { float w = 0, h = 0, dx = 0, dy = 0; };
@@ -719,7 +719,7 @@ inline interaction::Request BindRequest(const interaction::Snapshot& s, int inde
     return r;
 }
 
-// the player 2026-11-08 #3: this button draws glyphs, as upstream's button picker sends it (interactions.h, skill.id == GlyphDrawId): the
+// the player #3: this button draws glyphs, as upstream's button picker sends it (interactions.h, skill.id == GlyphDrawId): the
 // transport saves [glyphs] draw_slot first, then clears the button's game skill. So it is never sent when that clear could not
 // pass (upstream's own gate: fresh and editable): the setting must not change for a bind that is then refused.
 inline interaction::Request GlyphDrawRequest(const interaction::Snapshot& s, int index, uint64_t number, uint64_t session, uint64_t now) {
@@ -729,15 +729,15 @@ inline interaction::Request GlyphDrawRequest(const interaction::Snapshot& s, int
     return r;
 }
 
-// ---- R6Q: quick cast and hold to assign (the player's design; plan E5 "Quick cast and hold to assign", eval #9) ----
+// ---- R6Q: quick cast and hold to assign ----
 // Any of the ten slots (either hand: trigger, primary, secondary, grip + primary, grip + secondary) pressed with the laser
-// on a seat: released under the tap limit (P14) = QuickCast; held to full (P13, Hold to assign) = Assign at once; released
+// on a seat: released under the tap limit = QuickCast; held to full = Assign at once; released
 // between = NoChange; after full a release does nothing. The seat is the one under the laser 80 ms before the press (a
 // thumb's jolt at the press does not move it) and stays fixed while the button is held. One press at a time; a page change
 // or a close mid-hold drops it. The plain cancel button (right secondary, left primary, no grip) with the laser off the
 // wheel = Close; on a seat it is a slot press; on a gap inside the wheel nothing. Main page only (`main` false: nothing).
 constexpr double SeatLatchMs = 80, PressJoltMs = 30;
-// P13 as the hold runs: 0 = Off (every press a quick cast); 100-400 snap to 500 (L4's floor); at least tap + 150 ms.
+// P13 as the hold runs: 0 = Off (every press a quick cast); 100-400 snap to 500; at least tap + 150 ms.
 inline int EffectiveHoldMs(int holdMs, int tapMs) {
     if (holdMs <= 0) return 0;
     return std::max({holdMs < 500 ? 500 : holdMs, tapMs + 150});
@@ -751,26 +751,26 @@ struct QuickIn {
     bool down[2][Slots] = {};        // each hand's slots held now
     std::array<std::array<int, Slots>, 2> bound{};   // the skill on each hand's slot (-1 none)
     int holdMs = 1000, tapMs = 350;  // P13, P14
-    double lastHitMs = -1e18;        // R8: no assign within 300 ms of a hit (L2 Hit); a cast is never blocked
+    double lastHitMs = -1e18;        // no assign within 300 ms of a hit; a cast is never blocked
     bool thirds = false;             // the Gestures and Quick cast thirds take presses too (their pseudo seats)
 };
-// the player 2026-11-08 #3: the Glyphs half of the center takes a press like a seat does, under this pseudo seat (no real seat has it).
+// the player #3: the Glyphs half of the center takes a press like a seat does, under this pseudo seat (no real seat has it).
 // the Gestures and Quick cast thirds likewise: a tap opens the sub-menu, a hold puts that sub-menu on the button.
 constexpr int GlyphsSeat = MaxSeats, GesturesSeat = MaxSeats + 1, QuickSeat = MaxSeats + 2;
 inline int ThirdSeat(int third) { return third >= 0 && third < ThirdCount ? GlyphsSeat + third : -1; }
 inline int SeatThird(int seat) { return seat >= GlyphsSeat && seat < GlyphsSeat + ThirdCount ? seat - GlyphsSeat : -1; }
 inline bool IsThirdSeat(int seat) { return SeatThird(seat) >= 0; }
-// MenuTap / MenuAssign (): the Gestures or Quick cast third (QuickOut::seat says which); Glyphs keeps GlyphTap / GlyphAssign.
+// MenuTap / MenuAssign: the Gestures or Quick cast third (QuickOut::seat says which); Glyphs keeps GlyphTap / GlyphAssign.
 enum class Quick { None, QuickCast, Assign, NoChange, Close, GlyphTap, GlyphAssign, MenuTap, MenuAssign };
 struct QuickOut {
     Quick event = Quick::None;
     int seat = -1, hand = -1, slot = -1, replaced = -1;
     double heldMs = 0;
-    float holdFrac = 0;              // the hold ring's fill (L2): 0 until the tap limit, then to 1 at full
+    float holdFrac = 0;              // the hold ring's fill: 0 until the tap limit, then to 1 at full
     int holding = -1;                // the seat a hold runs on (stays at 100%, L5 Q5), -1 none
     bool assigned = false;           // that hold reached full and assigned
 };
-// #3 (designer): the center's words under a hold, skills and the Glyphs half alike. A bound button says what it loses, always on
+// #3: the center's words under a hold, skills and the Glyphs half alike. A bound button says what it loses, always on
 // two lines ("Replaces", then the skill alone: never chosen by width), since binding clears that button's skill (interactions.h);
 // else one line; "Assigned" at full, in the tick's green (literals: the draw key sees the change).
 struct HoldLines { const char* top = nullptr; const char* line = nullptr; bool green = false; };
@@ -781,7 +781,7 @@ inline HoldLines HoldLinesFor(const QuickOut& o, bool bound, const char* text) {
 inline const char* EmptyHoldStatus(int holdingSeat) {
     return holdingSeat == GlyphsSeat ? "Draw glyph" : holdingSeat == GesturesSeat ? "Gestures menu" : holdingSeat == QuickSeat ? "Quick cast" : "Hold to assign";
 }
-// Audit 2026-11-10 bug 1: what a button gives up to an assign. With no game skill it may still be a hand's Draw glyph button
+// what a button gives up to an assign. With no game skill it may still be a hand's Draw glyph button
 // (drawSlots: upstream's interaction::Output::glyphDraw, each hand's slot from the two [glyphs] values); a skill put there
 // takes Draw glyph off it (transport, glyphcast::DrawKeyHolding), so the hold and the log say so. hand, slot: QuickOut's.
 enum class Held { None, Skill, DrawGlyph };
@@ -797,7 +797,7 @@ inline HoldWords HoldWordsFor(Held held, const char* skillName, int holdingSeat)
     if (held == Held::DrawGlyph && holdingSeat != GlyphsSeat) return {"Draw glyph", true};
     return {EmptyHoldStatus(holdingSeat), false};
 }
-// The assign log's "(was ...)".
+// The assign log's "(was...)".
 inline std::string WasText(Held held, const char* skillName) {
     return held == Held::DrawGlyph ? "Draw glyph" : held == Held::None ? "none" : skillName ? skillName : "?";
 }
@@ -878,18 +878,18 @@ public:
         return out;
     }
 };
-// ---- each sub-menu on a button (the player: "bindable to a button from the General row, as Army X menu is") ----
+// ---- each sub-menu on a button ----
 // The three sub-menus' entries on the General shelf (AddShelfEntry). Never a game skill id (those stay under 400; upstream's
 // Draw glyph is 9000, ring Army X menu 9001). A hold there, or on the sub-menu's third (Gestures, Quick cast), sends upstream's
 // own clear of that button's game skill (BindSkill, skill -1, as Draw glyph's pick does); on its Applied the ring keeps the slot.
 constexpr int MenuEntryFirst = 9101;
-// Quick cast's potions and scrolls on its chooser's row (2026-11-16): ring Quick cast radial's item ids (quick_radial.h: exact
+// Quick cast's potions and scrolls on its chooser's row: ring Quick cast radial's item ids (quick_radial.h: exact
 // 1 << 28, family 2 << 28), never a skill or a ring entry.
 inline bool ItemSeat(int id) { return id >= (1 << 28); }
 inline bool KindSeat(int id) { return (id >> 28) == 2; }   // a kind (quick_radial.h IsFamilyId): the best one carried when cast
 inline int MenuEntryId(int third) { return third >= 0 && third < ThirdCount ? MenuEntryFirst + third : -1; }
 inline int MenuOfEntry(int id) { return id >= MenuEntryFirst && id < MenuEntryFirst + ThirdCount ? id - MenuEntryFirst : -1; }
-constexpr const char* MenuEntryName[ThirdCount] = {"Glyphs menu", "Gestures menu", "Quick cast"};   // Quick cast's entry is ring Quick cast radial's own (2026-11-16)
+constexpr const char* MenuEntryName[ThirdCount] = {"Glyphs menu", "Gestures menu", "Quick cast"};   // Quick cast's entry is ring Quick cast radial's own
 // Per sub-menu the hand slot (skills::HandSlot numbering, 0-9) it is on, -1 none. the ring's keys hold slot + 1 (0: none).
 struct MenuButtons {
     std::array<int, ThirdCount> slot{-1, -1, -1};
@@ -905,10 +905,10 @@ inline MenuButtons Assigned(MenuButtons b, int third, int slot) {
     return b;
 }
 // A sub-menu keeps its button only while the button holds no game skill and draws no glyph: a skill put there later through
-// upstream's Edit Slots or Center > Reset page, the ring's own hold to assign (headset 2026-11-16: a seat or third under the laser
-// takes the sub-menu button's press, MenuPressOpens), or Draw glyph, takes the button back. Never a trigger (review F1). The
-// stored key stays (review S5) for Edit Slots, Reset page and Draw glyph: only this per-frame list drops the slot while a skill or
-// glyph is there; the ring's own skill bind lets the key go (review N4 of 2026-11-16: SkillTakesButton, labbuttons::LetGo).
+// upstream's Edit Slots or Center > Reset page, the ring's own hold to assign (headset a seat or third under the laser
+// takes the sub-menu button's press, MenuPressOpens), or Draw glyph, takes the button back. Never a trigger. The
+// stored key stays for Edit Slots, Reset page and Draw glyph: only this per-frame list drops the slot while a skill or
+// glyph is there; the ring's own skill bind lets the key go.
 // gameSkill: each slot's skill id (-1 none).
 inline MenuButtons Kept(MenuButtons b, const std::array<int, skills::Count>& gameSkill, const std::array<int, 2>& drawSlots) {
     for (auto& s : b.slot) if (s >= 0 && (gameSkill[size_t(s)] >= 0 || s == drawSlots[0] || s == drawSlots[1])) s = -1;
@@ -927,15 +927,15 @@ inline MenuPress MenuPressed(const MenuButtons& b, const bool down[2][3], const 
     return p;
 }
 
-// ---- headset fixes (2026-11-16, headset test) ----
-// Bug 1: a sub-menu's button pressed while the open ring's main page has a seat or a center third under the laser is the ring's
+// ---- ----
+// a sub-menu's button pressed while the open ring's main page has a seat or a center third under the laser is the ring's
 // press, as every other button's (a tap casts that seat; a hold of Hold to assign, about 1 s, puts the seat on this button, so the
 // menu's own button can always be rebound). Anywhere else (the wheel shut, another page, the laser off the seats) it opens its
 // sub-menu as before.
 inline bool MenuPressOpens(bool wheelOpen, bool ringMain, Kind under) {
     return !(wheelOpen && ringMain && (under == Kind::Seat || ThirdOf(under) >= 0));
 }
-// Bug 4: a ring menu (Glyphs or Gestures menu, Quick cast, Army X menu) put on a button clears that button's game skill (upstream's
+// a ring menu (Glyphs or Gestures menu, Quick cast, Army X menu) put on a button clears that button's game skill (upstream's
 // own clear, as Draw glyph's pick). That skill is never dropped without a word: it moves to the menu's old button when that one is
 // free now (a swap), else into Quick cast's ring (quickCastTakes: Quick cast On and a skill of this hero's catalog), else it is
 // said taken off. was: the skill the button held (-1 none); oldSlot: the menu's button before (-1 none) and what it holds now.
@@ -945,17 +945,17 @@ inline MovedTo WhereMoved(int was, int newSlot, int oldSlot, int oldSlotSkill, b
     if (oldSlot >= 0 && oldSlot < skills::Count && oldSlot != newSlot && oldSlotSkill < 0 && !oldSlotGlyph) return MovedTo::OldButton;
     return quickCastTakes ? MovedTo::QuickCast : MovedTo::Dropped;
 }
-// The retired Quick cast menu button ('s exp.ring_wheel.quick_button, slot + 1) becomes Quick cast's own button
-// (exp.ideas.quick_radial.button) once, unless Quick cast has a button already or it is a trigger (review N2: a trigger stored
-// before review F1 stays the attack): the stored value it gets (0: none to move).
+// The retired Quick cast menu button ('s the ring's own setting, slot + 1) becomes Quick cast's own button
+// (exp.ideas.quick_radial.button) once, unless Quick cast has a button already or it is a trigger (a trigger stored
+// before stays the attack): the stored value it gets (0: none to move).
 inline float MovedQuickButton(float oldMenuButton, float quickCastButton) {
     const long slot = std::lround(oldMenuButton) - 1;
     if (slot == skills::TriggerSlot(0) || slot == skills::TriggerSlot(1)) return 0.f;
     return oldMenuButton >= .5f && quickCastButton < .5f ? oldMenuButton : 0.f;
 }
-// Review F1 (2026-11-16 fresh review): Quick cast put on a button from the center's third, why not (nullptr: it may). The trigger
-// first, as every sub-menu (review F1 of the attack, and the ring's own click), then the switch, the class, Draw glyph.
-// slot: the hand's button (0 trigger .. 4 grip + secondary).
+// Quick cast put on a button from the center's third, why not (nullptr: it may). The trigger
+// first, as every sub-menu, then the switch, the class, Draw glyph.
+// slot: the hand's button (0 trigger.. 4 grip + secondary).
 inline const char* QuickBindRefusal(int slot, bool on, bool classKnown, bool drawsGlyph) {
     if (slot <= 0) return "never a trigger (the attack, and the ring's click)";   // as ring_wheel_pages.h MenuButtonAllowed
     if (!on) return "Quick cast is Off (VR Settings > Menus > Ring skill menu)";
@@ -964,13 +964,13 @@ inline const char* QuickBindRefusal(int slot, bool on, bool classKnown, bool dra
     return nullptr;
 }
 
-// The Quick cast third's word when pointed (review N1): why nothing opens, or nullptr ("Trigger to open").
+// The Quick cast third's word when pointed: why nothing opens, or nullptr ("Trigger to open").
 inline const char* QuickThirdWord(bool on, bool classKnown) { return !on ? "Off" : !classKnown ? "Not for this class" : nullptr; }
-// Review N4 (2026-11-16): an Applied ring bind that puts a skill on a button (a game skill or a commander order: ids under 9000),
+// an Applied ring bind that puts a skill on a button (a game skill or a commander order: ids under 9000),
 // so a ring menu on that button lets go of it. Never a sub-menu's or ring entry's bind (Draw glyph 9000, ring entries 9001 on, a clear).
 inline bool SkillTakesButton(int skill, int menu, bool draw) { return menu < 0 && !draw && skill >= 0 && skill < 9000; }
 
-// The hold's haptic ticks at 25 / 50 / 75 % (L2, eval #10): how many quarter marks the fill crossed since last frame.
+// The hold's haptic ticks at 25 / 50 / 75 %: how many quarter marks the fill crossed since last frame.
 inline int TicksCrossed(float before, float now) {
     int n = 0;
     for (const float mark : {.25f, .5f, .75f}) if (before < mark && now >= mark) ++n;
@@ -986,7 +986,7 @@ struct CastResult { bool started = false; const char* refused = nullptr; glyphca
 template <class CastT, class ParkF>
 CastResult StartCast(CastWait& w, CastT& cast, const interaction::Snapshot& s, bool labOn, bool fresh, bool active, bool wheelShut, double nowS, double waitedMs, ParkF&& park) {
     CastResult r;
-    if (!labOn) { w = {}; return r; }   // the ring went Off with a cast queued: it never fires (perf R6Q)
+    if (!labOn) { w = {}; return r; }   // the ring went Off with a cast queued: it never fires
     if (!w.on) return r;
     if (!wheelShut) {   // the cast waits for upstream's close (cell 8 the frame before)
         if (waitedMs > 1000) { r.refused = "the wheel did not close"; w = {}; }
@@ -1012,7 +1012,7 @@ CastResult StartCast(CastWait& w, CastT& cast, const interaction::Snapshot& s, b
     w = {};
     return r;
 }
-// The wheel's edges and the close's reason (bug 9 logging; review-bug9 M1), once a frame at the top of the Input seam
+// The wheel's edges and the close's reason, once a frame at the top of the Input seam
 // (after HandControls, before interactions.Step). Wrote: what the ring released to upstream later in that same seam; upstream
 // acts on it in that frame's interactions.Step (the center closes the wheel there, transport closes HandControls), so the
 // close shows on the next frame's edge, and that next Frame reads it. A write is kept one frame only. First match wins:
@@ -1037,12 +1037,12 @@ public:
         return e;
     }
     void Wrote(const char* why) { wrote = why; }
-    // Audit 2026-11-10 bug 2: the wheel's input was cleared outside a focused frame (transport ClearInput: the headset
+    // the wheel's input was cleared outside a focused frame (transport ClearInput: the headset
     // unfocused past the blip, the session ending, a failed sync or copy), which closes the wheel there, so the close is that
     // moment's and not the next focused frame's (it came late, or never when the game ended first). The next Frame finds
     // the wheel closed already: one line a close. shutBefore: upstream had closed it on the last focused frame, after that
     // frame's Frame call, so the clear is not its reason (the ring's write, else "upstream"). Only then is the write the
-    // reason (review N1): no Frame runs between the last focused frame and the clear, so a write upstream ignored is still
+    // reason: no Frame runs between the last focused frame and the clear, so a write upstream ignored is still
     // here, and with the wheel still open at the clear it closed nothing.
     Edge Cleared(const char* why, bool shutBefore) {
         Edge e;
@@ -1053,11 +1053,11 @@ public:
     bool Open() const { return was >= 0; }
     void Off() { was = -1; wrote = nullptr; }   // the ring's Off edge (the caller logs ring-off)
 };
-// Audit 2026-11-10 bug 3: a footer tab clicked while upstream's own page shows (Map, Equipment, or any page while the ring
+// a footer tab clicked while upstream's own page shows (Map, Equipment, or any page while the ring
 // is not drawn). the ring writes nothing there, so the close was named upstream-page. Upstream's engine closes the wheel on
 // a trigger press over Inventory, VR Settings and the DEV window's tab (interactions.h Engine::Step; no editor page has
-// them). Stepped once a frame with the hover and trigger that engine read; the press edge is the engine's own (over .55 to
-// press, .2 to let go). The caller hands the name to WheelEdges::Wrote, which keeps it one frame: it names only a close on
+// them). Stepped once a frame with the hover and trigger that engine read; the press edge is the engine's own (over.55 to
+// press,.2 to let go). The caller hands the name to WheelEdges::Wrote, which keeps it one frame: it names only a close on
 // that frame, and every other close on those pages stays upstream-page.
 inline const char* FooterCloseName(int cell, bool developer) {
     if (cell == 11) return "footer-inventory";

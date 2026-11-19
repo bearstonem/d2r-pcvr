@@ -1,5 +1,5 @@
 #pragma once
-// The painted tree sheet's decode (; the pure side: steamvr/ring_wheel_tree_art.h): the embedded PNG decoded once on the atlas worker's
+// The painted tree sheet's decode (the pure side: steamvr/ring_wheel_tree_art.h): the embedded PNG decoded once on the atlas worker's
 // thread, never the frame thread, and the atlas id's picture cut from it. Kept apart so ring_wheel_draw.h and the unit tests stay free of WIC.
 #include <windows.h>
 #include <wincodec.h>
@@ -8,7 +8,7 @@
 #include "ring_wheel_tree_art.h"
 
 namespace framevr::ringwheel::treeart {
-// The sheet's bytes in `module` (the plugin, or ring-wheel-preview, which links the same .rc). False: not there.
+// The sheet's bytes in `module` (the plugin, or ring-wheel-preview, which links the same.rc). False: not there.
 inline bool Bytes(HMODULE module, const void*& data, size_t& size) {
     data = nullptr; size = 0;
     HRSRC found = module ? FindResourceW(module, ResourceName, MAKEINTRESOURCEW(10)) : nullptr;   // RT_RCDATA

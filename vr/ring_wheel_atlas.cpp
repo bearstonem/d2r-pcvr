@@ -1,4 +1,4 @@
-// Ring skill menu (, build step R5): the atlases on the ring's worker (vr/ring_wheel_atlas.h).
+// Ring skill menu (build step): the atlases on the ring's worker (vr/ring_wheel_atlas.h).
 #include "ring_wheel_atlas.h"
 #include "../steamvr/spell_sprites.h"   // stage 3a: upstream's spell sprite cache reader (pure)
 #include "../steamvr/ring_wheel_unbake.h"   // the clean icon's key (pure)
@@ -99,7 +99,7 @@ bool BuildGlyphs(const Fonts& fonts, int scalePct, AtlasImage& out, text::Metric
             return fail("font weight not found");
     }
     {   // The footer's Georgia from the system fonts, semibold as upstream asks GDI for it (Georgia has no 600: Bold answers,
-        // as it does for GDI); missing: Cinzel (feedback 1 item 4).
+        // as it does for GDI); missing: Cinzel.
         ComPtr<IDWriteFontCollection> system; UINT32 index = 0; BOOL exists = FALSE;
         ComPtr<IDWriteFontFamily> family; ComPtr<IDWriteFont> font;
         m.georgia = SUCCEEDED(static_cast<IDWriteFactory*>(dw.Get())->GetSystemFontCollection(&system, FALSE)) && SUCCEEDED(system->FindFamilyName(L"Georgia", &index, &exists)) && exists &&
@@ -200,7 +200,7 @@ void BuildIcons(const int* ids, int n, int scalePct, const IconSource& source, c
         const int cell = cells++;
         ++pack.found;
         for (int i = 0; i < n; ++i) if (ids[i] == unique[u]) pack.cellOf[size_t(i)] = int16_t(cell);
-        // Area-average the icon in linear light, premultiplied. R8 match stage 1: the kit's crop (wheel.js drawIcon: 104 px from
+        // Area-average the icon in linear light, premultiplied. match stage 1: the kit's crop (wheel.js drawIcon: 104 px from
         // (14, 13) of the 132 x 130 skill frame), as fractions of the frame upstream's cache stores, fills the art square.
         // a sub-menu's own picture (ring_wheel_menu_art.h) is framed already: the whole of it.
         const bool whole = MenuOfEntry(unique[u]) >= 0 || treeart::SlotOfArt(unique[u]) >= 0 || glyphart::SlotOfArt(unique[u]) >= 0;   // a painted tree square is the whole plate (the face crops its inside)
@@ -414,8 +414,8 @@ void AtlasWorker::Loop() {
         { std::lock_guard lock(mutex); latest = b; }
         ++builds;
         last = r; any = true;
-        if (compose->EffectsPending()) compose->FinishEffects(say);   // no offline blob: the effects' compile, after the first atlas
-        if (!fxTexTried) {   // stage 3a: the game effect textures, once per On (ring On only: this worker runs only then)
+        if (effects && compose->EffectsPending()) compose->FinishEffects(say);   // no offline blob: the effects' compile, after the first atlas
+        if (effects && !fxTexTried) {   // stage 3a: the game effect textures, once per On (ring On only: this worker runs only then)
             fxTexTried = true;
             const auto t = std::chrono::steady_clock::now();
             AtlasImage fx; int served = 0; std::string why;

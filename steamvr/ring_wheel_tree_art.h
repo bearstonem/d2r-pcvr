@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu > Layers > Tree icon (, the player 2026-11-17 late: "change these to be sizable and have gpt draw them"): the tree
+// Ring skill menu > Layers > Tree icon (the player late: "change these to be sizable and have gpt draw them"): the tree
 // mark's picture, one painted rust square per skill tree (24: 8 classes x 3 trees), our own art,
 // in full color. Today's mark is the kit's drawn glyph (TreeGlyphOf, RecipeTreeGlyph); this header is the painted picture's side:
 //   - the slot of a (class, position): class x 3 + the tree's skillcategories page (PageAt), -1 for an unknown class;
@@ -25,10 +25,10 @@
 namespace framevr::ringwheel::treeart {
 using Image = interaction::icons::Image;
 constexpr int Classes = 8, Count = Classes * Trees;   // 24 trees
-constexpr int ArtFirst = 9200;                          // the atlas ids ArtFirst .. ArtFirst + Count - 1 (ring_wheel_unbake.h OurArtFirst 9000 and up)
+constexpr int ArtFirst = 9200;                          // the atlas ids ArtFirst.. ArtFirst + Count - 1 (ring_wheel_unbake.h OurArtFirst 9000 and up)
 constexpr int SheetCols = 6, SheetRows = 4, CellPx = 144, SheetW = SheetCols * CellPx, SheetH = SheetRows * CellPx;
 static_assert(SheetCols * SheetRows == Count, "one sheet cell per tree");
-inline constexpr const wchar_t* ResourceName = L"D2RVR_LAB_RING_TREE_SHEET";   // RCDATA in steamvr/lab_ring_wheel_tree_art.rc
+inline constexpr const wchar_t* ResourceName = L"D2RVR_RING_TREE_SHEET";   // RCDATA in steamvr/ring_wheel_menu_art.rc
 
 // Mode, the ring row's list: Drawn is today's glyph (its Off value).
 enum class Mode : int { Drawn = 0, Circle = 1, Square = 2 };

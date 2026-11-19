@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (, build step R5): text as data (plan E2 text, L1 type, L3 the center blurb). Pure and Windows-free:
+// Ring skill menu (build step): text as data. Pure and Windows-free:
 // the glyph metrics the atlas worker measures (vr/ring_wheel_atlas.cpp), clean strings, widths, the center blurb's
 // shaped box (the kit's blurbLines, ported), and glyph quads for a line or an arc. Laid out only when the pointed skill
 // changes (BlurbCache); a frame only copies the cached glyph quads.
@@ -15,12 +15,12 @@
 
 namespace framevr::ringwheel::text {
 // Upstream's menu fonts (steamvr/assets/menu/fonts, SIL OFL): Cinzel 700, Alegreya Sans 500 and 700.
-// Georgia (feedback 1 item 4, the footer as upstream paints it): the installed Windows font, read at run time from the system
+// Georgia: the installed Windows font, read at run time from the system
 // font collection (no font file shipped; not OFL); Cinzel stands in when it is missing (Metrics::georgia false).
 enum Face { Cinzel, AlegreyaMedium, AlegreyaBold, Faces, Georgia = Faces, AllFaces };
-// L1 / L3 sizes (critique-vr-ux S2 floors: 22 px running text, 24 px names). The footer: Georgia semibold at every whole px
+// L1 / L3 sizes (critique-vr-ux floors: 22 px running text, 24 px names). The footer: Georgia semibold at every whole px
 // from 22 (the floor) down to 17 (upstream's six tabs, the named exception), then 16 and 15 (the 1.0 deg label floor at
-// 0.9 m) only when a row keeps no margin at 17 (review-r8 I4-2); one size per row (L1 Footer, FooterRowStyle); no outline,
+// 0.9 m) only when a row keeps no margin at 17; one size per row; no outline,
 // as upstream's GDI text. The footer sizes are last and in order (FooterStyleOf).
 constexpr int FooterMaxPx = 22, FooterMinPx = 15;
 enum Style { Name24, Name22, Body22, Bold22, Label26, Label22, Footer22, Footer21, Footer20, Footer19, Footer18, Footer17, Footer16, Footer15, Styles };
@@ -80,10 +80,10 @@ inline float Width(const Metrics& m, Style st, std::string_view s) {
 // The baseline under a line centered on y (the kit draws with textBaseline 'middle').
 inline float Baseline(const Metrics& m, Style st, float y) { return y + (m.ascent[size_t(st)] - m.descent[size_t(st)]) / 2; }
 
-// ---- The center blurb (L3; kit blurbLines): a shaped box inside the r 124 circle ----
+// ---- The center blurb: a shaped box inside the r 124 circle ----
 enum Kind { KName, KSub, KDesc, KHelp };
 struct Line { std::string text; Style style = Body22; Kind kind = KDesc; };
-// whole (designer gate D3, the Commander orders): every line shows as written: the description is never shortened and the
+// whole: every line shows as written: the description is never shortened and the
 // line under the name never dropped. What does not fit is reported in Blurb::over (WholeBlurb then picks what gives way).
 struct BlurbText { std::string name, sub, desc, help; bool whole = false; };
 struct Blurb { std::vector<Line> lines; std::vector<std::string> over; int maxLines = 0; };
@@ -136,7 +136,7 @@ inline Blurb LayBlurb(const Metrics& m, const BlurbText& in) {
     b.maxLines = int(std::floor(2 * BlurbR * .84f / LineH));
     b.lines = settle();
     // A whole blurb gives no line away, so it looks for the fewest lines whose own chords hold it: WrapAt keeps room for
-    // every count the blurb might still end with, which costs a line where the text is long (designer gate D3).
+    // every count the blurb might still end with, which costs a line where the text is long.
     if (in.whole) for (int n = 1; n <= b.maxLines && n < int(b.lines.size()); ++n) { auto l = lay(n, true); if (int(l.size()) == n) { b.lines = std::move(l); break; } }
     auto count = [&](Kind k) { return int(std::count_if(b.lines.begin(), b.lines.end(), [&](const Line& l) { return l.kind == k; })); };
     const auto di = std::find_if(segs.begin(), segs.end(), [](const Seg& s) { return s.kind == KDesc; });
@@ -163,7 +163,7 @@ inline Blurb LayBlurb(const Metrics& m, const BlurbText& in) {
     if (count(KName) > 2) b.over.push_back("name over two lines");
     return b;
 }
-// A blurb shown whole (designer gate D3): the long title when every line fits the circle, else the short one (the order
+// A blurb shown whole: the long title when every line fits the circle, else the short one (the order
 // row's own name already says "army"); if that does not fit either, the line under the name goes, as it does for a skill
 // whose name takes two lines. The description and the last line never give way: what still does not fit is in Blurb::over.
 inline BlurbText WholeBlurb(const Metrics& m, BlurbText in, const std::string& shortName) {

@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu > Center > Glyph icon (the player 2026-11-18 5:49 PM: "glyph icons are claude drawings, lets see what gpt can do to make them
+// Ring skill menu > Center > Glyph icon (the player 5:49 PM: "glyph icons are claude drawings, lets see what gpt can do to make them
 // look d2 style with the rust and silver, we need the square as the basic, and then we need to make a circle version for our ring
 // menu"): the pictures that replace the ring wheel's code-drawn glyphs, 12 of them, our own art:
 //   - slots 0-7 the Glyphs page's shape faces, in glyphs::Shape order (circle, triangle, square, lightning bolt, spiral, V, star, wave);
@@ -22,10 +22,10 @@
 namespace framevr::ringwheel::glyphart {
 using Image = interaction::icons::Image;
 constexpr int Shapes = 8, Sigils = 4, Count = Shapes + Sigils;
-constexpr int ArtFirst = 9300;   // the atlas ids ArtFirst .. ArtFirst + Count - 1 (tree art 9200 .. 9223, the sub-menus 9101 .. 9103)
+constexpr int ArtFirst = 9300;   // the atlas ids ArtFirst.. ArtFirst + Count - 1 (tree art 9200.. 9223, the sub-menus 9101.. 9103)
 constexpr int SheetCols = 4, SheetRows = 3, CellPx = 144, SheetW = SheetCols * CellPx, SheetH = SheetRows * CellPx;
 static_assert(SheetCols * SheetRows == Count, "one sheet cell per picture");
-inline constexpr const wchar_t* ResourceName = L"D2RVR_LAB_RING_GLYPH_SHEET";   // RCDATA in steamvr/ring_wheel_menu_art.rc
+inline constexpr const wchar_t* ResourceName = L"D2RVR_RING_GLYPH_SHEET";   // RCDATA in steamvr/ring_wheel_menu_art.rc
 constexpr int SlotBack = 8, SlotClear = 9, SlotStar = 10, SlotHand = 11;
 constexpr float SigilPx = 34;   // a painted sigil's outer size at 100% (the drawn one is 20 px of strokes)
 

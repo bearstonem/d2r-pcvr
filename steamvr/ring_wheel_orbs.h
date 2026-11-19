@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (, build-plan L1b "Tree orbs: open-tree state", Boss decision on Q1, 2026-11-07): the Tree orbs layout's
+// Ring skill menu (build-plan L1b "Tree orbs: open-tree state", Boss decision on Q1): the Tree orbs layout's
 // orbs, their closed names and the center while a tree is open, as plain data (kit wheel.js drawOrb, runeRing, the layout e
 // readout). Pure and Windows-free, like ring_wheel_draw.h, and drawn only with its recipes (disc, ring, rune band, tree glyph,
 // the glyph atlas): no new shader code. Every function draws nothing unless the wheel is open in the Tree orbs layout, so
@@ -7,10 +7,10 @@
 //
 // Wiring: Build calls PushOrbs in place of its own orb branch and OrbTexts with the other text; while CenterOpen
 // is true it draws PushOpenCenter in place of its center rings and skips the split. OrbGlow is the orb's rest glow for the
-// under-face effect pass. CenterBacking and PushGesturesMark are the designer's two Trees shown notes (r8-match-spec, stage 1
+// under-face effect pass. CenterBacking and PushGesturesMark are the design's two Trees shown notes (r8-match-spec, stage 1
 // redo): the kit's backing (75% black to r 84, gone by r 88) and the kit's Gestures mark.
 //
-// Type (L1b asks the kit's 20 px; our floors, critique-vr-ux S2, are 22 px): the names use Name22 (Cinzel 700 22 px) and the
+// Type: the names use Name22 (Cinzel 700 22 px) and the
 // help line Body22 (Alegreya Sans 500 22 px; the kit's 600 is not shipped), so no new glyph style is baked.
 #include <algorithm>
 #include <array>
@@ -43,7 +43,7 @@ inline int OpenTree(const Scene& s) { return Active(s) && s.step.tree >= 0 && s.
 inline bool CenterOpen(const Scene& s) { return OpenTree(s) >= 0 && s.step.blurb < 0 && s.holdFrac < 0 && !s.chooseTitle; }
 
 struct Orb { float x = 0, y = 0, R = 0, alpha = 0; bool open = false; };   // canvas px; alpha includes the wheel's
-// Orb t as drawn: open R 40, closed R 34; with the center grown it fades out by half the grow and shrinks to 65% (R4, as Build).
+// Orb t as drawn: open R 40, closed R 34; with the center grown it fades out by half the grow and shrinks to 65%.
 inline Orb OrbOf(const Scene& s, int t) {
     Orb o;
     if (!Active(s) || t < 0 || t >= Trees) return o;
@@ -122,7 +122,7 @@ inline bool OrbGlow(const Scene& s, int t, Instance& out) {
     }
     return false;
 }
-// The center while a tree is open (L1b): the kit's backing (75% to r 84, gone by r 88) and the center rune ring at r 80 in gold
+// The center while a tree is open: the kit's backing (75% to r 84, gone by r 88) and the center rune ring at r 80 in gold
 // light at 55%, not turning. In place of Build's center rings while CenterOpen.
 inline int PushOpenCenter(const Scene& s, Instance* out, int& n, int max) {
     if (!CenterOpen(s)) return 0;

@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (, review R6 X3): the icons the ring's atlas worker reads. The frame thread fetches them from upstream's
+// Ring skill menu: the icons the ring's atlas worker reads. The frame thread fetches them from upstream's
 // icon cache (interaction::icons::Get, as upstream's own Prefetch does) until every one is in or 2 s pass; the worker only
 // reads this box. So the worker never calls upstream: at session end upstream's icons::Shutdown runs before OnUiReset, and
 // a Get from our worker after it would start upstream's icon worker again (a thread left running at exit).
@@ -63,7 +63,7 @@ public:
         cv.wait_for(lock, std::chrono::milliseconds(ms), [&] { return done; });
     }
 };
-// Headset fixes 2026-11-15 (ring Kick icon On at 8:50, the ring kept the blank s1): the icon remaps that were On when the atlas
+// (ring Kick icon On at 8:50, the ring kept the blank s1): the icon remaps that were On when the atlas
 // was asked for (ring::IconVariantFrame, one bit per icon ring). Step: true once on each change, either edge, so the ring forgets
 // its icons and asks its worker for a new atlas (AtlasWorker::Request::iconVariant makes it a new request).
 struct IconVariant {

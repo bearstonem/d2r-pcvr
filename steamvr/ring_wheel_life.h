@@ -1,14 +1,14 @@
 #pragma once
-// Ring skill menu (, review-r6 X1 / X6): the ring swapchain's life after an Off edge, as plain data. Pure and Windows-free
+// Ring skill menu: the ring swapchain's life after an Off edge, as plain data. Pure and Windows-free
 // (ring-wheel-test runs it with fake GPU sides and a real worker thread).
 //
-// X1: the ring's worker frees only the GPU side (Compose::Release waits for the GPU there, off the frame thread). The
+// the ring's worker frees only the GPU side (Compose::Release waits for the GPU there, off the frame thread). The
 // swapchain is destroyed by Reap on the frame thread, inside OnWheelLayer under transport's mutex, once that worker has
 // exited, the way upstream destroys its own swapchains, so no API layer (VDXR, OpenXR bridges with frame generation) sees
 // xrDestroySwapchain from a second thread while the frame thread is in xrWaitFrame / xrEndFrame.
 //
 // Perf: the Off edge's drain is the hook's last call before it goes dark, so a swapchain
-// left for Reap would live (about 24 MB) until the next On or OnUiReset. Off() therefore destroys it in that drain call, on
+// left for Reap would live (about 24 MB) until the next On or OnUiReset. Off therefore destroys it in that drain call, on
 // the frame thread, once the ring's last compose is done on the GPU (a wait of at most `waitMs`, normally 0: the last compose
 // was a frame ago); only a GPU still busy past that keeps it for Reap (said in the log).
 #include <cstddef>
@@ -16,24 +16,24 @@
 
 namespace framevr::ringwheel {
 struct OffResult { bool destroyed = false; double ms = 0; };
-// Audit 2026-11-10 bug 8: a swapchain's release is said once, wherever it happens. The destroy callbacks are idempotent (Reap
-// destroys every side it frees, most of them long gone), so only a destroy that found a swapchain (`had`) speaks. `line()`
-// builds the text (a std::string) and is called only then (perf nit: nothing is formatted for a side with nothing to say).
+// a swapchain's release is said once, wherever it happens. The destroy callbacks are idempotent (Reap
+// destroys every side it frees, most of them long gone), so only a destroy that found a swapchain (`had`) speaks. `line`
+// builds the text (a std::string) and is called only then.
 template <class Line, class Say> bool SayReleased(bool had, Line&& line, Say&& say) {
     if (had) { const auto text = line(); say(text.c_str()); }
     return had;
 }
 // The retired GPU sides. T is the ring's Gpu; the callbacks keep this file free of D3D12 and OpenXR:
-//   exited(T*)  its worker has left (it never blocks);
+//   exited(T*) its worker has left (it never blocks);
 //   destroy(T*) destroys its swapchain (the frame thread);
-//   free(T*)    joins the exited worker and deletes it.
+//   free(T*) joins the exited worker and deletes it.
 template <class T> class Retired {
     std::vector<T*> list;
 public:
     void Add(T* g) { if (g) list.push_back(g); }
     // The Off edge (the frame thread, the drain call): `wait(g, ms)` blocks until its last compose is done on the GPU or `ms`
     // passed, whichever first, and says whether it is done (the ring: the compose fence's event, Compose::WaitIdle; one wait,
-    // no polling, so the bound is `waitMs` and not a Sleep step past it: perf's X1 bound); `now()` ms; `destroy(g)` destroys
+    // no polling, so the bound is `waitMs` and not a Sleep step past it: bound); `now` ms; `destroy(g)` destroys
     // its swapchain (idempotent); `retire(g)` hands its GPU side to its worker. The swapchain goes here when the GPU is done
     // within `waitMs`; the side is then retired and kept for Reap.
     template <class Wait, class Now, class Destroy, class Retire>
@@ -49,7 +49,7 @@ public:
     }
     bool Empty() const { return list.empty(); }
     size_t Size() const { return list.size(); }
-    // Review-r6 X6: a retired side whose swapchain `holds(g)` still exists (the GPU was busy at its Off edge, so Reap destroys
+    // a retired side whose swapchain `holds(g)` still exists (the GPU was busy at its Off edge, so Reap destroys
     // it once its worker exits). A new On edge makes no swapchain while one does: never two ring swapchains at once (frame
     // generation's runtime counts each against its limit, and a refusal keeps upstream's wheel for the session).
     template <class Holds> bool AnyHolds(Holds holds) const {
@@ -58,7 +58,7 @@ public:
     }
     // The On edge's gate (Setup): none made yet and no retired swapchain still alive.
     template <class Holds> bool MayCreate(bool haveOne, Holds holds) const { return !haveOne && !AnyHolds(holds); }
-    // Perf's X6 check: the frame thread, each frame before the gate: a retired swapchain whose GPU work is done (`gpuDone(g)`,
+    // the frame thread, each frame before the gate: a retired swapchain whose GPU work is done (`gpuDone(g)`,
     // the fence mark taken at its Off edge; never blocks) is destroyed now, whether or not its worker has exited (the worker
     // never touches the swapchain; it can take 0.1 s to minutes to leave a build stage). The side itself waits for Reap.
     // Returns how many were destroyed.
@@ -85,5 +85,35 @@ public:
         }
         return n;
     }
+};
+// The ring swapchain's own life (the reviewer's B1): made on the first open of the wheel on a ring page, not on the On edge, and
+// given back once the wheel has been shut for LingerMs (a quick shut and reopen keeps it), after its last compose is done on
+// the GPU. It is also given up at once whenever the runtime is short of swapchains (transport's swapchainsShort: the native
+// menus' panel or the shared panels could not get one), the way upstream gives its map surface up, and stays away while short.
+// Pure: the caller does the OpenXR work and says so (Created / Released / Refused).
+class ChainLife {
+public:
+    static constexpr double LingerMs = 5000;
+    enum class Act { None, Create, Release };
+    // want: the wheel is open on a ring page this frame; runtimeShort: swapchainsShort; nowMs: the frame's clock.
+    Act Step(bool want, bool runtimeShort, double nowMs) {
+        if (have_ && runtimeShort) { blocked_ = true; return Act::Release; }
+        if (want) {
+            lastUse_ = nowMs;
+            return !have_ && !blocked_ && !runtimeShort ? Act::Create : Act::None;
+        }
+        blocked_ = runtimeShort;   // shut: a refused make is tried again at the next open (unless the runtime is still short)
+        return have_ && nowMs - lastUse_ >= LingerMs ? Act::Release : Act::None;
+    }
+    void Created() { have_ = true; }
+    void Released() { have_ = false; }
+    void Refused() { blocked_ = true; }   // no second try until the wheel has been shut
+    void Reset() { *this = ChainLife{}; }
+    bool Have() const { return have_; }
+    // What the ring may promise the input side: it has a swapchain, or can make one now.
+    bool Usable(bool runtimeShort) const { return have_ || (!blocked_ && !runtimeShort); }
+private:
+    bool have_ = false, blocked_ = false;
+    double lastUse_ = 0;
 };
 }  // namespace framevr::ringwheel

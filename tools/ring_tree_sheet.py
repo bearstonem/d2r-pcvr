@@ -1,9 +1,8 @@
-"""development only (ring > Ring wheel > Layers > Tree icon, ): builds steamvr/assets/ring-wheel/ring-tree-sheet.png, the painted tree squares
+"""Offline tool (not run by the build): builds steamvr/assets/ring-wheel/ring-tree-sheet.png, the painted tree squares
 on one sheet, and steamvr/ring_wheel_tree_sheet.h, the mask of which cells are painted.
 
-the player 2026-11-17: "change these to be sizable and have gpt draw them (the icons for the skill tree like fire, lightning, ice) ...
-the rust background square we use for normal skills ... a color instead of the silver". One square per skill tree, 24 in all, our
-own art: tools/ring_tree_squares/tree-<class>-<tree>.png (384 px, borderless full-bleed rust (no frame, bevel or rivets; motif in the middle 80%), trimmed to its alpha box in case of a margin, straight alpha; the 1024 px masters
+One painted square per skill tree, 24 in all, original art kept by the artist (not in the repo):
+<squares>/tree-<class>-<tree>.png (384 px, borderless full-bleed rust (no frame, bevel or rivets; motif in the middle 80%), trimmed to its alpha box in case of a margin, straight alpha; the 1024 px masters
 stay with the artist).
 
 Sheet: 6 columns x 4 rows of 144 px cells (the ring's atlas art square at 150%), SLOT = the cell, row-major, SLOT = class * 3 +
@@ -16,7 +15,7 @@ The compose pass cuts the circle at draw time the way it cuts every skill (Recip
 shade, the dark line, the rim) from the whole square (nothing to crop: no bevel in the art); the square mode draws the whole square
 and adds the plate's frame in code (RecipeSquare: a bevel, a dark line, the accent rim). Nothing here is hand-painted round art.
 
-    python tools/ring_tree_sheet.py [--squares tools/ring_tree_squares] [--out <png>] [--mask <h>] [--preview <png>]
+    python tools/ring_tree_sheet.py [--squares <folder of squares>] [--out <png>] [--mask <h>] [--preview <png>]
     python tools/ring_tree_sheet.py --import <folder of squares>   (trim + downscale the squares into --squares)
 """
 import argparse, os, re, sys
@@ -93,7 +92,7 @@ def cell_of(path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--squares", default=os.path.join(HERE, "ring_tree_squares"))
-    ap.add_argument("--out", default=os.path.join(REPO, "steamvr", "assets", "lab", "ring-tree-sheet.png"))
+    ap.add_argument("--out", default=os.path.join(REPO, "steamvr", "assets", "ring-wheel", "ring-tree-sheet.png"))
     ap.add_argument("--mask", default=os.path.join(REPO, "steamvr", "ring_wheel_tree_sheet.h"))
     ap.add_argument("--preview", help="also write a check sheet (the sheet on a dark ground with the slot numbers' empties marked)")
     ap.add_argument("--import", dest="imp", help="trim and downscale the painted squares into --squares, then exit")

@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (, review-r6 X4): waiting for the reply to a ring bind, assign or glyph, as plain data. Pure and
+// Ring skill menu: waiting for the reply to a ring bind, assign or glyph, as plain data. Pure and
 // Windows-free (ring-wheel-test).
 //
 // Transport's request queue (interactionstate::Request) drops a request silently while another is queued or waiting, so a
@@ -44,7 +44,7 @@ public:
 };
 // The ring may send its next request (a bind or a glyph) only when none of its own waits for an answer.
 inline bool CanSend(const ReplyWait& bind, const ReplyWait& glyph) { return !bind.Waiting() && !glyph.Waiting(); }
-// Requests made but not sent yet (perf's X4 check: one queued slot let a third quick assign overwrite the second, unsent and
+// Requests made but not sent yet (one queued slot let a third quick assign overwrite the second, unsent and
 // unanswered). First in, first out, sent one at a time as CanSend allows; full = the new one is refused out loud by the
 // caller (Push false), never one dropped in silence. Four is far more than a 1 s hold-to-assign can fill while one
 // request waits (a reply comes within a few frames, 1.5 s at most).

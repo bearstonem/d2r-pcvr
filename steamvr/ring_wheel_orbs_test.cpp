@@ -1,4 +1,4 @@
-// Ring skill menu (, build-plan L1b): Tree orbs' open-tree state (steamvr/ring_wheel_orbs.h). Measured with the real glyph
+// Ring skill menu (build-plan L1b): Tree orbs' open-tree state (steamvr/ring_wheel_orbs.h). Measured with the real glyph
 // metrics: upstream's menu fonts through the atlas worker's own BuildGlyphs (DirectWrite; no GPU), so every width is the one
 // the wheel draws with.
 #include "ring_wheel_orbs.h"
@@ -176,7 +176,7 @@ int main() {
     }
     std::printf("tree orbs: names %.1f px clear at the closest (%s); center text out to r %.1f (%s); names out to r %.1f\n",
                 worstName, worstNameAt.c_str(), worstCenter, worstCenterAt.c_str(), worstEdge);
-    {   // for the designer's sheet: the center names that leave the kit's C - 24 / C + 18 (22 px floor)
+    {   // for the design's sheet: the center names that leave the kit's C - 24 / C + 18 (22 px floor)
         std::string moved;
         const auto help = ob::Wrap(m, ob::HelpStyle, ob::PointAtASkill, ob::CenterHelpWrap);
         for (const auto& c : sc::Classes) for (const char* nm : c.names) {

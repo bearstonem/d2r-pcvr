@@ -1,8 +1,8 @@
 #pragma once
-// Ring skill menu (, 2026-11-14): the 7 Commander orders (upstream v0.3.35, #439: Commander of the Dead) as the ring
+// Ring skill menu: the 7 Commander orders (upstream v0.3.35, #439: Commander of the Dead) as the ring
 // shows them. THE ONE FILE for an order's picture and words: every draw site, blurb and log line reads them here, so new
 // drawn formation icons are a change to IconSkill alone.
-// the player's pick (2026-11-14): upstream's text and its shared icon for now. Which orders exist, when they show and what they
+// the player's pick: upstream's text and its shared icon for now. Which orders exist, when they show and what they
 // do stay upstream's (summon_commander.h, interaction::HasSummonArmy, interaction::MakeCommanderSkill): never copied here.
 #include <cstring>
 #include <string>
@@ -31,7 +31,7 @@ inline const char* Initials(int id) {
 // Under the name: an order has no level and no mana (upstream's card: "Squad order", "no mana cost").
 inline const char* Sub() { return "Squad order, no mana"; }
 // What it does, short enough for the center: upstream's own line (skill_usage.h Line, 105 to 150 characters), cut here at
-// run time and never copied, so an upstream edit reaches the ring. The designer's rule (gate, 2026-11-14): up to its first
+// run time and never copied, so an upstream edit reaches the ring. The design's rule (gate): up to its first
 // full stop; a line that is one sentence, up to its first comma (closed with a full stop).
 inline std::string HelpCut(std::string_view line) {
     const size_t stop = line.find('.');
@@ -46,7 +46,7 @@ inline std::string Help(int id) { return Is(id) ? HelpCut(skillusage::Line(id, 0
 // far its middle sits above the seats' centers: over their hit circles (27 px), under the trees' lowest hit edge.
 inline const char* RowLabel() { return "ARMY"; }
 constexpr float RowLabelDy = 40;
-// The pointed order's last line on the glyph chooser (the designer's words, 2026-11-14): only the pointing hand's trigger
+// The pointed order's last line on the glyph chooser (the design's words): only the pointing hand's trigger
 // picks (rw::OrderActOf), so the line says Trigger; the title above already reads "Choose a skill for <shape>". The longer
 // "Trigger puts it on the glyph, hold assigns" left Hold Ground one line over the circle's eight.
 inline const char* ChooserAction() { return "Trigger picks, hold assigns"; }

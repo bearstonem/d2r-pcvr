@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (, build step R7): the Glyphs and Gestures pages (plan E6; look L3 "Glyphs page", "Gestures page",
+// Ring skill menu (build step): the Glyphs and Gestures pages (plan; look L3 "Glyphs page", "Gestures page",
 // "Glyph Choose a skill state"). Pure and Windows-free. Upstream keeps both pages' data and actions: the ring only draws
 // them in its own look and turns a release into upstream's cell for one frame (a gesture card, Back, the other hand), or,
 // for a glyph's skill, into a BindGlyph request (upstream's paged picker never opens; the picker's list is upstream's rule).
@@ -17,12 +17,12 @@
 
 namespace framevr::ringwheel {
 // A kind whose entry means "the best one carried": only one with tiers (quick_radial.h HasTiers). Antidote, Thawing and Stamina
-// have one potion each, so no "Best" pill and no "best one" line (the player's headset 2026-11-17).
+// have one potion each, so no "Best" pill and no "best one" line.
 inline bool BestSeat(int id) { return KindSeat(id) && framevr::quickradial::HasTiers(id & 0xffff); }
-// (2026-11-16, the player: "ring menu > quick cast / ring menu > gestures / ring menu > glyph"; "the edit mode is when the user
+// ("ring menu > quick cast / ring menu > gestures / ring menu > glyph"; "the edit mode is when the user
 // is in the ring menu"): Quick cast is a sub-menu of the ring as Glyphs is. Quick: its 12 places (ring Quick cast radial's ring, in
 // order) round the ring, center Back; QuickChoose: the class's skill layout to choose what goes in a place, its potions and
-// scrolls on the shelf row, center Back / Clear (as the glyph chooser). QuickKind (review 2026-11-16, the player: "if they have normal
+// scrolls on the shelf row, center Back / Clear (as the glyph chooser). QuickKind (review "if they have normal
 // rejuv and a full rejuv, and they select the normal rejuv, it should not drink a full rejuv"): a kind picked on the chooser's row
 // while the hero carries some: the kind (the best one, when cast), then each exact one carried, round the ring as Quick's places,
 // center Back to the chooser. All the ring's own pages over upstream's Spells page.
@@ -33,10 +33,10 @@ constexpr int QuickPlaces = 12;   // quick_radial.h MaxItems
 constexpr float QuickR = 205, QuickIconPx = 56, QuickHitR = 34;   // 12 places 107 px apart on r 205: 68 px hit circles clear of each other
 constexpr float GlyphR = 200, GlyphIconPx = 64, GlyphHitR = 40, GlyphSkillR = 262, GlyphSkillPx = 36;
 constexpr float GestureR = 210, GestureIconPx = 52, GestureHitR = 35, NoPointsDim = .45f;
-constexpr int SpellsTabCell = 9;   // upstream's SPELLS tab: Gestures' Back (plan E5; upstream's MOTIONS page has no other)
+constexpr int SpellsTabCell = 9;   // upstream's SPELLS tab: Gestures' Back
 constexpr int MaxItems = interaction::MotionCards;   // 14: the most cards a class has; 8 shapes
 static_assert(MaxItems >= glyphs::ShapeCount);
-// The ring page on upstream's page (the footer's own bounds: review R2 G7).
+// The ring page on upstream's page (the footer's own bounds:).
 inline interaction::MenuPage UpstreamPage(RingPage p) {
     return p == RingPage::Gestures ? interaction::MenuPage::Motions : p == RingPage::Main || QuickPage(p) ? interaction::MenuPage::Spells : interaction::MenuPage::Glyphs;
 }
@@ -57,7 +57,7 @@ inline NavStep NavigateTo(int third, interaction::MenuPage page) {
     return {};
 }
 
-// Review F2 (2026-11-15): upstream clicks only on a rising trigger edge, with rearm clear (a frame with the trigger at 0), and
+// upstream clicks only on a rising trigger edge, with rearm clear (a frame with the trigger at 0), and
 // never on the frame the wheel's hand changes (interactions.h). So a Fire is one frame at 1, then at least one frame at 0, and
 // none on the frame the wheel opens or changes hand. Evening review S-B: the wheel's hand is watched every frame (so the first
 // click after an open is not lost on a stale hand), and the give-up runs from the ask or the last page change (progress), never
@@ -82,17 +82,17 @@ struct FireGate {
     }
     bool GaveUp(double nowMs, double limitMs) const { return nowMs - sinceMs > limitMs || fires >= MaxFires; }
 };
-// Review F1: a sub-menu never goes on a trigger (it is the attack and the ring's own click). slot: the hand's button, 0 trigger.
+// a sub-menu never goes on a trigger (it is the attack and the ring's own click). slot: the hand's button, 0 trigger.
 inline bool MenuButtonAllowed(int slot) { return slot > 0; }
 
 // Upstream's glyph picker list (interaction::Engine::OpenGlyphSkills): the hero's own skills (owner -1), not 357, none that
 // needs a target except Town Portal (359).
 inline bool GlyphPickable(const interaction::Skill& k) { return k.id >= 0 && k.id != 357 && k.owner == -1 && (!k.directed || k.id == 359); }
-// The ring's glyph list (2026-11-14): everything a glyph shape may cast, as upstream's picker offers it: the catalog's
+// The ring's glyph list: everything a glyph shape may cast, as upstream's picker offers it: the catalog's
 // pickable skills, then the 7 Commander orders when the hero has a summon army. The orders and the army test are upstream's
 // own (interaction::HasSummonArmy, interaction::MakeCommanderSkill; no target on a glyph, as OpenGlyphSkills makes them),
 // never a copy of their rules. THE ONE LIST: the chooser lights its seats and builds its order row from it (ChooserLayout),
-// and ring-wheel-test R7 #20 holds it equal to upstream's picker. Built when a shape is chosen, never per frame.
+// and ring-wheel-test #20 holds it equal to upstream's picker. Built when a shape is chosen, never per frame.
 inline std::vector<interaction::Skill> GlyphChoices(const interaction::Snapshot& s) {
     std::vector<interaction::Skill> list;
     for (unsigned i = 0; i < s.skillCount && i < s.catalog.size(); ++i) if (GlyphPickable(s.catalog[i])) list.push_back(s.catalog[i]);
@@ -104,11 +104,11 @@ inline const interaction::Skill* ChoiceOf(const std::vector<interaction::Skill>&
     for (const auto& k : list) if (k.id == id && k.owner == owner) return &k;
     return nullptr;
 }
-// The chooser's seats from the main ring's and that list (the player's pick, 2026-11-14; the designer's sheet B). With no order on
+// The chooser's seats from the main ring's and that list. With no order on
 // the list: the main layout exactly, as before. With orders: every tree seat stays where it is (same index, same place);
 // the shelf row becomes the shelf skills a glyph can take, a gap, then the orders in upstream's order, centered on C at the
 // shelf's own height and pitch. Shelf skills a glyph cannot take step out (they were drawn at 25% there). ChooserRow: the same
-// with any row (`row`: its seats' ids, owner -1; Quick cast's chooser: its potions and scrolls, 2026-11-16).
+// with any row (`row`: its seats' ids, owner -1; Quick cast's chooser: its potions and scrolls).
 inline Layout ChooserRow(const Layout& main, const std::vector<interaction::Skill>& list, const std::vector<int>& row) {
     const int orderCount = int(row.size());
     if (!orderCount) return main;
@@ -144,7 +144,7 @@ inline Layout ChooserLayout(const Layout& main, const std::vector<interaction::S
     for (const auto& k : list) if (orders::Is(k.id) && k.owner == -1) row.push_back(k.id);
     return ChooserRow(main, list, row);
 }
-// Quick cast's chooser list (2026-11-16): every known skill the radial casts (a skill id under 4096: the class's, the general and
+// Quick cast's chooser list: every known skill the radial casts (a skill id under 4096: the class's, the general and
 // item skills; quick_radial.h IsSkillId), never a ring entry (Draw glyph 9000, the modules' 9001 on) or a Commander order (the
 // radial casts the catalog's skills only). Built when a place is chosen, never per frame.
 inline bool QuickPickable(const interaction::Skill& k) { return k.known && k.id >= 0 && k.id < 4096 && !orders::Is(k.id); }
@@ -153,7 +153,7 @@ inline std::vector<interaction::Skill> QuickChoices(const interaction::Snapshot&
     for (unsigned i = 0; i < s.skillCount && i < s.catalog.size(); ++i) if (QuickPickable(s.catalog[i])) list.push_back(s.catalog[i]);
     return list;
 }
-// The army watch (review M1, 2026-11-14). Whether the hero has a summon army is NOT part of the seats' key: a change of
+// The army watch. Whether the hero has a summon army is NOT part of the seats' key: a change of
 // that key resets the main ring's engine and quick cast, rebuilds the seats and asks the atlas again, and the live army
 // bit drops whenever the companions copy is over a second old (a load, a hitch, a failed read). The watch asks upstream's
 // own HasSummonArmy only when the catalog changed (the caller's key for it) or the live bit flipped, and says `changed`
@@ -188,7 +188,7 @@ inline int AddOrderIcons(int* ids, int n, int cap) {
     }
     return n;
 }
-// ---- A button on an order (the player's pick B, 2026-11-14) ----
+// ---- A button on an order ----
 // On the chooser an order takes presses as a main-ring seat does, through the same QuickCast: held to Hold to assign it
 // goes on that button; the pointing hand's trigger released under the Tap limit picks it for the glyph; a release between
 // the two does nothing. Any other button's tap does nothing (no order is given from the chooser). A skill's seat there
@@ -204,7 +204,7 @@ inline OrderAct OrderActOf(const QuickOut& e, int pointer) {
     if (e.event == Quick::QuickCast) return e.slot == 0 && e.hand == pointer ? OrderAct::Pick : OrderAct::None;
     return OrderAct::None;
 }
-// The hold ring on an order shows from the first frame of the press (the player, 2026-11-14), filling to Hold to assign; a seat
+// The hold ring on an order shows from the first frame of the press, filling to Hold to assign; a seat
 // on the main ring shows it from the Tap limit (QuickOut::holdFrac). Hold to assign Off: no ring.
 inline float OrderHoldFrac(const QuickOut& e, int holdMs, int tapMs) {
     const int full = EffectiveHoldMs(holdMs, tapMs);
@@ -230,7 +230,7 @@ inline void RingPos(int i, int n, float r, float& x, float& y) {
 
 // ---- Pointing and releases on the two pages ----
 struct PageIn { double nowMs = 0; bool hit = false; float x = 0, y = 0; bool trigger = false; RingPage page = RingPage::Glyphs; int count = 0; };
-enum class PageEvent { None, Upstream, ChooseSkill, Back, Move };   // Back: Quick cast's center (the ring's page, no upstream cell); Move: its page's lower half (2026-11-17)
+enum class PageEvent { None, Upstream, ChooseSkill, Back, Move };   // Back: Quick cast's center (the ring's page, no upstream cell); Move: its page's lower half
 // Copied into a Scene's StepOut (ToStep) for the draw and the redraw key: under, pressed, locked, centerGrown, blurb.
 struct PageOut { Target under{}, pressed{}; PageEvent event = PageEvent::None; int cell = -1, shape = -1; bool locked = false, grown = false; int blurb = -1; };
 class PageEngine {
@@ -248,7 +248,7 @@ public:
         const float x = cx - CanvasX, y = cy - CanvasY, r = std::hypot(x - C, y - C);
         const bool inCenter = lastUnder.kind == Kind::Back || lastUnder.kind == Kind::Hand;
         if (r <= (inCenter && grown ? CenterGrownR : CenterR)) {   // the grown circle's edge only once it has grown
-            if (page == RingPage::Gestures || page == RingPage::QuickKind || y < C - CenterDeadBand) return {Kind::Back};   // Quick cast's page: Back above, Move below (2026-11-17)
+            if (page == RingPage::Gestures || page == RingPage::QuickKind || y < C - CenterDeadBand) return {Kind::Back};   // Quick cast's page: Back above, Move below
             if (y > C + CenterDeadBand) return {Kind::Hand};
             return inCenter ? lastUnder : Target{Kind::Gap};
         }
@@ -263,7 +263,7 @@ public:
     }
     PageOut Step(const PageIn& in, const Settings& s) {
         PageOut out;
-        if (in.page != was) {   // a page change: presses locked out 250 ms (L2), a trigger already down let go first, timers reset
+        if (in.page != was) {   // a page change: presses locked out 250 ms, a trigger already down let go first, timers reset
             was = in.page; held = {}; lastUnder = {}; lockUntil = in.nowMs + s.lockoutMs; mustRelease = in.trigger; triggerWas = in.trigger;
             itemSince = centerSince = -1; grown = false;
         }
@@ -291,7 +291,7 @@ public:
             if (QuickRing(in.page)) { out.event = PageEvent::Back; break; }   // Quick: the ring menu's main page again; QuickKind: the chooser
             out.event = PageEvent::Upstream; out.cell = in.page == RingPage::Gestures ? SpellsTabCell : interaction::GlyphsCell; break;
         case Kind::Hand:
-            if (in.page == RingPage::Quick) { out.event = PageEvent::Move; break; }   // Quick cast's page: its lower half, Move (2026-11-17)
+            if (in.page == RingPage::Quick) { out.event = PageEvent::Move; break; }   // Quick cast's page: its lower half, Move
             out.event = PageEvent::Upstream; out.cell = interaction::GlyphHandCell; break;
         case Kind::Seat:
             if (in.page == RingPage::Gestures) { out.event = PageEvent::Upstream; out.cell = interaction::MotionCardCell(fired.index); }
@@ -313,17 +313,17 @@ struct PageView {
     std::array<int16_t, MaxItems> cell{};       // per item: the icon atlas cell of its skill, -1 none
     std::array<bool, MaxItems> on{}, follows{}, has{};   // gesture on; a left shape showing the right's skill; a skill set
     std::array<bool, MaxItems> best{};          // Quick cast: a kind (the best one carried), its "Best" pill (an exact one has none)
-    std::array<bool, MaxItems> dim{};           // Quick cast's kind page (2026-11-17): a tier not carried, drawn dim (it can still be put in a place)
+    std::array<bool, MaxItems> dim{};           // Quick cast's kind page: a tier not carried, drawn dim (it can still be put in a place)
     std::array<int, MaxItems> skill{};          // per item: its skill (a shape's cast, a card's), -1 none
     std::string title, top, bottom, below;      // the arc title; the center's halves (nothing pointed); under the label
-    std::string bottomCount;                    // Glyphs: the hand half's count line when pointed ("8 shapes, left hand"; designer RS4); Quick cast: Move's line
-    std::string bottomHelp;                     // Quick cast (2026-11-17): Move's trigger line when pointed
+    std::string bottomCount;                    // Glyphs: the hand half's count line when pointed ("8 shapes, left hand"; design RS4); Quick cast: Move's line
+    std::string bottomHelp;                     // Quick cast: Move's trigger line when pointed
     std::array<std::string, MaxItems> name, line, help;   // the pointed item's blurb: name, its line, the trigger's help
-    bool clock = false;                         // Quick cast, Fixed places (2026-11-17): the places named as a clock's hours (12 at the top)
-    int moveFrom = -1;                          // Quick cast's Move (2026-11-17): the place whose item is being moved (ringed), -1 none
+    bool clock = false;                         // Quick cast, Fixed places: the places named as a clock's hours (12 at the top)
+    int moveFrom = -1;                          // Quick cast's Move: the place whose item is being moved (ringed), -1 none
     bool operator==(const PageView&) const = default;
 };
-// Round 2026-11-08 item 6: the Gestures page shows every card, learned or not, and the seats hold only the skills the hero has.
+// item 6: the Gestures page shows every card, learned or not, and the seats hold only the skills the hero has.
 // Appends to ids[0, n) the class's cards and the skills a family card can show (spellmotion::CastSkillOf: Clay, Blood, Fire
 // Golem; Shadow Warrior, Master) that are not there yet; the new n. Called when the atlas request is built, never per frame.
 inline int AddGesturePageIcons(int skillClass, int* ids, int n, int cap) {
@@ -347,7 +347,7 @@ template <class NameOf, class CellOf>
 inline void FillGlyphs(PageView& v, const interaction::GlyphSets& sets, int hand, NameOf nameOf, CellOf cellOf) {
     v = PageView{}; v.page = RingPage::Glyphs; v.count = glyphs::ShapeCount;
     v.title = hand ? "Left hand's glyphs" : "Right hand's glyphs";
-    v.top = "Back"; v.bottom = hand ? "Right" : "Left";   // one word: "Right hand" at 22 px overflows the r 80 split (designer, R7 answers 6)
+    v.top = "Back"; v.bottom = hand ? "Right" : "Left";   // one word: "Right hand" at 22 px overflows the r 80 split
     v.bottomCount = hand ? "Right hand's 8 shapes" : "Left hand's 8 shapes";
     for (int i = 0; i < v.count; ++i) {
         const size_t k = size_t(i);
@@ -359,9 +359,9 @@ inline void FillGlyphs(PageView& v, const interaction::GlyphSets& sets, int hand
         v.help[k] = "Trigger to choose a skill";
     }
 }
-// Quick cast's page (2026-11-16): its 12 places, place k holding the radial's item k (ids, in the ring's order; n of them), the
+// Quick cast's page: its 12 places, place k holding the radial's item k (ids, in the ring's order; n of them), the
 // rest empty. nameOf(id) and cellOf(id) are the caller's (a skill's or an item's name; the atlas cell, -1 none). fixed (Quick cast
-// layout Fixed places, 2026-11-17): ids[k] is place k's item, -1 an empty one, each place named as a clock's hour (quick_radial.h
+// layout Fixed places): ids[k] is place k's item, -1 an empty one, each place named as a clock's hour (quick_radial.h
 // PlaceNumber: 12 at the top, 3 to the right); an empty place fills exactly there.
 template <class NameOf, class CellOf>
 inline void FillQuick(PageView& v, const int* ids, int n, NameOf nameOf, CellOf cellOf, bool fixed = false) {
@@ -382,10 +382,10 @@ inline void FillQuick(PageView& v, const int* ids, int n, NameOf nameOf, CellOf 
     }
     v.title = "Quick cast"; v.top = "Back";
     v.below = std::to_string(filled) + " of " + std::to_string(QuickPlaces) + " filled";
-    // the center's lower half (2026-11-17): Move, one place's item to another (no seat on any chooser)
+    // the center's lower half: Move, one place's item to another (no seat on any chooser)
     v.bottom = "Move"; v.bottomCount = filled ? "One place to another" : "Nothing to move yet"; v.bottomHelp = filled ? "Trigger, then two places" : "Fill a place first";
 }
-// Quick cast's Move (2026-11-17), from the center's lower half: picking (no place yet), then from (the place whose item waits for where
+// Quick cast's Move, from the center's lower half: picking (no place yet), then from (the place whose item waits for where
 // it goes, ringed). Each place says what a trigger there does; Back or Move again stops it (the page stays). A `from` that is empty
 // now (the ring changed under it) marks nothing: the caller drops it.
 inline void MarkQuickMove(PageView& v, int from, bool picking = false) {
@@ -413,7 +413,7 @@ inline void MarkQuickMove(PageView& v, int from, bool picking = false) {
         v.help[k] = v.has[k] ? "Trigger to swap them" : "Trigger to move it here";
     }
 }
-// Reviews S3 / S4 (2026-11-16): the radial's ring is this character's only once the radial has it for this game (its session and
+// Reviews / the radial's ring is this character's only once the radial has it for this game (its session and
 // class) and its save is read (Saved), or there is none to tell it by (ThisGame: kept for this game, added to the save once read).
 // Reading: no places shown as fact and no edits asked; ThisGame: the page says so.
 enum class QuickRingState { Reading, Saved, ThisGame };
@@ -473,7 +473,7 @@ inline void FillGestures(PageView& v, int skillClass, int off, NameOf nameOf, Ce
     v.title = "Gestures"; v.top = "Back";
     v.below = std::to_string(onCount) + " of " + std::to_string(v.count) + " on";
 }
-// The main page's halves: a count for the pointed half (L3 "Pointed half"): "8 shapes, right hand", "11 of 14 on".
+// The main page's halves: a count for the pointed half: "8 shapes, right hand", "11 of 14 on".
 inline std::string GlyphsCount(int hand) { return hand ? "8 shapes, left hand" : "8 shapes, right hand"; }
 inline std::string GesturesCount(int skillClass, int off) {
     const auto page = spellmotion::PageOf(skillClass);
@@ -511,8 +511,8 @@ inline int BuildPage(const Scene& s, const PageView& v, Instance* out, int maxSh
     Push(out, n, maxShapes, {cx, cy, 2 * cr + 20, 2 * cr + 20, 0, 0, 0, 0, 0, 0, 0, 0, .75f * A, RecipeDisc, 10});
     Push(out, n, maxShapes, {cx, cy, 2 * cr, 2 * cr, 0, 0, 0, 0, 0, Gold.r, Gold.g, Gold.b, A, RecipeRing, 2});
     Push(out, n, maxShapes, {cx, cy, 2 * (cr - 11), 2 * (cr - 11), 0, 0, 0, 0, 0, Gold.r, Gold.g, Gold.b, .8f * A, RecipeRing, 1.5f});
-    const bool quickSplit = v.page == RingPage::Quick;   // Quick cast's page (2026-11-17): Back above, Move below
-    if ((glyphsPage || quickSplit) && !pointedItem) {   // the split: hairline and its 6 px diamond (L3)
+    const bool quickSplit = v.page == RingPage::Quick;   // Quick cast's page: Back above, Move below
+    if ((glyphsPage || quickSplit) && !pointedItem) {   // the split: hairline and its 6 px diamond
         Push(out, n, maxShapes, {cx, cy, 2 * (cr - 15), 2, 0, 0, 0, 0, 0, Gold.r, Gold.g, Gold.b, A, RecipeRect, 0});
         Push(out, n, maxShapes, {cx, cy, 6, 6, Pi / 4, 0, 0, 0, 0, GoldLight.r, GoldLight.g, GoldLight.b, A, RecipeRect, 0});
     }
@@ -564,8 +564,8 @@ inline int BuildPage(const Scene& s, const PageView& v, Instance* out, int maxSh
             if (v.best[k]) Push(out, n, maxShapes, {x + 24, y + 24, 66, 26, 0, 0, 0, 0, 0, .08f, .07f, .06f, .92f * A, RecipeRect, 0});   // the "Best" pill, lower right
             if (i == v.moveFrom) Push(out, n, maxShapes, {x, y, size + 22, size + 22, 0, 0, 0, 0, 0, GoldLight.r, GoldLight.g, GoldLight.b, A, RecipeRing, 2.5f});   // Move: the place being moved, an outer gold ring
             if (pointed) Push(out, n, maxShapes, {x, y, size + 12, size + 12, 0, 0, 0, 0, 0, HoverRing.r, HoverRing.g, HoverRing.b, A, RecipeRing, 3});
-        } else {   // a gesture: its skill's icon; Off: dimmed with an "Off" pill (never color alone); no points (round 2026-11-08
-            // item 6): gray at upstream's 45% brightness (interaction_ui.cpp icon()) over a black disc, no pill (its line says "no points yet")
+        } else {   // a gesture: its skill's icon; Off: dimmed with an "Off" pill (never color alone); no points (
+            // item 6): gray at upstream's 45% brightness (interaction_ui.cpp icon) over a black disc, no pill (its line says "no points yet")
             const bool noPoints = !v.has[k] && v.on[k], lit = v.on[k] && !noPoints;
             const float size = GestureIconPx * (pointed ? 1.3f : 1.f), a = A * (noPoints ? NoPointsDim : v.on[k] ? 1.f : .5f);
             const Rgb rim = lit ? GoldLight : Muted;
@@ -630,11 +630,11 @@ inline int BuildPage(const Scene& s, const PageView& v, Instance* out, int maxSh
         const int pointed = s.step.under.kind == Kind::Back ? 1 : s.step.under.kind == Kind::Hand ? 2 : 0;
         DrawSplit(m, {v.top.c_str(), Sigil::Back, "To the wheel", "Trigger to go back"}, {v.bottom.c_str(), Sigil::Hand, v.bottomCount.c_str(), "Trigger to open"},
                   pointed, g, A, out, n, max, &s);
-    } else if (quickSplit) {   // Quick cast (2026-11-17): Back with its arrow and the count; Move below, costing no seat on any chooser
+    } else if (quickSplit) {   // Quick cast: Back with its arrow and the count; Move below, costing no seat on any chooser
         const int pointed = s.step.under.kind == Kind::Back ? 1 : s.step.under.kind == Kind::Hand ? 2 : 0;
         DrawSplit(m, {v.top.c_str(), Sigil::Back, v.below.c_str(), "Trigger to go back"}, {v.bottom.c_str(), Sigil::Star, v.bottomCount.c_str(), v.bottomHelp.c_str()},
                   pointed, g, A, out, n, max, &s);
-    } else {   // Gestures and Quick cast's kind page: one Back (its arrow above it at rest), "N of M on" / "N of 12 filled"; pointed: "Trigger to go back" (designer, R7 answers 4)
+    } else {   // Gestures and Quick cast's kind page: one Back (its arrow above it at rest), "N of M on" / "N of 12 filled"; pointed: "Trigger to go back"
         const bool on = s.step.under.kind == Kind::Back;
         if (!on) PushSigilOrArt(&s, Sigil::Back, out, n, max, cx, cy - 48, Gold, A);
         EmitLine(m, on ? text::Label26 : text::Label22, v.top, cx, cy - (on ? 26 : 12), on ? HoverRing : GoldLight, A, out, n, max);

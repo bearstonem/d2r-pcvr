@@ -747,6 +747,13 @@ desktop focus loss releases the injected mouse button; release the trigger
 before starting again. Pressing or releasing Left Grip during a drag will
 not convert it into a context-click.
 
+### Ring skill menu
+
+**VR Settings > Menus > Ring skill menu** (On by default) draws the skill wheel as three rings, one per skill tree, round a center that shows the pointed skill. Off gives the game's own skill wheel back exactly as before, and turns Quick cast off too.
+
+- Open it as the skill wheel opens (stick click). Point with the other hand's laser; press a button to cast the pointed skill, or hold that button to put the skill on it. Grip to move the wheel.
+- The center has three halves: Glyphs, Gestures and Quick cast. Tap one to open its page; hold a hand button on it to put that menu on the button, so a press of that button opens the wheel there. Quick cast's page fills its ring (see Quick cast).
+- Logging stays quiet: the On / Off edge, button changes and refused actions. For a bug report, `[debug] ring_wheel_log=1` in `d2r_pcvr.ini` adds every ring line (off by default).
 ### VR keyboard (character names)
 
 D2R shows no on-screen keyboard for the character name, so the mod adds one.

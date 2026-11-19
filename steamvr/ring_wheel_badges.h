@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (, feedback 1 items 3 and 5; build-plan L4 rows 16-18): the bound-button badge beside each skill, as
+// Ring skill menu (feedback 1 items 3 and 5; build-plan L4 rows 16-18): the bound-button badge beside each skill, as
 // plain data. Pure and Windows-free (ring-wheel-test). One badge per bound slot, in the player's button style (the design notes
 // item 3; the kit's badges=quest, drawQuestBadge): a dark disc with the face letter (A / B
 // right, X / Y left on Quest), a gold coin with a dark letter for the grip layer, a dark rounded square R / L for the
@@ -14,7 +14,7 @@
 namespace framevr::ringwheel {
 enum class BadgeKind : uint8_t { Disc, Coin, Square };   // the shader's RecipeBadge param
 enum class BadgeDepth { Outside, Outline, Inside, Center };
-// The three rows (L4 16-18): angle -1 = Auto (the kit's outer side plus the clear-of-neighbors search) or 0-345 deg
+// The three rows: angle -1 = Auto (the kit's outer side plus the clear-of-neighbors search) or 0-345 deg
 // clockwise from 12 o'clock (exact, no search); depth; size in px, 0 = Off (no badges).
 constexpr int BadgeAuto = -1, BadgeDefaultPx = 28;
 struct BadgeLook {
@@ -38,7 +38,7 @@ inline char BadgeLetter(controllers::Layout layout, int hand, int slot) {
     if (layout == controllers::Layout::Frame && hand) return secondary ? 'U' : 'D';
     return secondary ? '2' : '1';
 }
-// Job B (2026-11-18, the player: the badges "sometimes change from A, B to 1, 2"): a controller that sleeps or loses tracking reports
+// Job B: a controller that sleeps or loses tracking reports
 // no interaction profile, which transport reads as Layout::Generic ("Unknown"; the logs show `Frame controllers: right=Touch
 // left=Unknown` dozens of times a session), and Generic's faces are 1 / 2. The badges keep the last real layout of that hand
 // instead. Only in Automatic: a chosen layout (Button names row) is the player's and is shown as it is.
@@ -71,7 +71,7 @@ inline float BadgePref(const Layout& l, const Seat& s, int angleDeg) {
     const bool inward = l.mode == TreeLayout::Shown && std::hypot(s.x - C, s.y - C) > 250;
     return std::atan2(s.y - C, s.x - C) + (inward ? Pi - .55f : .55f);
 }
-// Which seats a badge keeps clear of (the kit's same()): every seat in Trees shown; with Tree orbs only its own tree's
+// Which seats a badge keeps clear of (the kit's same): every seat in Trees shown; with Tree orbs only its own tree's
 // (one tree shows at a time) and the shelf.
 inline bool BadgeSame(const Layout& l, const Seat& a, const Seat& b) { return l.mode == TreeLayout::Shown || a.tree < 0 || b.tree < 0 || a.tree == b.tree; }
 // The tree-name arc's inner edge less the badge (kit: 296 Trees shown, 320 Tree orbs) and the grown center's edge (r 140).
@@ -179,12 +179,12 @@ public:
         return true;
     }
     void Reset() { have = false; }
-    // Each wheel open (perf's badges nit 1): no pop for what changed while it was closed, and no new placement unless the
+    // Each wheel open: no pop for what changed while it was closed, and no new placement unless the
     // seats, binds, rows or controller changed (a re-place on every open cost up to 0.1 ms and a log line per open).
     void Opened() { opened = true; }
     const BadgeSet& Set() const { return set; }
 };
-// #3 (designer, 2026-11-08): the wheel hand's own Draw glyph button, on the Glyphs half: a skill's badge riding the center ring,
+// #3: the wheel hand's own Draw glyph button, on the Glyphs half: a skill's badge riding the center ring,
 // 45 deg upper right (offset = ring radius x DrawBadgeRing: 56.6 at rest, 96.2 grown); the Size row applies, Angle and Depth do
 // not. drawSlots: upstream's [glyphs] slots per hand (interaction::Output::glyphDraw), never a copy of them.
 constexpr float DrawBadgeRing = .7071f, DrawBadgeDimmed = .55f;   // Dimmed: the Gestures half is the one pointed
@@ -202,7 +202,7 @@ inline DrawBadge DrawBadgeFor(const std::array<int, 2>& drawSlots, int wheelHand
         if (SlotOf(wheelHand, k) == drawSlots[size_t(wheelHand)]) { d.on = true; d.kind = BadgeKindOf(k); d.letter = BadgeLetter(ctrl, wheelHand, k); d.sizePx = sizePx; }
     return d;
 }
-// The pop (L2 Assigned): 1.35x at 75 ms back to 1 at 150 ms; the green tick fades over 600 ms.
+// The pop: 1.35x at 75 ms back to 1 at 150 ms; the green tick fades over 600 ms.
 inline float BadgePop(double ageMs) { return ageMs >= 0 && ageMs < 150 ? 1 + .35f * float(std::sin(ageMs / 150 * Pi)) : 1.f; }
 inline float BadgeTick(double ageMs) { return ageMs >= 0 && ageMs < 600 ? 1 - float(ageMs / 600) : 0.f; }
 }  // namespace framevr::ringwheel

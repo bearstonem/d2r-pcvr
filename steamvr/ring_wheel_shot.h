@@ -1,8 +1,8 @@
 #pragma once
-// Ring skill menu (, round 2026-11-08 item 4): a screenshot's picture of the ring's layer, as data. The compose pass writes
+// Ring skill menu (item 4): a screenshot's picture of the ring's layer, as data. The compose pass writes
 // premultiplied color into an 8-bit target; a layer PNG (layer_shot.h, upstream's) is sRGB with straight alpha. Pure and
 // Windows-free. Runs only on a screenshot's frame.
-// Round 2026-11-12 Job B (audit bug 4: the save's 42-58 ms sat on the frame): the frame thread only hands the filled
+// Job B: the frame thread only hands the filled
 // readback buffer over (Queue); a worker copies its rows (Raw), makes the picture, writes the file and says the log line
 // (SaveQueue, Finish).
 #include <algorithm>
@@ -86,7 +86,7 @@ public:
     struct task { double at = 0; int behind = 0; double begun = 0; };   // when Push took it (NowMs), the saves not finished then, when the worker began it
     using Job = std::function<void(const task&)>;
     SaveQueue() = default;
-    // Never a blocking join here (as AtlasWorker, review R5 K3: it may run at DLL unload, under the loader lock): the ring
+    // Never a blocking join here (as AtlasWorker, it may run at DLL unload, under the loader lock): the ring
     // holds its queue on the heap and never destroys it; a test calls Drain first.
     ~SaveQueue() { if (thread.joinable()) { if (Idle()) thread.join(); else thread.detach(); } }
     SaveQueue(const SaveQueue&) = delete;
@@ -137,7 +137,7 @@ private:
 
 // The worker's half of a screenshot, after it copied the rows out: the picture from them, the file, then the one log line,
 // with the frame thread's ms (from `frameT0`, a NowMs the hook took first, to the Push) and the worker's (from the
-// task's `begun`, so the rows' copy counts). `write(file, rgba, w, h)`: true when the file is written (png::Save);
+// 's `begun`, so the rows' copy counts). `write(file, rgba, w, h)`: true when the file is written (png::Save);
 // `say(const char*)`: the log. Rows that are not whole (the copy failed): no file, and the line says so.
 template <class Write, class Say>
 void Finish(const Raw& raw, const std::wstring& file, double frameT0, const SaveQueue::task& t, Write&& write, Say&& say) {
@@ -157,7 +157,7 @@ void Finish(const Raw& raw, const std::wstring& file, double frameT0, const Save
 // The frame thread's half of a screenshot (the ring's OnLayerShot hook). With MaxWaiting saves unwritten it refuses at
 // once, before any GPU work. Else `take(why)` does the GPU's part (Compose::Shot) and returns how the worker reads the
 // rows, or sets `why`; then the save is queued (the queue is made at the first one). Null: queued, and the worker says
-// the saved / not saved line. Else why not, for the caller to say. On the worker, per save: `begin()` (its thread's
+// the saved / not saved line. Else why not, for the caller to say. On the worker, per save: `begin` (its thread's
 // priority), the rows read, Finish. Nothing thrown reaches the frame thread (out of memory: a reason, as the rest).
 using Reader = std::function<bool(Raw&)>;
 template <class Take, class Write, class Say, class Begin>

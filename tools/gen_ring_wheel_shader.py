@@ -1,12 +1,12 @@
-"""Ring skill menu (, R8 match stage 1a perf fix): compiles the compose pass's shaders once, at build time.
+"""Ring skill menu: compiles the compose pass's shaders once, at build time.
 
 The compose shader (vr/ring_wheel_compose.cpp `Source`, after steamvr/ring_wheel_skill_fx.h `RestLayersHlsl`) takes
-15-20 s to compile at /O3 since R8 match stage 1a; at run time that was the wait on
-every ring On edge. The build runs this (steamvr/lab.cmake) and writes <build>/generated/ring_wheel_shader_blob.h: the
+15-20 s to compile at /O3 ; at run time that was the wait on
+every ring On edge. The build runs this (steamvr/CMakeLists.txt) and writes <build>/generated/ring_wheel_shader_blob.h: the
 FNV-1a 64 hash of the exact source the ring compiles, the VS and PS bytecode (fxc /O3, the same d3dcompiler as D3DCompile)
 and the PS instruction-slot count; nothing binary goes into git. At run time a matching hash uses the bytecode (no compile).
 No fxc on the build machine: an empty blob (ShaderBlobOk false), and the ring compiles at run time as before.
-Two pixel shaders (R8 match stage 2): PS (icons, rings, text) and PSFx (the effects, recipe 6); each must stay within
+Two pixel shaders: PS (icons, rings, text) and PSFx (the effects, recipe 6); each must stay within
 SLOT_BUDGET (the build fails): the recipe tables are data and must not grow the code.
 
     python tools/gen_ring_wheel_shader.py --out <header> [--fxc <fxc.exe>]

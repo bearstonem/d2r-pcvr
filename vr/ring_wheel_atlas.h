@@ -1,7 +1,7 @@
 #pragma once
-// Ring skill menu (, build step R5): the atlases (plan E4, E2 text; frame-budget section 2). Everything here runs on the
+// Ring skill menu (build step): the atlases. Everything here runs on the
 // ring's one worker thread, never on the frame thread:
-//  - the compose pass's Setup (shader compile, GPU objects; perf R4 item 1),
+//  - the compose pass's Setup (shader compile, GPU objects; item 1),
 //  - the glyph atlas: upstream's menu fonts (Cinzel 700, Alegreya Sans 500 / 700; SIL OFL) at the render scale through
 //    DirectWrite's grayscale glyph analysis, the 2.5 px dark outline baked in (fill red, outline green), and the metrics
 //    the text layout measures with (steamvr/ring_wheel_text.h),
@@ -33,11 +33,11 @@ bool BuildGlyphs(const Fonts& fonts, int scalePct, AtlasImage& out, text::Metric
 // The icon atlas: `ids[i]` the skill id for seat i (-1 none). `source` returns a decoded icon or null (not cached yet, or
 // none); `settle` waits for the decodes `source` queued (interaction::icons::Wait).
 using IconSource = std::function<std::shared_ptr<const interaction::icons::Image>(int skill)>;
-// keyed, despeckled (): the icons cut clean (steamvr/ring_wheel_unbake.h) and the pixels the cleanup pass changed.
+// keyed, despeckled: the icons cut clean (steamvr/ring_wheel_unbake.h) and the pixels the cleanup pass changed.
 struct IconPack { std::vector<int16_t> cellOf; std::vector<int> missing; int wanted = 0, found = 0, scalePct = 100, keyed = 0, despeckled = 0; };
 // variant: the icon modules' remaps On (Request::iconVariant): a remapped icon keeps its own art (unbake::Keyed).
 void BuildIcons(const int* ids, int n, int scalePct, const IconSource& source, const std::function<void()>& settle, AtlasImage& out, IconPack& pack, uint32_t variant = 0);
-// R8 match stage 3a: the game effect texture atlas (AtlasKind::FxTex) from upstream's spell sprite cache file (sprites.ssp,
+// match stage 3a: the game effect texture atlas (AtlasKind::FxTex) from upstream's spell sprite cache file (sprites.ssp,
 // steamvr/spell_sprites.h): the fire plates 03 and 04, the smoke atlas, the arc flipbook and the glow card, BC4 decoded on
 // the CPU, packed and mipped. `served`: how many of the kit's 8 fx-tex.js keys it stands for (7: no curved shockwave in the
 // cache; 0 on any failure, `why` says why). Read-only; nothing written.
@@ -51,8 +51,8 @@ class AtlasWorker {
 public:
     struct Request {
         int classId = -1, scalePct = 150, n = 0;
-        std::array<int, MaxSeats + ExtraIcons> ids{};   // the seats, then the Gestures page's other cards (round 2026-11-08 item 6)
-        uint32_t iconVariant = 0;   // the icon modules' remaps (IconVariant, headset fixes 2026-11-15): a change is a new build
+        std::array<int, MaxSeats + ExtraIcons> ids{};   // the seats, then the Gestures page's other cards
+        uint32_t iconVariant = 0;   // the icon modules' remaps (IconVariant): a change is a new build
         bool operator==(const Request&) const = default;
     };
     struct Built {
@@ -63,7 +63,7 @@ public:
         double glyphMs = 0, iconMs = 0;
     };
     AtlasWorker() = default;
-    // Review R5 K3: never a blocking join here (it may run at DLL unload, under the loader lock). A worker that exited is
+    // never a blocking join here (it may run at DLL unload, under the loader lock). A worker that exited is
     // joined; one still running is detached (the ring holds its worker on the heap and never destroys it while running).
     ~AtlasWorker() { if (thread.joinable()) { if (exited.load()) thread.join(); else thread.detach(); } }
     AtlasWorker(const AtlasWorker&) = delete;
@@ -71,9 +71,12 @@ public:
     // Frame thread, at the session or the ring's On edge: starts the worker, which runs compose->Setup first.
     void Start(Compose* compose, ID3D12Device* device, ID3D12CommandQueue* queue, int format, Fonts fonts, IconSource source,
                std::function<void()> settle, void (*say)(const char*));
-    // Before Start: where the game effect texture cache is read from (default SpellSpriteCache(); the preview: a local copy;
+    // Before Start: where the game effect texture cache is read from (default SpellSpriteCache; the preview: a local copy;
     // an empty path: none, level 4).
     void SetFxTexCache(std::filesystem::path file) { fxTexFile = std::move(file); fxTexSet = true; }
+    // Before Start: false = no effects (the ring ships with every effect layer off): the effects pipeline is never compiled and the game effect
+    // texture cache (up to 32 MB) is never read, so the On edge costs neither. The preview and the tests keep the default (true).
+    void SetEffects(bool on) { effects = on; }
     // Frame thread, on a change only (class, seats, render scale): a lock and a notify.
     void Want(const Request& r);
     // The newest finished build whose atlases the frame thread's Pump has flipped in, or null (a lock: call it when a
@@ -81,7 +84,7 @@ public:
     std::shared_ptr<const Built> Current(const Compose& compose);
     unsigned Builds() const { return builds.load(); }   // icon builds finished (staged)
     bool Failed() const { return failed.load(); }
-    // Frame thread, the ring's Off edge (perf R5 must-fix): never waits. The worker leaves its loop (a build in progress
+    // Frame thread, the ring's Off edge: never waits. The worker leaves its loop (a build in progress
     // stops at its next stage), then runs `onExit` on its own thread (the ring frees the compose there, after the GPU).
     void Retire(std::function<void()> onExit);
     bool Exited() const { return exited.load(); }
@@ -108,6 +111,6 @@ private:
     std::shared_ptr<const Built> latest;
     std::atomic<unsigned> builds{0};
     std::atomic<bool> failed{false};
-    std::filesystem::path fxTexFile; bool fxTexSet = false;
+    std::filesystem::path fxTexFile; bool fxTexSet = false, effects = true;
 };
 }  // namespace framevr::ringwheel

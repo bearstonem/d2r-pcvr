@@ -36,9 +36,9 @@ enum Key {
     GrabKeep,      // remember the moved place
     GrabReset,     // a press puts it back (turns itself Off)
     Icon,          // skill circle layers: picture
-    ColorRing,     // ... its color ring
-    ElementFrame,  // ... the element frame
-    FxLayer,       // ... the animation layer
+    ColorRing,     //... its color ring
+    ElementFrame,  //... the element frame
+    FxLayer,       //... the animation layer
     ThirdGrow,     // percent the pointed center third grows
     ThirdDim,      // percent opacity of the other thirds
     MenuEntries,   // the sub-menus on the General shelf
@@ -66,7 +66,7 @@ inline std::array<float, Count>& Values() {
     }();
     return v;
 }
-inline bool Persisted(Key k) { return k == GlyphsButton || k == GesturesButton || k == QuickButton; }
+inline bool Persisted(Key k) { return k == GlyphsButton || k == GesturesButton; }   // Quick cast's button is the radial's own (quick_radial.h), kept by it
 // ring_wheel.cpp installs the writer; null (the tests): nothing is written.
 inline void (*&Persist())(Key, float) { static void (*f)(Key, float) = nullptr; return f; }
 inline float Value(Key k) { return k >= 0 && k < Count ? Values()[size_t(k)] : 0.f; }

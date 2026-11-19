@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (round 2026-11-08 #1, the player's rule for closing): with the ring On the wheel closes only on a deliberate
+// Ring skill menu: with the ring On the wheel closes only on a deliberate
 // action or a named safety reason. A hitch of any length, a lost hand, a lost laser or the headset's tracking never closes it.
 // Upstream closes the wheel on an input gap over 100 ms (hand_controls.h:44) and the engine resets on one over 150 ms
 // (interactions.h:787); the ring shows both a clock that never makes a step that long while the wheel is open. Pure: the ring
@@ -10,7 +10,7 @@
 #include "loot_aim.h"
 
 namespace framevr::ringwheel::closing {
-constexpr double MaxStepS = .09;       // under both gates (.1 HandControls, .15 the engine)
+constexpr double MaxStepS = .09;       // under both gates (.1 HandControls,.15 the engine)
 constexpr double MinStepS = 1e-5;      // strictly increasing, as both gates need
 constexpr double GapLogS = .1;         // a real gap upstream would have closed on: the "kept open" log line
 constexpr double FocusBlipMs = 250;    // the headset unfocused this long closes the wheel (a safety); shorter is a blip
@@ -18,7 +18,7 @@ constexpr double FocusBlipMs = 250;    // the headset unfocused this long closes
 // The wheel's clock: real time minus an offset. While the wheel is open a real step longer than MaxStepS shows as MaxStepS and
 // the excess joins the offset, so the frame after a hitch shows no second jump. Closed, the offset is a constant bias: every
 // step and every real gap is exactly upstream's, and with no hitch yet the clock is real time exactly. It never snaps back at
-// a close (a jump over .15 s would fire the Engine's Reset on the close frame). Only Clear and a new Clock end the bias.
+// a close (a jump over.15 s would fire the Engine's Reset on the close frame). Only Clear and a new Clock end the bias.
 class Clock {
     double real_ = 0, offset_ = 0, step_ = 0;
     bool started_ = false;

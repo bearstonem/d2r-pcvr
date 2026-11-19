@@ -1,4 +1,4 @@
-// Ring skill menu (, build step R2; steamvr/ring_wheel.h): the seats of both Tree layouts against the kit's numbers,
+// Ring skill menu (build step; steamvr/ring_wheel.h): the seats of both Tree layouts against the kit's numbers,
 // the hit test (nearest wins, hysteresis, faded trees take no hits, the center halves, the footer remap onto upstream's
 // cells), the tree dwell and hold, fire on release, the page lockout, and pick / bind / clear.
 #include <algorithm>
@@ -75,10 +75,10 @@ int main() {
         std::printf("seats: min pitch in a tree %.1f (shown) %.1f (orbs), across a gutter %.1f, outermost %.1f / %.1f px\n", minIn[0], minIn[1], minAcross, outer[0], outer[1]);
         Check(minIn[0] >= rw::MinPitch - .5f && minIn[1] >= rw::MinPitch - .5f, "70 px between seats in a tree, both layouts");
         Check(minAcross >= 60, "60 px across a gutter (Trees shown)");
-        // Designer 2026-11-07: Tree orbs fan 110 deg, not 140 (at 140 seats of neighbor trees overlapped: 6.7 px in the kit)
+        // Designer Tree orbs fan 110 deg, not 140 (at 140 seats of neighbor trees overlapped: 6.7 px in the kit)
         std::printf("seats: Tree orbs across trees %.1f px\n", minAcrossOrbs);
         Check(minAcrossOrbs >= rw::MinPitch, "Tree orbs: seats of different trees at least 70 px apart (every class, 1-10 a tree)");
-        // Perf R8 stage 2: the effects under the faces are drawn before every icon; safe only while no rest glow (33 px,
+        // stage 2: the effects under the faces are drawn before every icon; safe only while no rest glow (33 px,
         // 43 px on the 1.3x pointed icon) reaches a neighbor's face (its center minus 22 px).
         const float nearest = std::min({minIn[0], minIn[1], minAcross, minAcrossOrbs}) - rw::IconPx / 2;
         Check(nearest >= 1.3f * rw::RestCapPx, "the rest cap (pointed 1.3x) never reaches a neighbor's face (" + std::to_string(nearest) + " px)");
@@ -112,7 +112,7 @@ int main() {
         Check(rw::SeatsFrom(s, in, n) && n == 6, "six seats");
         Check(in[0].id == 36 && in[0].tree == 0 && in[1].id == 38 && in[1].tree == 1 && in[2].id == 54 && in[2].tree == 1 && in[3].id == 39 && in[3].tree == 2,
               "Sorceress: Fire, then Lightning in id order, then Cold");
-        // review G1: each class's top tree is the kit's (data.order); expected names from the kit's class files
+        // each class's top tree is the kit's (data.order); expected names from the kit's class files
         const char* top[8] = {"Bow & Crossbow", "Fire", "Curses", "Offensive Auras", "Masteries", "Summoning", "Traps", "Demon"};
         const char* lowerRight[8] = {"Javelin & Spear", "Lightning", "Poison & Bone", "Combat", "Combat", "Elemental", "Shadow Disciplines", "Eldritch"};
         bool tops = true;
@@ -279,7 +279,7 @@ int main() {
         o = h.Step(At(ms, a.x, a.y, false), set);
         Check(o.event == rw::Event::None, "a trigger held through a page change: its release is not a click, even after the lockout");
     }
-    // ---- the design notes "Unit-test list, R2-R6", R2 items (numbered as there); the blocks above stay ----
+    // ---- the design notes "Unit-test list, -", items (numbered as there); the blocks above stay ----
     {   // #1 every learned class skill has a seat, all 8 classes, both layouts; count == input; angles inside the sector minus
         // 0.08 rad; radii 184-274 (Trees shown) / 198-286 (Tree orbs)
         const int full[3] = {10, 10, 10};
@@ -328,7 +328,7 @@ int main() {
         Check(maxOff <= 5.0001f && maxOff >= 4, "#3 float reaches near its 5 px cap and never past it");
         Check(maxSpeed / 15 <= .5f, "#3 peak speed at most 0.5 deg/s at 15 px/deg");
         Check(inStep <= 2, "#3 neighbors (ids n and n + 1) never in step");
-        // the Animation row (L4 table, the player 2026-11-07: Off / Floating icons / Effect on hover / All effects, default Effect on hover)
+        // the Animation row
         const auto off = rw::PresetAnim(rw::Preset::Off), flo = rw::PresetAnim(rw::Preset::Floating), hov = rw::PresetAnim(rw::Preset::Hover), all = rw::PresetAnim(rw::Preset::All);
         Check(!off.floats && off.glow == rw::GlowOff && !off.hoverFx && !off.faceFx && !off.burst && off.crawlS == 0 && off.still, "#3 Off: rows 2-7 off, redraw only on a change");
         Check(flo.floats && flo.glow == rw::GlowOff && !flo.hoverFx && !flo.faceFx && flo.burst && flo.crawlS == 0 && !flo.still, "#3 Floating icons: float and burst only");
@@ -395,7 +395,7 @@ int main() {
         o = q.Step(At(ms += 10, a2, b2), quick);
         Check(o.tree == 2, "#5 hold 0: no wait after a switch");
     }
-    {   // #6 (round 2026-11-08, Boss's decision; before: 60% took hits) the row is a look only: at 0, 30, 49, 50, 60 and 100 % the other
+    {   // #6 the row is a look only: at 0, 30, 49, 50, 60 and 100 % the other
         // trees show at the row's level and take no hit; the laser on one of their seats answers as its third, and after the
         // dwell that tree takes over and the seat is hit. The pointed tree stays full.
         const auto l = ClassLayout(3, ten, rw::TreeLayout::Shown);
@@ -415,7 +415,7 @@ int main() {
             for (; ms <= start + 500; ms += 10) o = e.Step(At(ms, sx, sy), s);
             Check(o.tree == 1 && o.under == rw::Target{rw::Kind::Seat, other} && o.alpha[1] == 1, "#6 at " + std::to_string(int(pct)) + "%: after the dwell that tree takes over and the seat is hit");
         }
-        // Review N2: what can be hit fades over the same 160 ms as the look at row 0 and takes the same frames at 100, in both directions:
+        // what can be hit fades over the same 160 ms as the look at row 0 and takes the same frames at 100, in both directions:
         // 11 ms-free steps of 10 ms move the gate 1/16 a frame, and it opens or closes at half.
         for (float pct : {0.f, 100.f}) {
             rw::Settings s = st; s.othersPct = pct;
@@ -474,7 +474,7 @@ int main() {
             Check(o.tree == 0 && o.alpha[0] == 1 && o.alpha[1] == 0 && o.alpha[2] == 0, "#6 Tree orbs: the other orbs stay closed at 100%");
         }
     }
-    {   // Round 2026-11-08 item 4: a layer shot's pixels, from an 8-bit premultiplied target to sRGB straight alpha
+    {   // item 4: a layer shot's pixels, from an 8-bit premultiplied target to sRGB straight alpha
         namespace sh = framevr::ringwheel::shot;
         const uint8_t px[] = {10, 20, 30, 255,   0, 0, 0, 0,   60, 30, 15, 128,   200, 0, 0, 100,   9, 9, 9, 9};   // 5 x 1; pitch 24
         uint8_t rows[24 * 2] = {};
@@ -489,7 +489,7 @@ int main() {
         Check(bgra[0] == 30 && bgra[1] == 20 && bgra[2] == 10 && bgra[3] == 255, "shot: B8G8R8A8 comes out RGBA");
         const auto srgb = sh::ToStraightRgba8(rows, 24, 5, 2, false, true);
         Check(srgb[0] == 10 && srgb[3] == 255 && srgb[7] == 0, "shot sRGB: opaque as it is, clear stays clear");
-        // sRGB byte v of premultiplied linear L x a: decode, divide by a, encode. 60 at a = 128: linear .0452 / .502 = .0900 -> sRGB 84.
+        // sRGB byte v of premultiplied linear L x a: decode, divide by a, encode. 60 at a = 128: linear.0452 /.502 =.0900 -> sRGB 84.
         Check(std::abs(int(srgb[8]) - 84) <= 1 && srgb[11] == 128, "shot sRGB: decoded, divided in linear light, encoded (" + std::to_string(int(srgb[8])) + ")");
     }
     {   // #7 the center: grows after 150 ms inside, never on a 100 ms pass-through; a blurb after 100 ms on a skill, highlight at
@@ -592,7 +592,7 @@ int main() {
         rw::HapticGate g3; int all = 0; for (int k = 0; k < 30; ++k) all += g3.Hover(0, k * 10.0, 0);
         Check(all == 30, "#10 P12 0: no limit");
     }
-    // ---- R3 (the design notes items 11-13): placement ----
+    // ---- (the design notes items 11-13): placement ----
     {   // #11 sizes: 768 px is 48 deg at 0.80 m and 0.90 m; 15 px a degree at the center; an icon 2.9 deg; the quads
         Check(std::fabs(rw::DegOf(768, .8f, .9f) - 48.0f) < .15f, "#11 the 768 px wheel region is 48 deg wide at 0.80 m, 0.90 m away");
         Check(std::fabs(rw::PxPerDeg(.8f, .9f) - 15) <= .5f, "#11 15 +- 0.5 px a degree at the center");
@@ -632,7 +632,7 @@ int main() {
         rw::Placement wider = pl; wider.widthM = .9f;
         placer.Step(1, headAt(40, 0), wider);
         Check(placer.Spawned, "#12 a Placement change respawns it");
-        // review H1: reopen with the same hand and the same Placement as before the close, from another heading, so only the
+        // reopen with the same hand and the same Placement as before the close, from another heading, so only the
         // close can make it respawn
         const ia::Pose beforeClose = placer.Step(1, headAt(40, 0), wider);
         Check(!placer.Spawned, "#12 (H1) the same hand and Placement held open: kept");
@@ -667,7 +667,7 @@ int main() {
         m::PanelHit miss;
         Check(!m::IntersectPanel(hand, {0, 0, 1}, panel.p, panel.q, pl.widthM, pl.widthM, miss), "#13 a ray away from it misses (the beam takes 1.5 m)");
     }
-    {   // R6 (plan E3, E5): the ring's content quad, the laser's hit on it, the open hand's slot press, the bind request
+    {   // the ring's content quad, the laser's hit on it, the open hand's slot press, the bind request
         namespace m = framevr::math;
         auto near = [](float a, float b, float e) { return std::fabs(a - b) <= e; };
         const auto q768 = rw::QuadFor(128, 112, 768, 880, .8f), q864 = rw::QuadFor(80, 112, 864, 880, .8f), q1024 = rw::QuadFor(0, 112, 1024, 880, .8f);
@@ -715,7 +715,7 @@ int main() {
         Check(clear.skill == -1 && clear.skillOwner == -1 && ia::CanBind(s, clear, 1200), "R6: a clear (skill -1) passes CanBind with owner -1");
         Check(rw::BindRequest(s, -1, 47, -1, 7, 77, 1200).action == ia::Action::None && rw::BindRequest(s, framevr::skills::Count, 47, -1, 7, 77, 1200).action == ia::Action::None,
               "R6: a slot out of range sends nothing");
-        {   // the player 2026-11-08 #3: the Draw glyph request is upstream's picker's (skill_categories_test): skill -1, the old skill, CanBind passes
+        {   // the player #3: the Draw glyph request is upstream's picker's (skill_categories_test): skill -1, the old skill, CanBind passes
             const auto d = rw::GlyphDrawRequest(s, index, 8, 77, 1200);
             Check(d.action == ia::Action::BindGlyphDraw && d.index == index && d.skill == -1 && d.skillOwner == -1 && d.bank == s.bindingBank && d.previousSkill == 36 && (d.sequence >> 63) == 1, "#3 Draw glyph: upstream's BindGlyphDraw for this slot, its game skill cleared");
             Check(ia::CanBind(s, d, 1200), "#3 Draw glyph: the clear it asks for passes upstream's CanBind");
@@ -725,7 +725,7 @@ int main() {
             Check(rw::GlyphDrawRequest(s, framevr::skills::Count, 8, 77, 1200).action == ia::Action::None, "#3 a slot out of range: nothing sent");
         }
     }
-    {   // #9 (R6Q, the player's design): quick cast and hold to assign
+    {   // #9: quick cast and hold to assign
         const int per[3] = {10, 10, 10};
         const auto l = ClassLayout(1, per, rw::TreeLayout::Shown);
         const rw::Target seatA{rw::Kind::Seat, 4}, seatB{rw::Kind::Seat, 12}, gap{rw::Kind::Gap}, off{};
@@ -759,7 +759,7 @@ int main() {
         Check(only(run(0, 1, 520, seatA, 500, 400), rw::Quick::NoChange) && only(run(0, 1, -1, seatA, 500, 400, true, 200 + 551), rw::Quick::Assign),
               "#9 the clamp: hold 500 with tap 400 assigns at 550, not 500");
         Check(only(run(0, 1, 2000, seatA, 0), rw::Quick::QuickCast), "#9 Hold to assign Off: every press a QuickCast, however long");
-        {   // the player 2026-11-08 #3: the Glyphs half of the center takes a press like a skill: a tap opens its page, a hold assigns Draw glyph
+        {   // the player #3: the Glyphs half of the center takes a press like a skill: a tap opens its page, a hold assigns Draw glyph
             const rw::Target glyphsHalf{rw::Kind::Glyphs}, gesturesHalf{rw::Kind::Gestures};
             Check(only(run(0, 1, 349, glyphsHalf), rw::Quick::GlyphTap), "#3 a tap on the Glyphs half: GlyphTap (no cast)");
             Check(only(run(0, 1, 351, glyphsHalf), rw::Quick::NoChange), "#3 released between the tap limit and full: no change");
@@ -868,7 +868,7 @@ int main() {
         for (double t = 0; t < 400; t += 10) { rw::StepIn in; in.nowMs = t; in.hit = true; in.x = rw::CanvasCx; in.y = rw::CanvasCy - 40; in.trigger = t >= 200 && t < 300; o2 = e2.Step(in, set); clicked |= o2.event == rw::Event::Upstream && o2.cell == ia::GlyphsCell; }
         Check(clicked, "#9 quick cast on: the trigger on the Glyphs half still clicks upstream on release");
     }
-    {   // #9 (R6Q2): the cast through upstream's glyph press, with a fake glyphcast::Cast; #10 the hold's ticks
+    {   // #9: the cast through upstream's glyph press, with a fake glyphcast::Cast; #10 the hold's ticks
         namespace gc = framevr::glyphcast;
         struct FakeCast { int begins = 0; bool busy = false; gc::Plan plan{}; int skill = -1, owner = -2; bool Busy() const { return busy; }
                           void Begin(const gc::Plan& p, int k, int o, double) { ++begins; plan = p; skill = k; owner = o; } };
@@ -947,7 +947,7 @@ int main() {
         Check(rw::TicksCrossed(.2f, .3f) == 1 && rw::TicksCrossed(.3f, .45f) == 0 && rw::TicksCrossed(.45f, .8f) == 2 && rw::TicksCrossed(0, 1) == 3 && rw::TicksCrossed(.75f, 1) == 0,
               "#10 ticks at 25 / 50 / 75 % of the hold, each once");
     }
-    {   // R7 (eval #7, #18-#20; review R2 G7): the Glyphs and Gestures pages' routing, the grow delay and blurb hold, the glyph list
+    {   // (eval #7, #18-#20): the Glyphs and Gestures pages' routing, the grow delay and blurb hold, the glyph list
         rw::Settings set;
         auto at = [](int i, int n, float r) { float x, y; rw::RingPos(i, n, r, x, y); return std::pair<float, float>{x + rw::CanvasX, y + rw::CanvasY}; };
         auto release = [&](rw::PageEngine& e, rw::RingPage page, int count, float x, float y, double& t) {
@@ -994,7 +994,7 @@ int main() {
             q.nowMs = 100; q.trigger = true; l.Step(q, set); q.nowMs = 120; q.trigger = false;
             Check(l.Step(q, set).event == rw::PageEvent::None, "R7 a press inside the 250 ms lockout fires nothing");
         }
-        {   // 2026-11-16 (the player: "ring menu > quick cast / ring menu > gestures / ring menu > glyph"): Quick cast's page, its 12 places
+        {   // Quick cast's page, its 12 places
             // on r 205 open the chooser for that place, the whole center is Back (the ring's page: no upstream cell), the footer upstream's Spells
             rw::PageEngine e; double t = 0; settle(e, rw::RingPage::Quick, rw::QuickPlaces, t);
             for (int i = 0; i < rw::QuickPlaces; ++i) {
@@ -1002,7 +1002,7 @@ int main() {
                 const auto o = release(e, rw::RingPage::Quick, rw::QuickPlaces, x + 25, y, t);   // 25 px off its center: inside the 34 px hit
                 Check(o.event == rw::PageEvent::ChooseSkill && o.shape == i && o.cell < 0, "Quick cast page: a release on place i opens its chooser (no upstream cell)");
             }
-            // 2026-11-17 (review F8: Move costs no chooser seat): the center's upper half is Back, its lower half Move
+            // the center's upper half is Back, its lower half Move
             {
                 const auto o = release(e, rw::RingPage::Quick, rw::QuickPlaces, rw::CanvasCx, rw::CanvasCy - 40, t);
                 Check(o.event == rw::PageEvent::Back && o.cell < 0, "Quick cast page: the center's upper half is Back, to the ring menu");
@@ -1026,7 +1026,7 @@ int main() {
             rw::PageView none; rw::FillQuick(none, nullptr, 5, [](int) { return std::string(); }, [](int) { return -1; });
             Check(!none.has[0] && none.count == 12, "Quick cast page view: no ids: all empty, never read");
             Check(v.best[1] && !v.best[0] && !v.best[2] && !v.best[3], "Quick cast page view: a kind's place wears Best, a skill's or an exact one's never");
-            {   // the player's headset 2026-11-17: Antidote, Thawing and Stamina have no better version, so no Best pill (only kinds with tiers)
+            {   // the player's headset Antidote, Thawing and Stamina have no better version, so no Best pill (only kinds with tiers)
                 const int fam[6] = {(2 << 28) | 1, (2 << 28) | 2, (2 << 28) | 3, (2 << 28) | 4, (2 << 28) | 5, (2 << 28) | 6};   // Healing, Mana, Rejuvenation, Antidote, Thawing, Stamina
                 rw::PageView fv2; rw::FillQuick(fv2, fam, 6, [](int) { return std::string("x"); }, [](int) { return -1; });
                 Check(fv2.best[0] && fv2.best[1] && fv2.best[2] && !fv2.best[3] && !fv2.best[4] && !fv2.best[5] && rw::BestSeat(fam[2]) && !rw::BestSeat(fam[5]) &&
@@ -1035,13 +1035,13 @@ int main() {
                 rw::PageView kv2; const int one[1] = {fam[3]}; rw::FillQuickKind(kv2, one, 1, 0, "x", [](int) { return std::string("x"); }, [](int) { return -1; });
                 Check(!kv2.best[0] && kv2.line[0] != "The best one you carry, when cast", "Quick cast kind page view: a kind with no tiers has no best line");
             }
-            // reviews S3 / S4: before the character's ring is read the page shows no places as fact; kept for this game, it says so
+            // reviews / before the character's ring is read the page shows no places as fact; kept for this game, it says so
             rw::PageView r = v; rw::MarkQuick(r, rw::QuickRingState::Reading);
             Check(!r.has[0] && !r.has[2] && r.skill[0] == -1 && r.cell[0] == -1 && !r.best[1] && r.below == "Reading its ring" && r.line[0] == "Reading this character's ring" && r.count == 12,
                   "Quick cast page view: Reading: every place empty, the center says so");
             rw::PageView g = v; rw::MarkQuick(g, rw::QuickRingState::ThisGame); Check(g.has[0] && g.below == "This game only", "Quick cast page view: kept for this game: its places, the center says so");
             rw::PageView sv = v; rw::MarkQuick(sv, rw::QuickRingState::Saved); Check(sv == v, "Quick cast page view: saved: as filled");
-            // Quick cast layout Fixed places (2026-11-17): the places named as a clock's hours, gaps kept, an empty place fills exactly there
+            // Quick cast layout Fixed places: the places named as a clock's hours, gaps kept, an empty place fills exactly there
             const int fixedIds[10] = {-1, -1, -1, 54, -1, -1, -1, -1, -1, (2 << 28) | 1};
             rw::PageView fv; rw::FillQuick(fv, fixedIds, 10, [](int id) { return id == 54 ? std::string("Teleport") : std::string("Other"); }, [](int) { return -1; }, true);
             Check(fv.clock && fv.has[3] && fv.has[9] && !fv.has[0] && !fv.has[4] && !fv.has[10] && fv.skill[0] == -1 && fv.skill[3] == 54 && fv.below == "2 of 12 filled" &&
@@ -1062,7 +1062,7 @@ int main() {
             Check(em.bottomHelp == "Fill a place first", "Quick cast page view: an empty ring: nothing to move");
             rw::PageView kd; rw::FillQuickKind(kd, ids, 3, 0, "x", [](int) { return std::string(); }, [](int) { return -1; }); Check(kd.bottom.empty(), "Quick cast kind page: no Move");
         }
-        {   // Review 2026-11-16 (exact items, the player: "if they have normal rejuv and a full rejuv, and they select the normal rejuv, it should
+        {   // Review (exact items, "if they have normal rejuv and a full rejuv, and they select the normal rejuv, it should
             // not drink a full rejuv"): a kind's page: the kind, then each exact one carried, round Quick's ring; the whole center Back
             const int kind = (2 << 28) | 3, rvl = (1 << 28) | 0x6c7672, rvs = (1 << 28) | 0x737672, ids[3] = {kind, rvl, rvs};
             rw::PageEngine e; double t = 0; settle(e, rw::RingPage::QuickKind, 3, t);
@@ -1082,8 +1082,8 @@ int main() {
                   v.line[0] == "The best one you carry, when cast" && v.line[2] == "Exactly this one, never a stronger one", "Quick cast kind page view: the kind first (Best), the exact ones, their words");
             rw::PageView none; rw::FillQuickKind(none, nullptr, 3, 0, "x", [](int) { return std::string(); }, [](int) { return -1; });
             Check(none.count == 0, "Quick cast kind page view: no ids: nothing, never read");
-            {   // Potion choice (2026-11-17): Mana with nothing carried: Best and 5 tiers, all tiers dim but choosable
-                const auto mp = [](char d) { return (1 << 28) | int('m') | int('p') << 8 | int(d) << 16; };   // an exact Mana tier: mp1 .. mp5
+            {   // Potion choice: Mana with nothing carried: Best and 5 tiers, all tiers dim but choosable
+                const auto mp = [](char d) { return (1 << 28) | int('m') | int('p') << 8 | int(d) << 16; };   // an exact Mana tier: mp1.. mp5
                 const int mids[6] = {(2 << 28) | 2, mp('5'), mp('4'), mp('3'), mp('2'), mp('1')};
                 rw::PageView mv; rw::FillQuickKind(mv, mids, 6, 2, "Mana", [](int) { return std::string("x"); }, [](int) { return 5; }, [](int i) { return i > 0; });
                 Check(mv.count == 6 && mv.best[0] && !mv.dim[0] && mv.dim[1] && mv.dim[5] && mv.has[5] && mv.skill[1] == mp('5') && mv.skill[5] == mp('1'),
@@ -1163,7 +1163,7 @@ int main() {
             std::sort(upstream.begin(), upstream.end()); std::sort(ours.begin(), ours.end());
             Check(!upstream.empty() && upstream == ours, ("R7 #20 the glyph list == upstream's picker (Engine::OpenGlyphSkills), class " + std::to_string(cls)).c_str());
         }
-        {   // The Commander orders' row on the glyph chooser (2026-11-14, upstream v0.3.35 #439; the player's picks; the designer's sheet B).
+        {   // The Commander orders' row on the glyph chooser.
             namespace od = rw::orders;
             namespace cp = framevr::companions;
             // A hero: the class's 30 skills (its army summons left out when asked), the shelf's five, a live army or not.
@@ -1185,10 +1185,10 @@ int main() {
             auto mainOf = [&](const ia::Snapshot& h, rw::TreeLayout mode) { std::array<rw::SeatIn, rw::MaxSeats> in{}; int n = 0; rw::SeatsFrom(h, in, n); return rw::Build(in.data(), n, mode); };
             auto ordersIn = [&](const rw::Layout& l) { std::vector<int> ids; for (int i = 0; i < l.count; ++i) if (rw::OrderSeat(l, i)) ids.push_back(l.seats[size_t(i)].id); return ids; };
             const std::vector<int> all7{3901, 3902, 3903, 3904, 3905, 3906, 3907};
-            {   // 2026-11-16: Quick cast's chooser: every tree seat where the main ring has it, the shelf skills Quick cast casts, then its
+            {   // Quick cast's chooser: every tree seat where the main ring has it, the shelf skills Quick cast casts, then its
                 // eight potions and scrolls (ring Quick cast radial's family ids) on the row; the list never a ring entry or an order
                 const std::vector<int> fams{(2 << 28) | 1, (2 << 28) | 2, (2 << 28) | 3, (2 << 28) | 6, (2 << 28) | 4, (2 << 28) | 5, (2 << 28) | 16, (2 << 28) | 17};
-                int ninthCost = 0;   // review F8 (2026-11-17): classes whose chooser would lose a shelf skill to a ninth row seat
+                int ninthCost = 0;   // classes whose chooser would lose a shelf skill to a ninth row seat
                 const auto shelfKept = [](const rw::Layout& l) { int k = 0; for (int i = 0; i < l.count; ++i) k += l.seats[size_t(i)].tree < 0 && !rw::ItemSeat(l.seats[size_t(i)].id) && !rw::OrderSeat(l, i); return k; };
                 for (int cls = 0; cls < 7; ++cls) for (int live = 0; live < 2; ++live) {
                     const auto h = hero(cls, true, live != 0);
@@ -1211,7 +1211,7 @@ int main() {
                     Check(clean && rw::ChoiceOf(list, 220, 1000) != nullptr && rw::ChoiceOf(list, 0, -1) != nullptr, "the list: known skills under 4096 (an item skill, a directed one too), never an order: " + who);
                 }
                 Check(!rw::ItemSeat(54) && !rw::ItemSeat(9003) && !rw::ItemSeat(9101) && rw::ItemSeat((1 << 28) | 0x337068) && rw::ItemSeat((2 << 28) | 1), "an item seat is Quick cast's item id only");
-                // review F8: a ninth seat (Move, first built there) pushes a shelf skill off the chooser for every class here, so Move sits
+                // a ninth seat (Move, first built there) pushes a shelf skill off the chooser for every class here, so Move sits
                 // on the Quick cast page's center instead and the row keeps its eight
                 std::printf("Quick cast chooser: a ninth row seat would drop a shelf skill on %d of 14 class pages\n", ninthCost);
                 Check(ninthCost == 14, "review F8: a ninth row seat costs a shelf skill on every class page (so Move is no seat)");
@@ -1366,7 +1366,7 @@ int main() {
                 for (int a = od::First; a <= od::Last; ++a) for (int b = a + 1; b <= od::Last; ++b) distinct = distinct && std::string(od::Short(a)) != od::Short(b) && *od::Short(a);
                 Check(distinct, "order hold: the 7 short names differ, so the name tells the seven same pictures apart");
             }
-            {   // Designer gate D2: an order's help line is upstream's own line, cut at run time by the designer's rule
+            {   // Designer gate D2: an order's help line is upstream's own line, cut at run time by the design's rule
                 Check(od::HelpCut("Commands your army into a wall ahead. Warriors hold the line, mages fire from behind.") == "Commands your army into a wall ahead.", "orders help: two sentences: up to the first full stop");
                 Check(od::HelpCut("Orders your army to hold position at the targeted location, guarding doorways, choke points, or chests without following you.") == "Orders your army to hold position at the targeted location.",
                       "orders help: one sentence: up to its first comma, closed with a full stop (Hold Ground)");
@@ -1430,7 +1430,7 @@ int main() {
                 const auto overB = tx2::LayBlurb(met, over);
                 Check(!overB.over.empty() && of(overB, tx2::KDesc) == over.desc, "whole blurb: what cannot fit is reported, never shortened");
             }
-            {   // Review M1: the army watch. The answer is asked for on a catalog change or a flip of the live bit only, and
+            {   // the army watch. The answer is asked for on a catalog change or a flip of the live bit only, and
                 // only a change of the answer is reported; the seats' key (the main ring's reset) never sees any of it.
                 {   // a Necromancer with summon skills: the companions copy going stale and coming back changes nothing
                     rw::ArmyWatch w; auto fresh = hero(2, true, true), stale = fresh; stale.companions.relevant = 0;
@@ -1477,7 +1477,7 @@ int main() {
                 for (int id = od::First; id <= od::Last; ++id) each = each && std::count(ids, ids + n, od::IconSkill(id)) == 1;
                 Check(each && rw::AddOrderIcons(ids, n, 40) == n && rw::AddOrderIcons(ids, 3, 5) == 5, "orders header: each order's icon is asked for once, within the request's room");
             }
-            {   // A button on an order (the player's pick B): upstream's real nothing here, the ring's real Engine and QuickCast, 5 ms frames.
+            {   // A button on an order: upstream's real nothing here, the ring's real Engine and QuickCast, 5 ms frames.
                 const auto h = hero(2, true, false);
                 const auto cl = rw::ChooserLayout(mainOf(h, rw::TreeLayout::Shown), rw::GlyphChoices(h));
                 int order = -1, skill = -1;
@@ -1557,7 +1557,7 @@ int main() {
             s.open = false; Check(rw::BuildPage(s, g, list) == 0, "R7 closed: nothing");
         }
     }
-    {   // Round 2026-11-08 item 6: the Gestures page's cards all have an icon, learned or not, every class; every family member too
+    {   // item 6: the Gestures page's cards all have an icon, learned or not, every class; every family member too
         for (int cls = 0; cls < 8; ++cls) {
             const auto page = framevr::spellmotion::PageOf(cls);
             std::array<int, rw::MaxSeats + rw::ExtraIcons> ids{}; std::array<int16_t, rw::MaxSeats + rw::ExtraIcons> cells{};
@@ -1599,7 +1599,7 @@ int main() {
         Check(none > 0 && list[none].param < 0 && std::fabs(list[none].a - .45f) < 1e-4f && !pillAt(1) && list[none - 1].recipe == rw::RecipeDisc && list[none - 1].r == 0 && list[none - 1].a == 1, "item 6 no points: gray at 45% over a black disc, no Off pill");
         Check(off >= 0 && list[off].param < 0 && list[off].a == .5f && pillAt(2) && offNone >= 0 && list[offNone].param < 0 && list[offNone].a == .5f && pillAt(3), "item 6 turned Off keeps its look: gray at 50% with the pill, learned or not");
     }
-    {   // R8 (eval #3, L4 table): each preset's per-icon weights, at rest and pointed (a lightning icon)
+    {   // (eval #3, L4 table): each preset's per-icon weights, at rest and pointed (a lightning icon)
         struct W { bool floats, glow, hover, face; float crawl; };
         auto w = [](rw::Preset p, bool pointed) { const auto l = rw::LayersFor(rw::PresetAnim(p), pointed, 0, 1, 50); return W{l.floats, l.glowMoves, l.hoverFx, l.faceFx, l.crawl}; };
         auto same = [](W a, W b) { return a.floats == b.floats && a.glow == b.glow && a.hover == b.hover && a.face == b.face && std::fabs(a.crawl - b.crawl) < .01f; };
@@ -1634,7 +1634,7 @@ int main() {
         float peak = 0; for (double t = 0; t < 400; t += 2) peak = std::max(peak, rw::BurstAt(t, 0, true));
         Check(rw::BurstAt(0, 0, true) < .01f && peak > 1.02f && std::fabs(rw::BurstAt(340, 0, true) - 1) < .01f && rw::BurstAt(28 * 3, 3, true) < .01f, "R8 burst: overshoot, 28 ms stagger");
         Check(rw::BurstAt(80, 0, false) == .5f && rw::BurstAt(160, 0, false) == 1, "R8 burst Off: a plain 160 ms ease");
-        // R8 match stage 2 (spec 4a): the pointed effect's lifecycle.
+        // match stage 2 (spec 4a): the pointed effect's lifecycle.
         rw::PointedFx p;
         const bool early = p.Step(0, 3).seat < 0 && p.Step(99, 3).seat < 0;
         const auto s0 = p.Step(100, 3), s1 = p.Step(150, 3), s2 = p.Step(200, 3);
@@ -1675,7 +1675,7 @@ int main() {
         Check(floorA >= .2f && rw::FaceElementOf(glowOf(rw::RestKind::Phys, rw::RestKind::Fire)) == rw::Element::Phys &&
               rw::FaceElementOf(glowOf(rw::RestKind::Fire, rw::RestKind::Phys)) == rw::Element::Count, "stage 2: the face default keys on the first entry; shadow's art never under 20%");
     }
-    {   // R8 fight safety (L2 Hit; critique-vr-ux S7): 40% over 150 ms, held 1.5 s after the last hit, back over 300 ms
+    {   // fight safety: 40% over 150 ms, held 1.5 s after the last hit, back over 300 ms
         rw::FightFade f;
         auto at = [&](double t, float hp, bool fresh = true, uint64_t session = 7) { return f.Step(t, true, hp, fresh, session); };
         at(0, 100); at(990, 100);
@@ -1708,7 +1708,7 @@ int main() {
         }
         Check(assignAt == 1200, "R8 hold to assign waits until 300 ms after a hit (full at 1200 ms: " + std::to_string(assignAt) + ")");
     }
-    {   // R8 draw: a glow behind each icon (frozen when Off), the hover effect and crawl on the pointed lightning icon; redraws
+    {   // draw: a glow behind each icon (frozen when Off), the hover effect and crawl on the pointed lightning icon; redraws
         const int per[3] = {10, 10, 10};
         const auto l = ClassLayout(1, per, rw::TreeLayout::Shown);
         std::vector<uint8_t> el(size_t(l.count)); std::vector<int8_t> ci(size_t(l.count), -1); int nc = 0;
@@ -1721,7 +1721,7 @@ int main() {
         s.anim = rw::PresetAnim(rw::Preset::Hover);
         float t = 0;
         Check(count(rw::RecipeFx, &t, 0) == l.count && count(rw::RecipeFx, nullptr, 1) == 1 && count(rw::RecipeCrawl) == 1, "R8 Effect on hover: a glow per icon, a hover effect and a crawl on the pointed lightning icon");
-        {   // designer S3a FIX: the pointed default again over its own face: one face-sized quad, after every icon (the over pass)
+        {   // design S3a FIX: the pointed default again over its own face: one face-sized quad, after every icon (the over pass)
             const int n = rw::Build(s, list);
             int face = -1, faces = 0, lastIcon = -1;
             for (int i = 0; i < n; ++i) {
@@ -1730,7 +1730,7 @@ int main() {
             }
             Check(faces == 1 && face > lastIcon && list[face].w <= rw::IconPx * 1.3f + 2.01f, "S3a: the pointed default over its own face: one face-sized quad after every icon");
         }
-        {   // review N5: the stage the log names is the stage Build draws (the game textures only when they are in)
+        {   // the stage the log names is the stage Build draws (the game textures only when they are in)
             Check(rw::FxStageOf(rw::RestKind::Fire, true) == 3 && rw::FxStageOf(rw::RestKind::Fire, false) == 4 && rw::FxStageOf(rw::RestKind::Light, true) == 3 &&
                   rw::FxStageOf(rw::RestKind::Cold, true) == 4 && rw::FxStageOf(rw::RestKind::None, true) == 0, "N5: FxStageOf follows the game textures (3 with them, 4 without)");
             int fire = -1; for (int i = 0; i < l.count; ++i) if (el[size_t(i)] == uint8_t(rw::Element::Fire)) { fire = i; break; }
@@ -1740,7 +1740,7 @@ int main() {
             std::vector<uint8_t> pe = el; pe[size_t(fire)] = uint8_t(rw::Element::Poison); f.elements = pe.data();
             Check(game(true) == 2, "S3a recheck: a pointed poison skill's cloud also over its face (every element, as the kit)");
         }
-        {   // review N6: Build never passes MaxInstances shapes, whatever the caller allows (the effect buffers hold that many)
+        {   // Build never passes MaxInstances shapes, whatever the caller allows (the effect buffers hold that many)
             rw::Layout big; big.count = rw::MaxSeats;
             for (int i = 0; i < big.count; ++i) { auto& b = big.seats[size_t(i)]; b.id = 200 + i; b.tree = i % rw::Trees; b.x = 60.f + 50.f * float(i % 8); b.y = 60.f + 50.f * float(i / 8); }
             std::vector<rw::RestGlow> two(size_t(big.count));
@@ -1752,7 +1752,7 @@ int main() {
         s.anim = rw::PresetAnim(rw::Preset::Off); t = 0;
         Check(count(rw::RecipeFx, &t, 0) == l.count && t == 0 && count(rw::RecipeFx, nullptr, 1) == 0 && count(rw::RecipeCrawl) == 0, "R8 Off: the glows frozen (a steady rim), no effects");
         Check(rw::Build(s, list) <= rw::MaxDraw, "R8 within the instance budget");
-        {   // perf R8 stage 2 check: the effects in two passes, so a compose is at most 4 draws (3; +1 for badges)
+        {   // stage 2 check: the effects in two passes, so a compose is at most 4 draws (3; +1 for badges)
             s.anim = rw::PresetAnim(rw::Preset::All);
             const int n = rw::Build(s, list), runs = rw::DrawRuns(list, n);
             int fx = 0; for (int i = 0; i < n; ++i) fx += list[i].recipe == rw::RecipeFx;
@@ -1763,7 +1763,7 @@ int main() {
             const int n2 = rw::Build(t2, list);
             int lastFx = -1, firstText = n2, texts = 0;
             for (int i = 0; i < n2; ++i) { if (list[i].recipe == rw::RecipeFx) lastFx = i; if (list[i].recipe == rw::RecipeGlyph) { ++texts; if (firstText == n2) firstText = i; } }
-            rw::Instance runs5[5]{};   // review N3: base, fx, fx, base, fx = 4 runs; one = 1; none = 0
+            rw::Instance runs5[5]{};   // base, fx, fx, base, fx = 4 runs; one = 1; none = 0
             for (int i : {1, 2, 4}) runs5[i].recipe = rw::RecipeFx;
             Check(rw::DrawRuns(runs5, 5) == 4 && rw::DrawRuns(runs5, 1) == 1 && rw::DrawRuns(runs5 + 1, 2) == 1 && rw::DrawRuns(runs5, 0) == 0, "perf: DrawRuns counts shader changes");
             Check(texts > 0 && lastFx >= 0 && lastFx < firstText && rw::DrawRuns(list, n2) <= 4, "perf look check: the text (letters, names, badges) comes after every effect");
@@ -1829,7 +1829,7 @@ int main() {
             std::fabs(list[i].cx - (hot.x0 + hot.x1) / 2) < .01f && std::fabs(list[i].w - (hot.x1 - hot.x0)) < .01f && std::fabs(list[i].h - (hot.y1 - hot.y0)) < .01f) ++found; }
         Check(found == 1, "item 4: the gold rim is exactly the hit box");
         s.footer.on = false; Check(rims(104 / 255.f) == 0, "item 4: footer off, none drawn");
-        // One size per row (designer, after f1-footer) with a 5 px margin inside each side (review-r8 I4-2): fake fonts, every
+        // One size per row with a 5 px margin inside each side: fake fonts, every
         // capital 0.7 em wide. EQUIPMENT (9) fits the 174 px tabs (4 tabs, 768 px) at 22 px, the five tabs (developer mode) up to 19;
         // VR SETTINGS wraps at the five tabs' size; full width takes 22. At 0.8 em the five tabs shrink to 16.
         static rw::text::Metrics fake;
@@ -1851,7 +1851,7 @@ int main() {
             for (int i = 0; i < 6; ++i) for (const char* c = rw::FooterLabel(i, page, dev, hw); *c; ++c) caps = caps && *c >= ' ' && *c <= 'Z';
         Check(caps, "item 4: every footer label is in the footer sizes' glyphs (space to Z)");
     }
-    {   // R7c (feedback 1 item 7): the tree marks' glyphs and the center's rune band
+    {   // R7c: the tree marks' glyphs and the center's rune band
         using E = rw::Element;
         using G = rw::MarkGlyph;
         // ElementOf / TreeGlyphOf take the wheel position (Seat::tree) and read the class's skillcategories page through TreeOrder
@@ -1868,8 +1868,8 @@ int main() {
         Check(rw::TreeGlyphOf(2, rw::PositionOf(2, 1)) == G::Bone && rw::TreeGlyphOf(7, rw::PositionOf(7, 1)) == G::Arcane,
               "R7c TS3: Necromancer Poison and Bone = bone, Warlock Eldritch = shield (arcane)");
         Check(int(G::Phys) == int(E::Phys) && int(G::Fire) == int(E::Fire) && int(G::Shadow) == int(E::Shadow), "R7c: the mark glyphs share the elements' shader kinds");
-        {   // Designer (R7c, after 610ee30e): every mark's name, glyph and accent come from the same kit tree entry (skills.js /
-            // skills-more.js trees[page], with the class pages' final values folded in, 2026-11-07); this table is the kit's data,
+        {   // Designer: every mark's name, glyph and accent come from the same kit tree entry (skills.js /
+            // skills-more.js trees[page], with the class pages' final values folded in); this table is the kit's data,
             // copied by hand (name: a word of the game's tree name; rim 0: none, gold rims).
             struct KitTree { const char* word; uint32_t accent, rim; G glyph; };
             const KitTree kit[8][3] = {
@@ -1964,7 +1964,7 @@ int main() {
         s.layout = &o; s.skillClass = 3; s.grow = -1; s.step.under = {}; of(rw::RecipeTreeGlyph, g);
         Check(g.size() == 3 && std::fabs(g[0].u0 - .8f * 34) < .01f, "R7c: Tree orbs, the glyph inside each orb (0.8 of r 34)");
     }
-    {   // Round 2026-11-08 #1, the player's rule for closing (ring_wheel_close.h). Upstream's real HandControls and interaction::Engine,
+    {   // the player's rule for closing (ring_wheel_close.h). Upstream's real HandControls and interaction::Engine,
         // fed as transport feeds them (handInput.active, interactionInput.tracked, the close at transport:4760), through closing::Hold.
         namespace sk = framevr::skills;
         namespace cl = rw::closing;
@@ -2078,7 +2078,7 @@ int main() {
             {   Frame f; f.Click(1); f.Step(60); const double before = f.real; f.Step(30); (void)before;
                 Check(f.hold.Offset() == 0 && f.shownHand == f.real, "#1 no hitch, wheel open: exactly real time, no drift"); }
         }
-        for (const double gap : {500.0, 1200.0, 5000.0}) for (int letGo = 0; letGo < 2; ++letGo) {   // review M1: a hitch is not a long hold (the real QuickCast)
+        for (const double gap : {500.0, 1200.0, 5000.0}) for (int letGo = 0; letGo < 2; ++letGo) {   // a hitch is not a long hold (the real QuickCast)
             const std::string g = std::to_string(int(gap)) + " ms" + (letGo ? ", let go in the hitch" : ", held through");
             const int per[3] = {4, 4, 4};
             const auto l = ClassLayout(1, per, rw::TreeLayout::Shown);
@@ -2210,7 +2210,7 @@ int main() {
             Check(frame(6020, false) == rw::Quick::None, "#1 B released: no close");
             Check(frame(9000, true) == rw::Quick::Close, "#1 a real press after a 3 s gap closes");
         }
-        {   // Audit 2026-11-10 bug 3: a footer tab clicked on upstream's own page names the close. Upstream's real engine reads the
+        {   // a footer tab clicked on upstream's own page names the close. Upstream's real engine reads the
             // hover and trigger; rw::FooterClick reads the same two after it (the Request seam). The name must come on exactly
             // the frames that engine closes the wheel for Inventory, VR Settings or the DEV window, and on no other close.
             struct Run {
@@ -2256,7 +2256,7 @@ int main() {
             {   // a trigger held from before the ray reached the tab is no click, for upstream and for the name
                 Run r(false); r.Click(12); r.One(12, 1); r.One(11, 1); r.One(11, 1);
                 Check(r.f.Open(1) && r.named.empty(), "bug 3: a held trigger moved onto Inventory: no click, no name");
-                r.One(11, .3f); r.One(11, .6f); r.One(11, .3f); r.One(11, 1);   // still held by upstream's own rule (let go under .2)
+                r.One(11, .3f); r.One(11, .6f); r.One(11, .3f); r.One(11, 1);   // still held by upstream's own rule (let go under.2)
                 Check(r.f.Open(1) && r.named.empty() && !r.ignored, "bug 3: a trigger eased to 30% and pulled again is one hold (upstream's .2), no second press");
                 r.One(11, 0); r.One(11, 1);
                 Check(r.After() == "footer-inventory", "bug 3: let go and pressed again: the click");
@@ -2336,7 +2336,7 @@ int main() {
         e.Off();
         Check(!e.Open() && e.Frame(-1, none, nullptr, 10).kind == rw::WheelEdges::None, "M1: after the ring's Off edge no second close is logged");
     }
-    {   // Audit 2026-11-10 bug 2: the input cleared outside a focused frame closes the wheel there, and its line is written there.
+    {   // the input cleared outside a focused frame closes the wheel there, and its line is written there.
         const bool none[2]{}, left[2]{false, true};
         auto opened = [&] { rw::WheelEdges e; e.Frame(1, none, nullptr, 10); return e; };
         for (const char* why : {"headset-focus", "session-end", "xr-sync-failed", "copy-failed"}) {
@@ -2352,7 +2352,7 @@ int main() {
         { auto e = opened(); e.Wrote("quick-cast"); Check(e.Cleared("headset-focus", true).reason == "quick-cast", "bug 2: the ring's own close one frame before the clear keeps its name"); }
         { auto e = opened(); Check(e.Cleared("headset-focus", true).reason == "upstream", "bug 2: upstream closed the wheel one frame before the clear: not the clear's name"); }
         { auto e = opened(); e.Wrote("center"); e.Frame(1, none, nullptr, 10); Check(e.Cleared("session-end", false).reason == "session-end", "bug 2: a stale write is not the reason"); }
-        // Review N1: no Frame runs during a focus blip, so a write upstream ignored on the last focused frame is still there at the
+        // no Frame runs during a focus blip, so a write upstream ignored on the last focused frame is still there at the
         // clear. The wheel was still open at the Blip (shutBefore false), so the write closed nothing and must not name the clear.
         for (const char* ignored : {"footer-inventory", "center", "quick-cast"}) {
             auto e = opened(); e.Wrote(ignored);
@@ -2381,7 +2381,7 @@ int main() {
                     }
                     blip.Focused();
                     say(e.Frame(wheel, none, nullptr, 10), t);
-                    if (ignoredWrite && t < offAt && t + 11 >= offAt) e.Wrote(ignoredWrite);   // N1: the last focused frame's write, which upstream ignored (the wheel stays open)
+                    if (ignoredWrite && t < offAt && t + 11 >= offAt) e.Wrote(ignoredWrite);   // the last focused frame's write, which upstream ignored (the wheel stays open)
                 }
             };
             std::vector<std::string> back, never, stops, blipOnly, wrote;
@@ -2395,7 +2395,7 @@ int main() {
             Check(blipOnly.empty(), "bug 2: a 100 ms blip writes no close (the wheel stays open)");
         }
     }
-    {   // The trace for audit 2026-11-10 bug 6: the switch line carries the stick-click edges and the times
+    {   // The trace for the switch line carries the stick-click edges and the times
         const bool none[2]{}, left[2]{false, true}, right[2]{true, false}, both[2]{true, true};
         const std::string a = rw::SwitchedLine(1, left, 52.4, -1), b = rw::SwitchedLine(0, right, 300, 61.2);
         Check(a == "Frame ring wheel: switched to the left hand's wheel (stick clicks this frame: left; 52 ms after the open; the first switch of this open)", "bug 6 trace: the first switch: " + a);
@@ -2403,7 +2403,7 @@ int main() {
         Check(rw::SwitchedLine(1, both, 1, 1).find("this frame: both;") != std::string::npos && rw::SwitchedLine(1, none, 1, 1).find("this frame: none;") != std::string::npos, "bug 6 trace: both clicks, or none seen");
         Check(a.rfind("Frame ring wheel: switched to the left hand's wheel", 0) == 0 && rw::SwitchedLine(1, both, 3600000, 3600000).size() < 219, "bug 6 trace: the old words lead the line, and it fits its buffer");
     }
-    {   // Audit 2026-11-10 bug 1: a skill put on a Draw glyph button says what the button loses
+    {   // a skill put on a Draw glyph button says what the button loses
         namespace gc = framevr::glyphcast;
         const int x = rw::SlotOf(1, 1), b = rw::SlotOf(0, 2);   // left X (primary), right B (secondary)
         const std::array<int, 2> draws = gc::DrawSlots(float(x), -1);
@@ -2464,7 +2464,32 @@ int main() {
             Check(assign(-1, -1, draws) == "Draw glyph" && assign(-1, -1, {-1, -1}) == "none", "bug 1: Draw glyph assigned to the button that already draws says so too");
         }
     }
-    {   // Audit 2026-11-10 bug 8: every release of a ring swapchain is said once, the session's end too (it said nothing)
+    {   // B1: the swapchain is made on the first open, not the On edge; given back after a shut wheel's linger; given up at once when the runtime is short
+        using Act = rw::ChainLife::Act;
+        rw::ChainLife life;
+        Check(life.Step(false, false, 0) == Act::None && !life.Have() && life.Usable(false), "chain life: On with the wheel never opened makes nothing");
+        Check(life.Step(true, false, 100) == Act::Create, "chain life: the first open makes it");
+        life.Created();
+        Check(life.Step(true, false, 116) == Act::None && life.Have(), "chain life: an open wheel keeps it");
+        Check(life.Step(false, false, 200) == Act::None && life.Step(false, false, 116 + rw::ChainLife::LingerMs - 1) == Act::None, "chain life: a shut wheel keeps it for the linger (a quick shut and reopen costs nothing)");
+        Check(life.Step(true, false, 4000) == Act::None, "chain life: a reopen inside the linger reuses it");
+        Check(life.Step(false, false, 4000 + rw::ChainLife::LingerMs) == Act::Release, "chain life: shut for the whole linger, it is given back");
+        Check(life.Step(false, false, 9100) == Act::Release, "chain life: asked again until the GPU is done and the caller says Released");
+        life.Released();
+        Check(!life.Have() && life.Step(false, false, 20000) == Act::None && life.Step(true, false, 20100) == Act::Create, "chain life: given back, then made again at the next open");
+        life.Created();
+        Check(life.Step(true, true, 20200) == Act::Release, "chain life: the runtime short of swapchains: given up at once, even with the wheel open");
+        life.Released();
+        Check(life.Step(true, true, 20300) == Act::None && !life.Usable(true), "chain life: stays away while the runtime is short");
+        Check(life.Step(true, true, 20400) == Act::None && life.Step(false, true, 20500) == Act::None && life.Step(true, true, 20600) == Act::None, "chain life: short all session: never made again");
+        rw::ChainLife refused;
+        Check(refused.Step(true, false, 0) == Act::Create, "chain life: refused: asked once");
+        refused.Refused();
+        Check(refused.Step(true, false, 16) == Act::None && !refused.Usable(false), "chain life: refused: no second try while the wheel stays open, upstream's wheel meanwhile");
+        Check(refused.Step(false, false, 100) == Act::None && refused.Usable(false) && refused.Step(true, false, 200) == Act::Create, "chain life: refused: tried again at the next open");
+        Check(rw::KeepQuietLine("Frame ring wheel: swapchain given up for upstream's panels (the runtime's limit); upstream's wheel until it is free"), "chain life: the give-up is said");
+    }
+    {   // every release of a ring swapchain is said once, the session's end too (it said nothing)
         struct Gpu { bool chain = true; bool gpuDone = true; bool exited = false; };
         std::vector<std::string> lines;
         auto destroy = [&](Gpu* g, const char* where, double ms) {
@@ -2479,7 +2504,7 @@ int main() {
             list.DestroyDone([](Gpu* g) { return g->chain; }, [](Gpu* g) { return g->gpuDone; }, [&](Gpu* g) { destroy(g, rw::ReapWhere(wait, rw::ReapStep::GpuDone), -1); });
             list.Reap(wait, [](Gpu* g) { return g->exited; }, [](Gpu*) {}, [&](Gpu* g) { destroy(g, rw::ReapWhere(wait, rw::ReapStep::WorkerGone), -1); }, [](Gpu*) {});
         };
-        {   // Review N3: the GPU busy at the session's Retire and done by its Reap; and one kept at an Off edge, freed at the
+        {   // the GPU busy at the session's Retire and done by its Reap; and one kept at an Off edge, freed at the
             // session's end. Both are the session's end, never "kept at its Off edge".
             for (const char* retiredAt : {"session end", "Off edge"}) {
                 rw::Retired<Gpu> list; Gpu g; g.gpuDone = false; lines.clear();
@@ -2522,7 +2547,7 @@ int main() {
             Check(rw::SayReleased(true, line, [&](const char* text) { said += std::string(text) == "x"; }) && built == 1 && said == 1, "perf nit: a swapchain released: the text built once and said");
         }
     }
-    {   // Audit 2026-11-10, the ring's wiring (read from the sources: the ring file needs the game to run). Each line here was
+    {   // the ring's wiring (read from the sources: the ring file needs the game to run). Each line here was
         // missing or different before its fix, and a merge that drops one fails here.
         auto read = [](const char* file) {
             std::string here = __FILE__; here = here.substr(0, here.find_last_of("/\\") + 1);
@@ -2534,7 +2559,11 @@ int main() {
         auto has = [](const std::string& text, const char* what) { return text.find(what) != std::string::npos; };
         const std::string lab = read("../vr/ring_wheel.cpp"), table = read("ring_wheel_host.h"), tr = read("transport.cpp");
         Check(!lab.empty() && !table.empty() && !tr.empty(), "wiring: the three sources are read");
-        // bug 2: the close line at the clear, through upstream's own OnClearInput hook; one line a close
+        Check(has(lab, "chainLife.Step(f.open&&placed&&f.palette&&ringActive,runtimeShort,double(f.nowMs))") && has(lab, "caserw::ChainLife::Act::Create:MakeChain(f);break;") &&
+              has(lab, "caserw::ChainLife::Act::Release:ReleaseChain(f,runtimeShort);break;") && has(lab, "chainLife.Usable(runtimeShort)") && !has(lab, "create(session,&ci,&g->chain)"),
+              "chain life: the ring makes its swapchain only in MakeChain, from the Layer step, and Ready follows it (wiring)");
+        Check(has(tr, "XrSwapchain(chain),true);},swapchainsShort});"), "chain life: transport hands the ring swapchainsShort (wiring)");
+        // the close line at the clear, through upstream's own OnClearInput hook; one line a close
         Check(has(table, "voidCleared();"), "wiring bug 2: the ring wheel's Cleared door");
         Check(has(lab, "voidCleared(){") && has(lab, "edges.Cleared(why,shut)") && has(lab, "sayKept(rw::ClosedLine("), "wiring bug 2: Cleared writes the close line there");
         Check(has(lab, "edges.Frame(f.wheelHand,click,hold.Safety(),session)"), "wiring bug 2: the focused frame no longer names a cleared input's close (never two lines)");
@@ -2550,23 +2579,23 @@ int main() {
             }
             Check(seams == 3 && cleared == 3, "wiring bug 2: each of the 3 Blip seams runs into ClearInput (" + std::to_string(cleared) + " of " + std::to_string(seams) + ")");
         }
-        // bug 3: upstream's own footer click, read after its engine stepped
+        // upstream's own footer click, read after its engine stepped
         Check(has(lab, "footerClick.Step(EnabledNow()&&in.wheelHand>=0&&!ringActive,pageWas,in.hover,in.trigger,in.snapshot.developer))edges.Wrote(tab);"),
               "wiring bug 3: the Request seam names a footer click on upstream's page");
-        // bug 1: the hold's words and both assign lines ask what the button held
+        // the hold's words and both assign lines ask what the button held
         Check(has(lab, "rw::HoldWordsFor(rw::HeldBy(was,glyphDrawNow,e.hand,e.slot)") && has(lab, "rw::WasText(rw::HeldBy(o.replaced,glyphDrawNow,o.hand,o.slot)"), "wiring bug 1: the center's words and the log's (was ...) ask HeldBy");
         Check(has(lab, "assign%s->%s(was%s)held=%.0fms\",name(e.seat).c_str(),slotName(e.hand,e.slot).c_str(),wasText(e).c_str()") &&
               has(lab, "assignDrawglyph->%s(was%s)held=%.0fms\",slotName(e.hand,e.slot).c_str(),wasText(e).c_str()"), "wiring bug 1: both assign lines");
         Check(has(lab, "glyphDrawNow=o.glyphDraw;"), "wiring bug 1: the draw slots are upstream's own (its Output)");
-        // bug 8: the session's end says its release
+        // the session's end says its release
         Check(has(lab, "Retire(sayKept,\"sessionend\");") && has(lab, "Reap(true,sayKept);") && !has(lab, "Retire(nullptr)"), "wiring bug 8: the session's end says its swapchain's release");
         Check(has(lab, "Retire(f.say,\"Offedge\");") && has(lab, "rw::SayReleased(DestroyChain(g)"), "wiring bug 8: the Off edge keeps its line; a kept one says its later release");
         Check(has(lab, "rw::SayReleased(DestroyChain(g)&&say,[where]{returnrw::ReleasedLine(where,-1);},"), "wiring perf nit: Reap builds a release line only for a swapchain that was there, with a log to take it");
         Check(has(lab, "gone(g,rw::ReapWhere(wait,rw::ReapStep::GpuDone));") && has(lab, "gone(g,rw::ReapWhere(wait,rw::ReapStep::WorkerGone));") && !has(lab, "gone(g,\""),
               "wiring N3: both of Reap's steps take their words from ReapWhere (the session's end when it waits)");
-        // the trace for bug 6
+        // the trace for
         Check(has(lab, "f.say(rw::SwitchedLine(f.wheelHand,click,t-openedMs,switchedMs<0?-1:t-switchedMs).c_str());"), "wiring bug 6 trace: the switch line carries the click edges and times");
-        // The Commander orders' row (2026-11-14): the chooser draws from the ring's one glyph list, the main ring never does
+        // The Commander orders' row: the chooser draws from the ring's one glyph list, the main ring never does
         Check(has(lab, "chooseList=rw::GlyphChoices(s);") && has(lab, "chooseLayout=rw::ChooserLayout(layout,chooseList);"), "wiring orders: the chooser's seats come from rw::GlyphChoices, the list R7 #20 holds equal to upstream's picker");
         Check(has(lab, "if(rw::ChoiceOf(chooseList,seat.id,seat.owner)||(forQuick&&rw::ItemSeat(seat.id)))chooseDim[i]=0;") && !has(lab, "k&&rw::GlyphPickable(*k))chooseDim"),
               "wiring orders: a chooser seat is lit by that list alone (Quick cast's chooser: its potions and scrolls too)");
@@ -2589,7 +2618,7 @@ int main() {
             Check(has(hdr, "returnIs(id)?HelpCut(skillusage::Line(id,0)):std::string();") && !has(hdr, "Commandsyourarmy") && !has(hdr, "Recallsyour") && !has(hdr, "holdposition") && !has(hdr, "Dismissestactical"),
                   "wiring D2: the orders header cuts upstream's line and keeps no copy of it");
         }
-        {   // Review M1: the seats' key mixes no army or roster value; the watch sits beside it
+        {   // the seats' key mixes no army or roster value; the watch sits beside it
             const size_t a = lab.find("uint64_th=1469598103934665603ull;"), b = a == std::string::npos ? a : lab.find("seatsKey=h;", a);
             const std::string key = b == std::string::npos ? std::string() : lab.substr(a, b - a);
             Check(!key.empty() && !has(key, "companions") && !has(key, "ArmyKey") && !has(key, "HasSummonArmy") && !has(key, "mix(army") && !has(key, "mix(rw::Army"),
@@ -2599,31 +2628,31 @@ int main() {
                   has(lab, "if(rp==rw::RingPage::QuickChoose&&(chooseKey!=seatsKey||chooseStale||!chooseQuick)){BuildChooser(s,true);engineOpen=false;}"),
                   "wiring M1: a rebuilt request keeps the orders' icons; a stale chooser (or the other chooser's seats) is rebuilt before it is used");
         }
-        // Review 2026-11-16 (exact items): a kind with tiers on Quick cast's chooser opens its page (2026-11-17: carried or not); its page lives
+        // Review (exact items): a kind with tiers on Quick cast's chooser opens its page; its page lives
         // over its place's chooser; a kind's cell is its picture's
         Check(has(lab, "elseif(quickPageOn)rp=quickChoose>=0?(quickKind?rw::RingPage::QuickKind:rw::RingPage::QuickChoose):rw::RingPage::Quick;\nif(quickChoose<0)quickKind=0;") &&
               has(lab, "elseif(intcarried=0;qr::IsFamilyId(seat.id)&&(carried=KindPage(s,seat.id&0xffff))>0){") && has(lab, "constintid=quickKindIds[size_t(pageOut.shape)];") &&
               has(lab, "for(constuint32_tcode:qr::ExactCodes){") && has(lab, "request.n,qr::PictureId(id)):-1;"),
               "wiring: Quick cast's kind page (routing, the chooser's kind, its pick) and the exact items' pictures");
-        // Potion choice (2026-11-17, review N1): KindPage opens only for a kind with tiers and never returns early for "none carried"
+        // Potion choice: KindPage opens only for a kind with tiers and never returns early for "none carried"
         // (that was the bug: Mana went straight in as "(best)" with no mana potions); the dim tiers and their pick log; the kind's plain name
         Check(has(lab, "if(!qr::HasTiers(family))return0;") && !has(lab, "if(carried<=0)return0;") && has(lab, "quickKindN=1+tiers;") &&
               has(lab, "quickKindDim[size_t(k)+1]=!carries;") && has(lab, "(exactly;nonecarriednow)") && has(lab, "stringQuickKindName(intfamily){returnqr::HasTiers(family)?std::string(qr::FamilyName(family)):qr::FamilyEntryName(family,true);}") &&
               !has(lab, "qr::FamilyEntryName(seat.id&0xffff,true)"),
               "wiring: Quick cast's kind page always opens for a kind with tiers (carried or not), dim tiers say none carried, the chooser names the plain kind");
-        // Reviews S3 / S4 / N1 (2026-11-16): the page shows and edits the radial's ring only when it is this character's and read
+        // Reviews / / the page shows and edits the radial's ring only when it is this character's and read
         Check(has(lab, "if(!qv.ready||qv.session!=s.session||qv.cls!=s.skillClass||qv.save==lk::Save::Reading)returnrw::QuickRingState::Reading;") &&
               has(lab, "pageOut.event==rw::PageEvent::ChooseSkill&&QuickState(s,qv)==rw::QuickRingState::Reading){") &&
               has(lab, "if(framevr::quickradial::link::Viewqv;QuickState(s,qv)==rw::QuickRingState::Reading){") && has(lab, "framevr::quickradial::link::Ask({s.session,place,id,owner,pointer})") &&
               has(lab, "rw::FillQuick(view,qv.ids.data(),qv.n,quickName,cellOf,qv.fixed);rw::MarkQuick(view,qs);") && has(lab, "(uint64_t(quickChooser?quickChoose+1:0)<<52)"),
               "wiring S3 / S4 / N1: Quick cast's page waits for the character's ring (its layout, 2026-11-17); edits carry the pointing hand; the chooser's words carry the place");
-        // Quick cast's Move (2026-11-17; review F8: on the page's center, no chooser seat): Move picks a place, then the target; the
-        // ask carries the source place; a Move lives on the Quick cast page only and is dropped when its place empties (review F9)
+        // Quick cast's Move: Move picks a place, then the target; the
+        // ask carries the source place; a Move lives on the Quick cast page only and is dropped when its place empties
         Check(!has(lab, "QuickMoveSeat") && !has(lab, "row.push_back(rw::") && has(lab, "framevr::quickradial::link::Ask({s.session,to,-1,-1,pointer,from})") &&
               has(lab, "if(!quickPageOn||quickChoose>=0){quickMoveFrom=-1;quickMovePick=false;}") && has(lab, "if(qs!=rw::QuickRingState::Reading)rw::MarkQuickMove(view,quickMoveFrom,quickMovePick);") &&
               has(lab, "if(quickMoveFrom>=0&&!QuickPlaceFilled(quickMoveFrom)){") && has(lab, "pageOut.event==rw::PageEvent::Move)"),
               "wiring Move: no chooser seat, the page's Move, its target ask, its resets and its view");
-        {   // Review S3 (the radial's side): edits wait while the save is read; made before it is read, puts are added to the stored ring, never over it
+        {   // (the radial's side): edits wait while the save is read; made before it is read, puts are added to the stored ring, never over it
             const std::string qrc = read("../vr/quick_radial.cpp");
             Check(has(qrc, "if(on&&qr::ClassKnown(st.cls)&&st.session==s.session&&!st.identified&&!st.answered)return;") &&
                   has(qrc, "if(put)st.movedBefore.push_back({*put,-1,\"theringmenu\",true});") && has(qrc, "if(!live.Has(m.it.skill)||st.ring.Has(m.it.skill))continue;") &&
@@ -2631,11 +2660,11 @@ int main() {
                   has(qrc, "if(e.hand>=0)Pulses(e.hand,3);"),
                   "wiring S3 (radial): edits wait for the save; earlier puts merged into the stored ring; the page's state published; a drop pulses the pointing hand");
         }
-        // Review S1: the chooser's seats are drawn on the chooser page only (the row never on the main ring)
+        // the chooser's seats are drawn on the chooser page only (the row never on the main ring)
         Check(has(lab, "constboolanyChooser=ringPage==rw::RingPage::GlyphChoose||ringPage==rw::RingPage::QuickChoose;") &&
               has(lab, "constboolchoosing=anyChooser&&chooseQuick==(ringPage==rw::RingPage::QuickChoose)&&chooseKey==seatsKey&&!chooseStale&&chooseLayout.count>0;"),
               "wiring S1: `choosing` holds only on a chooser's page, with that chooser's own seats (the glyph chooser's, or Quick cast's, 2026-11-16)");
-        // Review S2: the main ring's quick-cast inputs and hold words, as they were before the move into the two helpers
+        // the main ring's quick-cast inputs and hold words, as they were before the move into the two helpers
         Check(has(lab, "q.nowMs=hold.NowMs(nowMs);q.main=true;q.lastHitMs=hold.NowMs(fightNow.lastHitMs);") && has(lab, "constbooldown[3]={hi.trigger[h]>.55f,hi.face[h][0],hi.face[h][1]};") && has(lab, "constboolgrip=hi.grip[h]>.5f;") &&
               has(lab, "q.press[h]=rw::SlotPress(down,grip,quickHeld[h]);") && has(lab, "for(intk=0;k<rw::Slots;++k)q.down[h][k]=down[k==0?0:(k-1)%2+1];") && has(lab, "q.bound[size_t(h)][size_t(k)]=slot>=0?s.skills[size_t(slot)].id:-1;"),
               "wiring S2: FillQuick: the shown clock, the hit time, the trigger at .55, the grip at .5, the slots and their skills");
@@ -2644,7 +2673,7 @@ int main() {
         Check(has(lab, "FillQuick(q,f,s,in.nowMs);q.under=step.under;") && has(lab, "HoldStep(e,e.holdFrac,q,s,f.layout);//thehold,fromthetaplimit"), "wiring S2: the main ring's two calls: every target under the laser, the hold from the Tap limit");
         Check(has(lab, "order=ia::MakeCommanderSkill(id,true);") && has(lab, "rw::orders::Help(seat.id)") && has(lab, "rw::orders::Sub()"), "wiring orders: an order's name is upstream's entry; its help and sub line come from the one header");
     }
-    {   // Review R6 X3: the worker reads only the box; the frame thread fills it from upstream's cache until done or 2 s
+    {   // the worker reads only the box; the frame thread fills it from upstream's cache until done or 2 s
         using Image = framevr::interaction::icons::Image;
         rw::IconBox box;
         const int ids[3] = {1, 2, 3};
@@ -2669,7 +2698,7 @@ int main() {
         Check(std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(1000), "X3 Close wakes a worker waiting in Settle (the Off edge, a reset)");
         Check(box.Take(1) != nullptr, "X3 a new set keeps the icons already in");
     }
-    {   // Feedback 1 items 3 and 5 (L4 rows 16-18): the bound-button badges, their shapes, letters, placement and rows
+    {   // Feedback 1 items 3 and 5: the bound-button badges, their shapes, letters, placement and rows
         using L = framevr::controllers::Layout;
         const char wantR[5] = {'R', 'A', 'B', 'A', 'B'}, wantL[5] = {'L', 'X', 'Y', 'X', 'Y'};
         for (int k = 0; k < rw::Slots; ++k) {
@@ -2677,7 +2706,7 @@ int main() {
             Check(rw::BadgeKindOf(k) == (k == 0 ? rw::BadgeKind::Square : k >= 3 ? rw::BadgeKind::Coin : rw::BadgeKind::Disc), "slot " + std::to_string(k) + ": trigger square, face disc, grip layer coin");
         }
         Check(rw::BadgeLetter(L::Index, 1, 1) == 'A' && rw::BadgeLetter(L::Frame, 1, 2) == 'U' && rw::BadgeLetter(L::Generic, 0, 4) == '2', "other controllers: one letter each (Index A / B, Frame's D-pad U / D, generic 1 / 2)");
-        {   // Job B (2026-11-18): a sleeping controller reads Unknown (Generic); the badge letters must not fall to 1 / 2
+        {   // Job B: a sleeping controller reads Unknown (Generic); the badge letters must not fall to 1 / 2
             rw::LetterLayoutHold hold;
             Check(hold.Step(0, L::Touch, true) == L::Touch && hold.Step(1, L::Touch, true) == L::Touch, "B hold: both hands Touch at first");
             const L right = hold.Step(0, L::Generic, true), left = hold.Step(1, L::Generic, true);
@@ -2850,7 +2879,7 @@ int main() {
             Check(badOrder == 0 && bodiesMissing == 0, "batch 3: every badge body after every effect, the face-cut quad included" + (firstBad.empty() ? std::string() : " (first: " + firstBad + ")"));
             Check(maxRuns <= 4, "batch 3: badges on top still cost no draw past 4 (" + std::to_string(maxRuns) + ")");
         }
-        {   // the player 2026-11-08 #3 (designer): the wheel hand's Draw glyph button on the Glyphs half
+        {   // the player #3: the wheel hand's Draw glyph button on the Glyphs half
             const std::array<int, 2> slots{rw::SlotOf(0, 1), rw::SlotOf(1, 3)};
             const auto r = rw::DrawBadgeFor(slots, 0, L::Touch, 28), left = rw::DrawBadgeFor(slots, 1, L::Touch, 22);
             Check(r.on && r.kind == rw::BadgeKind::Disc && r.letter == 'A' && r.sizePx == 28, "#3 badge: the right wheel hand's own button (A, a disc)");
@@ -2886,7 +2915,7 @@ int main() {
             { auto x = sc; x.holdFrac = 0; x.holdSeat = rw::GlyphsSeat; hidden(x, "the hold before the tap limit shows"); }
             { auto x = sc; x.chooseTitle = "Circle"; hidden(x, "the glyph chooser"); }
             { auto x = sc; x.drawBadge = {}; hidden(x, "no draw button"); }
-            {   // the designer's correction: it stays while the center is pointed, riding the ring
+            {   // the design's correction: it stays while the center is pointed, riding the ring
                 auto x = sc; x.step.centerGrown = true; x.step.under = {rw::Kind::Glyphs};
                 const auto g = see(x, grownAt);
                 Check(g.body >= 0 && g.letter > g.body && g.a == 1.f && see(x, rest).body < 0, "#3 badge: the Glyphs half pointed: it stays, on the grown ring (96.2), full");
@@ -2894,7 +2923,7 @@ int main() {
                 const auto d = see(x, grownAt);
                 Check(d.body >= 0 && std::fabs(d.a - .55f) < .001f, "#3 badge: the Gestures half pointed: it stays at 55%");
             }
-            {   // the requirement changed (designer): the Warlock's whole center is Kind::Glyphs, so its draw button shows there
+            {   // the requirement changed: the Warlock's whole center is Kind::Glyphs, so its draw button shows there
                 auto x = sc; x.hasMotions = false;
                 const auto w = see(x, rest);
                 Check(w.body >= 0 && w.letter > w.body, "#3 badge: shows on the Warlock's one center");
@@ -2960,7 +2989,7 @@ int main() {
             Check(!(rw::KeyOf(sm) == k0) && rw::KeyOf(sc) == k0, "draw key: a new placement redraws, the same one does not");
         }
     }
-    {   // Job B (the design notes item 1, critic FB1 / FS1): pointing with either hand. 90 Hz frames; a hand's ray as a yaw.
+    {   // Job B (the design notes item 1): pointing with either hand. 90 Hz frames; a hand's ray as a yaw.
         namespace pt = framevr::ringwheel::pointing;
         struct Hand { bool tracked = true, onPanel = true, onTarget = false, trigger = false, anyDown = false; float yaw = 0; };
         struct Sim {
@@ -3025,7 +3054,7 @@ int main() {
             t.Step(15);
             Check(t.Owner() == -1, "job B: ... and 1 s after it, released");
         }
-        {   // a hand change: the other hand's deliberate move takes over unless the owner has a button down (round 2026-11-08 #5: 8 deg, was 3)
+        {   // a hand change: the other hand's deliberate move takes over unless the owner has a button down
             Sim s; s.Step(5); s.Turn(0, 3, 100); s.h[0].onTarget = true; s.Step(30); s.Turn(1, 8, 100);
             Check(s.Owner() == 1, "job B: swapping hands mid-hover: the left takes over within 300 ms");
             Sim t; t.Step(5); t.Turn(0, 3, 100); t.h[0].anyDown = true; t.Step(10); t.Turn(1, 5, 100); t.h[1].trigger = true; t.Step(5);
@@ -3033,12 +3062,12 @@ int main() {
             t.h[0].anyDown = false; t.h[1].trigger = false; t.Step(); t.h[1].trigger = true; t.Step();
             Check(t.Owner() == 1, "job B: once let go, the other hand's trigger takes it");
         }
-        {   // round 2026-11-08 #5 (the player's log: 361 of 420 owner changes under 50 ms apart): the owner changes only on a deliberate move
+        {   // the owner changes only on a deliberate move
             for (const double hz : {90.0, 28.6}) {
                 const std::string at = std::to_string(int(hz)) + " Hz";
                 auto start = [&](Sim& s) { s.stepMs = 1000 / hz; s.Step(5); s.Turn(0, 3, 150); s.h[0].onTarget = s.h[1].onTarget = true; s.Step(int(hz)); };
                 unsigned rnd = 12345;
-                auto jitter = [&]() { rnd = rnd * 1664525u + 1013904223u; return float(int(rnd >> 8) % 241 - 120) / 100; };   // -1.2 .. 1.2 deg
+                auto jitter = [&]() { rnd = rnd * 1664525u + 1013904223u; return float(int(rnd >> 8) % 241 - 120) / 100; };   // -1.2.. 1.2 deg
                 {   // noise on both hands (each frame up to 2.4 deg apart: over the 1.5 deg claim, under the 5 deg take), 60 s
                     Sim s; start(s); const int owner = s.Owner(); int flips = 0;
                     for (int f = 0; f < int(60 * hz); ++f) { s.h[0].yaw = jitter(); s.h[1].yaw = jitter(); s.Step(); flips += s.out.changed; }
@@ -3066,18 +3095,18 @@ int main() {
                 {   // a new owner holds it OwnMinMs against the old owner's move, then a deliberate move takes it back
                     Sim s; start(s);
                     double took = 0;
-                    while (s.Owner() == 0 && took < 2000) { s.h[1].yaw += 40 * float(s.stepMs) / 1000; s.Step(); took += s.stepMs; }   // review N1: capped
+                    while (s.Owner() == 0 && took < 2000) { s.h[1].yaw += 40 * float(s.stepMs) / 1000; s.Step(); took += s.stepMs; }   // capped
                     double ms = 0;
                     while (s.Owner() == 1 && ms < 2000) { s.h[0].yaw += 80 * float(s.stepMs) / 1000; s.Step(); ms += s.stepMs; }
                     Check(s.Owner() == 0 && ms >= pt::OwnMinMs - s.stepMs && ms <= 700, "#5 " + at + ": a new owner keeps it 300 ms, then a deliberate move takes it back (" + std::to_string(int(ms)) + " ms)");
                 }
-                {   // review N2: a 4 deg move is over the claim and under TakeDeg: the owner keeps it
+                {   // a 4 deg move is over the claim and under TakeDeg: the owner keeps it
                     Sim s; start(s); const int n = std::max(1, int(200 / s.stepMs));
                     for (int f = 0; f < n; ++f) { s.h[1].yaw += 4.f / float(n); s.Step(); }
                     s.Step(int(hz / 2));
                     Check(s.Owner() == 0, "#5 " + at + ": a 4 deg move by the other hand does not take it");
                 }
-                {   // review S1: both rays on a gap: an idle owner lets go, and the other hand needs a deliberate move to claim
+                {   // both rays on a gap: an idle owner lets go, and the other hand needs a deliberate move to claim
                     auto released = [&](Sim& s) { s.stepMs = 1000 / hz; s.Step(5); s.Turn(0, 3, 150); s.Step(int(hz * 1.5)); };
                     { Sim s; released(s); Check(s.Owner() == -1 && s.out.why == pt::Why::None, "#5 S1 " + at + ": idle on a gap, the owner let go");
                       const int n = std::max(1, int(200 / s.stepMs)); for (int f = 0; f < n; ++f) { s.h[1].yaw += 4.f / float(n); s.Step(); }
@@ -3132,14 +3161,14 @@ int main() {
             s.wheel = 1; s.Step(30);
             Check(s.Owner() == -1, "job B: reopened, no owner until a hand moves");
         }
-        {   // the player's closing rule (FS1 dropped): B / X with no laser on the wheel closes it, an owner or none
+        {   // the player's closing rule: B / X with no laser on the wheel closes it, an owner or none
             const int per[3] = {4, 4, 4};
             const auto l = ClassLayout(1, per, rw::TreeLayout::Shown);
             rw::QuickCast qc; rw::QuickIn q; q.main = true; q.nowMs = 1000; q.under = {};
             q.press[0] = 2;   // right B, plain
             Check(qc.Step(q, l).event == rw::Quick::Close, "#1: B with no laser on the wheel closes it");
         }
-        {   // perf 'Pointing check' must-fix 1: the thin beam keeps 2 layer slots for the blood and strain quads; should-fix 2:
+        {   // perf 'Pointing check' fix: the thin beam keeps 2 layer slots for the blood and strain quads; fix:
             // it is Off at the ring's Off edge (TabOn false), whatever the frame says.
             using B = pt::Beam;
             Check(pt::BeamFor(true, true, true, 10, 16) == B::Draw, "job B beam: 10 of 16 used, drawn (5 stay spare)");
@@ -3154,7 +3183,7 @@ int main() {
                   "job B beam: the wheel's laser not showing, or no beam written: none");
         }
     }
-    {   // Feedback 1 item 2: grip to move (ring_wheel_grab.h over upstream's panels::Grab), the ring's rules and the critic's FS3 / FS4
+    {   // Feedback 1 item 2: grip to move (ring_wheel_grab.h over upstream's panels::Grab), the ring's rules and the
         namespace m = framevr::math;
         const ia::Pose head{{0, 1.6f, 0}, {0, 0, 0, 1}};
         rw::Placement pl; pl.distanceM = .9f; pl.widthM = .8f; pl.belowDeg = 8; pl.worldLock = true;
@@ -3247,12 +3276,12 @@ int main() {
             auto y = in(hand0 + m::Vec{.1f, 0, 0}, true); y.hit = false;
             Check(same(g.Step(y).pose, base) && !g.Moving(), "a grip with the ray off the wheel: no move");
         }
-        {   // review-grip S3 (batch1 merge): the grabbing hand is the pointing owner; with none, the hand not holding the wheel
+        {   // review-grip (batch1 merge): the grabbing hand is the pointing owner; with none, the hand not holding the wheel
             Check(rw::GrabHand(1, 1) == 1 && rw::GrabHand(0, 0) == 0, "S3: an owner pointing with the wheel's own hand grabs with it");
             Check(rw::GrabHand(0, 1) == 0 && rw::GrabHand(1, 0) == 1, "S3: an owner on the other hand grabs with that hand");
             Check(rw::GrabHand(-1, 1) == 0 && rw::GrabHand(-1, 0) == 1 && rw::GrabHand(-1, -1) == 0, "S3: no owner: the hand not holding the wheel, as before job B (no wheel: 0, the old formula's)");
         }
-        {   // review-grip S1: on an upstream page, a trigger squeezed mid-move reaches no cell
+        {   // review-grip on an upstream page, a trigger squeezed mid-move reaches no cell
             rw::RingGrab g; g.Step(in(hand0, true)); g.Step(in(hand0 + m::Vec{.05f, 0, 0}, true));
             g.Step(in(hand0 + m::Vec{.06f, 0, 0}, true, false, true));
             Check(g.Moving(), "S1: a trigger squeezed while moving keeps the move (Held)");
@@ -3264,7 +3293,7 @@ int main() {
             hover = 5; hitNow = true; rw::HoldUpstreamWhileMoving(false, false, hover, hitNow);
             Check(hover == 5 && hitNow, "S1: not moving: upstream's hover and hit stand");
         }
-        {   // review-grip S2 (mutation G8): move, Grab to move Off for one step, On again: the spawn pose, not the old place
+        {   // review-grip (mutation G8): move, Grab to move Off for one step, On again: the spawn pose, not the old place
             rw::RingGrab g; g.Step(in(hand0, true)); g.Step(in(hand0 + m::Vec{.1f, 0, 0}, true)); g.Step(in(hand0 + m::Vec{.1f, 0, 0}, false));
             Check(!rw::IsZero(g.Kept()), "S2: moved and let go: a kept place");
             auto off = in(hand0, false); off.on = false; g.Step(off);
@@ -3281,7 +3310,7 @@ int main() {
             const auto after = g.Step(in(hand0 + m::Vec{.2f, 0, 0}, false));
             Check(!g.Holding() && dist(after.pose, up.pose) < 1e-4f, "M1: the trigger let go: no longer holding, the place kept");
         }
-        {   // review-grip S4: the other hand takes over mid-move (both grips down): no jump, no move until a fresh grip
+        {   // review-grip the other hand takes over mid-move (both grips down): no jump, no move until a fresh grip
             rw::RingGrab g;
             auto h0 = [&](m::Vec at, bool grip) { auto x = in(at, grip); x.handIndex = 0; return x; };
             auto h1 = [&](m::Vec at, bool grip) { auto x = in(at, grip); x.handIndex = 1; return x; };
@@ -3297,7 +3326,7 @@ int main() {
             Check(rw::GripDown == .5f, "S4: one grip threshold for the grab and the owner's pin");
         }
     }
-    {   // R8 match stage 1 (r8-match-spec 6.1, 7.3): the rest glow per skill, its cap, the panel-wide rest events
+    {   // match stage 1 (r8-match-spec 6.1, 7.3): the rest glow per skill, its cap, the panel-wide rest events
         using K = rw::RestKind;
         const auto* tiger = rw::SkillFxOf(254), *fire = rw::SkillFxOf(251), *phoenix = rw::SkillFxOf(280);
         auto named = [](K k, const std::string& n) { return rw::ValidKind(k) && n == rw::RestKindName[uint32_t(k)]; };
@@ -3377,7 +3406,7 @@ int main() {
         int seatsDrawn = 0; for (int i = 0; i < nOff; ++i) seatsDrawn += list[i].recipe == rw::RecipeSeat;
         Check(seatsDrawn == l.count, "stage 1 every seat drawn as the kit's icon (RecipeSeat)");
     }
-    {   // Review-r6 X1: a retired swapchain is destroyed on the frame thread (Reap's caller), only after its worker exited;
+    {   // a retired swapchain is destroyed on the frame thread (Reap's caller), only after its worker exited;
         // the worker only releases the GPU side.
         struct Side { std::thread worker; std::atomic<bool> exited{false}; std::atomic<bool> released{false}; bool chain = true; };
         const auto frame = std::this_thread::get_id();
@@ -3411,7 +3440,7 @@ int main() {
         Check(reap(true) == 1 && destroyedOn.size() == 1 && destroyedOn[0] == frame && afterExit[0], "X1 OnUiReset: joins the worker, then destroys on its own thread");
         delete c;
     }
-    {   // Perf's X1 check: the Off edge (Layer's !on drain, the hook's last call) destroys the swapchain itself, on the frame
+    {   // the Off edge (Layer's !on drain, the hook's last call) destroys the swapchain itself, on the frame
         // thread, once the last compose is done; the hook then goes dark and nothing waits for the next On.
         struct Gpu { bool chain = true; int destroys = 0; bool retired = false; bool destroyedBeforeRetire = false; uint64_t submitted = 0, completed = 0; };
         double clock = 0;
@@ -3457,7 +3486,7 @@ int main() {
         Check(!none.Off(static_cast<Gpu*>(nullptr), 16, [](Gpu*, unsigned) { return true; }, [] { return 0.0; }, [](Gpu*) {}, [](Gpu*) {}).destroyed && none.Empty(),
               "X1 Off with nothing made: nothing destroyed, nothing kept");
     }
-    {   // Review-r6 X6: rapid On / Off never holds two ring swapchains. Frames run Layer's order: an Off edge = Retired::Off
+    {   // rapid On / Off never holds two ring swapchains. Frames run Layer's order: an Off edge = Retired::Off
         // (16 ms bound); an On frame = Reap(false), then Setup's MayCreate gate. The GPU is busy at some Off edges (the
         // swapchain stays for Reap), and a worker takes a few frames to exit.
         struct Side { bool chain = true; int exitAt = 0; bool busy = false; };
@@ -3482,7 +3511,7 @@ int main() {
             live = new Side; live->busy = (made % 3) == 1; ++made; ++chains;   // every third one's GPU still busy at its Off edge
             most = std::max(most, chains);
         };
-        for (int i = 0; i < 60; ++i) onFrame(i % 2 == 0);   // On, Off, On, Off ... every frame
+        for (int i = 0; i < 60; ++i) onFrame(i % 2 == 0);   // On, Off, On, Off... every frame
         for (int i = 0; i < 10; ++i) onFrame(true);
         most = std::max(most, chains);
         Check(most <= 1, "X6 rapid On / Off with a busy GPU: never two ring swapchains at once (most " + std::to_string(most) + ")");
@@ -3493,8 +3522,8 @@ int main() {
         rw::Retired<Side> empty;
         Check(empty.MayCreate(false, holds) && !empty.MayCreate(true, holds), "X6 the gate: no retired swapchain and none made = make one; one made = never a second");
     }
-    {   // Perf's X6 check: the wait ends when the GPU is done, not when the worker exits. Worker 30 frames to leave (a build
-        // stage), GPU done three frames after the Off edge (review-watch S1: two On frames see it busy, so ignoring gpuDone
+    {   // the wait ends when the GPU is done, not when the worker exits. Worker 30 frames to leave (a build
+        // stage), GPU done three frames after the Off edge (review-watch two On frames see it busy, so ignoring gpuDone
         // fails): On frames run Layer's order (DestroyDone, Reap, then the gate).
         struct Side { bool chain = true; int exitAt = 0, gpuDoneAt = 0; };
         rw::Retired<Side> list;
@@ -3531,7 +3560,7 @@ int main() {
         list.Reap(true, [](Side*) { return true; }, [](Side*) {}, destroy, [](Side* s) { delete s; });
         delete live;
     }
-    {   // Review-r6 X4: every ring request is answered exactly once (its reply, or refused after 1.5 s), and the next one waits
+    {   // every ring request is answered exactly once (its reply, or refused after 1.5 s), and the next one waits
         using R = ia::Result;
         rw::ReplyWait w;
         Check(w.Step(0) == rw::ReplyEnd::None && !w.Waiting(), "X4 nothing sent: nothing to answer");
@@ -3567,7 +3596,7 @@ int main() {
         for (double now = 0; e == rw::ReplyEnd::None && now < 5000; now += 11) { e = lost.Step(now); ++stepsTo; }
         Check(e == rw::ReplyEnd::TimedOut && rw::CanSend(lost, glyph), "X4 a dropped request: refused at 1.5 s, the next one may go");
     }
-    {   // Perf's X4 check: requests made but not sent wait in order; one slot let a third quick assign drop the second, unsent
+    {   // requests made but not sent wait in order; one slot let a third quick assign drop the second, unsent
         rw::SendQueue<int> q;
         int out = 0;
         Check(!q.Pop(out) && q.Size() == 0, "send queue: empty pops nothing");
@@ -3603,7 +3632,7 @@ int main() {
         Check(sentSkills == std::vector<int>({100, 200, 300}) && dropped == 0 && refusedAtPush == 0, "perf X4: A in flight, B and C made: all three sent, in order, none dropped");
         Check(answered == std::vector<int>({100, 200, 300}), "perf X4: all three answered (B no longer lost to C)");
     }
-    {   // Round 2026-11-12 Job B (audit bug 4: the PNG save sat on the frame): the save queue and the worker's half
+    {   // Job B: the save queue and the worker's half
         namespace sh = rw::shot;
         using task = sh::SaveQueue::task;
         // A save held on the worker until the test lets it go. 3 s at most: a queue that ran the job on the caller fails, not hangs.
@@ -3754,7 +3783,7 @@ int main() {
               b.find("render 100%") != std::string::npos, "On line: changed rows show their new values (" + b + ")");
         st.worldLock = false;
         Check(rw::OnLine(st).find("upstream's wheel on its hand anchor") != std::string::npos, "On line: Stays in the room Off says the ring is not drawn");
-        {   // the quiet log (the player's PR rule): edges, refusals and failures pass; per-open, per-pick, pointer and periodic lines do not
+        {   // the quiet log: edges, refusals and failures pass; per-open, per-pick, pointer and periodic lines do not
             auto keep = [](const char* l) { return rw::KeepQuietLine(l); };
             Check(keep(rw::OnLine(st).c_str()) && keep(rw::OffLine()) && keep("Frame ring wheel: bind Fireball -> right A (applied)") && keep("Frame ring wheel: bind Fireball -> right A (refused: 3 already waiting to be sent)") && keep("Frame ring wheel: compose setup failed: x") && keep("Frame ring wheel: Quick cast not put on right A: Quick cast is Off") && keep("Frame ring wheel: swapchain kept: the GPU still busy after 10 ms"), "quiet log: edges, binds, refusals and failures are kept");
             Check(!keep("Frame ring wheel: opened right hand's wheel, page Spells") && !keep("Frame ring wheel: page Spells") && !keep("Frame ring wheel: pointer owner=right why=row") && !keep("Frame ring wheel: 10 s: composes=1") && !keep("Frame ring wheel: placed 0.90 m ahead") && !keep("Frame ring wheel: tap cast Fireball slot=A") && !keep("Frame ring wheel: layers icon=x") && !keep("Frame ring wheel: atlas icons=3/3 missing=none glyphs=ok") && !keep("Frame ring wheel: assign Fireball -> A held=500 ms") && !keep("Frame ring wheel: closed reason=back after 1.0 s"), "quiet log: opens, pages, pointing, placement, picks and the 10 s line are not said");
@@ -3817,7 +3846,7 @@ int main() {
                 worst = std::min(worst, std::hypot(cl.seats[size_t(i)].x - rw::C, cl.seats[size_t(i)].y - rw::C) - rw::IconPx / 2 - 3.5f - rw::ThirdReach(true, rw::ThirdGrowDefault));
         }
         Check(worst >= 6, "the grown third (11%) stays 6 px clear of every seat's ring: " + std::to_string(worst) + " px");
-        // Fire on release: Glyphs and Gestures release upstream's cells, Quick cast the ring's OpenQuick (2026-11-16: its page in the ring)
+        // Fire on release: Glyphs and Gestures release upstream's cells, Quick cast the ring's OpenQuick
         auto click = [&](float deg) {
             rw::Engine en; en.Reset(l); rw::StepOut last{};
             const auto p = at(deg, 50);
@@ -3906,7 +3935,7 @@ int main() {
         Check(rw::NavigateTo(rw::ThirdGestures, P::Motions).nav == rw::Nav::Done, "already there: done");
         Check(rw::NavigateTo(rw::ThirdGlyphs, P::EditSlots).nav == rw::Nav::Wait, "an editor open: wait (the ring gives up after a second)");
     }
-    {   // 2026-11-16: the Quick cast page went (one quick cast: ring Quick cast radial); its shared pieces stay tested here
+    {   // the Quick cast page went (one quick cast: ring Quick cast radial); its shared pieces stay tested here
         constexpr int Eight = 8;
         {   // one stick-select rule (steamvr/stick_select.h) over eight items, with the shared feel's defaults
             namespace ss = framevr::stickselect;
@@ -3924,7 +3953,7 @@ int main() {
             ss::Hold h; h.Start(.9f, 0); const bool a1 = h.Step(.9f, 0), a2 = h.Step(.6f, 0), a3 = !h.Step(.1f, 0), a4 = !h.Step(.9f, 0);
             Check(a1 && a2 && a3 && a4, "review S3: after a cast or Back the pushed stick stays the menu's until it is back in the middle");
         }
-        {   // Review F2: the menu-open click frames (one at 1, then one at 0; none on the opening or hand-change frame)
+        {   // the menu-open click frames (one at 1, then one at 0; none on the opening or hand-change frame)
             rw::FireGate g; double t = 0;
             auto frame = [&](int hand, int page) { t += 11; g.Watch(hand, page, t); return g.Step(t); };
             g.Ask(0);
@@ -3945,13 +3974,13 @@ int main() {
             Check(!rw::MenuButtonAllowed(0) && rw::MenuButtonAllowed(1), "review F1: a sub-menu never goes on the trigger");
         }
     }
-    {   // Headset fixes 2026-11-16 
-        // Bug 1: a sub-menu's button with a seat or a third under the open ring's laser is the ring's press (a hold rebinds that button)
+    {
+        // a sub-menu's button with a seat or a third under the open ring's laser is the ring's press (a hold rebinds that button)
         Check(!rw::MenuPressOpens(true, true, rw::Kind::Seat) && !rw::MenuPressOpens(true, true, rw::Kind::Quick) && !rw::MenuPressOpens(true, true, rw::Kind::Glyphs) &&
               !rw::MenuPressOpens(true, true, rw::Kind::Gestures), "bug 1: a seat or a third under the laser takes the menu button's press (tap casts, hold rebinds)");
         Check(rw::MenuPressOpens(false, false, rw::Kind::None) && rw::MenuPressOpens(true, true, rw::Kind::Gap) && rw::MenuPressOpens(true, true, rw::Kind::None) &&
               rw::MenuPressOpens(true, true, rw::Kind::Footer) && rw::MenuPressOpens(true, false, rw::Kind::Seat), "bug 1: the wheel shut, a gap, the footer or another page: the button opens its sub-menu as before");
-        {   // ... and through the ring's own hold to assign: a hold of Hold to assign on a seat assigns that button, whatever it held
+        {   //... and through the ring's own hold to assign: a hold of Hold to assign on a seat assigns that button, whatever it held
             const int per[3] = {4, 4, 4};
             const auto l = ClassLayout(1, per, rw::TreeLayout::Shown);
             rw::QuickCast q; rw::QuickOut got{};
@@ -3965,7 +3994,7 @@ int main() {
             }
             Check(got.event == rw::Quick::Assign && got.hand == 1 && got.slot == 1 && got.seat == 2, "bug 1/2: held about 1 s on a seat, left X (a menu's button) takes that skill");
         }
-        // Bug 4: a ring menu over a game skill moves that skill: to the menu's old button when free, else into Quick cast, else said
+        // a ring menu over a game skill moves that skill: to the menu's old button when free, else into Quick cast, else said
         using M = rw::MovedTo;
         Check(rw::WhereMoved(-1, 3, 5, -1, false, true) == M::Nothing, "bug 4: nothing on the button: nothing to move");
         Check(rw::WhereMoved(54, 3, 5, -1, false, true) == M::OldButton, "bug 4: the menu's old button is free: the skill swaps there");
@@ -3979,7 +4008,7 @@ int main() {
               "one quick cast: the old menu button becomes Quick cast's unless it has one");
         Check(rw::MovedQuickButton(1, 0) == 0 && rw::MovedQuickButton(5, 0) == 0 && rw::MovedQuickButton(2, 0) == 2,
               "review N2: a trigger stored before review F1 (slot 0 or 4) never moves to Quick cast's button; a face button does");
-        // Review F1 (2026-11-16): a hold on the Quick cast third with a trigger is refused first, whatever else is true
+        // a hold on the Quick cast third with a trigger is refused first, whatever else is true
         Check(rw::QuickBindRefusal(0, true, true, false) && std::string(rw::QuickBindRefusal(0, true, true, false)).find("never a trigger") == 0,
               "review F1: the pointing trigger's hold on the Quick cast third: never a trigger");
         Check(rw::QuickBindRefusal(0, false, false, true) && std::string(rw::QuickBindRefusal(0, false, false, true)).find("never a trigger") == 0,
@@ -3991,12 +4020,12 @@ int main() {
         Check(!rw::QuickBindRefusal(1, true, true, false) && !rw::QuickBindRefusal(4, true, true, false), "review F1: a free face or grip button takes Quick cast");
         for (int slot = 1; slot < rw::Slots; ++slot) Check(rw::MenuButtonAllowed(slot) == !rw::QuickBindRefusal(slot, true, true, false), "review F1: the same buttons as every sub-menu");
         Check(!rw::MenuButtonAllowed(0) && rw::QuickBindRefusal(0, true, true, false), "review F1: the trigger, as every sub-menu");
-        // Review N4: an Applied skill bind lets a ring menu's button go; a sub-menu's clear, Draw glyph or a ring entry never
+        // an Applied skill bind lets a ring menu's button go; a sub-menu's clear, Draw glyph or a ring entry never
         Check(rw::SkillTakesButton(54, -1, false) && rw::SkillTakesButton(3901, -1, false), "review N4: a game skill or a commander order takes the button");
         Check(!rw::SkillTakesButton(-1, 1, false) && !rw::SkillTakesButton(-1, -1, false) && !rw::SkillTakesButton(9000, -1, true) && !rw::SkillTakesButton(54, -1, true) &&
               !rw::SkillTakesButton(9001, -1, false) && !rw::SkillTakesButton(9003, -1, false) && !rw::SkillTakesButton(rw::MenuEntryId(0), -1, false),
               "review N4: a clear, a sub-menu, Draw glyph, Army X menu, Quick cast and a menu's entry never let a menu go");
-        // The Quick cast third's words: Off in the ring when its switch is Off, Not for this class (review N1); a draw key change redraws
+        // The Quick cast third's words: Off in the ring when its switch is Off, Not for this class; a draw key change redraws
         Check(std::string(rw::QuickThirdWord(false, true)) == "Off" && std::string(rw::QuickThirdWord(false, false)) == "Off" &&
               std::string(rw::QuickThirdWord(true, false)) == "Not for this class" && !rw::QuickThirdWord(true, true), "review N1: the Quick cast third's word");
         rw::Scene a, b, c2; b.quickWord = rw::QuickThirdWord(false, true); c2.quickWord = rw::QuickThirdWord(true, false);
@@ -4014,8 +4043,8 @@ int main() {
         std::vector<float> px(size_t(9 * 9 * 4), 0.f);
         auto A = [&](int x, int y) -> float& { return px[(size_t(y) * 9 + size_t(x)) * 4 + 3]; };
         A(1, 1) = .6f;   // a lone fleck
-        for (int y = 4; y < 9; ++y) for (int x = 4; x < 9; ++x) A(x, y) = 1;   // a solid glyph part ...
-        A(6, 6) = .1f;   // ... with a pinhole
+        for (int y = 4; y < 9; ++y) for (int x = 4; x < 9; ++x) A(x, y) = 1;   // a solid glyph part...
+        A(6, 6) = .1f;   //... with a pinhole
         const int changed = ub::Despeckle(px, 9, 9);
         Check(A(1, 1) == 0 && A(6, 6) > .9f && A(8, 8) == 1 && changed == 2, "cleanup: the lone fleck gone, the pinhole filled, the rest as it was");
     }
@@ -4073,7 +4102,7 @@ int main() {
         sc.thirds = false;
         Check(sectors(sc).first == 0, "thirds off: no slice (the halves' look)");
     }
-    {   // 2026-11-16 (the player: the Gestures, Glyphs and Quick cast marks showed gold): each third's mark is its own picture (a seat's
+    {   // each third's mark is its own picture (a seat's
         // icon: RecipeSeat at the mark, 36 px at rest), before every badge body; a picture missing: the drawn mark in silver,
         // never gold. A sub-menu shelf entry with a cell draws it as any icon.
         int per[3] = {4, 4, 4};
@@ -4132,7 +4161,7 @@ int main() {
         Check(silverStroke > 0 && goldStroke == 0, "no pictures: the thirds' drawn marks in silver, no gold");
         Check(entrySilver > 0, "no pictures: the Glyphs menu entry's drawn mark in silver");
     }
-    {   // (the player 2026-11-17: "sizable and have gpt draw them"): the tree marks' painted pictures, the sheet's cell lookup, the size
+    {   //: the tree marks' painted pictures, the sheet's cell lookup, the size
         // clamp and the fallback to the drawn glyph, with 0, 3 and 24 squares in the sheet.
         namespace ta = framevr::ringwheel::treeart;
         const uint32_t builtMask = ta::MaskRef();
@@ -4272,7 +4301,7 @@ int main() {
         }
         ta::SetMask(builtMask);
     }
-    {   // Glyph icon (2026-11-18, the player 5:49 PM): the Glyphs page's eight shapes and the center split's four sigils as painted squares
+    {   // Glyph icon: the Glyphs page's eight shapes and the center split's four sigils as painted squares
         namespace ga = framevr::ringwheel::glyphart;
         const uint32_t builtMask = ga::MaskRef();
         Check(ga::Count == 12 && ga::Shapes == 8 && ga::Sigils == 4 && ga::SheetW == 576 && ga::SheetH == 432 && ga::SlotOfArt(ga::ArtFirst) == 0 && ga::SlotOfArt(ga::ArtFirst + 11) == 11 && ga::SlotOfArt(ga::ArtFirst + 12) < 0 && ga::SlotOfArt(9223) < 0 && ga::SlotOfArt(9103) < 0,
