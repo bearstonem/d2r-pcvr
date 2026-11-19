@@ -73,7 +73,7 @@ inline bool KeepQuietLine(const char* line) {
     if (std::strncmp(line, prefix, sizeof prefix - 1) != 0) return true;
     const char* body = line + sizeof prefix - 1;
     if (std::strncmp(body, "On", 2) == 0 || std::strncmp(body, "Off", 3) == 0 || std::strncmp(body, "bind ", 5) == 0) return true;
-    for (const char* mark : {"refused", "failed", "not put on", "not opened", "swapchain kept", "swapchain waits", "missing", "taken off", "let go of",
+    for (const char* mark : {"refused", "failed", "not put on", "not opened", "swapchain kept", "swapchain waits", "taken off", "let go of",
                              "(its button", "fx textures 0/8", "dropped"})
         if (std::strstr(body, mark)) return true;
     return false;
