@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (build steps -): what the compose pass draws, as plain data (plan; look L1-L3;
+// Ring skill menu (build steps -): what the compose pass draws, as plain data (plan; look -;
 // the design notes sections 2-3). Pure and Windows-free: the instance list a frame draws (shapes, icons, glyphs), when a
 // frame composes at all, the 3-slot ring that never waits on the GPU, the atlas cell grid and the content rectangle inside
 // the swapchain. vr/ring_wheel_compose.cpp draws the list; ring-wheel-preview renders it on WARP (the design notes 14-16).
@@ -15,8 +15,8 @@
 #include "ring_wheel_orders.h"
 #include "ring_wheel_skill_fx.h"
 #include "ring_wheel_text.h"
-#include "ring_wheel_tree_art.h"   // the tree marks' painted pictures (ring > Ring wheel > Layers > Tree icon)
-#include "ring_wheel_glyph_art.h"   // the Glyphs page's shapes and the center's sigils, painted (ring > Ring wheel > Center > Glyph icon)
+#include "ring_wheel_tree_art.h"   // the tree marks' painted pictures (Tree icon)
+#include "ring_wheel_glyph_art.h"   // the Glyphs page's shapes and the center's sigils, painted (Glyph icon)
 
 namespace framevr::ringwheel {
 constexpr int MaxInstances = 320, MaxText = 512, MaxDraw = MaxInstances + MaxText;   // match stage 1: up to 2 rest glows and 2 over-face passes an icon // fixed arrays (no growth per frame)
@@ -33,13 +33,13 @@ enum Recipe : uint32_t {
                        // effect (Element, r + 70; u1 = u0); 2: a rest pass over the face (lightning arcs, steel glints; same quad as 0)
     RecipeCrawl = 7,   // the lightning face crawl over an icon's face; u0 = u1 = its 70 ms step
     RecipeFace = 8,    // an icon face copy moved by (r, g) px from its seat, cut to the seat's circle (icon art motion)
-    RecipeRunes = 9,   // R7c: the center's rune band (kit runeRing), runes at the quad's radius - 6.5 (mid gap); param = the rune count; u0 = u1 = the
+    RecipeRunes = 9,   // the center's rune band (kit runeRing), runes at the quad's radius - 6.5 (mid gap); param = the rune count; u0 = u1 = the
                        // hash seed (the kit's round(r)); v0 = v1 = the dimmed half (0 none, 1 top, 2 bottom, at 55%)
-    RecipeTreeGlyph = 10,   // R7c: a tree mark's glyph (kit glyph), param = its kind (MarkGlyph: TreeGlyphOf); u0 = u1 = its size r
+    RecipeTreeGlyph = 10,   // a tree mark's glyph (kit glyph), param = its kind (MarkGlyph: TreeGlyphOf); u0 = u1 = its size r
     RecipeSeat = 11,   // match stage 1: a seat's icon as the kit's drawIcon: the art cut at r = half-size - SeatRingPx, its rim shade
                        // (0.6 r to r, 0 to 55% black), a 3 px #070504 line on r + 1, the rim `param` px wide on r + 1.5 + param / 2 in the
                        // tint (2: the tree rim on r + 2.5; 3: the hover ring on r + 3); param < 0: the shade and the rings only (face copies)
-    RecipeBadge = 12,   // feedback 1 item 3: a bound-button badge (kit drawQuestBadge), param = BadgeKind; u0 = u1 = its body radius, v0 = v1 = the
+    RecipeBadge = 12,   // a bound-button badge (kit drawQuestBadge), param = BadgeKind; u0 = u1 = its body radius, v0 = v1 = the
                         // square's corner; its 7 px dark halo fills the rest of the quad. RecipeGlyph with param 1: the fill only, no outline (the coin)
     RecipeSector = 13,  // a third of the center (a 120 deg ring sector), param = the third (0 Glyphs, 1 Gestures, 2 Quick cast), u0 = u1 = its
                         // inner radius; the quad's radius its outer; a 2 px edge in the tint over a fill at 30% (tint.a: the whole)
@@ -86,7 +86,7 @@ inline void CellRect(int cell, int pct, float& u0, float& v0, float& u1, float& 
     u0 = float(x) / AtlasTexPx; v0 = float(y) / AtlasTexPx; u1 = float(x + a) / AtlasTexPx; v1 = float(y + a) / AtlasTexPx;
 }
 
-// L1 colors (style guide tokens), straight RGB 0-1.
+// colors (style guide tokens), straight RGB 0-1.
 struct Rgb { float r, g, b; };
 constexpr Rgb Gold{.627f, .490f, .278f}, GoldLight{.910f, .780f, .494f}, HoverRing{.949f, .875f, .651f};
 constexpr Rgb Parchment{.949f, .922f, .847f}, Muted{.788f, .733f, .627f};
@@ -320,13 +320,13 @@ struct Scene {
     Anim anim{};
     double tMs = 0;
     bool hasMotions = true;
-    float grow = -1;               // the center's grow 0-1 (r 80 + 56 g, L3's 220 ms ease); -1: 0 or 1 from step.centerGrown
+    float grow = -1;               // the center's grow 0-1 (r 80 + 56 g, 's 220 ms ease); -1: 0 or 1 from step.centerGrown
     int atlasPct = 100;            // the scale the icon atlas was packed at
     const int16_t* cells = nullptr;           // per seat index: its icon cell, -1 missing (the initials disc); null: cell = index
     const text::Metrics* metrics = nullptr;   // null: no text (the glyph atlas not built yet)
     const char* const* initials = nullptr;    // per seat index: a missing icon's initials (1-2 letters)
     const text::Blurb* blurb = nullptr;       // the pointed skill's blurb (BlurbCache), drawn once the center is 55% grown
-    std::array<const char*, Trees> treeNames{};   // on the outer arc at r 313 (Trees shown; feedback 1 nit, was 308: COLD SPELLS touched a floating icon)
+    std::array<const char*, Trees> treeNames{};   // on the outer arc at r 313 (Trees shown; was 308: COLD SPELLS touched a floating icon)
     uint32_t revision = 0;         // the caller's data revision: bumped when the layout, the atlas or a name changes in place
     // R6Q2, a button held on a skill past the tap limit: the fill 0-1 (-1: no
     // hold), the held seat, the slot's name ("Right trigger") and the status line ("Replaces Fire Wall", "Hold to assign").
@@ -352,14 +352,14 @@ struct Scene {
     // pointedSinceMs (the effect 100 ms after the pointing, fading in over 100 ms).
     int fxSeat = -2; double fxAgeMs = 0; float fxAlpha = 0;
     bool fxTex = false;   // stage 3a: the game texture atlas is in (level 3 for fire, poison and lightning; else level 4)
-    FooterView footer{};   // feedback 1 item 4: the footer's tabs (off: none drawn)
+    FooterView footer{};   // the footer's tabs (off: none drawn)
     const char* chooseTitle = nullptr;   // the shape's name (the arc's gold part)
     const char* clearLine = nullptr;     // the Clear half's first line: "<shape> will cast nothing"
     // Quick cast's chooser: its title's muted lead and its Back half's line (nullptr: the glyph chooser's words)
     const char* chooseLead = nullptr; const char* chooseBack = nullptr;
     const uint8_t* seatDim = nullptr;
-    int skillClass = -1;   // R7c: the hero's class (the tree marks' glyphs, TreeGlyphOf); -1: plain marks
-    const BadgeSet* badges = nullptr;   // feedback 1 item 3: the bound-button badges (BadgeBoard); main page only, never with chooseTitle
+    int skillClass = -1;   // the hero's class (the tree marks' glyphs, TreeGlyphOf); -1: plain marks
+    const BadgeSet* badges = nullptr;   // the bound-button badges (BadgeBoard); main page only, never with chooseTitle
     // the layers (Layers page), the center in thirds (main page) with the grow and the dim, each sub-menu's button badge on
     // its third's mark (on: bound), per seat a sub-menu entry's mark (0 none, 1 + the third). quickWord:
     // why the Quick cast third opens nothing (QuickThirdWord: Off in the ring, Not for this class), said instead of "Trigger to open".
@@ -372,19 +372,19 @@ struct Scene {
     //: each third's picture's atlas cell (ring_wheel_menu_art.h; -1: none, the drawn mark in silver). A shelf
     // entry's picture comes through `cells` as any seat's.
     std::array<int16_t, ThirdCount> thirdCell{-1, -1, -1};
-    // (ring > Ring wheel > Layers > Tree icon): the mode (treeart::Mode: 0 Drawn is today's glyph), the mark's size in percent
+    // (Tree icon): the mode (treeart::Mode: 0 Drawn is today's glyph), the mark's size in percent
     // (treeart::SizePct: 100 today's, 0 hides the mark) and each tree position's painted picture's atlas cell (-1: none, the drawn
     // glyph). Trees shown only: the orbs keep their glyphs.
     int treeMode = 0; int treeSizePct = treeart::SizeDefault;
     std::array<int16_t, Trees> treeCell{-1, -1, -1};
-    // ring > Ring wheel > Center > Glyph icon: the Glyphs page's eight shapes and the center split's four sigils as painted pictures
+    // Glyph icon: the Glyphs page's eight shapes and the center split's four sigils as painted pictures
     // (mode 0 Drawn: today's strokes; a slot with no cell keeps its drawn shape or sigil).
     glyphart::View glyph{};
 };
-// R7c: the rune band (kit runeRing): runes 13 px apart on r - 5.5, at least 12, each one of three strokes by the kit's hash of
+// the rune band (kit runeRing): runes 13 px apart on r - 5.5, at least 12, each one of three strokes by the kit's hash of
 // (index x 31 + round r). Two static sets: the rest center's (r 80) and the grown one's (r 136), crossfaded by the grow, so no
 // rune changes shape while the center grows (the kit re-rolls them every px of r).
-constexpr float MarkR = 14, MarkGlyphR = 16.f / 1.5f;   // R7c TS2: the Trees shown mark's outer radius; its glyph 16 px tall
+constexpr float MarkR = 14, MarkGlyphR = 16.f / 1.5f;   // TS2: the Trees shown mark's outer radius; its glyph 16 px tall
 inline int RuneCount(float r) { return std::max(12, int(std::lround(Tau * (r - 5.5f) / 13))); }
 enum class RuneShape { Line, Caret, Zed };
 inline RuneShape RuneOf(int i, int seedR) { const float h = Hash(uint32_t(i * 31 + seedR)); return h < .33f ? RuneShape::Line : h < .66f ? RuneShape::Caret : RuneShape::Zed; }
@@ -512,7 +512,7 @@ inline void MenuBadgeAt(int t, bool left, float g, float k, float& x, float& y, 
     x += (left ? -.55f : .55f) * 20 * MarkScale * k; y += .45f * 20 * MarkScale * k;
 }
 struct Half { const char* label = nullptr; Sigil sigil = Sigil::None; const char* line0 = nullptr; const char* line1 = nullptr; };
-// The painted picture's slot of a split sigil (ring > Ring wheel > Center > Glyph icon); -1: no picture for it (the thirds' marks).
+// The painted picture's slot of a split sigil (Glyph icon); -1: no picture for it (the thirds' marks).
 inline int SigilSlot(Sigil s) {
     switch (s) { case Sigil::Back: return glyphart::SlotBack; case Sigil::Cross: return glyphart::SlotClear; case Sigil::Star: return glyphart::SlotStar; case Sigil::Hand: return glyphart::SlotHand; default: return -1; }
 }
@@ -626,7 +626,7 @@ inline int Build(const Scene& s, Instance* out, int maxShapes = MaxInstances, in
     const float cx = CanvasCx, cy = CanvasCy;
     const bool holding = s.holdFrac >= 0;
     const float g = holding ? 1.f : s.grow >= 0 ? std::clamp(s.grow, 0.f, 1.f) : s.step.centerGrown ? 1.f : 0.f;
-    // The center: its dark backing disc (75%, L1), the rune ring's outer and inner strokes, the split's hairline.
+    // The center: its dark backing disc (75%,), the rune ring's outer and inner strokes, the split's hairline.
     const float cr = CenterR + (CenterGrownR - CenterR) * g;
     Push(out, n, maxShapes, {cx, cy, 2 * cr + 20, 2 * cr + 20, 0, 0, 0, 0, 0, 0, 0, 0, .75f * A, RecipeDisc, 10});
     // (the mockup's pointed panel): the pointed third's slice reaches its grow past the edge: its dark backing first; the
@@ -637,7 +637,7 @@ inline int Build(const Scene& s, Instance* out, int maxShapes = MaxInstances, in
     if (third >= 0) Push(out, n, maxShapes, {cx, cy, 2 * reach, 2 * reach, 0, cr - 2, 0, cr - 2, 0, 0, 0, 0, .75f * A, RecipeSector, float(third + 4)});
     Push(out, n, maxShapes, {cx, cy, 2 * cr, 2 * cr, 0, 0, 0, 0, 0, Gold.r, Gold.g, Gold.b, A, RecipeRing, 2});
     Push(out, n, maxShapes, {cx, cy, 2 * (cr - 11), 2 * (cr - 11), 0, 0, 0, 0, 0, Gold.r, Gold.g, Gold.b, .8f * A, RecipeRing, 2});   // 2 px
-    {   // R7c: the rune band between the two rings; a pointed half's band full, the other half at 55%
+    {   // the rune band between the two rings; a pointed half's band full, the other half at 55%
         // thirds: the pointed third's band full, the other two at the dim row (code 4 + third + 3 x the dim's percent).
         const int half = s.thirds ? (third >= 0 ? 4 + third + 3 * int(std::lround(dimK * 100)) : 0)
                                   : s.step.under.kind == Kind::Glyphs ? 2 : s.step.under.kind == Kind::Gestures ? 1 : 0;   // the half that dims
@@ -705,12 +705,12 @@ inline int Build(const Scene& s, Instance* out, int maxShapes = MaxInstances, in
         const float disc = orb ? 2 * r + 8 : 2 * MarkR * k, ring = orb ? 2 * r + 6 : 2 * MarkR * k, gr = orb ? .8f * r : MarkGlyphR * k;
         Push(out, n, maxShapes, {x, y, disc, disc, 0, 0, 0, 0, 0, .055f, .043f, .031f, .9f * ta, RecipeDisc, 2});
         Push(out, n, maxShapes, {x, y, ring, ring, 0, 0, 0, 0, 0, c.r, c.g, c.b, ta, RecipeRing, 2});
-        const MarkGlyph glyph = TreeGlyphOf(s.skillClass, t);   // R7c: the kit's glyph in gold light, inside the mark or the orb
+        const MarkGlyph glyph = TreeGlyphOf(s.skillClass, t);   // the kit's glyph in gold light, inside the mark or the orb
         if (glyph != MarkGlyph::None)
             Push(out, n, maxShapes, {x, y, 2 * gr + 4, 2 * gr + 4, 0, gr, 0, gr, 0, GoldLight.r, GoldLight.g, GoldLight.b, ta, RecipeTreeGlyph, float(glyph)});
     }
     // The seats: each icon at its rest place plus its float, cut round, a 2 px rim; the pointed one 1.3x with the hover
-    // ring. A seat with no icon gets L1's initials disc (its rim, a dark disc and the initials).
+    // ring. A seat with no icon gets 's initials disc (its rim, a dark disc and the initials).
     struct Initial { float x, y, a; int seat; };
     std::array<Initial, MaxSeats> initials{};
     int nInitials = 0;
@@ -718,7 +718,7 @@ inline int Build(const Scene& s, Instance* out, int maxShapes = MaxInstances, in
     const int pointedTree = pointedSeat >= 0 && pointedSeat < l.count ? l.seats[size_t(pointedSeat)].tree : -2;
     const double tS = std::fmod(s.tMs / 1000.0, 3600.0);
     std::array<int, Trees> inTree{};   // each seat's order in its tree (the burst's stagger)
-    std::array<SeatDrawn, MaxSeats> drawn{};   // feedback 1 item 3: where the badges ride
+    std::array<SeatDrawn, MaxSeats> drawn{};   // where the badges ride
     auto restOf = [&](int i) {
         if (s.rest) return s.rest[i];
         RestGlow g; g.kind[0] = RestKind(s.elements ? std::min<uint32_t>(s.elements[i], uint32_t(Element::Count) - 1) : uint32_t(Element::Phys));
@@ -813,7 +813,7 @@ inline int Build(const Scene& s, Instance* out, int maxShapes = MaxInstances, in
         if (!pointed) lay.crawl = crawlS > 0 && CrawlsAtRest(glow) && eventAge >= 0 && eventAge < RestBurstMs ? float(std::sin(eventAge / RestBurstMs * Pi)) : 0.f;
         Float f; float x, y; seatAt(i, pointed, k, x, y, &f);
         const float size = IconPx * (pointed ? 1.3f : 1.f), r = size / 2;
-        drawn[size_t(i)] = {x, y, A * ta, true, pointed};   // feedback 1 item 3: where the badges ride (seatAt's place)
+        drawn[size_t(i)] = {x, y, A * ta, true, pointed};   // where the badges ride (seatAt's place)
         const int cell = s.cells ? s.cells[i] : i % (AtlasCells * AtlasCells);
         const Rgb rim = seat.tree >= 0 ? TreeRimOf(s.skillClass, seat.tree) : Gold;
         const float seed = Seed(seat.id), glowT = lay.glowMoves ? float(tS) : 0.f;
@@ -893,7 +893,7 @@ inline int Build(const Scene& s, Instance* out, int maxShapes = MaxInstances, in
         }
         if (L.fx) pushRest(2);   // over the face: the lightning arcs (kit: after the rim), the steel glint (the Animation layer)
     }
-    PushFooter(s, A, out, n, maxShapes);   // feedback 1 item 4: fades with the wheel, never with the fight dim
+    PushFooter(s, A, out, n, maxShapes);   // fades with the wheel, never with the fight dim
     // The effect passes: the under pass in front of everything, the over pass after the shapes and before
     // the text: 4 draws.
     nU = std::min(nU, std::max(0, maxShapes - n)); nO = std::min(nO, std::max(0, maxShapes - n - nU));
@@ -901,7 +901,7 @@ inline int Build(const Scene& s, Instance* out, int maxShapes = MaxInstances, in
     std::copy(fxOver.begin(), fxOver.begin() + nO, out + n); n += nO;
     // Batch 3 merge (Boss: badges and text on top): the badge bodies after the over pass, before their letters; still 4 draws
     // (under fx, shapes, over fx, then badges and text on the same PS).
-    PushBadges(s, drawn, out, n, maxShapes);   // feedback 1 item 3: over every icon and every effect
+    PushBadges(s, drawn, out, n, maxShapes);   // over every icon and every effect
     const bool drawBadge = DrawBadgeShows(s);
     const float dbOff = cr * DrawBadgeRing, dbR = s.drawBadge.sizePx / 2.f;
     float dbx = cx + dbOff, dby = cy - dbOff;
@@ -967,7 +967,7 @@ inline int Build(const Scene& s, Instance* out, int maxShapes = MaxInstances, in
         EmitArc(m, text::Name22, lead, cx, cy, r, -Pi / 2 - tot / 2 + wm / r / 2, Muted, A, out, n, max);
         EmitArc(m, text::Name22, s.chooseTitle, cx, cy, r, -Pi / 2 + tot / 2 - wg / r / 2, GoldLight, A, out, n, max);
     }
-    if (holding) {   // the held button in words where its picture goes (the picture set is L1's, later), the status below
+    if (holding) {   // the held button in words where its picture goes (the picture set is 's, later), the status below
         if (s.holdName) EmitLine(m, text::Body22, s.holdName, cx, cy + HoldNameY, Parchment, A, out, n, max);
         if (s.holdSlot) EmitLine(m, text::Label26, s.holdSlot, cx, cy - 14, GoldLight, A, out, n, max);
         if (s.holdTop) EmitLine(m, text::Body22, s.holdTop, cx, cy + HoldTopY, Muted, A, out, n, max);
@@ -1012,12 +1012,12 @@ struct DrawKey {
     std::array<const void*, 7> r7{};
     uint32_t fightQ = 0, burstQ = 0; const void* elements = nullptr; const void* crawl = nullptr; int crawlCount = 0;
     const void* rest = nullptr;   // match stage 1
-    int skillClass = -1;   // R7c: the tree marks' glyphs
-    const void* badges = nullptr; uint32_t badgeRev = 0, badgePop = 0;   // feedback 1 item 3: the set, its placement, a pop or tick running
+    int skillClass = -1;   // the tree marks' glyphs
+    const void* badges = nullptr; uint32_t badgeRev = 0, badgePop = 0;   // the set, its placement, a pop or tick running
     DrawBadge drawBadge{};   // #3
     const void* holdTop = nullptr; bool holdGreen = false;
     const void* holdName = nullptr;
-    int footer = 0;   // feedback 1 item 4: on, page, developer, width, hand (its hover: under) // topCount, bottomCount, topLabel, bottomLabel, chooseTitle, seatDim, clearLine (their text: the revision)
+    int footer = 0;   // on, page, developer, width, hand (its hover: under) // topCount, bottomCount, topLabel, bottomLabel, chooseTitle, seatDim, clearLine (their text: the revision)
     const void* layout = nullptr; const void* cells = nullptr; const void* metrics = nullptr; const void* initials = nullptr; const void* blurbText = nullptr;
     std::array<const void*, Trees> names{};
     SeatLayers layers{}; bool thirds = false; int thirdQ = 0; std::array<DrawBadge, ThirdCount> menuBadge{}; const void* seatMark = nullptr; const char* quickWord = nullptr; const char* chooseLead = nullptr; const char* chooseBack = nullptr;   //;

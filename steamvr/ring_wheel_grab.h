@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (feedback 1 item 2; build-plan): grip to move the wheel, as plain data. Pure and Windows-free
+// Ring skill menu : grip to move the wheel, as plain data. Pure and Windows-free
 // (ring-wheel-test). Reuses upstream's panels::Grab unchanged (steamvr/native_panels.h, the VR Settings helper): grip on
 // the panel arms it, 3 cm of hand travel starts the move, the grabbed point stays in the hand (move, angle, tilt, push and
 // pull in one hold), hand roll ignored, tilt clamped, the distance kept 0.40-1.50 m from the head. The result is an offset
@@ -31,10 +31,10 @@ inline float GazeDeg(const interaction::Pose& head, math::Vec at) {
 }
 
 // Batch1 merge: the grabbing hand is job B's pointing owner; with none, the hand not holding the wheel.
-// Review-grip one grip threshold for the grab and the pointing owner's pin (a grip that grabs always keeps its owner).
+// one grip threshold for the grab and the pointing owner's pin (a grip that grabs always keeps its owner).
 constexpr float GripDown = .5f;
 inline int GrabHand(int owner, int wheelHand) { return owner == 0 || owner == 1 ? owner : wheelHand == 0 ? 1 : 0; }
-// Review-grip while the wheel moves, upstream's pages (Equipment, DEV, the editors) get no hover and no hit, so a trigger
+// while the wheel moves, upstream's pages (Equipment, DEV, the editors) get no hover and no hit, so a trigger
 // squeezed mid-move clicks nothing there. The ring's pages drop their own events in Input (ringPage true: untouched).
 inline void HoldUpstreamWhileMoving(bool moving, bool ringPage, int& hover, bool& pointerHit) {
     if (moving && !ringPage) { hover = -1; pointerHit = false; }
@@ -109,7 +109,7 @@ public:
         return o;
     }
     bool Moving() const { return moving; }   // the start / end log
-    // Review-grip M1: what upstream's Grab::Step consumes, Moving and Held (the grip let go with the trigger still down): the
+    // M1: what upstream's Grab::Step consumes, Moving and Held (the grip let go with the trigger still down): the
     // ring, upstream's pages and quick cast drop the trigger until it is let go too.
     bool Holding() const { return grab.state == panels::Grab::State::Moving || grab.state == panels::Grab::State::Held; }
     const panels::Offset& Kept() const { return offset; }

@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (build step): the Glyphs and Gestures pages (plan; look L3 "Glyphs page", "Gestures page",
+// Ring skill menu (build step): the Glyphs and Gestures pages (plan; look "Glyphs page", "Gestures page",
 // "Glyph Choose a skill state"). Pure and Windows-free. Upstream keeps both pages' data and actions: the ring only draws
 // them in its own look and turns a release into upstream's cell for one frame (a gesture card, Back, the other hand), or,
 // for a glyph's skill, into a BindGlyph request (upstream's paged picker never opens; the picker's list is upstream's rule).
@@ -22,7 +22,7 @@ inline bool BestSeat(int id) { return KindSeat(id) && framevr::quickradial::HasT
 // ("ring menu > quick cast / ring menu > gestures / ring menu > glyph"; "the edit mode is when the user
 // is in the ring menu"): Quick cast is a sub-menu of the ring as Glyphs is. Quick: its 12 places (ring Quick cast radial's ring, in
 // order) round the ring, center Back; QuickChoose: the class's skill layout to choose what goes in a place, its potions and
-// scrolls on the shelf row, center Back / Clear (as the glyph chooser). QuickKind (review "if they have normal
+// scrolls on the shelf row, center Back / Clear (as the glyph chooser). QuickKind ("if they have normal
 // rejuv and a full rejuv, and they select the normal rejuv, it should not drink a full rejuv"): a kind picked on the chooser's row
 // while the hero carries some: the kind (the best one, when cast), then each exact one carried, round the ring as Quick's places,
 // center Back to the chooser. All the ring's own pages over upstream's Spells page.
@@ -59,7 +59,7 @@ inline NavStep NavigateTo(int third, interaction::MenuPage page) {
 
 // upstream clicks only on a rising trigger edge, with rearm clear (a frame with the trigger at 0), and
 // never on the frame the wheel's hand changes (interactions.h). So a Fire is one frame at 1, then at least one frame at 0, and
-// none on the frame the wheel opens or changes hand. Evening review S-B: the wheel's hand is watched every frame (so the first
+// none on the frame the wheel opens or changes hand. the wheel's hand is watched every frame (so the first
 // click after an open is not lost on a stale hand), and the give-up runs from the ask or the last page change (progress), never
 // from the last click, with at most MaxFires clicks a page (a grip held keeps upstream's rearm set: every click is ignored).
 struct FireGate {
@@ -583,7 +583,7 @@ inline int BuildPage(const Scene& s, const PageView& v, Instance* out, int maxSh
             if (pointed) Push(out, n, maxShapes, {x, y, size + 12, size + 12, 0, 0, 0, 0, 0, HoverRing.r, HoverRing.g, HoverRing.b, A, RecipeRing, 3});
         }
     }
-    PushFooter(s, std::clamp(s.wheelAlpha, 0.f, 1.f), out, n, maxShapes);   // feedback 1 item 4
+    PushFooter(s, std::clamp(s.wheelAlpha, 0.f, 1.f), out, n, maxShapes);   // 
     const int max = n + maxText;
     if (glyphsPage) {   // the shapes' strokes: 3 px gold light on a 5 px dark underlay
         const auto& strokes = ShapeStrokes();

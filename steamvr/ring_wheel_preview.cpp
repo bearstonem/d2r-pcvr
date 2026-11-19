@@ -337,19 +337,19 @@ int main(int argc, char** argv) {
         if (a == "--fallback") fallback = true;   // perf 1b finding 1: time the no-fxc path (manual: its compile is too slow for ctest)
         if (a == "--out") out = argv[i + 1]; else if (a == "--icons") iconDir = argv[i + 1]; else if (a == "--kit") kit = argv[i + 1];
         else if (a == "--frames") frames = argv[i + 1];   // the animation layers' frames (contact sheets: make-sheets.py)
-        else if (a == "--footer") footerOut = argv[i + 1];   // feedback 1 item 4: the footer at 5 and 6 tabs
-        else if (a == "--r7c") r7cOut = argv[i + 1];   // R7c: every class's tree marks and the rune band
+        else if (a == "--footer") footerOut = argv[i + 1];   // the footer at 5 and 6 tabs
+        else if (a == "--r7c") r7cOut = argv[i + 1];   // every class's tree marks and the rune band
         else if (a == "--sprites") sprites = argv[i + 1];   // stage 3a: <folder>\sprites.ssp (never the game folder)
         else if (a == "--match") matchOut = argv[i + 1];   // match spec: every class on real icons (needs --icons, a local cache)
         else if (a == "--orders") ordersOut = argv[i + 1];   // the Commander orders' row on the glyph chooser (3 classes, with and without an army)
         else if (a == "--t036") t036Out = argv[i + 1];   // the five layers, the center in thirds, the Quick cast page
         else if (a == "--tree") treeOut = argv[i + 1];   // the Sorceress page's painted tree icons at 50, 100 and 200%, circle and square, drawn; saved there
         else if (a == "--glyph") glyphOut = argv[i + 1];   // Glyph icon: the Glyphs page and the center's sigils painted, circle and square, at 50-300%; saved there
-        else if (a == "--badges") badgeOut = argv[i + 1];   // feedback 1 items 3 and 5: the button badges' 12 settings
+        else if (a == "--badges") badgeOut = argv[i + 1];   // the button badges' 12 settings
         else if (a == "--shot-ms") shotMs = argv[i + 1];   // Job B, by hand: where a screenshot's ms go (writes its PNGs there)
         else if (a == "--adapter") hardware = std::string(argv[i + 1]) == "hardware";   // with --shot-ms: the machine's GPU, not WARP
     }
-    // review-bug9 nit: --match judges real icons only; without --icons it used to run nothing and still say "all passed".
+    // --match judges real icons only; without --icons it used to run nothing and still say "all passed".
     if (!matchOut.empty() && iconDir.empty()) {
         std::printf("ring-wheel-preview: --match needs --icons <the d2r_vr_icons cache folder> (real skill icons); nothing run\n");
         return 2;
@@ -482,7 +482,7 @@ int main(int argc, char** argv) {
             return a;
         };
         Check(sigil(0) > .99f && sigil(.25f) > .4f && sigil(.25f) < .6f && sigil(.5f) == 0 && sigil(1) == 0,
-            "L1 R4 fix: a tree's sigil fades with the center's grow, gone by half of it");
+            "fix: a tree's sigil fades with the center's grow, gone by half of it");
     }
     // ---- Pure: when a frame composes (frame-budget section 2; item 3) ----
     {
@@ -499,7 +499,7 @@ int main(int argc, char** argv) {
         s.step.under = {rw::Kind::Seat, 3};
         Check(still.Want(s), "#14 Animation Off: a change composes at once");
         still.Done(false);
-        Check(still.Want(s) && still.busy == 1, "perf R4 #3: the ring was busy: the change stays due the next frame");
+        Check(still.Want(s) && still.busy == 1, "perf #3: the ring was busy: the change stays due the next frame");
         still.Done(true);
         Check(!still.Want(s), "#14 Animation Off: composed, then rests");
         s.wheelAlpha = .5f;   // a field Build reads, changed alone
@@ -547,7 +547,7 @@ int main(int argc, char** argv) {
         Check(r.Acquire(1) == 0 && r.skippedBusy == 1, "#14 the oldest done: its slot again");
         rw::CostWindow w;
         for (int i = 1; i <= 100; ++i) w.Add(i * .01);
-        Check(std::fabs(w.Mean() - .505) < 1e-6 && w.max == 1 && w.P95() >= .95 && w.P95() <= .97 && w.n == 100, "perf R4 #4: mean, max and p95 over every sample");
+        Check(std::fabs(w.Mean() - .505) < 1e-6 && w.max == 1 && w.P95() >= .95 && w.P95() <= .97 && w.n == 100, "perf #4: mean, max and p95 over every sample");
     }
     // ---- Text: the glyph atlas from upstream's fonts, clean strings, the blurb's shaped box ----
     rw::Fonts fonts;
@@ -788,7 +788,7 @@ int main(int argc, char** argv) {
             }
             (void)compose.TakeWindow();   // these pictures are not in the cost window the check below reads
         }
-        {   // (ring > Ring wheel > Layers > Tree icon): a Sorceress page with the tree marks painted, circle
+        {   // (Tree icon): a Sorceress page with the tree marks painted, circle
             // and square, at 50, 100 and 200%, then Drawn at 100% and Hidden, at the panel's real size. Checked every run; saved with --tree <folder>.
             // The squares: the built sheet's (tools/ring_tree_sheet.py) when it holds any; else a stand-in sheet of three flat-colored plates
             // (the proof of the drawing, not of the art: its file names say stand-in).
@@ -855,7 +855,7 @@ int main(int argc, char** argv) {
             }
             if (standIn) { ta::SetMask(0); ta::SetSheet(nullptr); }
         }
-        {   // Glyph icon (ring > Ring wheel > Center > Glyph icon): the Glyphs page's eight shapes and the main
+        {   // Glyph icon (Glyph icon): the Glyphs page's eight shapes and the main
             // page's center sigils (star, hand) drawn, painted circle at 50 / 100 / 200 / 300% and painted square. Checked every run; saved with
             // --glyph <folder>. The squares: the built sheet's (tools/ring_glyph_sheet.py) when it holds any; else a stand-in sheet of twelve
             // flat rust plates with a silver disc (the proof of the drawing, not of the art: its file names say stand-in).
@@ -1202,7 +1202,7 @@ int main(int argc, char** argv) {
         const auto w = compose.TakeWindow();
         std::printf("composes %u: cpu mean %.3f max %.3f p95 %.3f ms; WARP gpu %u samples mean %.3f ms (a software device: not the headset's number)\n",
             w.composes, w.cpuMean, w.cpuMax, w.cpuP95, w.gpuSamples, w.gpuMean);
-        Check(w.composes == 10 && (w.gpuSamples == 0 || w.gpuSamples == 10), "perf R4 #4: the window holds every compose");
+        Check(w.composes == 10 && (w.gpuSamples == 0 || w.gpuSamples == 10), "perf #4: the window holds every compose");
         {   // item 4: a screenshot's picture: right pixels straight after composes that may still be in flight
             const rw::ContentRect c{256, 128, 0, 0, 256};
             rw::Instance list[2];
@@ -1444,7 +1444,7 @@ int main(int argc, char** argv) {
                 seats.request.classId = cls;
                 worker.Want(seats.request);
                 std::shared_ptr<const rw::AtlasWorker::Built> built;
-                if (!PumpUntil(compose, [&] { built = worker.Current(compose); return built && built->request == seats.request; }, 60000)) { Check(false, std::string("R7 atlas for ") + classNames[cls]); continue; }
+                if (!PumpUntil(compose, [&] { built = worker.Current(compose); return built && built->request == seats.request; }, 60000)) { Check(false, std::string("atlas for ") + classNames[cls]); continue; }
                 auto cellOf = [&](int id) -> int { for (int i = 0; i < seats.layout.count; ++i) if (seats.layout.seats[size_t(i)].id == id) return built->icons.cellOf[size_t(i)]; return -1; };
                 auto known = [&](int id) { return cellOf(id) >= 0; };
                 auto nameOf = [&](int id) { return "Skill " + std::to_string(id); };
@@ -1455,12 +1455,12 @@ int main(int argc, char** argv) {
                         sets[0][0] = k.first; sets[0][2] = k.first + 4; sets[0][5] = k.first + 9;
                         rw::FillGlyphs(v, sets, 0, nameOf, cellOf);
                     } else {
-                        if (!framevr::spellmotion::HasMotions(cls)) { Check(cls == 7, "R7 only the Warlock has no Gestures page"); continue; }
+                        if (!framevr::spellmotion::HasMotions(cls)) { Check(cls == 7, "only the Warlock has no Gestures page"); continue; }
                         rw::FillGestures(v, cls, 0b101, nameOf, cellOf, known);   // cards 1 and 3 off
                         const auto page = framevr::spellmotion::PageOf(cls);
                         bool order = v.count == page.count;
                         for (int i = 0; i < v.count && order; ++i) order = framevr::spellmotion::Family(page.skills[i]) || v.skill[size_t(i)] == page.skills[i];
-                        Check(order, std::string("R7 ") + classNames[cls] + ": the Gestures page in upstream's card order");
+                        Check(order, std::string("") + classNames[cls] + ": the Gestures page in upstream's card order");
                     }
                     rw::Scene s; s.open = true; s.anim = rw::PresetAnim(rw::Preset::Off); s.tMs = 2000;
                     s.atlasPct = built->icons.scalePct; s.metrics = &built->metrics;
@@ -1498,7 +1498,7 @@ int main(int argc, char** argv) {
                     auto sets = framevr::interaction::NoGlyphs;
                     sets[0][0] = 54; sets[1][1] = 40;
                     rw::FillGlyphs(v, sets, 1, [](int id) { return std::string(id == 54 ? "Teleport" : "Frozen Armor"); }, cellOf);
-                    Check(v.follows[0] && v.skill[0] == 54 && v.line[0] == "Casts the right hand's Teleport" && !v.follows[1] && v.skill[1] == 40, "R7 the left hand's shape follows the right's (GlyphFollows)");
+                    Check(v.follows[0] && v.skill[0] == 54 && v.line[0] == "Casts the right hand's Teleport" && !v.follows[1] && v.skill[1] == 40, "the left hand's shape follows the right's (GlyphFollows)");
                     rw::Scene s; s.open = true; s.anim = rw::PresetAnim(rw::Preset::Off); s.atlasPct = built->icons.scalePct; s.metrics = &built->metrics;
                     s.step.under = {rw::Kind::Hand}; s.step.centerGrown = true;
                     rw::Instance list[rw::MaxDraw];
@@ -1551,7 +1551,7 @@ int main(int argc, char** argv) {
                         Check(Bright(px, c.w, c, rw::CanvasCx - 200, rw::CanvasCy - 335, rw::CanvasCx + 200, rw::CanvasCy - 290) > 60, "quick-cast-chooser: its title on the top arc");
                         { rw::Scene q2 = qm; q2.chooseLead = nullptr; rw::Scene q3 = qm; q3.chooseBack = nullptr; Check(!(rw::KeyOf(qm) == rw::KeyOf(q2)) && !(rw::KeyOf(qm) == rw::KeyOf(q3)), "quick-cast-chooser: its own words redraw (the draw key)"); }
                         if (!out.empty()) Save(out, "quick-cast-chooser", px, c.w, c.h);
-                        // Review (exact items): a kind's page: Rejuvenation (Best), then the Full and the plain one carried
+                        // Exact items: a kind's page: Rejuvenation (Best), then the Full and the plain one carried
                         const int kids[3] = {(2 << 28) | 3, (1 << 28) | 0x6c7672, (1 << 28) | 0x737672};
                         rw::PageView kv;
                         rw::FillQuickKind(kv, kids, 3, 3, "Rejuvenation", [&](int id) { return id == kids[0] ? std::string("Rejuvenation") : id == kids[1] ? std::string("Full Rejuvenation Potion") : std::string("Rejuvenation Potion"); },
@@ -1597,7 +1597,7 @@ int main(int argc, char** argv) {
                     h.topCount = glyphCount.c_str(); h.bottomCount = count.c_str();
                     for (int t = 0; t < rw::Trees; ++t) h.treeNames[size_t(t)] = SorceressTrees[t];
                     n = rw::Build(h, list);
-                    Check(count == "12 of 14 on", "R7 the Gestures half's count (" + count + ")");
+                    Check(count == "12 of 14 on", "the Gestures half's count (" + count + ")");
                     Check(DrawWait(compose, f.target.Get(), c, list, n) == rw::Compose::Result::Composed, "center-gestures-pointed: composed");
                     px = f.Read(c.w, c.h);
                     Check(Bright(px, c.w, c, rw::CanvasCx - 110, rw::CanvasCy + 44, rw::CanvasCx + 110, rw::CanvasCy + 96) > 150, "center-gestures-pointed: the count and Trigger to open under the label");
@@ -1625,9 +1625,9 @@ int main(int argc, char** argv) {
                     rw::FillGlyphs(g, sets, 0, nameOf, cellOf);
                     pageShot("glyphs-rest-sorceress", g, {}, false);
                     pageShot("glyph-no-skill-pointed", g, {rw::Kind::Seat, 1}, true);
-                    Check(g.line[1] == "No skill yet", "R7 a shape with no skill says No skill yet");
+                    Check(g.line[1] == "No skill yet", "a shape with no skill says No skill yet");
                     rw::FillGestures(m, cls, 0b101, nameOf, cellOf, known);
-                    Check(m.count == 14, "R7 the Sorceress: 14 cards");
+                    Check(m.count == 14, "the Sorceress: 14 cards");
                     pageShot("gestures-rest-sorceress", m, {}, false);
                 }
                 if (cls == 7) {   // the Warlock: no Gestures; its chooser still has Back / Clear glyph
@@ -1646,7 +1646,7 @@ int main(int argc, char** argv) {
                 }
             }
         }
-        // each animation layer's frames (contact sheets per layer, L5 #6). The Sorceress (fire, lightning, cold trees) and
+        // each animation layer's frames (contact sheets per layer, #6). The Sorceress (fire, lightning, cold trees) and
         // the Paladin (Zeal 106, Charge 107); synthetic icons. Checks: the effects draw outside the icon, the Off glow is still.
         if (!real) for (int cls : {1, 3}) {
             const auto& k = framevr::skillcategories::Classes[size_t(cls)];
@@ -1656,7 +1656,7 @@ int main(int argc, char** argv) {
             seats.request.classId = cls; orbs.request.classId = cls;
             worker.Want(seats.request);
             std::shared_ptr<const rw::AtlasWorker::Built> built;
-            if (!PumpUntil(compose, [&] { built = worker.Current(compose); return built && built->request == seats.request; }, 60000)) { Check(false, "R8 atlas"); continue; }
+            if (!PumpUntil(compose, [&] { built = worker.Current(compose); return built && built->request == seats.request; }, 60000)) { Check(false, "atlas"); continue; }
             std::vector<uint8_t> el(size_t(seats.layout.count)); std::vector<int8_t> ci(size_t(seats.layout.count), -1); int nc = 0;
             for (int i = 0; i < seats.layout.count; ++i) { el[size_t(i)] = uint8_t(rw::ElementOf(cls, seats.layout.seats[size_t(i)].tree)); if (el[size_t(i)] == uint8_t(rw::Element::Light)) ci[size_t(i)] = int8_t(nc++); }
             const auto c = rw::Content(rw::FooterWidth(false, 5), 150);
@@ -1668,12 +1668,12 @@ int main(int argc, char** argv) {
             auto draw = [&](const rw::Scene& s) {
                 static rw::Instance list[rw::MaxDraw];
                 const int n = rw::Build(s, list);
-                Check(DrawWait(compose, f.target.Get(), c, list, n) == rw::Compose::Result::Composed, "R8 composed");
+                Check(DrawWait(compose, f.target.Get(), c, list, n) == rw::Compose::Result::Composed, "composed");
                 return f.Read(c.w, c.h);
             };
             auto seatAt = [&](const Seats& st, int i, float& x, float& y) { x = rw::CanvasX + st.layout.seats[size_t(i)].x; y = rw::CanvasY + st.layout.seats[size_t(i)].y; };
             const std::filesystem::path fr = frames;
-            if (cls == 1) {   // feedback 1 item 4: every footer label fits its tab at its row's one size (22 down to 17 px); the footer at 5 and 6 tabs
+            if (cls == 1) {   // every footer label fits its tab at its row's one size (22 down to 17 px); the footer at 5 and 6 tabs
                 using P = framevr::interaction::MenuPage;
                 std::printf("footer font: %s\n", built->metrics.georgia ? "Georgia" : "Cinzel (Georgia missing)");
                 int fits = 0, labels = 0; std::string sizes;
@@ -1717,7 +1717,7 @@ int main(int argc, char** argv) {
                         auto s = base(seats); s.elements = one.data(); s.anim.floats = false; s.tMs = 1000 + t * 400;
                         const auto px = draw(s);
                         if (t == 0) first = px;
-                        if (t == 3) Check(px != first, "R8 glow " + std::to_string(e) + ": it moves");
+                        if (t == 3) Check(px != first, "glow " + std::to_string(e) + ": it moves");
                         if (!fr.empty()) SaveCrop(fr, "glow-" + std::to_string(e) + "-" + std::to_string(t), px, c, sx, sy, 130);
                     }
                     auto s = base(seats); s.elements = one.data(); s.anim = rw::PresetAnim(rw::Preset::Off);
@@ -1726,7 +1726,7 @@ int main(int argc, char** argv) {
                     int rimA = 0;   // stage 1: the glow's brightest place round the rim (poison's blobs sit at four places)
                     for (int k = 0; k < 24; ++k)   // stage 1b: the light (the kit's lighter layers are additive: rgb, no alpha)
                         for (int ch = 0; ch < 4; ++ch) rimA = std::max<int>(rimA, At(a, c.w, sx + rw::IconPx * .6f * std::cos(k * rw::Tau / 24), sy + rw::IconPx * .6f * std::sin(k * rw::Tau / 24), c, ch));
-                    Check(a == b && (e == int(rw::Element::Phys) || rimA > 8)   /* stage 1: the fitted levels (arcane is the kit's dimmest) */, "R8 glow " + std::to_string(e) + " Off: a steady rim, the same each frame");
+                    Check(a == b && (e == int(rw::Element::Phys) || rimA > 8)   /* stage 1: the fitted levels (arcane is the kit's dimmest) */, "glow " + std::to_string(e) + " Off: a steady rim, the same each frame");
                 }
                 // Hover effects: the pointed icon, one per element, 6 frames over 2.2 s.
                 for (int e = 0; e < int(rw::Element::Count); ++e) {
@@ -1738,7 +1738,7 @@ int main(int argc, char** argv) {
                         outside += Bright(px, c.w, c, sx - 90, sy - 90, sx + 90, sy + 90) - Bright(px, c.w, c, sx - 40, sy - 40, sx + 40, sy + 40);
                         if (!fr.empty()) SaveCrop(fr, "hover-" + std::to_string(e) + "-" + std::to_string(t), px, c, sx, sy, 220);
                     }
-                    Check(outside > 0 || e == 4 || e == 7, "R8 hover " + std::to_string(e) + ": its effect reaches past the icon");
+                    Check(outside > 0 || e == 4 || e == 7, "hover " + std::to_string(e) + ": its effect reaches past the icon");
                 }
                 // Lightning crawl over a pointed lightning icon: 6 frames 70 ms apart; at rest (All effects, 8 s) the bursts.
                 int light = -1; for (int i = 0; i < seats.layout.count; ++i) if (ci[size_t(i)] >= 0) { light = i; break; }
@@ -1759,7 +1759,7 @@ int main(int argc, char** argv) {
                     rw::FightOut o = t < 5 ? ff.Step(times[t], true, t == 0 ? 80.f : 80.f, true, 1) : rw::FightOut{1, .15f, true};
                     auto s = base(seats); s.anim = rw::PresetAnim(rw::Preset::Off); s.step.under = {rw::Kind::Seat, seat}; s.fight = o.dim; s.wheelAlpha = o.wheel;
                     const auto px = draw(s);
-                    if (t == 2) Check(At(px, c.w, sx, sy, c, 3) > 200, "R8 fight: the pointed icon stays full");
+                    if (t == 2) Check(At(px, c.w, sx, sy, c, 3) > 200, "fight: the pointed icon stays full");
                     if (!fr.empty()) SaveCrop(fr, "fight-0-" + std::to_string(t), px, c, rw::CanvasCx, rw::CanvasCy, 720);
                 }
                 // Tree burst (Tree orbs): tree 0 opened, 6 frames over 400 ms.
@@ -1784,7 +1784,7 @@ int main(int argc, char** argv) {
                 }
             }
         }
-        // R7c: each class's tree marks (the kit's glyphs) and the center's rune band, Trees shown and Tree
+        // each class's tree marks (the kit's glyphs) and the center's rune band, Trees shown and Tree
         // orbs, at 150%; every rune of the rest band read back against ringwheel::RuneOf (the shader's hash is the kit's).
         if (!real) {
             const char* const classNames[8] = {"amazon", "sorceress", "necromancer", "paladin", "barbarian", "druid", "assassin", "warlock"};
@@ -1798,7 +1798,7 @@ int main(int argc, char** argv) {
                 shown.request.classId = cls;
                 worker.Want(shown.request);
                 std::shared_ptr<const rw::AtlasWorker::Built> built;
-                if (!PumpUntil(compose, [&] { built = worker.Current(compose); return built && built->request == shown.request; }, 60000)) { Check(false, std::string("R7c atlas for ") + classNames[cls]); continue; }
+                if (!PumpUntil(compose, [&] { built = worker.Current(compose); return built && built->request == shown.request; }, 60000)) { Check(false, std::string("atlas for ") + classNames[cls]); continue; }
                 const auto c = rw::Content(rw::FooterWidth(false, 5), 150);
                 std::array<const char*, rw::Trees> names{};
                 for (int t = 0; t < rw::Trees; ++t) names[size_t(t)] = framevr::skillcategories::Name(cls, rw::PageAt(cls, t) + 1);
@@ -1811,12 +1811,12 @@ int main(int argc, char** argv) {
                     static rw::Instance list[rw::MaxDraw];
                     const int n = rw::Build(s, list);
                     const std::string name = std::string(classNames[cls]) + (shot == 0 ? "-shown" : shot == 1 ? "-orbs" : "-center-grown-glyphs-pointed");
-                    Check(DrawWait(compose, f.target.Get(), c, list, n) == rw::Compose::Result::Composed, "R7c " + name + " composed");
+                    Check(DrawWait(compose, f.target.Get(), c, list, n) == rw::Compose::Result::Composed, "" + name + " composed");
                     const auto px = f.Read(c.w, c.h);
                     if (shot < 2) for (int t = 0; t < rw::Trees; ++t) {   // the glyph lights the mark's inside (gold light over the dark disc)
                         const float r = shot ? 34.f : 12.f, x = rw::CanvasCx + 128 * std::cos(st.layout.dir[size_t(t)]), y = rw::CanvasCy + 128 * std::sin(st.layout.dir[size_t(t)]);
                         const int lit = Bright(px, c.w, c, x - .8f * r, y - .8f * r, x + .8f * r, y + .8f * r);
-                        Check(lit > (shot ? 60 : 15), "R7c " + name + ": tree " + std::to_string(t) + "'s glyph drawn (" + std::to_string(lit) + " px)");
+                        Check(lit > (shot ? 60 : 15), "" + name + ": tree " + std::to_string(t) + "'s glyph drawn (" + std::to_string(lit) + " px)");
                     }
                     if (shot == 0) for (int i = 0; i < rw::RuneCount(rw::CenterR); ++i) {   // each rune's shape (TS4 8 px, 2 px strokes): only the stem lights (0, 2.5); then only the caret (-0.625, -2); else Z
                         const float ac = i * rw::Tau / rw::RuneCount(rw::CenterR), th = ac + rw::Pi / 2, rr = rw::CenterR - 6.5f;
@@ -1834,7 +1834,7 @@ int main(int argc, char** argv) {
                             bottom += At(px, c.w, rw::CanvasCx + rr * std::cos(a), rw::CanvasCy + rr * std::sin(a), c, 0);
                             top += At(px, c.w, rw::CanvasCx + rr * std::cos(-a), rw::CanvasCy + rr * std::sin(-a), c, 0);
                         }
-                        Check(top > 0 && bottom > .35 * top && bottom < .75 * top, "R7c: Glyphs pointed, the bottom half's runes dim (" + std::to_string(int(100 * bottom / std::max(top, 1.0))) + "% of the top's)");
+                        Check(top > 0 && bottom > .35 * top && bottom < .75 * top, "Glyphs pointed, the bottom half's runes dim (" + std::to_string(int(100 * bottom / std::max(top, 1.0))) + "% of the top's)");
                     }
                     if (!r7cOut.empty()) {
                         Save(r7cOut, name, px, c.w, c.h);
@@ -1843,7 +1843,7 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            Check(runeRead == 8 * 36 && runeMiss == 0, "R7c: every rest rune drawn as ringwheel::RuneOf says (" + std::to_string(runeRead - runeMiss) + " of " + std::to_string(runeRead) + ")");
+            Check(runeRead == 8 * 36 && runeMiss == 0, "every rest rune drawn as ringwheel::RuneOf says (" + std::to_string(runeRead - runeMiss) + " of " + std::to_string(runeRead) + ")");
         }
         // match spec (sections 6 and 7; B1: judged on the real skill icons, --icons: a local icon cache in
         // upstream's format, never in git). Stage 1: every class with its per-skill rest glow, seated where the design kit seats
@@ -2069,7 +2069,7 @@ int main(int argc, char** argv) {
             }
             Check(s1Bad == 0, "every class and tree's rest band light within 0.70-1.10 x the reference's (" + std::to_string(s1Bad) + " over)");
         }
-        // Feedback 1 items 3 and 5: the bound-button badges on WARP, Sorceress Trees shown at 100% and 150% with
+        // the bound-button badges on WARP, Sorceress Trees shown at 100% and 150% with
         // the kit's stand-in binds (qbauto: A B RT gA gB X Y LT gX gY spread over the trees). Each kind's pixels against the
         // kit's colors (disc #4A3820 to #14110D, coin #FFF0C4 / #E8C77E / #C9A25E, rim #E8C77E, a dark halo), the coin's letter
         // drawn without the dark outline (as thick as the disc's same letter), every size's widest letter 2 px inside its badge,

@@ -635,7 +635,7 @@ inline DrawList Draw(const Plane& p, Mode m, const Entries& es, int pick, const 
 constexpr float ToggleMiddle = .05f;
 struct FrameIn {
     double nowMs = 0;
-    bool on = false;            // the radial runs (Enabled())
+    bool on = false;            // the radial runs (Enabled)
     int bound = -1;             // the slot the radial is on (-1: none)
     int held = -1, hand = 0;    // upstream's held slot this frame (handOutput.slot) and the bound slot's hand (0 right, 1 left)
     bool down = false;          // the bound button physically down (the raw trigger or face button)

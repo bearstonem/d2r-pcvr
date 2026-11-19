@@ -427,8 +427,8 @@ float4 HoverBolt(float2 p, float L, float t, float seed) {
     }
     return acc;
 }
-// R7c: a tree mark's glyph (kit glyph), in units of its size r, canvas y down. The fills (flame, drop,
-// bolt) are the kit's paths as polygons (its beziers sampled; the flame is the design's tree-mark flame, R7c answer 2); the rest strokes max(2, 0.12 r) px wide with round ends.
+// a tree mark's glyph (kit glyph), in units of its size r, canvas y down. The fills (flame, drop,
+// bolt) are the kit's paths as polygons (its beziers sampled; the flame is the design's tree-mark flame, answer 2); the rest strokes max(2, 0.12 r) px wide with round ends.
 static const float2 GlyphPoly[28] = {
     float2(-0.309, 0.666), float2(-0.511, 0.467), float2(-0.600, 0.180), float2(-0.572, -0.168), float2(-0.420, -0.550),
     float2(-0.120, -0.180), float2(0.180, -0.900), float2(0.402, -0.549), float2(0.523, -0.177), float2(0.514, 0.185), float2(0.349, 0.504), float2(0.000, 0.750),   // fire (the tree-mark flame)
@@ -469,7 +469,7 @@ float TreeGlyph(uint kind, float2 p, float r, float fw) {
     else sd = min(Seg(q, float2(-0.55, 0.55), float2(0.55, -0.55)), Seg(q, float2(-0.15, -0.55), float2(-0.55, -0.15))) - lw;
     return saturate(0.5 - sd * r / fw);
 }
-// R7c: the rune band (kit runeRing): n runes from angle 0 (canvas +x), each turned by its angle + 90 deg, 8 px tall in 2 px
+// the rune band (kit runeRing): n runes from angle 0 (canvas +x), each turned by its angle + 90 deg, 8 px tall in 2 px
 // strokes (TS4), one of three by the kit's hash of (i x 31 + seed) (ringwheel::RuneOf): a stem and slash, a caret, a Z.
 // Static. On R - 6.5: the middle of the gap between our rings (they stroke inward from their radius: 78-80 and 67-69 at
 // rest; the kit centers its strokes, so its r - 5.5 is the same middle).
@@ -488,7 +488,7 @@ float Runes(float2 p, float R, uint n, uint seed, float fw) {
     else m = min(min(Seg(q, float2(-2.5, -4), float2(2.5, -4)), Seg(q, float2(2.5, -4), float2(-2.5, 4))), Seg(q, float2(-2.5, 4), float2(2.5, 4)));
     return saturate((1.0 - m) / fw + 0.5);
 }
-// Feedback 1 item 3: a bound-button badge (kit drawQuestBadge), premultiplied, in gamma colors. kind 0 a dark iron disc,
+// a bound-button badge (kit drawQuestBadge), premultiplied, in gamma colors. kind 0 a dark iron disc,
 // 1 the grip layer's gold coin, 2 the trigger's dark rounded square (corner cr); each with a 2 px gold light rim inside its
 // edge, over a 7 px dark halo (70% at the body's radius to 0). The fill is the kit's radial gradient from a 1 px circle at
 // (-0.4 Rb, -0.4 Rb) to the body circle: t solves |p - c(t)| = r(t) (canvas two-circle gradient), clamped 0-1.
@@ -639,15 +639,15 @@ float4 PS(V i) : SV_Target {
         float2 f = Frame((uint)(i.shape.y + 0.5), i.local, i.uv.x, i.uv.y, fw);
         float3 col = lerp(i.tint.rgb, lerp(i.tint.rgb, float3(1, 0.97, 0.88), 0.55), f.y);
         c = float4(col, 1) * f.x;
-    } else if (recipe == 9) {   // R7c the rune band: uv = (the hash seed, the dimmed half: 1 top, 2 bottom)
+    } else if (recipe == 9) {   // the rune band: uv = (the hash seed, the dimmed half: 1 top, 2 bottom)
         // 4 + third + 3 x percent: the thirds, that third full and the others at the percent
         uint dim = (uint)(i.uv.y + 0.5);
         float k = (dim == 1 && i.local.y < 0) || (dim == 2 && i.local.y > 0) ? 0.55 : 1;
         if (dim >= 4) k = ThirdOfPoint(i.local) == (dim - 4) % 3 ? 1 : ((dim - 4) / 3) / 100.0;
         c = float4(i.tint.rgb, 1) * (Runes(i.local, R, (uint)(i.shape.y + 0.5), (uint)(i.uv.x + 0.5), fw) * k);
-    } else if (recipe == 10) {   // R7c a tree mark's glyph: param = its kind, u0 = its size r
+    } else if (recipe == 10) {   // a tree mark's glyph: param = its kind, u0 = its size r
         c = float4(i.tint.rgb, 1) * TreeGlyph((uint)(i.shape.y + 0.5), i.local, i.shape.w, fw);
-    } else if (recipe == 12) {   // feedback 1 item 3 a bound-button badge: param = its kind, uv = (body radius, the square's corner)
+    } else if (recipe == 12) {   // a bound-button badge: param = its kind, uv = (body radius, the square's corner)
         c = Badge(i.local, d, i.uv.x, i.uv.y, (uint)(i.shape.y + 0.5), fw);
     } else if (recipe == 4) {
         float2 g = gGlyphs.SampleGrad(gLinear, i.uv, dx, dy).rg;   // fill, outline

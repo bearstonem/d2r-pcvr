@@ -91,6 +91,10 @@ public:
 // the GPU. It is also given up at once whenever the runtime is short of swapchains (transport's swapchainsShort: the native
 // menus' panel or the shared panels could not get one), the way upstream gives its map surface up, and stays away while short.
 // Pure: the caller does the OpenXR work and says so (Created / Released / Refused).
+// What the Layer door asks ChainLife::Step: the wheel is open on a page the ring draws (placed, a quad to replace, and the page
+// itself), never "the ring is ready": a refused swapchain makes the ring not ready, which must not read as a shut wheel (that
+// would let a refused make be tried again every other frame while the wheel stays open).
+inline bool ChainWanted(bool wheelOpen, bool placed, bool hasQuad, bool wheelOnRingPage) { return wheelOpen && placed && hasQuad && wheelOnRingPage; }
 class ChainLife {
 public:
     static constexpr double LingerMs = 5000;

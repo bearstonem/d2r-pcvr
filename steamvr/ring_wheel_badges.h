@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (feedback 1 items 3 and 5; build-plan L4 rows 16-18): the bound-button badge beside each skill, as
+// Ring skill menu (rows 16-18): the bound-button badge beside each skill, as
 // plain data. Pure and Windows-free (ring-wheel-test). One badge per bound slot, in the player's button style (the design notes
 // item 3; the kit's badges=quest, drawQuestBadge): a dark disc with the face letter (A / B
 // right, X / Y left on Quest), a gold coin with a dark letter for the grip layer, a dark rounded square R / L for the
@@ -50,7 +50,7 @@ struct LetterLayoutHold {
         return known[h];
     }
 };
-// The badge center's distance from its icon's center (build-plan L4 row 17), R = size / 2: Outside touches the outline
+// The badge center's distance from its icon's center (row 17), R = size / 2: Outside touches the outline
 // from outside, On outline straddles it a little outward (the kit's r x 0.98 + 4), Inside touches it from inside, Center 0.
 inline float BadgeDist(const BadgeLook& k) {
     const float R = k.sizePx / 2.f, r = IconPx / 2;

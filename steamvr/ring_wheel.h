@@ -229,12 +229,12 @@ struct Settings {
     int holdMs = 300;           // P9: the least time between tree switches
     float hysteresisPx = 6;     // P5
     int lockoutMs = 250;        // after a page change
-    float fadeMs = 160;         // L2: a tree's fade
+    float fadeMs = 160;         // a tree's fade
     bool developer = false, footerFull = false;   // P7 Full width
     bool hasMotions = true;     // spellmotion::HasMotions: false (the Warlock) = one Glyphs center
     int growMs = 150;           // P10: the center grows after the laser is this long inside it (a sweep through never grows it)
     int blurbMs = 100;          // P11: a skill held this long shows its blurb (its highlight is at once)
-    bool quickCast = false;     // R6Q: seats take slot presses (QuickCast below); the trigger's release on a seat picks nothing
+    bool quickCast = false;     // seats take slot presses (QuickCast below); the trigger's release on a seat picks nothing
     bool thirds = false;        // the center in thirds (the main page); false: the two halves (the glyph chooser's Back / Clear)
     float thirdGrowPct = ThirdGrowDefault;   // the pointed third's reach past the center's edge (Center > Pointed third grows)
 };
@@ -284,7 +284,7 @@ inline Preset PresetOf(const Anim& a) {
 // ---- the animation layers ----
 // A skill's element for its glow and effects. Until trace T1 proves the Skills row's element column, by its tree:
 // each class's three trees (skillcategories order) mapped by the design's style guide; shelf skills are steel.
-// position: the seat's tree position on the wheel (Seat::tree, TreeOrder), turned into its skillcategories page here (R7c:
+// position: the seat's tree position on the wheel (Seat::tree, TreeOrder), turned into its skillcategories page here (
 // read the position as the page, so Amazon, Paladin, Barbarian and Druid glowed with another tree's element).
 enum class Element : uint8_t { Fire, Cold, Light, Poison, Arcane, Holy, Aura, Shadow, Phys, Count };
 inline Element ElementOf(int skillClass, int position) {
@@ -302,7 +302,7 @@ inline Element ElementOf(int skillClass, int position) {
     if (skillClass < 0 || skillClass >= 8 || position < 0 || position >= Trees) return E::Phys;
     return table[skillClass][PageAt(skillClass, position)];
 }
-// R7c: each tree's mark glyph, the kit's sigil map (skills.js / skills-more.js trees[i].sigil,
+// each tree's mark glyph, the kit's sigil map (skills.js / skills-more.js trees[i].sigil,
 // page i): flame = Fire (the design's two-tongue flame, TS1), bolt = Light, flake = Cold, hammer = Holy, sun and gear = Aura,
 // shield = Arcane, eye = Shadow, fist = Phys, venom = Bone (TS3). The first nine share Element's numbers (the kit's glyph
 // kinds); drawn by the compose pass's RecipeTreeGlyph. position as ElementOf; None = no glyph.
@@ -323,7 +323,7 @@ inline MarkGlyph TreeGlyphOf(int skillClass, int position) {
     return table[skillClass][PageAt(skillClass, position)];
 }
 // What one icon shows this frame, from the Animation rows and its state. glowMoves false = the glow's frozen
-// frame (a steady colored rim, L4 row 3 Off); crawl: the lightning face crawl's strength 0-1.
+// frame (a steady colored rim, row 3 Off); crawl: the lightning face crawl's strength 0-1.
 struct Layers { bool floats = false, glowMoves = false, hoverFx = false, faceFx = false; float crawl = 0; };
 // crawlIndex / crawlCount: this icon among the lightning icons (the stagger); -1 for a non-lightning icon.
 inline Layers LayersFor(const Anim& a, bool pointed, int crawlIndex, int crawlCount, double tMs) {
@@ -729,7 +729,7 @@ inline interaction::Request GlyphDrawRequest(const interaction::Snapshot& s, int
     return r;
 }
 
-// ---- R6Q: quick cast and hold to assign ----
+// ---- quick cast and hold to assign ----
 // Any of the ten slots (either hand: trigger, primary, secondary, grip + primary, grip + secondary) pressed with the laser
 // on a seat: released under the tap limit = QuickCast; held to full = Assign at once; released
 // between = NoChange; after full a release does nothing. The seat is the one under the laser 80 ms before the press (a
@@ -767,7 +767,7 @@ struct QuickOut {
     int seat = -1, hand = -1, slot = -1, replaced = -1;
     double heldMs = 0;
     float holdFrac = 0;              // the hold ring's fill: 0 until the tap limit, then to 1 at full
-    int holding = -1;                // the seat a hold runs on (stays at 100%, L5 Q5), -1 none
+    int holding = -1;                // the seat a hold runs on (stays at 100%, Q5), -1 none
     bool assigned = false;           // that hold reached full and assigned
 };
 // #3: the center's words under a hold, skills and the Glyphs half alike. A bound button says what it loses, always on
@@ -977,7 +977,7 @@ inline int TicksCrossed(float before, float now) {
     return n;
 }
 
-// ---- R6Q: a quick cast waiting for the wheel to shut, then started through upstream's glyph press ----
+// ---- a quick cast waiting for the wheel to shut, then started through upstream's glyph press ----
 // The same steps as transport's recognised glyph (its stroke path): the skill known and available, the press free, then
 // glyphcast::Dispatch (its hand slot, else the right trigger's record, parked there first). `CastT` is glyphcast::Cast in
 // the game and a fake in the tests; nothing here touches a binding (a cast never changes a button's skill).

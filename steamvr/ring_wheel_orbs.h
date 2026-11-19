@@ -1,5 +1,5 @@
 #pragma once
-// Ring skill menu (build-plan L1b "Tree orbs: open-tree state", Boss decision on Q1): the Tree orbs layout's
+// Ring skill menu (b "Tree orbs: open-tree state", Boss decision on Q1): the Tree orbs layout's
 // orbs, their closed names and the center while a tree is open, as plain data (kit wheel.js drawOrb, runeRing, the layout e
 // readout). Pure and Windows-free, like ring_wheel_draw.h, and drawn only with its recipes (disc, ring, rune band, tree glyph,
 // the glyph atlas): no new shader code. Every function draws nothing unless the wheel is open in the Tree orbs layout, so

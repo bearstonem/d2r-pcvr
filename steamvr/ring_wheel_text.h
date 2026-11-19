@@ -18,7 +18,7 @@ namespace framevr::ringwheel::text {
 // Georgia: the installed Windows font, read at run time from the system
 // font collection (no font file shipped; not OFL); Cinzel stands in when it is missing (Metrics::georgia false).
 enum Face { Cinzel, AlegreyaMedium, AlegreyaBold, Faces, Georgia = Faces, AllFaces };
-// L1 / L3 sizes (critique-vr-ux floors: 22 px running text, 24 px names). The footer: Georgia semibold at every whole px
+// / sizes (critique-vr-ux floors: 22 px running text, 24 px names). The footer: Georgia semibold at every whole px
 // from 22 (the floor) down to 17 (upstream's six tabs, the named exception), then 16 and 15 (the 1.0 deg label floor at
 // 0.9 m) only when a row keeps no margin at 17; one size per row; no outline,
 // as upstream's GDI text. The footer sizes are last and in order (FooterStyleOf).

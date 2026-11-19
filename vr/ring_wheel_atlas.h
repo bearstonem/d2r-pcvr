@@ -7,7 +7,7 @@
 //    the text layout measures with (steamvr/ring_wheel_text.h),
 //  - the icon atlas: the player's own skill icons from upstream's local icon cache (interaction::icons, decoded on its own
 //    worker), each pre-scaled to its cell's art, premultiplied, 4 mips (2 x 2 box in linear light). A missing icon is
-//    listed, and its seat draws L1's initials disc.
+//    listed, and its seat draws 's initials disc.
 // Each image goes to the GPU through Compose::Stage; the frame thread's Compose::Pump copies it in 1 MB slices.
 // A build runs once per change of class, seats or render scale (Want with the same request: nothing).
 #include "ring_wheel_compose.h"

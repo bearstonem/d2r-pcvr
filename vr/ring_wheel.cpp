@@ -27,7 +27,7 @@
 //    buttons, binds it through upstream's BindSkill. Every other page (Equipment, Developer, the editors) and the time before the
 //    ring is ready: upstream's picture and hit test at the ring's pose. The Map page: exactly upstream's.
 //
-// Doors (steamvr/ring_wheel_host.h): transport calls each only while host::Active() (the setting is On, or the ring still has state
+// Doors (steamvr/ring_wheel_host.h): transport calls each only while host::Active (the setting is On, or the ring still has state
 // to drain after an Off edge); with the Ring skill menu Off, upstream's wheel runs as it always did.
 //  - Pointer    transport Input, after MotionPointer: the spawn pose, the ray, the hit (ring: canvas px; else upstream's cell);
 //               pointing with either hand (ring_wheel_pointing.h): the owner gets upstream's beam, dot, hover and hit.
@@ -103,7 +103,7 @@ rw::Placer placer;
 bool placed = false;        // this frame the ring placed the panel (the layer seam sizes the quad)
 float placedWidth = .8f;
 ia::Pose placedPose{};
-// Feedback 1 item 2: grip to move (steamvr/ring_wheel_grab.h, upstream's panels::Grab). The pointing hand's grip, trigger and
+// grip to move (steamvr/ring_wheel_grab.h, upstream's panels::Grab). The pointing hand's grip, trigger and
 // face buttons come from FilterWheelInput (one frame late: no new upstream line); its ray's hit from the last Pointer.
 rw::RingGrab ringGrab;
 bool gripIn[2] = {}, triggerIn[2] = {}, faceIn[2] = {};
@@ -158,6 +158,7 @@ uint64_t blurbKey = ~0ull;
 ULONGLONG acquireToldAt = 0;
 double acquireMax = 0;
 bool ringActive = false;     // this frame the ring drew and hit-tests (the Spells page, ready)
+bool wheelOnRingPage = false;   // this frame the wheel is open on a page the ring draws (ready or not): what the swapchain's life follows
 bool hit = false; float hitX = 0, hitY = 0;   // the pointer's hit, canvas px
 bool held[2][3] = {};        // the wheel hand's trigger, primary, secondary last frame (press edges)
 rw::ComposePolicy policy;
@@ -170,7 +171,7 @@ struct Bind { bool queued = false; int index = -1, skill = -1, owner = -1, slot 
               int was = -1, wasOwner = -1, oldSlot = -1; const char* labName = nullptr; };
 uint64_t bindSequence = 0;
 rw::ReplyWait bindWait, glyphWait;   // the reply each sent request waits for (1.5 s at most)
-// R6Q: the quick cast state machine, a cast waiting for the wheel to shut, feedback pulses (hand, when).
+// the quick cast state machine, a cast waiting for the wheel to shut, feedback pulses (hand, when).
 rw::QuickCast quick;
 bool quickHeld[2][3] = {};   // each hand's trigger, primary, secondary last frame
 struct PendingCast { bool on = false; int skill = -1, owner = -1, hand = 0, slot = -1, layout = 0; double held = 0; ULONGLONG since = 0; };
@@ -265,7 +266,7 @@ bool quickMovePick = false;
 bool quickClock = false;
 int PlaceNo(int place) { return qr::PlaceNumber(place, quickClock); }
 bool QuickPlaceFilled(int place) { const auto qv = framevr::quickradial::link::Read(); return place >= 0 && place < qv.n && place < int(qv.ids.size()) && qv.ids[size_t(place)] >= 0; }
-// Review (exact items): the kind whose page is open over the chooser (rw::RingPage::QuickKind; 0: none) and its items
+// Exact items: the kind whose page is open over the chooser (rw::RingPage::QuickKind; 0: none) and its items
 // (the kind, then every tier the game has, qr::TiersOf; the ones not carried dim), made when the kind is picked, never per frame.
 int quickKind = 0, quickKindN = 0, quickKindCarried = 0;
 std::array<int, rw::QuickPlaces> quickKindIds{};
@@ -392,7 +393,7 @@ void RefreshEntries(const ia::Snapshot& s, void (*say)(const char*)) {
     }
 
 }
-// Feedback 1 items 3 and 5: the bound-button badges (steamvr/ring_wheel_badges.h), re-placed only on a bind, row or seat change.
+// the bound-button badges (steamvr/ring_wheel_badges.h), re-placed only on a bind, row or seat change.
 rw::BadgeBoard badges;
 int ctrlLayoutNow = 0;   // the controller layout Input last saw (the badges' letters)
 rw::LetterLayoutHold letterHold; int letterHeldSaid = -1;   // job B: the last real layout per hand; the held layout last logged
@@ -1007,7 +1008,7 @@ int StepOwner(const host::PointerFrame& f, bool tracked0, bool tracked1, Where w
 // Item 2: one grab step; open false = the wheel closed or not world-locked (a grab in progress ends). Logs start / end at
 // most once a second, and every clear or respawn.
 ia::Pose GrabStep(host::PointerFrame& f, const ia::Pose& head, const ia::Pose& spawn, const rw::Placement* p, bool open, bool spawned) {
-    // Review-grip the grabbing hand is job B's pointing owner (last frame's, as the buttons and grabHit are), else the
+    // the grabbing hand is job B's pointing owner (last frame's, as the buttons and grabHit are), else the
     // hand not holding the wheel (before job B, and the Pointing hand row's Other hand).
     const int pointer = rw::GrabHand(pointerOwner, f.wheelHand);
     rw::GrabIn in;
@@ -1130,7 +1131,7 @@ void Pointer(host::PointerFrame f) {
         if (ring) { hit = true; hitX = r.x; hitY = r.y; } else f.hover = r.cell;
     }
     grabHit = r.met;   // item 2: the next frame's grab arms only with the owner's ray on the panel
-    rw::HoldUpstreamWhileMoving(ringGrab.Holding(), ring, f.hover, f.pointerHit);   // review-grip no upstream click mid-move
+    rw::HoldUpstreamWhileMoving(ringGrab.Holding(), ring, f.hover, f.pointerHit);   // no upstream click mid-move
     f.beamLength = r.met ? r.h.distance : rw::BeamMissM;   // the beam still ends on a moving panel
     const math::Vec mid = r.from + r.dir * (f.beamLength * .5f);
     Write(f.beamPose, {mid, math::BeamOrientation(r.dir, head.p - mid)});
@@ -1255,7 +1256,7 @@ void Edges(const host::InputFrame& f, const ia::Snapshot* s) {
     pageWas = f.page; sessionWas = session;
 }
 
-// R6Q: what QuickCast reads each frame, on the main ring and on the chooser's order row: both hands' ten slots (upstream's
+// what QuickCast reads each frame, on the main ring and on the chooser's order row: both hands' ten slots (upstream's
 // rule, hand_controls.h): trigger, primary, secondary, grip + primary, grip + secondary; each slot's skill; the two rows.
 void FillQuick(rw::QuickIn& q, const host::InputFrame& f, const ia::Snapshot& s, double nowMs) {
     q.nowMs = hold.NowMs(nowMs); q.main = true; q.lastHitMs = hold.NowMs(fightNow.lastHitMs);   // a hitch is not a long hold
@@ -1309,7 +1310,7 @@ void HoldStep(const rw::QuickOut& e, float frac, const rw::QuickIn& q, const ia:
 
 void Input(host::InputFrame f) {
     if (f.say) sayKept = f.say;
-    if (!EnabledNow()) { ringActive = false; engineOpen = false; return; }
+    if (!EnabledNow()) { ringActive = false; wheelOnRingPage = false; engineOpen = false; return; }
     if (const int slot = framevr::quickradial::link::bindApplied.exchange(-1); slot >= 0) buttons::Claim(slot, buttons::Owner::QuickCast, f.say);   // the radial's own bind landed: other menus on that button let go
     if (f.hands) {   // item 2: the grab's buttons, read by the next Pointer
         const auto& hi = *static_cast<const framevr::skills::HandInput*>(f.hands);
@@ -1321,7 +1322,7 @@ void Input(host::InputFrame f) {
         const auto& hi = *static_cast<const framevr::skills::HandInput*>(f.hands);
         f.trigger = pointerOwner >= 0 ? hi.trigger[pointerOwner] : 0.f;
     }
-    if (!f.snapshot) { ringActive = false; engineOpen = false; return; }
+    if (!f.snapshot) { ringActive = false; wheelOnRingPage = false; engineOpen = false; return; }
     const auto& s = *static_cast<const ia::Snapshot*>(f.snapshot);
     if (s.session != grabSession) { grabSession = s.session; ringGrab.NewSession(); }   // item 2: a moved place lasts one game session
     developerNow = s.developer;   // the pointer's quad is the layer's (six tabs, 864 px, in developer mode)
@@ -1363,7 +1364,8 @@ void Input(host::InputFrame f) {
         wantMenu = {};
     }
     rw::RingPage rp = rw::RingPage::Main;
-    ringActive = Ready() && placed && f.wheelHand >= 0 && RingPageOf(f.page, s.skillClass, rp);
+    wheelOnRingPage = placed && f.wheelHand >= 0 && RingPageOf(f.page, s.skillClass, rp);
+    ringActive = wheelOnRingPage && Ready();
     // Quick cast's page lives on the open ring over upstream's Spells page, while its switch is On for this class
     if (!ringActive || rp != rw::RingPage::Main || !framevr::quickradial::Enabled() || !framevr::quickradial::ClassKnown(s.skillClass)) { quickPageOn = false; quickChoose = -1; }
     else if (quickPageOn) rp = quickChoose >= 0 ? (quickKind ? rw::RingPage::QuickKind : rw::RingPage::QuickChoose) : rw::RingPage::Quick;
@@ -1425,7 +1427,7 @@ void Input(host::InputFrame f) {
     if (rp == rw::RingPage::QuickChoose && (chooseKey != seatsKey || chooseStale || !chooseQuick)) { BuildChooser(s, true); engineOpen = false; }
     if (!engineOpen) {   // buttons held at open: let go first
         engine.Reset(rp == rw::RingPage::GlyphChoose || rp == rw::RingPage::QuickChoose ? chooseLayout : layout); quick.Reset(); badges.Opened(); engineOpen = true;   // badges: a bind made while closed shows without a pop; no re-place unless something changed
-        if (pageChanged) engine.PageChanged(in.nowMs, in.trigger, set);   // L2: 250 ms lockout, a held trigger let go first
+        if (pageChanged) engine.PageChanged(in.nowMs, in.trigger, set);   // 250 ms lockout, a held trigger let go first
         for (auto& h : held) for (bool& b : h) b = true;
         for (auto& h : quickHeld) for (bool& b : h) b = true;
     }
@@ -1549,7 +1551,7 @@ void Input(host::InputFrame f) {
         quickChoose = -1; QueuePulses(pointer, 1, .5f);   // back on the Quick cast page, for the next place
         if (f.say) { std::snprintf(pageLine, sizeof pageLine, "Frame ring wheel: Quick cast place %d: %s (asked of the radial)", PlaceNo(place), what.c_str()); f.say(pageLine); }
     };
-    if (rp == rw::RingPage::QuickKind) {   // review one kind's page: the kind, then every tier (carried or not, the others dim); trigger puts it in the place; center Back
+    if (rp == rw::RingPage::QuickKind) {   // one kind's page: the kind, then every tier (carried or not, the others dim); trigger puts it in the place; center Back
         quick.Drop(); engineOpen = false;
         rw::PageIn pi;
         pi.nowMs = in.nowMs; pi.hit = in.hit; pi.x = hitX; pi.y = hitY; pi.trigger = triggerIn > .5f; pi.page = rp; pi.count = quickKindN;
@@ -1579,7 +1581,7 @@ void Input(host::InputFrame f) {
                 QueuePulses(pointer, 3, .35f);
                 if (f.say) { std::snprintf(pageLine, sizeof pageLine, "Frame ring wheel: Quick cast chooser refused %s: not one Quick cast casts", name.c_str()); f.say(pageLine); }
                 engineOpen = false;
-            } else if (int carried = 0; qr::IsFamilyId(seat.id) && (carried = KindPage(s, seat.id & 0xffff)) > 0) {   // review the best or an exact one
+            } else if (int carried = 0; qr::IsFamilyId(seat.id) && (carried = KindPage(s, seat.id & 0xffff)) > 0) {   // the best or an exact one
                 QueuePulses(pointer, 1, .2f);
                 if (f.say) { std::snprintf(pageLine, sizeof pageLine, "Frame ring wheel: Quick cast kind page %s for place %d (best, then %d exact tiers, %d carried)", name.c_str(), PlaceNo(place), carried, quickKindCarried); f.say(pageLine); }
             } else ask(seat.id, seat.owner, "put " + name + " there");   // a skill, or a kind with no tiers (Antidote, Thawing, Stamina): the family
@@ -1645,10 +1647,10 @@ void Input(host::InputFrame f) {
         }
         thirdSaid = t;
     }
-    // R6Q: both hands' ten slots (upstream's rule, hand_controls.h): trigger, primary, secondary, grip + primary, grip + secondary.
+    // both hands' ten slots (upstream's rule, hand_controls.h): trigger, primary, secondary, grip + primary, grip + secondary.
     rw::QuickIn q;
     FillQuick(q, f, s, in.nowMs); q.under = step.under; q.thirds = set.thirds;   // the thirds' pseudo seats
-    {   // feedback 1 item 3: the badges' letters; job B: a hand that reads Unknown (asleep) keeps its last real layout, never 1 / 2
+    {   // the badges' letters; job B: a hand that reads Unknown (asleep) keeps its last real layout, never 1 / 2
         const bool automatic = int(vrsettings::Read().values[framevr::settings::ControllerLabels]) == int(framevr::controllers::Choice::Automatic);
         const int now = int(letterHold.Step(f.wheelHand == 1 ? 1 : 0, framevr::controllers::Layout(f.layout), automatic));
         if (now != f.layout && f.say && now != letterHeldSaid) { char line[120]; std::snprintf(line, sizeof line, "Frame ring wheel: badge letters kept as %s (the %s controller reads %s now)", framevr::controllers::Name(framevr::controllers::Layout(now)), f.wheelHand == 1 ? "left" : "right", framevr::controllers::Name(framevr::controllers::Layout(f.layout))); f.say(line); }
@@ -1866,7 +1868,7 @@ void Layer(host::LayerFrame f) {
         if (f.say) { char line[160]; std::snprintf(line, sizeof line, "Frame ring wheel: closed reason=setting-off after %.1f s, page %s", double(GetTickCount64() - openedAt) / 1000, UpPageName(pageWas)); f.say(line); }
         edges.Off();
     }
-    if (!on) { hold.Reset(); focusBlip.Focused(); focusWhy = nullptr; shutBeforeClear = false; Retire(f.say, "Off edge"); Reap(false, f.say); ringActive = false; engineOpen = false; seatsKey = 0; built.reset(); choose = -1; ringPageSeen = false; layoutSaid = -1; otherTreesSaid = -1; wantMenu = {}; thirdSaid = -2; layersSaid = false; return; }   // layoutSaid: the next On says tree layout= again
+    if (!on) { hold.Reset(); focusBlip.Focused(); focusWhy = nullptr; shutBeforeClear = false; Retire(f.say, "Off edge"); Reap(false, f.say); ringActive = false; wheelOnRingPage = false; engineOpen = false; seatsKey = 0; built.reset(); choose = -1; ringPageSeen = false; layoutSaid = -1; otherTreesSaid = -1; wantMenu = {}; thirdSaid = -2; layersSaid = false; return; }   // layoutSaid: the next On says tree layout= again
     Reap(false, f.say);
     SyncPreset(f.say);
     if (f.output) {   // upstream's glyph and gesture state as its Step left it (the pages' data, plan)
@@ -1877,7 +1879,7 @@ void Layer(host::LayerFrame f) {
     runtimeShort = f.swapchainsShort;
     if (!gpu) return;
     gpu->compose.Pump();
-    switch (chainLife.Step(f.open && placed && f.palette && ringActive, runtimeShort, double(f.nowMs))) {   // the swapchain: the first open makes it, a shut wheel's or a yielded one is given back
+    switch (chainLife.Step(rw::ChainWanted(f.open, placed, f.palette != nullptr, wheelOnRingPage), runtimeShort, double(f.nowMs))) {   // the swapchain: the first open makes it, a shut wheel's or a yielded one is given back
     case rw::ChainLife::Act::Create: MakeChain(f); break;
     case rw::ChainLife::Act::Release: ReleaseChain(f, runtimeShort); break;
     default: break;
@@ -1912,7 +1914,7 @@ void Layer(host::LayerFrame f) {
     scene.thirds = ringPage == rw::RingPage::Main;   // the center in thirds; the chooser keeps its halves
     scene.thirdGrowPct = cfg::Value(cfg::ThirdGrow); scene.thirdDimPct = cfg::Value(cfg::ThirdDim);
     scene.quickWord = rw::QuickThirdWord(framevr::quickradial::Enabled(), framevr::quickradial::ClassKnown(s.skillClass));   // Off, or not this class
-    // feedback 1 item 4: upstream's footer tabs from the hit test's numbers (the same developer flag as the quad)
+    // upstream's footer tabs from the hit test's numbers (the same developer flag as the quad)
     scene.footer = {true, rw::UpstreamPage(ringPage), developerNow, cfg::On(cfg::FooterFull), true};
     scene.wheelAlpha = fightNow.wheel; scene.fight = fightNow.dim;
     if (shownElements.size() == size_t(shown.count) && shownCrawl.size() == size_t(shown.count)) { scene.elements = shownElements.data(); scene.crawlIndex = shownCrawl.data(); scene.crawlCount = crawlCount; }
@@ -1994,9 +1996,9 @@ void Layer(host::LayerFrame f) {
     std::array<const char*, rw::Trees> names{};
     for (int t = 0; t < rw::Trees; ++t) names[size_t(t)] = framevr::skillcategories::Name(seatClass, rw::PageAt(seatClass, t) + 1);
     scene.treeNames = names; scene.revision = revision + (uint32_t(ringPage) << 28);
-    scene.skillClass = seatClass;   // R7c: the tree marks' glyphs (the class the seats were laid out for)
+    scene.skillClass = seatClass;   // the tree marks' glyphs (the class the seats were laid out for)
     const bool onPage = ringPage == rw::RingPage::Glyphs || ringPage == rw::RingPage::Gestures || rw::QuickRing(ringPage);
-    if (!onPage && !anyChooser) {   // feedback 1 item 3: main page only
+    if (!onPage && !anyChooser) {   // main page only
         scene.badges = Badges(s, double(f.nowMs), layout, seatsKey, f.say);
         scene.drawBadge = rw::DrawBadgeFor(glyphDrawNow, wheelHandNow, framevr::controllers::Layout(ctrlLayoutNow), BadgeLookNow().sizePx);   // #3: upstream's own draw slot
         const int sizePx = BadgeLookNow().sizePx;   // each sub-menu's button on its third's mark (the Size row applies, Angle and Depth do not)
@@ -2160,7 +2162,7 @@ void Beam(host::BeamFrame f) {
     f.quad(f.quadCtx, &beam2Quad, pose, BeamWidthM * Beam2Share, beam2Len, f.beamRect, f.chain, f.premultiplied);
 }
 
-// R6Q: once the wheel is shut, the queued quick cast goes through upstream's own glyph press (as a recognised glyph does,
+// once the wheel is shut, the queued quick cast goes through upstream's own glyph press (as a recognised glyph does,
 // transport's stroke path): its hand slot, else the right trigger's record (parked first). One branch when nothing waits.
 void Cast(host::CastFrame f) {
     if (!pendingCast.on && !pulseCount) return;
@@ -2201,11 +2203,15 @@ void Cast(host::CastFrame f) {
 
 void Session() { saidUpstream = 0; }
 // Any state the ring still holds (an Off edge not drained yet, a wheel it owns, a swapchain or its worker): the doors run until it is gone.
-bool StateHeld() { return told || gpu != nullptr || !retiring.Empty() || ringActive || engineOpen || edges.Open() || pointerOwner >= 0; }
+bool StateHeld() {
+    return told || gpu != nullptr || !retiring.Empty() || ringActive || wheelOnRingPage || engineOpen || edges.Open() || pointerOwner >= 0 ||
+           pendingCast.on || pulseCount > 0 || sendQueue.Size() > 0 || bindWait.Waiting() || glyphWait.Waiting() || wantMenu.third >= 0 ||
+           ringGrab.State() != framevr::panels::Grab::State::Idle || !rw::IsZero(ringGrab.Kept());
+}
 // Transport Shutdown (the GPU idle, before the session goes): join the worker and free everything, waiting as needed.
 void Reset() {
     told = false; placed = false; placer.Reset(); hold.Reset(); armyWatch.Reset(); chooseStale = false;
-    ringActive = false; engineOpen = false; seatsKey = 0; built.reset(); sendQueue.Clear(); bindWait.Clear();
+    ringActive = false; wheelOnRingPage = false; engineOpen = false; seatsKey = 0; built.reset(); sendQueue.Clear(); bindWait.Clear();
     quick.Reset(); pendingCast = {}; pulseCount = 0; seenFlips = ~0u; holdFracWas = 0; blurbKey = ~0ull;
     choose = -1; ringPageSeen = false; pages.Reset(); viewKey = ~0ull; countKey = ~0ull; glyphWait.Clear(); wantMenu = {};
     fightFade.Reset(); fightNow = {}; deadSaid = false; animSeen = -1; pointedWas = -1;
