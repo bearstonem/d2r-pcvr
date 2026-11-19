@@ -577,7 +577,7 @@ void TestHandler() {
     Check(Lines("Frame army x menu: hunt the mark: Melee and ranged") == 1 && Lines("Frame army x menu: hunt: monster 999") == 1 && s.emitted > 0,
           "On: the mode line and the hunt's start line");
     for (int i = 0; i < 60; ++i) s.Tick();
-    Check(Lines("Frame army x menu: hunt: 7 of 7 at monster 999") == 1 && Lines("Frame army x menu: hunt 5 s:") >= 2, "the arrival line once all are there; the 5 s lines");
+    Check(Lines("Frame army x menu: hunt: 7 of 7 at monster 999") == 1 && Lines("Frame army x menu: hunt 5 s:") == 0, "the arrival line once all are there; no line every 5 s");
     s.c.ClearPriorityTarget();
     s.Tick();
     Check(Lines("Frame army x menu: hunt over: monster 999 after") == 1 && Lines("killed or lost") == 1 && Lines("Regroup, back to formation") == 1, "the kill line: Regroup");
@@ -746,7 +746,7 @@ void TestHandlerLeashRunAsk() {
         s.c.SetPriorityTarget(MarkId + 24, mark);
         s.Tick(); s.Tick();
         Check(armyxhunt::Leash(at(s, 201)), "hunting: kept");
-        s.c.ApplyCommanderSkill(cmd::SkillRegroup, Hero);   // the X menu's Regroup or the commander's commander skill: the same coordinator call
+        s.c.ApplyCommanderSkill(cmd::SkillRegroup, Hero);   // the X menu's Regroup or the commander skill: the same coordinator call
         Check(!armyxhunt::Leash(at(s, 201)) && Lines("hunt leash: released: the game moves summon 201 (a new order since the last army tick (Regroup, a formation, Hold);") == 1,
               "Regroup: released at once (before the next army tick), said");
         s.Tick();
@@ -1380,7 +1380,7 @@ void TestFarMarkHandlers() {
         bool untouched = true;
         for (int i = 0; i < 4; ++i) { s.Tick(); untouched = untouched && s.emitted == s.stepEmitted; }
         Check(Lines("Frame army x menu:") == all && target(201) == 0 && untouched, "Off: no line, no target, no move changed (the roll made while Off counted for nothing)");
-        Check(Fits("hit back:") && Fits("hit back 1 s:"), "every hit back line within LineMax");
+        Check(Fits("hit back:"), "every hit back line within LineMax");
     }
     {   // Many summons hit at once: each its own attacker, at most four lines a second
         g_lines.clear();
@@ -1395,9 +1395,7 @@ void TestFarMarkHandlers() {
         armyxhunt::Target({206, true, t});
         Check(Lines("hit back: summon ") == 4 && Lines("(7 fighting back now)") == 4 && t == 5010, "seven hit at once: all seven take it on, four lines that second");
         for (int i = 0; i < 4; ++i) s.Tick();
-        Check(Lines("Frame army x menu: hit back 1 s: 7 fighting back; walks to their attackers: ") == 1 && Lines(" not sent (the move list was full); ") == 1 &&
-              Lines("walks to their attackers: 0 sent") == 0 && Lines(" walks back to the spot dropped") == 1, "once a second while they fight back, what was really sent and dropped");
-        if (g_failed) Dump("hit back 1 s:");
+        Check(Lines("hit back 1 s:") == 0, "no line a second while they fight back: only the start and the end are said");
         s.c.SetPriorityTarget(MarkId + 130, FarMark);
         s.Tick();
         Check(Lines("the army has a mark or a priority target now") >= 1 && Lines("(0 fighting back now)") >= 1, "a mark: every one of them lets go (the hunt has the army)");

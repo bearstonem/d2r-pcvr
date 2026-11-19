@@ -157,7 +157,7 @@ DefendWant g_defendWant;
 DefendScan g_defendScan;
 constexpr uint64_t DefendWantMs = 1000;        // an ask older than this (no army tick since: Fall out, no army) is not scanned
 constexpr uint64_t DefendScanFreshMs = 1000;   // a scan older than this is not used (the ticks are about 250 ms apart)
-// Hold here goes through the commander's commander path on transport's thread (ExecuteCommanderSkill: its spot clamped to 14 sub-tiles
+// Hold here goes through the commander path on transport's thread (ExecuteCommanderSkill: its spot clamped to 14 sub-tiles
 // past 16); its anchor is claimed as the X menu's on the next army tick (GetTickCount64 of the Give; 0 none).
 std::atomic<uint64_t> g_holdClaimMs{0};
 constexpr uint64_t ClaimMs = 1500;
@@ -192,7 +192,7 @@ void PathText(char* out, size_t n, const xm::Hover& h) {
     else std::snprintf(out, n, "%s > %s", b.name, xm::OrderLabel(b.orders[h.sub]));
 }
 
-// The one call site of an order: the commander's commander path, with the spot aimed at the press.
+// The one call site of an order: the commander path, with the spot aimed at the press.
 bool Give(seam::ArmyXPressFrame& f, int order) { return f.order(order, st.aim[0], st.aim[1]); }
 // The one call site of Attack my target and Move and hold, summons only: the army half of the commander's
 // IssueTacticalOrder, on the coordinator it already holds under g_tacticalLock (the army step's Moves seam, the game
@@ -459,7 +459,7 @@ void ArmyTick(seam::ArmyMovesFrame& f) {
     g_armyTickMs.store(f.nowMs, std::memory_order_relaxed);
     if (on) g_focus.Drain([&c](const xm::Aimed& a) { return Apply(c, a, g_focus.kind); });
     char line[260];
-    // Hold here (the commander's commander path, transport's thread) anchored the army: that anchor is the X menu's, to defend. Timed
+    // Hold here (the commander path, transport's thread) anchored the army: that anchor is the X menu's, to defend. Timed
     // on the clock now.
     if (const uint64_t claim = g_holdClaimMs.exchange(0, std::memory_order_relaxed), now = GetTickCount64();
         on && claim && now >= claim && now - claim <= ClaimMs && c.anchorActive) {
@@ -524,6 +524,19 @@ void ArmyTick(seam::ArmyMovesFrame& f) {
     f.say(line);
 }// The held button, once a frame.
 void Press(seam::ArmyXPressFrame f) {
+    // A game skill or a Draw glyph put on the menu's button takes it back at once: the menu is on no button again (one
+    // line), and with that every army rule of it is off. A snapshot from just before the bind may still show the skill
+    // the bind cleared: wait it out.
+    if (const int was = armyxmenu::Button(); was >= 0 && was < framevr::skills::Count && f.fresh && f.snapshot && GetTickCount64() - st.boundAtMs > 2000) {
+        const auto& now = *static_cast<const ia::Snapshot*>(f.snapshot);
+        const bool skill = now.skills[size_t(was)].known && now.skills[size_t(was)].id >= 0;
+        if (skill || f.glyphDraw[0] == was || f.glyphDraw[1] == was) {
+            char line[160];
+            std::snprintf(line, sizeof line, "Frame army x menu: slot %d %s: the menu is on no button now", was, skill ? "has a game skill" : "is a Draw glyph button");
+            if (f.say) f.say(line);
+            SaveButton(-1);
+        }
+    }
     const bool on = armyxmenu::On();
     const int bound = armyxmenu::Button();
     // Closed and not our press (or nothing bound), no targeting and no mark: one branch, nothing else (the toast still fades out
@@ -558,15 +571,6 @@ void Press(seam::ArmyXPressFrame f) {
     in.eye = {f.head[0], f.head[1], f.head[2]};
     in.head = {f.head[3], f.head[4], f.head[5], f.head[6]};
     in.army = ia::HasSummonArmy(snap);
-    // A game skill or a Draw glyph put on the menu's button takes it: the menu is on no button again (one line), and with
-    // that every army rule of it is off. A snapshot from just before the bind may still show the cleared skill: wait it out.
-    if (in.bound >= 0 && f.fresh && (skillThere || glyphThere) && GetTickCount64() - st.boundAtMs > 2000) {
-        char line[160];
-        std::snprintf(line, sizeof line, "Frame army x menu: slot %d %s: the menu is on no button now", in.bound,
-                      skillThere ? "has a game skill" : "is a Draw glyph button");
-        if (f.say) f.say(line);
-        SaveButton(-1);
-    }
     const xm::Tuning t = xm::Shipped();
     if (g_focus.Waiting()) Settle(f, in.nowMs, t, !on);   // Attack my target's outcome from the game thread
     const auto& hi = *static_cast<const framevr::skills::HandInput*>(f.hands);

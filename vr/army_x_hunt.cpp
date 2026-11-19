@@ -147,13 +147,12 @@ struct State {
     xhunt::Hunt hunt;
     xhunt::Mode told = xhunt::Mode::Off;   // the mode last said
     bool toldAny = false;
-    uint64_t arriveLineMs = 0, statusMs = 0;
-    unsigned sentSince = 0, droppedSince = 0;
+    uint64_t arriveLineMs = 0;
     uint64_t retryLineMs = 0; unsigned retriedSince = 0;   // Retry at the mark: since its last line
     uint32_t retryId = 0; float retryDist = 0;             // the last hunter retried since then, and how far it stood
 };
 State g;
-constexpr uint64_t ArriveLineMs = 1000, StatusMs = 5000;
+constexpr uint64_t ArriveLineMs = 1000;
 
 const char* ModeName(xhunt::Mode m) {
     return m == xhunt::Mode::All ? "Melee and ranged" : m == xhunt::Mode::Melee ? "Melee only" : "Off";
@@ -213,10 +212,8 @@ uint32_t ModesOf(const seam::ArmyWalkFrame& f, uint32_t& classId, uint64_t nowMs
 }
 struct RunState {
     xhunt::RunMode told = xhunt::RunMode::Off; bool toldAny = false;
-    uint64_t sinceMs = 0; unsigned ran = 0, walked = 0;
 };
 RunState g_run;
-constexpr uint64_t RunSumMs = 10000;
 // A class's accepted mask (0: none read yet), for the army tick's runners: the same decision Walk makes for that summon's move.
 uint32_t CachedModes(uint32_t classId) {
     for (size_t k = 0; k < g_classModesN; ++k) if (g_classModes[k].classId == classId && g_classModes[k].ok) return g_classModes[k].modes;
@@ -339,8 +336,6 @@ size_t g_hbFoeN = 0;
 uint64_t g_hbSecondMs = 0;
 int g_hbLines = 0;
 constexpr int HitBackLinesPerSecond = 4;
-uint64_t g_hbSumMs = 0;                                    // the once-a-second line while a summon fights back
-unsigned g_hbSent = 0, g_hbUnsent = 0, g_hbDropped = 0, g_hbRetried = 0;
 const char* WalkText(uint8_t walk) {
     return walk == 1 ? "its walk was sent" : walk == 2 ? "no walk sent this tick (the move list was full: it goes next)" : "no walk needed (it stands beside it)";
 }
@@ -391,14 +386,6 @@ void HitBackTick(seam::ArmyMovesFrame& f) {
                       e.pet, e.foe, double(e.afterMs) / 1000.0, xhunt::HitBack::EndText(e.end), e.fought ? "fought it" : "did not get to fight it", o.engaged);
         Say(f, line);
     }
-    // what the engine really did with the moves, once a second while a summon fights back (the proof a walk was sent)
-    if (!o.engaged) { g_hbSent = g_hbUnsent = g_hbDropped = g_hbRetried = 0; g_hbSumMs = f.nowMs; return; }
-    g_hbSent += unsigned(o.sent); g_hbUnsent += unsigned(o.unsent); g_hbDropped += unsigned(o.dropped); g_hbRetried += unsigned(o.retried);
-    if (f.nowMs >= g_hbSumMs && f.nowMs - g_hbSumMs < 1000) return;
-    std::snprintf(line, sizeof line, "Frame army x menu: hit back 1 s: %d fighting back; walks to their attackers: %u sent (%u of them retries), %u not sent (the move list was full); %u walks back to the spot dropped",
-                  o.engaged, g_hbSent, g_hbRetried, g_hbUnsent, g_hbDropped);
-    Say(f, line);
-    g_hbSent = g_hbUnsent = g_hbDropped = g_hbRetried = 0; g_hbSumMs = f.nowMs;
 }
 // The look at each fought attacker (Sample: the game tick, no lock): found by id (the commander's lookup), its header checked (a live
 // monster), its place read; dead or not found: said so, and the engine lets it go.
@@ -484,10 +471,9 @@ void Moves(seam::ArmyMovesFrame f) {
                       "Frame army x menu: hunt: monster %u, %.1f sub-tiles from you: %d summons sent (%d melee beside it, %d ranged to %.0f), %d kept in formation; nearest %.1f, farthest %.1f sub-tiles; %d moves now (%d walks back dropped)",
                       t.mark, t.heroDist, t.hunters, t.melee, t.ranged, xhunt::RangedKeep, t.kept, t.nearest, t.farthest, t.sent, t.dropped);
         Say(f, line);
-        g.arriveLineMs = 0; g.statusMs = f.nowMs; g.sentSince = g.droppedSince = 0;
+        g.arriveLineMs = 0;
     }
     if (t.mark) {
-        g.sentSince += unsigned(t.sent); g.droppedSince += unsigned(t.dropped);
         if (t.jumped) {   // the game's own leash (DetourRelocateUnit; vetoed while Hold the leash is On) or a relocation moved a hunter
             std::snprintf(line, sizeof line, "Frame army x menu: hunt: %d hunter%s moved, not walked (summon %u: %.1f -> %.1f sub-tiles from monster %u in one tick; the game's own leash? Hold the leash %s)",
                           t.jumped, t.jumped == 1 ? "" : "s", t.jumpId, t.jumpFrom, t.jumpTo, t.mark, (cfg::rules.huntLeash && armyxmenu::On()) ? "On" : "Off");
@@ -512,12 +498,6 @@ void Moves(seam::ArmyMovesFrame f) {
             std::snprintf(line, sizeof line, "Frame army x menu: hunt: %d of %d at monster %u (%d just now; nearest %.1f sub-tiles); the game's AI attacks it",
                           t.arrived, t.hunters, t.mark, t.arrivedNew, t.nearest);
             Say(f, line);
-        }
-        if (f.nowMs - g.statusMs >= StatusMs) {
-            std::snprintf(line, sizeof line, "Frame army x menu: hunt 5 s: monster %u, %.1f sub-tiles from you; %d hunters, %d there now, nearest %.1f, farthest %.1f; %u moves sent, %u walks back dropped",
-                          t.mark, t.heroDist, t.hunters, t.arrived, t.nearest, t.farthest, g.sentSince, g.droppedSince);
-            Say(f, line);
-            g.statusMs = f.nowMs; g.sentSince = g.droppedSince = 0;
         }
     }
     if (t.returned) {
@@ -592,16 +572,6 @@ void Walk(seam::ArmyWalkFrame f) {
     const uint32_t modes = army ? ModesOf(f, classId, now) : 0;
     const bool run = xhunt::Runs(mode, f.petType, modes);
     if (run) f.walk = false;
-    ++(run ? g_run.ran : g_run.walked);
-    if (!g_run.sinceMs || now < g_run.sinceMs) g_run.sinceMs = now;
-    else if (now - g_run.sinceMs >= RunSumMs) {
-        if (f.say) {
-            char line[200];
-            std::snprintf(line, sizeof line, "Frame army x menu: run 10 s: %u moves sent running, %u walking", g_run.ran, g_run.walked);
-            f.say(line);
-        }
-        g_run.sinceMs = now; g_run.ran = g_run.walked = 0;
-    }
 }
 
 // DetourServerMoveUnit (Move; any monster's own move the commander's gate let through):
