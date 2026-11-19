@@ -169,3 +169,18 @@ cartouche and the band's sigil (also original) are path strings in
 `vr_settings_draw.cpp`.
 `vr-settings-preview.exe --draw-sheet <out.png>` renders every icon and every
 control in every state.
+
+## Army X menu artwork
+
+`army-x-menu-sheet.png` (432 x 616) and `army-x-target-mark.png` are original
+artwork for the Army X menu: the four circles and their orders (silver-pewter
+symbols on a dark disc with a gold rim, in the skill wheel's own style), the
+orders' names, and the eight frames of the arrow that stands over a marked
+monster. They were generated for this project with an image tool from text
+prompts and then cut and laid out by script; no game picture is an input.
+
+Both are embedded by `interaction_assets.rc` and painted once a session into
+the menu's regions of the static image (`panelatlas::ArmyXMenu`,
+`panelatlas::ArmyXMark`), premultiplied, so the menu needs no swapchain of its
+own. The cell layout is in `army_x_menu.h` (`xmenu::atlas`); a sheet of another
+size is refused and the menu draws nothing.

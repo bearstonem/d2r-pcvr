@@ -23,6 +23,8 @@
 #endif
 #include <windows.h>
 #include "pcvr_identity.h"
+#include "army_x_orders.h"
+#include "../steamvr/army_face.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "summon_range.h"
 #endif
@@ -5027,6 +5029,8 @@ void Tick() {
     const auto s = targetlock::Get();
     const bool fresh = wanted && !gamestate::MenuOpen() && s.at && GetTickCount64() - s.at <= 500;
     aimtargets::Tick(fresh ? &s : nullptr);
+    // The Army X menu's Attack my target: the monster each hand aims at, and the eyes' while the outline would show it.
+    if (::armyxmenu::On()) ::armyxmenu::Picks(framevr::armyseam::HandPicksFrame{fresh ? &s : nullptr, {aimtargets::g_pick[0].id.load(), aimtargets::g_pick[1].id.load()}, framevr::aimrules::EyesOutlined(FollowsView(), aimtargets::Pointing(aimtargets::OutlineDominant())) ? aimtargets::g_pick[2].id.load() : 0u});
     // A Fist of the Heavens call (motions_paladin.h): the monster nearest the
     // weapon arm's line, in the same cone and reach as the hands' picks, is
     // handed to the game's target query for the skill (RulesUnit). None: no
@@ -13286,6 +13290,14 @@ DWORD WINAPI UpdateThread(void*) {
                 const auto& compView = g_skyView[g_eye.load() & 1];
                 if (compView.axes_ok) { compFx = -compView.axes[6]; compFy = -compView.axes[8]; }
                 ReleaseSRWLockShared(&g_skyLock);
+            }
+            {   // the summon army forms where you face: the view's forward on the ground plane (army_face.h)
+                AcquireSRWLockShared(&g_skyLock);
+                const auto& faceView = g_skyView[g_eye.load() & 1];
+                const bool faceOk = faceView.axes_ok;
+                const float faceX = faceOk ? -faceView.axes[6] : 0.0f, faceY = faceOk ? -faceView.axes[8] : 0.0f;
+                ReleaseSRWLockShared(&g_skyLock);
+                armyface::Facing(faceOk, faceX, faceY);
             }
             companionai::Install();
             companionai::Tick(compFx, compFy);

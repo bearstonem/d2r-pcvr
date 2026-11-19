@@ -1,4 +1,11 @@
 #include "../vr/companion_ai.cpp"
+// The Army X menu's handlers (vr/army_x_menu.cpp, vr/army_x_hunt.cpp: not linked here): the menu on no button, nothing done.
+namespace armyxmenu {bool On(){return false;}void GameTick(framevr::armyseam::CompanionTickFrame){}}
+namespace armyface {void Heading(HeadingFrame){}}   // the army forms where you face (vr/army_face.cpp, not linked here): the model's forward kept
+namespace armyxhunt {
+void Moves(framevr::armyseam::ArmyMovesFrame){}bool Leash(framevr::armyseam::SummonRelocateFrame){return false;}void Walk(framevr::armyseam::ArmyWalkFrame){}
+void Move(framevr::armyseam::SummonMoveFrame){}void Refused(framevr::armyseam::SummonRefusedFrame){}void Target(framevr::armyseam::SummonTargetFrame){}
+}
 #undef NDEBUG
 #include <cassert>
 #include <cmath>

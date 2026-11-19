@@ -12,6 +12,8 @@
 #include "../steamvr/telegraph.h"
 #include "../steamvr/callback_ticket.h"
 #include "../steamvr/logging.h"
+#include "army_x_orders.h"
+#include "../steamvr/army_face.h"
 #include "bow.h"
 #include "bow_signatures.h"
 #include "companion_ai_signatures.h"
@@ -630,6 +632,9 @@ int DetourRelocateUnit(uintptr_t game, uintptr_t unit, uintptr_t targetRoom, int
             framevr::logging::Write(line);
             return 1;
         }
+        // Army X menu: a summon hunting the marked monster is not pulled back by the game's own leash. On no button:
+        // nothing is read and no lock taken.
+        if (::armyxmenu::On() && ::armyxhunt::Leash(framevr::armyseam::SummonRelocateFrame{unitId, x, y, [] { AcquireSRWLockShared(&g_tacticalLock); const framevr::armyseam::ArmyOrderNow a{g_summonCoordinator.orderStampPending, g_summonCoordinator.priorityTargetId, g_summonCoordinator.freeRoam}; ReleaseSRWLockShared(&g_tacticalLock); return a; }()})) return 1;
         return originalRelocateUnit ? originalRelocateUnit(game, unit, targetRoom, x, y, unk1, unk2) : 1;
     }
 
@@ -745,7 +750,10 @@ int DetourServerMoveUnit(uintptr_t game, uintptr_t unit, uintptr_t targetUnit, i
                 isTargetPlayer, hasEnemyPos, hasTargetUnit ? targetHeader[2] : 0, { enemyX, enemyY });
             ReleaseSRWLockShared(&g_tacticalLock);
         }
-        if (!allowMove) return 1;
+        // Army X menu: a hunter's refused move beside its mark is answered as failed (the game thinks again); its own walk
+        // to a place on the way there goes out as a run.
+        if (!allowMove) { int answer = 1; ::armyxhunt::Refused(framevr::armyseam::SummonRefusedFrame{header[2], moveMode, x, y, answer}); return answer; }
+        ::armyxhunt::Move(framevr::armyseam::SummonMoveFrame{header[2], targetUnit, x, y, moveMode, pathType, flags});
         return originalServerMoveUnit(game, unit, targetUnit, moveMode, x, y, pathType, flags);
     }
 
@@ -1072,6 +1080,10 @@ void StepSummonArmyServer(
         if (anchorActive) {
             centerPos = g_summonCoordinator.anchorPos;
         }
+        // The army forms where you face: the tick's heading, in place of the model's forward (army_face.h).
+        float faceFx = fx, faceFy = fy;
+        armyface::Heading(armyface::HeadingFrame{faceFx, faceFy, plyrPos.x, plyrPos.y, nowMs, false, g_summonCoordinator.headingFilter, &framevr::logging::Write});
+        const float fx = faceFx, fy = faceFy;
         (void)g_summonCoordinator.UpdateCorridorState(centerPos, { fx, fy }, walkablePred);
         curStance = g_summonCoordinator.activeStance;
         curFormation = g_summonCoordinator.corridorActive
@@ -1095,7 +1107,9 @@ void StepSummonArmyServer(
                 const int targetX = int(std::round(plyrPos.x + std::cos(angle) * dist));
                 const int targetY = int(std::round(plyrPos.y + std::sin(angle) * dist));
                 if (walkablePred(targetX, targetY)) {
-                    (void)DispatchServerMoveToCoord(game, unitPtrs[i], samples[i].pos, targetX, targetY, true);   // walking: no summon runs
+                    bool walk = true;   // walking, unless the Army X menu's run rule lets this summon run
+                    ::armyxhunt::Walk(framevr::armyseam::ArmyWalkFrame{unitPtrs[i], samples[i].unitId, samples[i].petType, walk, &framevr::logging::Write});
+                    (void)DispatchServerMoveToCoord(game, unitPtrs[i], samples[i].pos, targetX, targetY, walk);
                 }
             }
             framevr::logging::Write("Frame summon commander: dispatched fall-out dispersal wake-up to army");
@@ -1154,9 +1168,14 @@ void StepSummonArmyServer(
     size_t leftToFight = 0;
     {
         AcquireSRWLockExclusive(&g_tacticalLock);
+        float faceFx = fx, faceFy = fy;   // the same heading for Step, the coordinator's filter seeded with it
+        armyface::Heading(armyface::HeadingFrame{faceFx, faceFy, plyrPos.x, plyrPos.y, nowMs, true, g_summonCoordinator.headingFilter, &framevr::logging::Write});
+        const float fx = faceFx, fy = faceFy;
         emitted = g_summonCoordinator.Step(
             std::span(samples.data(), validCount),
             plyrPos, fx, fy, nowMs, moves);
+        // Army X menu: its orders given here, and the walk to a marked monster in place of the walk back to formation.
+        ::armyxhunt::Moves(framevr::armyseam::ArmyMovesFrame{g_summonCoordinator, samples.data(), validCount, moves.data(), moves.size(), emitted, plyrPos.x, plyrPos.y, nowMs, &framevr::logging::Write});
         leftToFight = g_summonCoordinator.leftToFightLastStep;
         ReleaseSRWLockExclusive(&g_tacticalLock);
     }
@@ -1198,7 +1217,9 @@ void StepSummonArmyServer(
         }
 
         // Walk to the formation slot via DispatchServerMoveToCoord (no teleportation, no run: summons have no run animation).
-        bool moved = DispatchServerMoveToCoord(game, uPtr, uPos, tx, ty, true);
+        bool walk = true;   // walking, unless the Army X menu's run rule lets this summon run
+        ::armyxhunt::Walk(framevr::armyseam::ArmyWalkFrame{uPtr, cmd.unitId, cmd.petType, walk, &framevr::logging::Write});
+        bool moved = DispatchServerMoveToCoord(game, uPtr, uPos, tx, ty, walk);
         if (moved) {
             ++dispatchedNow;
             g_summonFormationMoves.fetch_add(1, std::memory_order_relaxed);
@@ -1274,6 +1295,7 @@ void __cdecl CompanionGameThreadTick(const PluginContext*, void*) noexcept {
 
     // 1.5. Step Commander of the Dead summon army formation engine (runs even without a mercenary)
     StepSummonArmyServer(game, player, playerRoom, { px, py }, GetTickCount64());
+    if (::armyxmenu::On()) ::armyxmenu::GameTick(framevr::armyseam::CompanionTickFrame{[] { AcquireSRWLockShared(&g_tacticalLock); const uint32_t id = g_summonCoordinator.priorityTargetId; ReleaseSRWLockShared(&g_tacticalLock); return id; }()});   // Army X menu: the mark's life, its scans
 
     // 2. Query hireling vitals
     float health = 0.0f, maxHealth = 0.0f;
@@ -2273,6 +2295,7 @@ bool TryOverrideCombatTarget(uintptr_t game, uintptr_t unit, uintptr_t& outTarge
             priId = g_summonCoordinator.priorityTargetId;
             ReleaseSRWLockShared(&g_tacticalLock);
         }
+        ::armyxhunt::Target(framevr::armyseam::SummonTargetFrame{header[2], isManaged, priId});   // Army X menu: a hit summon's own attacker, with no mark set
         if (isManaged && priId != 0) {
             const uintptr_t enemy = melee::ServerUnit(game, 1, priId);
             uint32_t enemyHeader[4]{};

@@ -1431,6 +1431,7 @@ bool QueueParry(uint32_t monster,int before) {
     const uintptr_t token=(uintptr_t(uint32_t(durability+1))<<32)|monster;
     return threads->runOnGameThread(context,&Parry,reinterpret_cast<void*>(token))==D2RL::Threads::Result::Success;
 }
+uint32_t MonsterModes(uintptr_t unit,uint32_t classId) {return ModeMask(unit,classId);}
 bool LocalServer(uintptr_t& game,uintptr_t& player) {
     Server local;{std::lock_guard lock(serverMutex);local=server;}
     uint32_t id=0;

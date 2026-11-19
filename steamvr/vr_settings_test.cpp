@@ -1160,14 +1160,39 @@ int main(int argc,char** argv){
         const auto* row=content::RowOf(SummonRangeMultiplier);
         Check(Defaults()[SummonRangeMultiplier]==1&&row&&row->page==View::Monsters&&row->kind==content::RowKind::Slider,
               "one shared summon range slider defaults to native on Monsters (Gameplay)");
-        Check(Definitions[SummonRangeMultiplier].min==1&&Definitions[SummonRangeMultiplier].max==5&&Definitions[SummonRangeMultiplier].step==.25f,
-              "shared range slider supports 1x to 5x in quarter steps");
+        Check(Definitions[SummonRangeMultiplier].min==1&&Definitions[SummonRangeMultiplier].max==5&&Definitions[SummonRangeMultiplier].step==.1f,
+              "shared range slider supports 100% to 500% in 10% steps (the ini keeps the multiplier, 1 to 5)");
+        Check(std::wstring(Definitions[SummonRangeMultiplier].section)==L"gameplay"&&std::wstring(Definitions[SummonRangeMultiplier].key)==L"summon_range_multiplier",
+              "the ini key is still [gameplay] summon_range_multiplier: saved profiles load unchanged");
         m.Click(Step(SummonRangeMultiplier));
-        Check(m.Get()[SummonRangeMultiplier]==1.25f,"summon range advances fractionally");
+        Check(m.Get()[SummonRangeMultiplier]==1.1f,"summon range advances 10%");
         layout::ApplyPreset(m,0);
-        Check(m.Get()[SummonRangeMultiplier]==1.25f,"presets preserve summon range");
+        Check(m.Get()[SummonRangeMultiplier]==1.1f,"presets preserve summon range");
         Check(Normalize(SummonRangeMultiplier,NAN)==1&&Normalize(SummonRangeMultiplier,0)==1&&Normalize(SummonRangeMultiplier,6)==5,
               "shared multiplier normalizes invalid and out-of-range choices");
+        // Like Monster sight range, the row reads as a percent: 1.25 is 125%, 3 is 300% (the stored number is still the multiplier).
+        const auto& r=*row;
+        Check(content::ValueText(r,1)=="100%"&&content::ValueText(r,1.1f)=="110%"&&content::ValueText(r,1.25f)=="125%"&&content::ValueText(r,3)=="300%"&&
+              content::ValueText(r,4.75f)=="475%"&&content::ValueText(r,5)=="500%","summon range reads as a percent, 100% to 500%");
+        Check(!r.warn&&std::string(r.help).find("estart")==std::string::npos&&std::string(HelpText(SummonRangeMultiplier)).find("estart")==std::string::npos&&
+              std::string(Definitions[SummonRangeMultiplier].detail).find("estart")==std::string::npos,"summon range no longer says to restart: it applies at once");
+        Check(std::string(HelpText(SummonRangeMultiplier)).find("100%")!=std::string::npos&&std::string(HelpText(SummonRangeMultiplier)).size()<450,
+              "its help names 100% as the game's own and fits the card");
+        // Forty steps of 10% from 100% land exactly on 500%, and thirty on 400% (no float drift in what is saved).
+        Model walk;walk.Open(s);walk.view=View::Monsters;
+        for(int i=0;i<30;++i)walk.Click(Step(SummonRangeMultiplier));
+        Check(walk.Get()[SummonRangeMultiplier]==4.f,"thirty 10% steps from 100% reach exactly 400%");
+        for(int i=0;i<30;++i)walk.Click(Step(SummonRangeMultiplier));
+        Check(walk.Get()[SummonRangeMultiplier]==5.f,"500% is the top");
+        for(int i=0;i<40;++i)walk.Click(Step(SummonRangeMultiplier,-1));
+        Check(walk.Get()[SummonRangeMultiplier]==1.f,"forty steps back are exactly 100%, the bottom");
+        // An ini value off the 10% grid loads as it is, shows, and steps from there.
+        Check(Normalize(SummonRangeMultiplier,1.25f)==1.25f&&Normalize(SummonRangeMultiplier,2.35f)==2.35f,"an ini value off the 10% grid (1.25) loads unchanged");
+        Model off;off.Open(s);off.view=View::Monsters;off.Set(SummonRangeMultiplier,1.25f);
+        off.Click(Step(SummonRangeMultiplier));
+        Check(off.Get()[SummonRangeMultiplier]==1.35f&&content::ValueText(r,off.Get()[SummonRangeMultiplier])=="135%","from 125% a step up is 135%");
+        off.Click(Step(SummonRangeMultiplier,-2));
+        Check(off.Get()[SummonRangeMultiplier]==1.15f&&content::ValueText(r,off.Get()[SummonRangeMultiplier])=="115%","two steps down from 135% are 115%");
     }
     {
         const auto defaults=Defaults();

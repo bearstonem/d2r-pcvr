@@ -21,6 +21,10 @@ std::shared_ptr<const Image> Get(const std::string& key);
 std::shared_ptr<const Image> Get(Item item);
 void Prefetch(const Snapshot&);
 uint64_t Revision();
+// A picture the plugin makes itself for a key no manifest has (the Army X menu's entry): asked on the decode thread before
+// the cache's file; null: not its key. wic: the thread's IWICImagingFactory.
+using BuiltIn=std::shared_ptr<const Image>(*)(const std::string& key,void* wic);
+void SetBuiltIn(BuiltIn decode);
 void Shutdown();
 // Preview-only override; set before the first Get. Production uses DLL folder.
 void Directory(const std::wstring& path);

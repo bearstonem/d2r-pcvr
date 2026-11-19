@@ -56,10 +56,16 @@ constexpr Region KeyboardCapsLit{KeyboardLit.x,KeyboardCaps.y,keyboard::TexelWid
 // Stash navigation plaques (stash_buttons.h): right of the lit keyboard, from where the respec
 // faces' column ends down (that column is wider than the gap the keyboard leaves beside it).
 constexpr Region Stash(int i){return {KeyboardLit.x+KeyboardLit.w+Gap,Leather.y+RespecPictures*(RespecHeight+Gap)+i*(stashbuttons::Height+Gap),stashbuttons::Width,stashbuttons::Height};}
-constexpr int StaticWidth=1536,StaticHeight=KeyboardCaps.y+KeyboardCaps.h>Stash(3).y+Stash(3).h+Gap?KeyboardCaps.y+KeyboardCaps.h:Stash(3).y+Stash(3).h+Gap;
+// The Army X menu's sheet (army_x_menu.h: its circles, orders and names): a strip of its own under the keyboards, so the
+// menu needs no swapchain of its own.
+constexpr Region ArmyXMenu{0,KeyboardCaps.y+KeyboardCaps.h+Gap,432,616};
+constexpr int StaticWidth=1536,StaticHeight=ArmyXMenu.y+ArmyXMenu.h>Stash(3).y+Stash(3).h+Gap?ArmyXMenu.y+ArmyXMenu.h:Stash(3).y+Stash(3).h+Gap;
 // Right of the pointer, above the compass: the floating map's grab hint (grab_hint.h), its sign's frames, the glow
 // reaching out and the border's strips, so the hint needs no swapchain of its own.
 constexpr Region GrabHint{Pointer.x+Pointer.w+Gap,0,grabhint::AtlasWidth,grabhint::AtlasHeight};
+// Under the pointer, left of the grab hint: the Army X menu's target mark, eight frames one under the other.
+constexpr int ArmyXMarkFrame=64,ArmyXMarkFrames=8;
+constexpr Region ArmyXMark{Pointer.x,Pointer.y+Pointer.h+Gap,ArmyXMarkFrame,ArmyXMarkFrames*ArmyXMarkFrame+(ArmyXMarkFrames-1)*Gap};
 // Dynamic: VR Settings (its help card inside the panel) across the top, the
 // glyph trail beside it, the blood visor under them, then the strain light, the
 // quest card and the bow laser beside it.
