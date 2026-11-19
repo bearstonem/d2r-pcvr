@@ -446,7 +446,7 @@ void Tick(const rt::PressFrame& f, const ia::Snapshot& s, bool on, const qr::Tun
         { std::lock_guard lock(w.m); w.identWanted = true; w.identClass = s.skillClass; w.identLevel = int(s.experience.level); w.identSession = s.session; }
         w.cv.notify_one();
     }
-    if (!st.ctl.Open()) {   // the hold ring painted ahead of the next open (its skills' levels and usability move with the game)
+    if (!st.ctl.Open() && st.bound >= 0) {   // the hold ring painted ahead of the next open, only while a button is bound (nothing is painted or kept by a player who never binds one)
         const auto es = qr::EntriesFor(qr::Mode::Cast, st.ring, t.fixed);
         const uint64_t key = KeyOf(es, s, t);
         st.wantKey = key;

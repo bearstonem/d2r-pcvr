@@ -958,7 +958,7 @@ inline float MovedQuickButton(float oldMenuButton, float quickCastButton) {
 // slot: the hand's button (0 trigger .. 4 grip + secondary).
 inline const char* QuickBindRefusal(int slot, bool on, bool classKnown, bool drawsGlyph) {
     if (slot <= 0) return "never a trigger (the attack, and the ring's click)";   // as ring_wheel_pages.h MenuButtonAllowed
-    if (!on) return "Quick cast is Off (Lab > Experiment: Ideas > Combat > Quick cast radial)";
+    if (!on) return "Quick cast is Off (VR Settings > Menus > Ring skill menu)";
     if (!classKnown) return "this class keeps upstream's buttons";
     if (drawsGlyph) return "that button draws glyphs (put a skill on it first)";
     return nullptr;

@@ -1266,7 +1266,7 @@ void FillQuick(rw::QuickIn& q, const host::InputFrame& f, const ia::Snapshot& s,
 // three short pulses, said.
 void OpenQuickCast(int hand, const ia::Snapshot& s, host::InputFrame& f, double heldMs, const char* how) {
     char line[240];
-    const char* no = !framevr::quickradial::Enabled() ? "Quick cast is Off (VR Settings > Combat > Quick cast)"
+    const char* no = !framevr::quickradial::Enabled() ? "Quick cast is Off (VR Settings > Menus > Ring skill menu)"
                    : !framevr::quickradial::ClassKnown(s.skillClass) ? "this class keeps upstream" : nullptr;
     if (no) {
         QueuePulses(hand, 3, .35f);
