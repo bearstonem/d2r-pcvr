@@ -8,6 +8,7 @@
 // room in the stash - only what was found is stored there.
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "collection_view.h"
@@ -32,6 +33,11 @@ struct IconPixels {
 using IconLookup = std::function<const IconPixels*(const std::string& key)>;
 
 // Paints one frame. heading is drawn in the top frame (the category name).
-void Paint(settings::draw::Painter& painter, const Library& library, const ViewState& view, const IconLookup& icons);
+// gameText is the game's own item text for the pointed slot (empty when it has
+// not been fetched yet); rangeText is the same item's possible ranges, shown
+// under it so the roll can be compared. The card is drawn only while a slot is
+// pointed.
+void Paint(settings::draw::Painter& painter, const Library& library, const ViewState& view, const IconLookup& icons,
+           std::string_view gameText = {}, std::string_view rangeText = {});
 
 }   // namespace framevr::collection::draw

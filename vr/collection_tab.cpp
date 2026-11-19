@@ -228,6 +228,10 @@ void TabClearFound() {
     if (g_loaded) g_library.ClearFound();
 }
 
+void TabMarkFoundCode(Category category, uint32_t code) {
+    if (g_loaded) g_library.MarkFoundCode(category, code);
+}
+
 void TabMarkFound(Category category, uint32_t recordId) {
     std::lock_guard lock(g_lock);
     if (g_loaded) g_library.MarkFound(category, recordId);

@@ -91,6 +91,8 @@ inline constexpr float PageGap    = 6.0f;
 inline constexpr float ArrowSize  = 56.0f;
 inline constexpr float FooterSize = 52.0f;
 inline constexpr float SlotGap    = 6.0f;
+// A slot is a vertical rectangle, not a square: an item reads taller than wide.
+inline constexpr float SlotAspect = 0.78f;   // width / height
 
 struct Rect {
     float x = 0, y = 0, width = 0, height = 0;
@@ -153,7 +155,8 @@ inline Layout Build(int page, int pages, int tabs, Size size = Size::Small) {
     const float areaWidth  = CanvasWidth - 2 * Margin;
     const float areaHeight = areaBottom - areaTop;
     const float cell       = std::min(areaWidth / float(grid.columns), areaHeight / float(grid.rows));
-    const float side       = std::max(1.0f, cell - SlotGap);
+    const float height     = std::max(1.0f, cell - SlotGap);
+    const float width      = std::max(1.0f, height * SlotAspect);   // a vertical rectangle
     const float gridWidth  = cell * float(grid.columns);
     const float gridHeight = cell * float(grid.rows);
     const float gridLeft   = (CanvasWidth - gridWidth) * 0.5f;
@@ -162,7 +165,7 @@ inline Layout Build(int page, int pages, int tabs, Size size = Size::Small) {
         for (int column = 0; column < grid.columns; ++column) {
             const float cellX = gridLeft + column * cell;
             const float cellY = gridTop + row * cell;
-            layout.slots[row * grid.columns + column] = {cellX + (cell - side) * 0.5f, cellY + (cell - side) * 0.5f, side, side};
+            layout.slots[row * grid.columns + column] = {cellX + (cell - width) * 0.5f, cellY + (cell - height) * 0.5f, width, height};
         }
     }
 

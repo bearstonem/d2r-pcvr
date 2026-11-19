@@ -62,7 +62,7 @@ units are made by Setup from the player's own game files and are never distribut
 |---|---|---|
 | MinHook (compiled into plugin) | Vendored `third_party/minhook` | `third_party/minhook/LICENSE.txt`, BSD 2-clause |
 | ReShade SDK headers | Vendored `external/reshade` | `external/reshade/LICENSE.md`, BSD 3-clause |
-| D2RLoader Plugin SDK headers | [D2RLoader/PluginSDK](https://github.com/D2RLoader/PluginSDK), `717f727a0ec52912d1558764345f8fa3453a2bd6` | `steamvr/licenses/D2RLoader-PluginSDK-MIT.txt` |
+| D2RLoader Plugin SDK headers | [D2RLoader/PluginSDK](https://github.com/D2RLoader/PluginSDK), `03a5af9e0feb3f95f95e148e330e01f6635950df` | `steamvr/licenses/D2RLoader-PluginSDK-MIT.txt` |
 | OpenXR headers and Windows loader | [KhronosGroup/OpenXR-SDK](https://github.com/KhronosGroup/OpenXR-SDK), 1.1.62, `57af7fc61f9f2d492580cb28aab6d0ea59d8d417` | `steamvr/licenses/OpenXR-Apache-2.0.txt`, `OpenXR-MIT.txt` |
 | JsonCpp (compiled into OpenXR loader) | OpenXR SDK's vendored JsonCpp | `steamvr/licenses/JsonCpp.txt`, public domain / MIT |
 | Box3D physics (compiled into plugin; dropped empty bottles) | [erincatto/box3d](https://github.com/erincatto/box3d), 0.1.0, `8441b4a06d6d09dcfb0b0f704df4d847d1437b92`, unmodified | `steamvr/licenses/Box3D-MIT.txt`, MIT, copyright 2026 Erin Catto |

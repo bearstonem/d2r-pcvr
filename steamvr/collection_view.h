@@ -44,6 +44,10 @@ public:
     // Marks the entry with this record id as found and returns its slot, or
     // UINT32_MAX when the id is not in that category.
     uint32_t MarkFound(Category category, uint32_t recordId);
+    // The same by base item code: a material (a gem or rune) carries no record
+    // id, so its slot is found by the code. UINT32_MAX when the code is not in
+    // that category.
+    uint32_t MarkFoundCode(Category category, uint32_t code);
     void     ClearFound();
     bool     IsFound(Category category, uint32_t slot) const;
 
@@ -232,6 +236,17 @@ inline uint32_t Library::MarkFound(Category category, uint32_t recordId) {
     for (uint32_t slot = 0; slot < Size(category); ++slot) {
         const uint32_t index = start_[static_cast<std::size_t>(category)] + slot;
         if (entries_[index].recordId != recordId) continue;
+        found_[index] = 1;
+        return slot;
+    }
+    return UINT32_MAX;
+}
+
+inline uint32_t Library::MarkFoundCode(Category category, uint32_t code) {
+    if (!finished_) return UINT32_MAX;
+    for (uint32_t slot = 0; slot < Size(category); ++slot) {
+        const uint32_t index = start_[static_cast<std::size_t>(category)] + slot;
+        if (entries_[index].code != code) continue;
         found_[index] = 1;
         return slot;
     }

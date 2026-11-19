@@ -150,6 +150,8 @@ void OpenCampfireFrame();   // the campfire: the headset frame opened before an 
 // The campfire's menu (name, Create, Back, the checkboxes) as a board in the scene: its width,
 // how far ahead of the eyes and how far below them it stands when the scene begins (metres).
 void SetCampfireMenu(float width, float distance, float drop);
+// The stash window's own scale, isolated to it ([interaction] stash_scale).
+void SetStashScale(float scale);
 // The campfire's caption: the part of the game's menu band (shares of it: left, top, right, bottom) where the
 // game writes the picked hero's class and words, on a board of its own above the heroes (width, distance
 // ahead and rise over the eyes, metres). on=false: none.

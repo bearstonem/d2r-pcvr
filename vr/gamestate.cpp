@@ -952,6 +952,49 @@ void CinemaMessage(const char* target,const char* command,const char* text) {
 }
 
 void TellSheetRects(const char* opened);   // below
+
+// The Collection page: route the CollectionTab button's click to our own message at
+// runtime (prepare_collection_tab leaves the button without one), so choosing the
+// tab keeps the stash open and shows the Collection page in its place. UI thread
+// only; the widget exists only after the panel is built, so callers defer it.
+framevr::CallbackTicket g_collectionTabTicket;
+void MaintainCollectionTab(const PluginContext* ctx) {
+    if (!g_widgets || !g_widgets->findPanel || !g_widgets->findWidget) {
+        Log("gamestate: no widget service; the Collection tab cannot be routed");
+        return;
+    }
+    if (!HasWidgetServiceField(g_widgets, WidgetServiceSetWidgetEventMessageFieldEnd)) {
+        Log("gamestate: this loader has no setWidgetEventMessage; the Collection tab cannot be routed");
+        return;
+    }
+    Widgets::WidgetHandle panel = 0;
+    if (g_widgets->findPanel(ctx, "BankExpansionLayout", &panel) != Widgets::Result::Success || !panel) {
+        Log("gamestate: the stash panel was not found to route the Collection tab");
+        return;
+    }
+    Widgets::WidgetHandle button = 0;
+    if (g_widgets->findWidget(ctx, panel, framevr::collection::TabWidgetName, &button) != Widgets::Result::Success || !button) {
+        Log("gamestate: the Collection tab button is not on the stash bar");
+        return;
+    }
+    const auto result = g_widgets->setWidgetEventMessage(ctx, button, Widgets::EventKind::Click,
+                                                         framevr::collection::TabTarget, framevr::collection::TabCommand);
+    Log(result == Widgets::Result::Success
+            ? "gamestate: the Collection tab is wired to open the collection page"
+            : "gamestate: the Collection tab wiring failed");
+}
+void __cdecl WireCollectionTab(const PluginContext* ctx, void* token) noexcept {
+    if (g_collectionTabTicket.Claim(reinterpret_cast<uintptr_t>(token))) MaintainCollectionTab(ctx);
+}
+void ScheduleCollectionTab(const PluginContext* ctx) {
+    if (!g_threads || !g_threads->runOnUiThread) { MaintainCollectionTab(ctx); return; }
+    const auto now = GetTickCount64();
+    if (g_collectionTabTicket.Expired(now, 2000)) g_collectionTabTicket.Cancel();
+    const auto token = g_collectionTabTicket.Start(now);
+    if (token && g_threads->runOnUiThread(ctx, &WireCollectionTab, reinterpret_cast<void*>(token)) != Threads::Result::Success)
+        g_collectionTabTicket.Claim(token);
+}
+
 SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessageEvent* e, void*) noexcept {
     if (!e) return SharedEvents::UiMessageAction::Continue;
     const char* target = e->target ? e->target : "";
@@ -970,19 +1013,38 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
     if (g_keyboard.exchange(g_nameBox.Shown()) != g_nameBox.Shown())
         Log(g_nameBox.Shown() ? "gamestate: name box up (a hero picked) - VR keyboard shown" : "gamestate: name box gone - VR keyboard hidden");
     g_keyboardEpoch.store(g_nameBox.Epoch());
+    // The Collection tab on the stash bar: a stock target (BankPanelMessage, whose own
+    // tabs send SelectTab) with the mod's own command, which the game ignores, so the
+    // stash stays open and the page shows in it.
+    if (!strcmp(target, framevr::collection::TabTarget)) {
+        if (!strcmp(command, framevr::collection::TabCommand)) {
+            framevr::collection::TabSetWanted(true);
+            Log("gamestate: the Collection page was chosen");
+        } else if (!strcmp(command, "SelectTab")) {
+            framevr::collection::TabSetWanted(false);   // a normal stash tab was chosen
+        }
+        return SharedEvents::UiMessageAction::Continue;
+    }
     if (strcmp(target, "PanelManager") == 0) {
         const bool before = g_menu.load() != 0;
         if (!strcmp(command, "OpenPanel") || !strcmp(command, "OpenExclusivePanel")) { if (*text) g_panels.insert(text); }
         else if (!strcmp(command, "ClosePanel") || !strcmp(command, "UnloadPanel")) g_panels.erase(text);
         else if (!strcmp(command, "UnloadAll") || !strcmp(command, "CloseAll")) g_panels.clear();
-        // The Collection tab on the mod's own stash layout asks for this one (prepare_collection_tab):
-        // the panel it names goes the other way from what the open list holds.
+        // An old layout's TogglePanel (the tab before the runtime routing) still means "show the page".
         else if (!strcmp(command, "TogglePanel") && *text) { if (!g_panels.erase(text)) g_panels.insert(text); }
-        // That tab closes the stash so the Collection panel takes its place, which is what choosing
-        // it means; the game never sends this for the stash itself.
         if (!strcmp(command, "TogglePanel") && !strcmp(text, "BankExpansionLayout")) {
             framevr::collection::TabSetWanted(true);
-            Log("gamestate: the Collection tab on the stash bar was chosen");
+            Log("gamestate: the Collection tab on the stash bar was chosen (old layout message)");
+        }
+        // The stash opened: wire the Collection button (it exists only now).
+        if ((!strcmp(command, "OpenPanel") || !strcmp(command, "OpenExclusivePanel")) && !strcmp(text, "BankExpansionLayout"))
+            ScheduleCollectionTab(ctx);
+        // The stash closed: the Collection page goes with it.
+        if ((!strcmp(command, "ClosePanel") || !strcmp(command, "UnloadPanel")) && !strcmp(text, "BankExpansionLayout")) {
+            if (framevr::collection::TabWanted()) {
+                framevr::collection::TabSetWanted(false);
+                Log("gamestate: the stash closed; the Collection page goes with it");
+            }
         }
         if (!strcmp(command, "OpenPanel") || !strcmp(command, "OpenExclusivePanel") || !strcmp(command, "ClosePanel") ||
             !strcmp(command, "UnloadPanel") || !strcmp(command, "UnloadAll") || !strcmp(command, "CloseAll") ||
@@ -1132,6 +1194,12 @@ void Init(const PluginContext* ctx) {
     g_threads = Query<ThreadService>(ctx);
     g_widgets = Query<WidgetService>(ctx);
     Log(g_widgets ? "gamestate: widgets ok - the map can be opened and closed directly" : "gamestate: widgets MISSING - the map cannot be set");
+    if (g_widgets) {
+        char b[160];
+        snprintf(b, sizeof b, "gamestate: widget service size %u, setWidgetEventMessage %s", g_widgets->serviceSize,
+                 HasWidgetServiceField(g_widgets, WidgetServiceSetWidgetEventMessageFieldEnd) ? "present" : "MISSING");
+        Log(b);
+    }
     g_inventory = Query<InventoryService>(ctx);
     g_items = Query<ItemService>(ctx);
     g_events = Query<SharedEventService>(ctx);

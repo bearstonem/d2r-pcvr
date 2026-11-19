@@ -10,6 +10,7 @@
 
 #include "collection_model.h"
 #include "collection_tab.h"
+#include "collection_tooltip_provider.h"
 #include "logging.h"
 
 namespace framevr::collection {
@@ -73,12 +74,18 @@ D2RL::Inventory::IterationAction __cdecl CountItem(const D2RL::PluginContext*, c
     case D2RL::Items::Quality::Unique:
         ++tally.uniques;
         Note(tally.uniqueRows, record);
-        if (record != UINT32_MAX) TabMarkFound(Category::Uniques, record);
+        if (record != UINT32_MAX) {
+            TabMarkFound(Category::Uniques, record);
+            tooltip::RememberHandle(Category::Uniques, record, item->handle);   // its exact text, later
+        }
         break;
     case D2RL::Items::Quality::Set:
         ++tally.sets;
         Note(tally.setRows, record);
-        if (record != UINT32_MAX) TabMarkFound(Category::Sets, record);
+        if (record != UINT32_MAX) {
+            TabMarkFound(Category::Sets, record);
+            tooltip::RememberHandle(Category::Sets, record, item->handle);
+        }
         break;
     case D2RL::Items::Quality::Normal:
         // A completed runeword carries its name string id in prefixIds[0]
@@ -87,6 +94,10 @@ D2RL::Inventory::IterationAction __cdecl CountItem(const D2RL::PluginContext*, c
         if (item->prefixIds[0] != 0) {
             ++tally.runewordCandidates;
             Note(tally.runewordNames, item->prefixIds[0]);
+        } else {
+            // Otherwise a plain base item: a gem or rune the stash holds is a
+            // found material (its slot is keyed by the code, not a record id).
+            TabMarkFoundCode(Category::Materials, item->code);
         }
         break;
     default:
@@ -168,6 +179,7 @@ void RunScan() {
 
     ScanState state;
     TabClearFound();
+    tooltip::ForgetHandles();   // the handles below replace last scan's
     const D2RL::Items::ItemContainer containers[] = {
         D2RL::Items::ItemContainer::Inventory,     D2RL::Items::ItemContainer::Cube,
         D2RL::Items::ItemContainer::PersonalStash, D2RL::Items::ItemContainer::SharedStash,

@@ -26,6 +26,15 @@ namespace framevr::collection {
 class Library;
 struct ViewState;
 
+// The stash bar's Collection button (prepare_collection_tab adds it): its widget
+// name in the layout, and the target/command the mod routes its click to at
+// runtime (WidgetService::setWidgetEventMessage in gamestate.cpp), so choosing it
+// keeps the stash open and shows the Collection page in place. The layout carries
+// no message of its own.
+inline constexpr const char* TabWidgetName = "CollectionTab";
+inline constexpr const char* TabTarget     = "PCVRCollection";
+inline constexpr const char* TabCommand    = "Open";
+
 // Reads the catalog beside the plugin and stores the context. Safe when the
 // file is missing: the tab stays empty and the log says so.
 void InitTab(const D2RL::PluginContext* ctx);
@@ -60,6 +69,7 @@ void TabSetWanted(bool wanted);
 // Called by the scan: the found flags start empty for the character's stash.
 void TabClearFound();
 void TabMarkFound(Category category, uint32_t recordId);
+void TabMarkFoundCode(Category category, uint32_t code);   // a material (gem or rune), by its code
 
 // One line for the log: what the catalog holds and how much of it is found.
 void TabReport();

@@ -14,7 +14,7 @@ std::string Line(const char* category, const char* code, int recordId, const cha
          + std::to_string(level) + "\t" + type + "\t" + extra;
 }
 
-// 100 uniques (two panel pages), 2 sets, 1 runeword.
+// 100 uniques (two panel pages), 2 sets, 1 runeword, 1 material.
 Library Build() {
     Library library;
     assert(library.LoadLine("# collection 1"));
@@ -25,6 +25,7 @@ Library Build() {
     assert(library.LoadLine(Line("sets", "lrg", 56, "Civerb's Ward", 3, "shie", "Civerb's Vestments")));
     assert(library.LoadLine(Line("sets", "amu", 57, "Civerb's Icon", 3, "amul", "Civerb's Vestments")));
     assert(library.LoadLine(Line("runewords", "", 3, "Beast", 0, "axe", "r30 r03 r22 r23 r17")));
+    assert(library.LoadLine(Line("materials", "gsv", 0, "Amethyst", 0, "gema")));
     library.Finish();
     return library;
 }
@@ -33,10 +34,11 @@ Library Build() {
 
 int main() {
     Library library = Build();
-    assert(library.Total() == 103);
+    assert(library.Total() == 104);
     assert(library.Size(Category::Uniques) == 100);
     assert(library.Size(Category::Sets) == 2);
     assert(library.Size(Category::Runewords) == 1);
+    assert(library.Size(Category::Materials) == 1);
 
     // The file's order inside a category is the slot; fields are parsed as written.
     const Entry* first = library.At(Category::Uniques, 0);
@@ -71,6 +73,11 @@ int main() {
     assert(library.Found(Category::Uniques) == 1 && library.Found(Category::Sets) == 1);
     library.ClearFound();
     assert(library.Found(Category::Uniques) == 0 && !library.IsFound(Category::Sets, 1));
+
+    // A material (a gem or rune) is found by its code, not a record id.
+    assert(library.MarkFoundCode(Category::Materials, Library::CodeOf("gsv")) == 0);
+    assert(library.MarkFoundCode(Category::Materials, Library::CodeOf("xxx")) == UINT32_MAX);
+    assert(library.IsFound(Category::Materials, 0) && library.Found(Category::Materials) == 1);
 
     // The panel's page state: two pages of uniques (96 slots a page), and the
     // category switch starts at the first page.

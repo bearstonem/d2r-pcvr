@@ -11,6 +11,10 @@
 // The collection's tabs are a range at the end of the shared stash, added by
 // D2RLoader's [d2rcore.stash] add_shared_tabs: firstTab is the first one the
 // collection owns (the vanilla tabs come before it) and tabs is how many.
+#include <cstdint>
+
+#include "collection_model.h"
+
 namespace D2RL {
 struct PluginContext;
 }
@@ -26,6 +30,12 @@ void ShutdownStore();
 // Called from the update thread: while the stash is open it asks the game thread
 // to sweep the shared stash, at most a few times a second.
 void TickStore(bool stashOpen);
+
+// A click on a panel slot: the stored copy goes back to the inventory, or a
+// carried copy is stored in the collection's tab. identity is the record id for
+// a unique or set, the base item code for a material (the panel's slot identity).
+// Called from the update thread; the move itself runs on the game thread.
+void RequestSlotAction(Category category, uint32_t identity);
 
 // One line for the log: whether affinity is on and where the collection's tabs
 // are, then what the last sweep did.

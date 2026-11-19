@@ -321,7 +321,7 @@ cancel pending requests. Native console and item calls never hold the developer
 status mutex: travel may pump rendering/UI while dispatch runs. Old callbacks
 cannot consume newer requests or overwrite their results.
 
-The [pinned SDK](https://github.com/D2RLoader/PluginSDK/tree/717f727a0ec52912d1558764345f8fa3453a2bd6)
+The [pinned SDK](https://github.com/D2RLoader/PluginSDK/tree/03a5af9e0feb3f95f95e148e330e01f6635950df)
 defines console success as **dispatch acceptance**. The UI therefore reports
 "Commands sent"; verify actual level, skill ranks and arrival in game. Gear
 success means the complete SDK inventory transaction was accepted.

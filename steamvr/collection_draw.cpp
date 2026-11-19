@@ -2,7 +2,9 @@
 #include "collection_draw.h"
 
 #include <string>
+#include <vector>
 
+#include "collection_tooltip.h"
 #include "vr_settings_draw.h"
 
 namespace framevr::collection::draw {
@@ -14,12 +16,27 @@ using settings::draw::ControlState;
 using settings::draw::Icon;
 using settings::draw::Painter;
 using settings::draw::RectF;
+using settings::draw::TextSize;
 using settings::draw::TextStyle;
 
 RectF Box(const panel::Rect& rect) { return {rect.x, rect.y, rect.width, rect.height}; }
 
 RectF Inset(const panel::Rect& rect, float by) {
     return {rect.x + by, rect.y + by, rect.width - 2 * by, rect.height - 2 * by};
+}
+
+// The item image keeps its own proportions inside the slot: a wide belt stays wide
+// and short, a tall armour fills the height rather than being stretched to the box.
+// Centred in the box; never stretched, never enlarged past it.
+RectF FitImage(const RectF& box, int width, int height) {
+    if (width <= 0 || height <= 0 || box.w <= 0 || box.h <= 0) return box;
+    const float aspect = float(width) / float(height);
+    if (aspect > box.w / box.h) {
+        const float h = box.w / aspect;
+        return {box.x, box.y + (box.h - h) * 0.5f, box.w, h};
+    }
+    const float w = box.h * aspect;
+    return {box.x + (box.w - w) * 0.5f, box.y, w, box.h};
 }
 
 // A category's slot colours: the game's own item colours - a unique is gold on
@@ -48,9 +65,84 @@ RectF GridField(const panel::Layout& layout) {
             (last.x + last.width) - first.x + 2 * pad, (last.y + last.height) - first.y + 2 * pad};
 }
 
+// The card under the laser: a dark stone box in a bronze frame, the entry's name
+// in its category's colour, one quiet line, then the game's own item text wrapped
+// to the box. It sits beside the pointed slot and never leaves the panel.
+void DrawTooltip(Painter& painter, const panel::Rect& anchor, const tooltip::Tooltip& tip, Category category) {
+    if (tip.Empty()) return;
+    constexpr float Width = 384.0f, Pad = 18.0f, TitleGap = 6.0f, DividerGap = 10.0f;
+    const float     textWidth = Width - 2 * Pad;
+
+    const TextSize title    = painter.Measure(tip.title, TextStyle::Value, textWidth, true);
+    const TextSize subtitle = painter.Measure(tip.subtitle, TextStyle::Small, textWidth, true);
+    std::vector<TextSize> body;
+    float                 bodyHeight = 0;
+    for (const std::string& line : tip.body) {
+        const TextSize size = painter.Measure(line.empty() ? " " : line, TextStyle::Help, textWidth, true);
+        bodyHeight += size.height;
+        body.push_back(size);
+    }
+    std::vector<TextSize> ranges;
+    float                 rangesHeight = 0;
+    for (const std::string& line : tip.ranges) {
+        const TextSize size = painter.Measure(line.empty() ? " " : line, TextStyle::Help, textWidth, true);
+        rangesHeight += size.height;
+        ranges.push_back(size);
+    }
+    const TextSize rangeLabel = painter.Measure("Possible ranges", TextStyle::Small, textWidth, false);
+    const float    rangesBlock = tip.ranges.empty() ? 0
+        : DividerGap + 1 + DividerGap + rangeLabel.height + rangesHeight;
+    const float    height = Pad + title.height + TitleGap + subtitle.height + DividerGap + 1 + DividerGap +
+                            bodyHeight + rangesBlock + Pad;
+    const tooltip::Box box = tooltip::PlaceTooltip(anchor, Width, height);
+
+    Color titleColor = Color::Text;
+    switch (category) {
+    case Category::Uniques:   titleColor = Color::GoldHi; break;
+    case Category::Sets:      titleColor = Color::Ok; break;
+    case Category::Runewords: titleColor = Color::Section; break;
+    default: break;
+    }
+
+    painter.Fill({box.x, box.y, box.w, box.h}, Color::Ink, 0.94f);
+    painter.Outline({box.x, box.y, box.w, box.h}, Color::Bronze, 3.0f);
+
+    float y = box.y + Pad;
+    painter.Text(tip.title, TextStyle::Value, {box.x + Pad, y, textWidth, title.height}, titleColor, Align::Leading, true);
+    y += title.height + TitleGap;
+    painter.Text(tip.subtitle, TextStyle::Small, {box.x + Pad, y, textWidth, subtitle.height}, Color::Dim, Align::Leading, true);
+    y += subtitle.height + DividerGap;
+    painter.Divider(box.x + Pad, box.x + box.w - Pad, y);
+    y += 1 + DividerGap;
+    for (std::size_t i = 0; i < body.size(); ++i) {
+        const std::string& line = tip.body[i];
+        painter.Text(line.empty() ? " " : line, TextStyle::Help, {box.x + Pad, y, textWidth, body[i].height},
+                     Color::TipBody, Align::Leading, true);
+        y += body[i].height;
+    }
+
+    // A found item's possible ranges, under a rule, so the exact roll above can be
+    // compared with what the item could have rolled.
+    if (!tip.ranges.empty()) {
+        y += DividerGap;
+        painter.Divider(box.x + Pad, box.x + box.w - Pad, y);
+        y += 1 + DividerGap;
+        painter.Text("Possible ranges", TextStyle::Small, {box.x + Pad, y, textWidth, rangeLabel.height},
+                     Color::Quiet, Align::Leading, false);
+        y += rangeLabel.height;
+        for (std::size_t i = 0; i < ranges.size(); ++i) {
+            const std::string& line = tip.ranges[i];
+            painter.Text(line.empty() ? " " : line, TextStyle::Help, {box.x + Pad, y, textWidth, ranges[i].height},
+                         Color::Magic, Align::Leading, true);
+            y += ranges[i].height;
+        }
+    }
+}
+
 }   // namespace
 
-void Paint(Painter& painter, const Library& library, const ViewState& view, const IconLookup& icons) {
+void Paint(Painter& painter, const Library& library, const ViewState& view, const IconLookup& icons,
+           std::string_view gameText, std::string_view rangeText) {
     const panel::Layout layout = panel::Build(view.page, view.Pages(library), int(CategoryCount), view.size);
 
     // The panel's own surface: stone inside a bronze frame.
@@ -91,7 +183,7 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
             painter.Outline(box, style.edge, pointed ? 4.f : 3.f);
             const IconPixels* pixels = icons ? icons(panel::IconKey(view.category, entry->recordId, entry->code)) : nullptr;
             if (pixels != nullptr && pixels->rgba != nullptr) {
-                painter.Image(inner, pixels->rgba, pixels->width, pixels->height);
+                painter.Image(FitImage(inner, pixels->width, pixels->height), pixels->rgba, pixels->width, pixels->height);
             } else {
                 // Still decoding: a gold dot stands for the icon for now.
                 painter.Fill({inner.x + inner.w * 0.33f, inner.y + inner.h * 0.33f, inner.w * 0.34f, inner.h * 0.34f}, style.edge, 0.9f);
@@ -127,6 +219,14 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
         step.chosen  = i == int(view.show);
         step.pointed = view.hover.kind == panel::HitKind::Show && view.hover.index == i;
         painter.Socket(Box(layout.showSteps[i]), panel::ShowName(static_cast<panel::Show>(i)), step);
+    }
+
+    // The pointed slot's card, last so it sits over the grid.
+    if (view.hover.kind == panel::HitKind::Slot) {
+        if (const Entry* entry = SlotEntry(library, view, visible, view.hover.index)) {
+            const bool found = SlotFound(library, view, visible, view.hover.index);
+            DrawTooltip(painter, layout.slots[view.hover.index], tooltip::BuildTooltip(*entry, found, gameText, rangeText), view.category);
+        }
     }
 }
 

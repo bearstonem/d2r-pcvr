@@ -124,7 +124,10 @@ int main(int argc, char** argv) {
     const char* foundText   = nullptr;
     const char* categoryName = nullptr;
     const char* sizeName     = nullptr;
+    const char* tooltipText  = nullptr;
+    const char* rangesText   = nullptr;
     int         page        = 0;
+    int         hover       = -1;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         const auto next = [&](const char*& into) { if (i + 1 < argc) into = argv[++i]; };
@@ -134,7 +137,10 @@ int main(int argc, char** argv) {
         else if (arg == "--found") next(foundText);
         else if (arg == "--category") next(categoryName);
         else if (arg == "--size") next(sizeName);
+        else if (arg == "--tooltip") next(tooltipText);
+        else if (arg == "--ranges") next(rangesText);
         else if (arg == "--page") page = std::atoi(i + 1 < argc ? argv[++i] : "0");
+        else if (arg == "--hover") hover = std::atoi(i + 1 < argc ? argv[++i] : "-1");
     }
     if (catalogPath == nullptr) {
         std::fprintf(stderr, "usage: collection-preview --catalog <collection.tsv> [--icons <folder>] [--out <png>] [--category uniques|sets|runewords] [--page N] [--found \"122,301\"]\n");
@@ -181,6 +187,7 @@ int main(int argc, char** argv) {
         else std::fprintf(stderr, "unknown category %s\n", categoryName);
     }
     view.Clamp(library);
+    if (hover >= 0) view.hover = {framevr::collection::panel::HitKind::Slot, hover};   // the pointed slot, for the card
 
     const auto                       co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     IWICImagingFactory*              wic = nullptr;
@@ -212,7 +219,8 @@ int main(int argc, char** argv) {
     framevr::settings::draw::Painter painter;
     if (!painter.Ready()) { std::fprintf(stderr, "painter: %s\n", painter.Error().c_str()); return 5; }
     if (!painter.Begin()) { std::fprintf(stderr, "begin: %s\n", painter.Error().c_str()); return 6; }
-    framevr::collection::draw::Paint(painter, library, view, lookup);
+    framevr::collection::draw::Paint(painter, library, view, lookup, tooltipText ? tooltipText : "",
+                                     rangesText ? rangesText : "");
     const auto pixels = painter.End();
     if (pixels.empty()) { std::fprintf(stderr, "paint: %s\n", painter.Error().c_str()); return 7; }
 

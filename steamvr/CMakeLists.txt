@@ -101,8 +101,8 @@ target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/respec.cpp)   # Reset Skills & Stats
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_lock.cpp ${ROOT}/vr/summon_range.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/loot_beam_scan.cpp)   # loot beams: the items on the floor that get one
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/monster_immunity.cpp)
-target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/collection_scan.cpp ${ROOT}/vr/collection_tab.cpp ${ROOT}/vr/collection_store.cpp)   # collection tabs: the catalog scan, the catalog and affinity (collection_model.h)
-target_sources(d2rl-pcvr PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/collection_draw.cpp)   # collection tabs: the panel's own painting (collection_draw.h)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/collection_scan.cpp ${ROOT}/vr/collection_tab.cpp ${ROOT}/vr/collection_store.cpp ${ROOT}/vr/collection_tooltip_provider.cpp)   # collection tabs: the catalog scan, the catalog, affinity and the tooltip provider (collection_model.h)
+target_sources(d2rl-pcvr PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/collection_draw.cpp ${CMAKE_CURRENT_SOURCE_DIR}/collection_tooltip.cpp)   # collection tabs: the panel's own painting and its tooltip (collection_draw.h, collection_tooltip.h)
 add_executable(monster-immunity-test monster_immunity_test.cpp)
 target_compile_options(monster-immunity-test PRIVATE -UNDEBUG)
 add_executable(monster-immunity-runtime-test monster_immunity_runtime_test.cpp)
@@ -221,6 +221,7 @@ add_executable(collection-model-test collection_model_test.cpp)   # collection t
 add_executable(collection-panel-test collection_panel_test.cpp)   # collection tabs: tab row, slot grid, paging and hit testing
 add_executable(collection-view-test collection_view_test.cpp)     # collection tabs: catalog loading, found flags, page state
 add_executable(collection-pointer-test collection_pointer_test.cpp)   # collection tabs: the laser, the trigger and the clock
+add_executable(collection-tooltip-test collection_tooltip_test.cpp collection_tooltip.cpp)   # collection tabs: the preview spec, the item text split and the card's placement
 add_executable(stats-button-test stats_button_test.cpp)
 add_executable(menu-drop-test menu_drop_test.cpp)
 add_executable(respec-button-test respec_button_test.cpp)
@@ -401,7 +402,7 @@ add_executable(controller-labels-test controller_labels_test.cpp)
 add_executable(vr-settings-store-test vr_settings_store_test.cpp ${ROOT}/vr/settings_menu.cpp)
 target_link_libraries(vr-settings-store-test PRIVATE framevr-runtime)
 add_executable(vr-settings-preview vr_settings_preview.cpp vr_settings_ui.cpp vr_settings_draw.cpp vr_settings_assets.rc)
-add_executable(collection-preview collection_preview.cpp collection_draw.cpp vr_settings_draw.cpp vr_settings_assets.rc)   # the Collection panel as a PNG, for checking the look without a headset
+add_executable(collection-preview collection_preview.cpp collection_draw.cpp collection_tooltip.cpp vr_settings_draw.cpp vr_settings_assets.rc)   # the Collection panel as a PNG, for checking the look without a headset
 target_include_directories(collection-preview PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(collection-preview PRIVATE user32 gdi32 d2d1 dwrite windowscodecs ole32 framevr-runtime)
 add_dependencies(vr-settings-preview release-notes-generated)
@@ -492,7 +493,7 @@ foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test activ
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test prop-heft-test limb-rig-test aged-cache-test ecs-storage-test look-at-test limb-physics-test limb-worker-test leather-menu-test stash-buttons-test stats-button-test menu-drop-test arcane-decay-test respec-button-test vr-keyboard-test
     combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test guard-strain-test heartbeat-test haptic-impact-test haptic-heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test logging-test log-rotation-test melee-contact-test bow-bash-test weapon-heft-test hit-reactions-test held-collision-test held-world-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-warlock-test motions-assassin-test motions-paladin-test motions-druid-test bone-graft-test
     interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test floating-map-test navigation-info-test companions-test summon-commander-test active-effects-test skill-cooldowns-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test sheet-walk-test room-stitch-test ceiling-top-test loot-beams-test
-    vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test loot-aim-test telegraph-test aim-reach-test aim-rules-test teleport-arc-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test light-radius-test world-sound-test frame-generation-test late-wait-test turn-capture-test panel-atlas-test atlas-dirty-test far-objects-test collection-model-test collection-panel-test collection-view-test collection-pointer-test)
+    vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test loot-aim-test telegraph-test aim-reach-test aim-rules-test teleport-arc-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test light-radius-test world-sound-test frame-generation-test late-wait-test turn-capture-test panel-atlas-test atlas-dirty-test far-objects-test collection-model-test collection-panel-test collection-view-test collection-pointer-test collection-tooltip-test)
   # These fixtures use assert for their checks, including in Release builds.
   if(MSVC)
     target_compile_options(${test_target} PRIVATE /UNDEBUG)

@@ -31,6 +31,7 @@ import prepare_game_ceiling
 import prepare_campfire_sky
 import prepare_frontend_floor
 import prepare_frontend_scene
+import prepare_collection
 import prepare_collection_tab
 from game_install import validate_game
 import mod_identity
@@ -338,6 +339,34 @@ def default_saves(game):
 
 LOADER_CONFIG = Path('d2rloader/config/d2rloader.toml')
 
+# The collection stores found items in extra shared stash tabs. The loader's
+# add_shared_tabs and the mod's [collection] tabs (d2r_pcvr.ini, default 24) must
+# agree, so the installer keeps them in step. See vr/collection_store.h.
+COLLECTION_SHARED_TABS = 24
+
+
+def ensure_shared_tabs(text, tabs):
+    """Return the loader toml with [d2rcore.stash] add_shared_tabs set to tabs.
+
+    Every other line, comment and section is kept. A commented add_shared_tabs is
+    left as a comment; the live setting is written into its section."""
+    lines = text.splitlines()
+    header = '[d2rcore.stash]'
+    setting = 'add_shared_tabs = %d' % tabs
+    start = next((i for i, line in enumerate(lines) if line.strip() == header), None)
+    if start is None:
+        if lines and lines[-1].strip():
+            lines.append('')
+        lines.extend([header, setting])
+        return '\n'.join(lines) + '\n'
+    end = next((j for j in range(start + 1, len(lines)) if lines[j].lstrip().startswith('[')), len(lines))
+    for k in range(start + 1, end):
+        if lines[k].strip().startswith('add_shared_tabs'):
+            lines[k] = setting
+            return '\n'.join(lines) + '\n'
+    lines.insert(start + 1, setting)
+    return '\n'.join(lines) + '\n'
+
 
 def reshade_shader_files(root):
     "The shader files to install: reshade/D2R_*.fx and D2R_*.fxh by pattern (a new header is never left out). Stops if the effect, or a header it includes, is missing."
@@ -644,6 +673,7 @@ def main():
     else:
         payload.update({mod_identity.MOD_DIR / name: data for name, data in front.items()})
         print('Prepared the main menu\'s act scenes in 3D from your installed game.')
+    collection_prepared = False
     try:
         collection_tab = prepare_collection_tab.prepare(game, casclib=args.casclib)
         prepare_collection_tab.check_existing(game / mod_identity.MOD_DIR, collection_tab)
@@ -651,7 +681,31 @@ def main():
         print(f'Collection tab on the stash bar unavailable; the stash keeps its five tabs: {error}')
     else:
         payload.update({mod_identity.MOD_DIR / name: data for name, data in collection_tab.items()})
+        collection_prepared = True
         print('Prepared the Collection tab on the stash bar from your installed game.')
+    if collection_prepared:
+        # The panel's catalog (collection.tsv beside the plugin), built from the
+        # player's own game tables; never shipped.
+        with tempfile.TemporaryDirectory(prefix='d2r-vr-collection-') as temporary:
+            try:
+                result = prepare_collection.prepare(game, temporary, casclib=args.casclib)
+            except (OSError, ValueError, KeyError, IndexError) as error:
+                print(f'Collection catalog unavailable; the panel stays empty: {error}')
+            else:
+                payload[mod_identity.PLUGIN.parent / 'collection.tsv'] = (Path(temporary) / 'collection.tsv').read_bytes()
+                print('Prepared the Collection catalog ({} uniques, {} sets, {} runewords, {} materials) from your '
+                      'installed game.'.format(result.get('uniques', 0), result.get('sets', 0),
+                                               result.get('runewords', 0), result.get('materials', 0)))
+        # The collection's storage: extra shared stash tabs. Keep the loader's own
+        # setting in step with the mod's [collection] tabs, whatever the loader's
+        # default or the player's existing config said.
+        toml_rel = LOADER_CONFIG
+        source = payload.get(toml_rel)
+        if source is None and (game / toml_rel).is_file():
+            source = (game / toml_rel).read_bytes()
+        if source is not None:
+            payload[toml_rel] = ensure_shared_tabs(source.decode('utf-8'), COLLECTION_SHARED_TABS).encode('utf-8')
+            print('Set the loader to add the shared stash tabs the collection stores in.')
     require_game_closed()
     check_launcher_icon(game, payload[mod_identity.MOD_DIR / 'launcher_icon.png'])
     snapshot = args.backup_dir / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
