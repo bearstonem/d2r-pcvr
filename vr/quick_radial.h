@@ -43,6 +43,6 @@ void Cast(CastFrame f);
 void Layer(const LayerFrame& f);
 void Request(RequestFrame f);
 // vr/quick_items.cpp Use (UI thread), its first statement: the radial's own in-flight inventory use may name its item code for
-// that call; the caller restores `assigned` on every return.
-void QuickUse(const void* request, uint32_t& assigned);
+// that call. Returns the item code the call may use: `assigned`, or the radial's own request's code; the caller's global is never changed.
+uint32_t QuickUse(const void* request, uint32_t assigned);
 }  // namespace framevr::quickradial::rt

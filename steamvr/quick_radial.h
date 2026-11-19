@@ -20,6 +20,7 @@
 #include <vector>
 #include "interactions.h"
 #include "stick_select.h"
+#include "quick_radial_size.h"
 
 namespace framevr::quickradial {
 
@@ -576,7 +577,7 @@ inline float Meters(const Plane& p, float deg) noexcept { return 2 * p.dist * st
 // a hint. Both regions are free in the shared image (the glue's static_asserts).
 namespace atlas {
 struct Rect { int x, y, w, h; };
-constexpr int AW = 480, AH = 848, BW = 512, BH = 232, Gap = 8;
+constexpr int AW = quickradialsize::AW, AH = quickradialsize::AH, BW = quickradialsize::BW, BH = quickradialsize::BH, Gap = 8;
 constexpr int RingPx = 448, RimPx = 112, LabelW = 232, LabelH = 40;
 constexpr Rect RingRect{0, 0, RingPx, RingPx};
 constexpr Rect RimRect{0, RingPx + Gap, RimPx, RimPx};

@@ -14,7 +14,8 @@
 // The pictures are painted on the radial's own worker (vr/quick_radial_paint.cpp), which also reads the character's save name
 // (charsave) and keeps each character's ring, and the radial's button, in d2r_vr_quick_radial.ini beside the plugin.
 // Closed, with nothing pending: one branch a frame in the press (a 0.5 s tick looks for a new character or a changed ring and
-// paints it ahead of the next open), no allocation, no lock. No swapchain.#include <windows.h>
+// paints it ahead of the next open), no allocation, no lock. No swapchain.
+#include <windows.h>
 #include <openxr/openxr.h>
 #include <atomic>
 #include <chrono>
@@ -259,6 +260,7 @@ struct State {
     Pending pending;
     qr::BindWatch bind;
     int ownerTold = -2;
+    bool offHandled = false;      // the Off cleanup ran (Press returns at once while the radial is off)
     uint32_t buttonSeen = 0;      // qr::state::buttonSet as last seen: a change (the ring menu's SetButton, or our own bind) is saved
     uint32_t noRoomTold = 0;
 };
@@ -407,8 +409,8 @@ void Tick(const rt::PressFrame& f, const ia::Snapshot& s, bool on, const qr::Tun
             char line[260];
             st.answered = true;   // the page: Saved or This game, no longer Reading (review S3)
             if (!r.ok) {   // review N4: said once per reason and level, not every 10 s
-                if (r.twins) std::snprintf(line, sizeof line, "Frame quick radial: two or more class %d saves at level %d (newest: '%s'): not sure which is played; the ring is kept for this game only", r.cls, r.level, r.name.c_str());
-                else std::snprintf(line, sizeof line, "Frame quick radial: no save of class %d at level %d yet (newest: '%s'); the ring is kept for this game, read again every 10 s", r.cls, r.level, r.name.c_str());
+                if (r.twins) std::snprintf(line, sizeof line, "Frame quick radial: two or more class %d saves at level %d: not sure which is played; the ring is kept for this game only", r.cls, r.level);
+                else std::snprintf(line, sizeof line, "Frame quick radial: no save of class %d at level %d yet; the ring is kept for this game, read again every 10 s", r.cls, r.level);
                 const int said = (r.twins ? 1 : 2) + r.level * 4;
                 if (said == st.noSaveTold) line[0] = 0;
                 st.noSaveTold = said;
@@ -417,7 +419,7 @@ void Tick(const rt::PressFrame& f, const ia::Snapshot& s, bool on, const qr::Tun
                 st.identified = true; st.key = r.key; st.name = r.name;
                 if (!r.found) {   // no ring stored yet: this game's ring (moved skills, the ring menu's edits) is saved as it is
                     const bool keep = st.ring.n > 0;
-                    std::snprintf(line, sizeof line, "Frame quick radial: character %s (class %d, level %d): %s", r.name.c_str(), r.cls, r.level,
+                    std::snprintf(line, sizeof line, "Frame quick radial: character (class %d, level %d): %s", r.cls, r.level,
                                   keep ? "no ring stored yet: this game's ring saved" : "no ring stored yet (empty: fill it from the ring menu's Quick cast)");
                     if (keep) { std::lock_guard lock(w.m); w.saves.emplace_back(st.key, qr::Encode(st.ring)); }
                 } else {   // reviews S2, S3: the stored ring wins; what was put on the live ring before (still there) is added to it, never over it
@@ -431,7 +433,7 @@ void Tick(const rt::PressFrame& f, const ia::Snapshot& s, bool on, const qr::Tun
                         else if (f.say) { char full[240]; std::snprintf(full, sizeof full, "Frame quick radial: %s (put in the ring menu before the save was read) not added: the stored ring is full (12)", NameOf(s, m.it.skill).c_str()); f.say(full); }
                     }
                     const int count = st.ring.Count();
-                    std::snprintf(line, sizeof line, "Frame quick radial: character %s (class %d, level %d): %d item%s loaded%s", r.name.c_str(), r.cls, r.level, count, count == 1 ? "" : "s",
+                    std::snprintf(line, sizeof line, "Frame quick radial: character (class %d, level %d): %d item%s loaded%s", r.cls, r.level, count, count == 1 ? "" : "s",
                                   added ? " (with what this game put on it before, saved)" : "");
                     if (added) { std::lock_guard lock(w.m); w.saves.emplace_back(st.key, qr::Encode(st.ring)); }
                 }
@@ -619,6 +621,7 @@ void Press(PressFrame f) {
     if (!st.busy && !buttonMoved && (st.bound < 0 || f.slot != st.bound) && nowS < st.nextTickS && !st.drawn && st.buzzCount == 0 &&
         framevr::quickradial::link::moveAsk.load(std::memory_order_relaxed) < 0 && !framevr::quickradial::link::editWaiting.load(std::memory_order_relaxed)) return;   // closed, not our press: one branch
     const bool on = qr::Enabled();
+    if (!on) { if (st.offHandled) return; st.offHandled = true; } else st.offHandled = false;   // switched off: the Off cleanup below runs once, then nothing (no tick, no lock)
     if (buttonMoved) { st.buttonSeen = buttonNow; st.nextTickS = 0; st.ownerTold = -2; SaveButton(); }
     const auto& snap = *static_cast<const ia::Snapshot*>(f.snapshot);
     const qr::Tuning t = ReadTuning();
@@ -854,9 +857,10 @@ void Request(RequestFrame f) {
 }
 // vr/quick_items.cpp Use (UI thread): upstream's inventory use takes only its one assigned item; the radial's own request (its
 // sequence, in flight) is let through for its code, for that call only (the caller puts the assignment back).
-void QuickUse(const void* request, uint32_t& assigned) {
+uint32_t QuickUse(const void* request, uint32_t assigned) {
     const auto* r = static_cast<const ia::Request*>(request);
     const uint64_t seq = useSeq.load(std::memory_order_acquire);
-    if (r && seq && r->sequence == seq && r->action == ia::Action::UseItem && r->index != 0) assigned = uint32_t(r->index);
+    if (r && seq && r->sequence == seq && r->action == ia::Action::UseItem && r->index != 0) return uint32_t(r->index);
+    return assigned;
 }
 }  // namespace framevr::quickradial::rt
