@@ -56,7 +56,7 @@ inline constexpr float ProgressStep = 0.5f;
 inline constexpr uint64_t HunterStallMs = 15000;   // one hunter with no new best this long gives up (back to its spot)
 inline constexpr uint64_t NoProgressMs = 15000;    // no hunter with a new best this long: the hunt gives up
 // A hunter whose distance to the mark changes this much between two ticks was moved, not walked (the game's own leash relocates a
-// summon far from the hero, DetourRelocateUnit, vetoed for a hunter only while Hold the leash is On): only logged.
+// summon far from the hero, DetourRelocateUnit, vetoed for a hunter only while the leash rule holds it): only logged.
 inline constexpr float JumpCells = 10.0f;
 inline constexpr float TraceNear = 3.0f;           // the hunt's hunters: within this of the mark (MeleeArrive)
 static_assert(HunterStallMs <= NoProgressMs, "a hunter never gives up before the hunt would");
@@ -484,7 +484,7 @@ public:
         return o;
     }
     void Forget() { owned_ = false; defending_ = lost_ = skip_ = 0; }
-    // Army X menu taken off its button (N3, recommended yes): the X menu's own anchor (Move and hold, or Hold here's spot it
+    // Army X menu taken off its button: the X menu's own anchor (Move and hold, or Hold here's spot it
     // claimed) is let go, the coordinator's ClearAnchor (the army re-forms on the hero, as after any order that ends a hold), and
     // forgotten. Another order's anchor (moved, or none) is never touched. True: an anchor was cleared.
     bool Release(Coord& c) {
@@ -717,7 +717,7 @@ inline LeashPick PickLeash(float reach, int level, int lastLevel, const uint32_t
 // each release is at once, not at the next army tick.
 enum class LeashRelease : uint8_t {
     Held,
-    Off,          // Hold the leash Off (or Army X menu, Summons, Ideas Off)
+    Off,          // the leash rule off, or the menu on no button
     NotHunter,    // not in the leash roster (not hunting, gave up, beyond Leash reach), or no fresh roster
     HuntOff,      // Hunt the mark Off
     FallOut,      // Fall out

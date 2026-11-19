@@ -220,11 +220,11 @@ uint32_t CachedModes(uint32_t classId) {
     return 0;
 }
 
-// ---- Far mark trace ----
+// ---- The army's pets ----
 // Every army pet the army step sampled (hunting or not), kept by id on the game thread (Moves writes, the sampler reads: the same
 // thread), and what the game's own seams saw of each since the sampler's last look (atomics, in a slot the pet keeps by its unit
-// id for as long as it is sampled: slots by roster position lost their counts whenever a summon died or
-// was cast, and a pet that had swung then read IDLE WHILE HIT).
+// id for as long as it is sampled, so a summon dying or being cast never moves
+// another pet's counts).
 struct Pet {
     uint32_t id = 0; uint16_t classId = 0; uint8_t petType = 0, mode = 1;
     int slot = -1;                 // its PetSeen slot (-1: none free)
@@ -416,7 +416,7 @@ void Moves(seam::ArmyMovesFrame f) {
     armyxmenu::ArmyTick(f);
     PublishPets(f);   // the army's pets by id, for the fight back
     HitBackTick(f);   // Fight back when hit: a hit summon's own attacker, only while the army has no priority target
-    const xhunt::Mode mode = xhunt::ModeOf(cfg::Gated(cfg::rules.hunt));   // Off with Army X menu, Summons or Ideas Off
+    const xhunt::Mode mode = xhunt::ModeOf(cfg::Gated(cfg::rules.hunt));   // Off while the menu is on no button
     char line[360];
     if (mode != g.told && (g.toldAny || mode != xhunt::Mode::Off)) {
         std::snprintf(line, sizeof line, "Frame army x menu: hunt the mark: %s%s", ModeName(mode),
@@ -428,7 +428,7 @@ void Moves(seam::ArmyMovesFrame f) {
     if (mode == xhunt::Mode::Off && !g.hunt.Mark() && !g.hunt.Returning()) return;   // Off, nothing under way: one branch
     // Summons run's decision for each sampled summon (the same as Walk's for its move: its type and its class's mask, once read),
     // and Run the whole approach: Step sends a runner seen walking again (runners), the AI's own walks for it go out as runs (Move)
-    const auto runMode = xhunt::RunModeOf(cfg::Gated(cfg::rules.run));   // Off with Army X menu, Summons or Ideas Off
+    const auto runMode = xhunt::RunModeOf(cfg::Gated(cfg::rules.run));   // Off while the menu is on no button
     const bool approach = runMode != xhunt::RunMode::Off && (cfg::rules.runApproach && armyxmenu::On());
     std::array<uint8_t, framevr::commander::MaxArmyUnits> runners{};
     const size_t rn = runMode == xhunt::RunMode::Off ? 0 : std::min(f.unitCount, runners.size());
@@ -474,9 +474,9 @@ void Moves(seam::ArmyMovesFrame f) {
         g.arriveLineMs = 0;
     }
     if (t.mark) {
-        if (t.jumped) {   // the game's own leash (DetourRelocateUnit; vetoed while Hold the leash is On) or a relocation moved a hunter
-            std::snprintf(line, sizeof line, "Frame army x menu: hunt: %d hunter%s moved, not walked (summon %u: %.1f -> %.1f sub-tiles from monster %u in one tick; the game's own leash? Hold the leash %s)",
-                          t.jumped, t.jumped == 1 ? "" : "s", t.jumpId, t.jumpFrom, t.jumpTo, t.mark, (cfg::rules.huntLeash && armyxmenu::On()) ? "On" : "Off");
+        if (t.jumped) {   // the game's own leash (DetourRelocateUnit; vetoed while the leash rule holds it) or a relocation moved a hunter
+            std::snprintf(line, sizeof line, "Frame army x menu: hunt: %d hunter%s moved, not walked (summon %u: %.1f -> %.1f sub-tiles from monster %u in one tick; the game's own leash? the leash rule is %s)",
+                          t.jumped, t.jumped == 1 ? "" : "s", t.jumpId, t.jumpFrom, t.jumpTo, t.mark, (cfg::rules.huntLeash && armyxmenu::On()) ? "on" : "off");
             Say(f, line);
         }
         g.retriedSince += unsigned(t.retried);
@@ -554,7 +554,7 @@ bool Leash(seam::SummonRelocateFrame f) {
 
 // StepSummonArmyServer's moves (Walk; the game thread, no lock): walk or run.
 void Walk(seam::ArmyWalkFrame f) {
-    const auto mode = xhunt::RunModeOf(cfg::Gated(cfg::rules.run));   // Off with Army X menu, Summons or Ideas Off
+    const auto mode = xhunt::RunModeOf(cfg::Gated(cfg::rules.run));   // Off while the menu is on no button
     if (mode != g_run.told && (g_run.toldAny || mode != xhunt::RunMode::Off) && f.say) {
         static constexpr const char* names[3] = {"Off (every summon walks, as before)", "Wolves (Spirit and Dire wolves run; the rest walk)",
                                                   "Every runner (wolves, and the Valkyrie, Grizzly and Shadows whose game data has a run; Necromancer summons walk)"};

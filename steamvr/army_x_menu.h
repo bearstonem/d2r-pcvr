@@ -25,13 +25,12 @@ namespace framevr::xmenu {
 // written to the game's bindings (the button's game skill is cleared, as for Draw glyph).
 constexpr int ItemId = 9001;
 // Its icon's key in the commander's icon cache ("s" + the id, as every skill's): no manifest has it, so the glue's icon maker
-// paints it (atlas::BindIcon below) for every painter that asks: the ring wheel's shelf, the commander's Edit Slots list.
+// paints it (atlas::BindIcon below) for every painter that asks (the Edit Slots list).
 inline constexpr const char* IconKey = "s9001";
 
 // ---- The bind ----
-// Two ways put Army X menu on a hand button: the commander's hand wheel (Edit Slots lists it, General / Items, with an army out) and
-// the ring wheel's General shelf (hold a button on the entry, as on a skill; whenever the switch is On). Both send the commander's
-// own BindSkill with skill ItemId; Take makes it the commander's clear of that button's game skill (as Draw glyph's pick does) and
+// Army X menu goes on a hand button through the hand wheel: Edit Slots lists it (General / Items, with an army out) and sends
+// the commander's own BindSkill with skill ItemId; Take makes it the commander's clear of that button's game skill (as Draw glyph's pick does) and
 // remembers it; the reply's Applied makes that slot the X menu's button ([wheel] army_x_menu_button = slot + 1).
 struct BindWatch {
     uint64_t seq = 0; int slot = -1;
@@ -53,7 +52,7 @@ struct BindWatch {
     }
     void Forget() noexcept { seq = 0; slot = -1; }
 };
-// The ring wheel's entry: its name and help (the blurb), and its slot from the stored button (0: none).
+// The slot the menu is on, from the stored button (slot + 1; 0: none).
 inline int SlotOfButton(float stored, int slots) noexcept { const int b = int(stored + .5f) - 1; return b >= 0 && b < slots ? b : -1; }
 
 enum Dir : int { Up = 0, Down = 1, Left = 2, Right = 3, DirCount = 4 };
@@ -132,8 +131,8 @@ inline Aimed PickFor(const Aimed& hand, const Aimed& eyes, double nowMs) noexcep
 enum class AttackHow { Focus, NoTarget, TacticalOff, Targeting };
 // a: the hand's pick copied at the press, nowMs: the press (the same clock); tacticalOn: VR Settings' Tactical commands, the
 // switch the commander's priority target needs (companionai::IssueTacticalOrder refuses without it; with it Off the aim rules may
-// not even pick, so it is the reason named first). targeting: Attack my target's reach row is above Off: with no
-// monster outlined the hand picks one (Targeting, below) instead of the wedge; Off: the wedge, as before.
+// not even pick, so it is the reason named first). targeting: Attack my target's reach is above 0: with no
+// monster outlined the hand picks one (Targeting, below) instead of the wedge; 0: the wedge, as before.
 inline AttackHow PlanAttack(const Aimed& a, double nowMs, bool tacticalOn, bool targeting = false) noexcept {
     if (!tacticalOn) return AttackHow::TacticalOff;
     if (Fresh(a, nowMs)) return AttackHow::Focus;
@@ -142,11 +141,11 @@ inline AttackHow PlanAttack(const Aimed& a, double nowMs, bool tacticalOn, bool 
 
 // ---- Attack my target's targeting mode ----
 // Let go on Attack my target with no monster outlined: the cross closes and the hand that held the button points a long ray;
-// the monster nearest it (by angle, out to the reach row) is the candidate, an arrow over it that jumps as the hand sweeps (a
+// the monster nearest it (by angle, out to the reach) is the candidate, an arrow over it that jumps as the hand sweeps (a
 // tick each change), and that hand's trigger locks it. While the mode is on it OWNS that hand's trigger: the trigger's own
 // action (attack, skill) never fires, the locking pull included; after the lock or a cancel the trigger is the game's again on
 // its next fresh press (one held through the end stays muted until it comes up). Cancel: the grip (a fresh press) or the time
-// row; nothing is ordered then (no wedge in this mode).
+// limit; nothing is ordered then (no wedge in this mode).
 constexpr float CatchDeg = 10.f;      // the ray picks within this of a monster's body: the tactical chord's AimDegrees (transport)
 constexpr float StickDeg = 1.f;       // the candidate holds until another is this much nearer the ray (no flicker between two)
 constexpr float BodyM = 1.f;          // the body point the angle is measured to, above the feet (the chord's degreesOff: 1 m)
@@ -211,7 +210,7 @@ struct TargetIn {
     double nowMs = 0; bool on = false;
     float trigger = 0, grip = 0;   // the targeting hand's raw trigger and grip (HandInput), 0-1
     uint32_t candidate = 0;        // RayPick's this frame (0: none)
-    float timeoutS = 4;            // the time row (0: no limit)
+    float timeoutS = 4;            // the time limit (0: none)
 };
 struct TargetOut {
     bool mute = false;             // the targeting hand's trigger does nothing else this frame (the glue clears its slot's request)
@@ -318,7 +317,7 @@ struct FocusQueue {
         if (s == Queued && nowMs - postedMs > TimeoutMs && state.compare_exchange_strong(s, Idle, std::memory_order_acq_rel)) return Outcome::TimedOut;
         return Outcome::None;
     }
-    // Transport, the switch going Off: a queued one is dropped (true), never given; one already taken still reports.
+    // Transport, the menu taken off its button: a queued one is dropped (true), never given; one already taken still reports.
     bool Cancel() noexcept { int s = Queued; return state.compare_exchange_strong(s, Idle, std::memory_order_acq_rel); }
     bool Waiting() const noexcept { return state.load(std::memory_order_relaxed) != Idle; }
     // The switch going Off: a queued one is dropped (Dropped); one the game thread is giving right now
@@ -638,13 +637,13 @@ struct Premul {
 };
 // The bind entry's icon: the cross
 // itself, its four circles (CellUp .. CellRight, as the menu opens) shrunk to BindCircle px round the middle of a picture with
-// the commander's skill frame proportions (132 x 130), inside the part of a skill frame the ring wheel shows (104 px from (14, 13)).
+// the commander's skill frame proportions (132 x 130), inside the frame's inner 104 px (from (14, 13)).
 // sheet: the sheet, straight RGBA, w x h; out: straight RGBA, BindW x BindH (all clear when the sheet is missing).
 constexpr int BindW = 132, BindH = 130, BindCircle = 40, BindReach = 32;
 inline void BindIcon(const uint8_t* sheet, int w, int h, std::vector<uint8_t>& out) {
     out.assign(size_t(BindW) * BindH * 4, 0);
     if (!sheet || w < Width || h < Height) return;
-    constexpr int cx = 14 + 52, cy = 13 + 52;                  // the ring wheel's crop's center
+    constexpr int cx = 14 + 52, cy = 13 + 52;                  // the inner area's center
     constexpr int step[DirCount][2] = {{0, -1}, {0, 1}, {-1, 0}, {1, 0}};   // Up, Down, Left, Right (picture y down)
     const float k = float(Icon) / BindCircle;
     for (int d = 0; d < DirCount; ++d) {

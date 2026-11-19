@@ -695,7 +695,7 @@ void TestLeashRule() {
     Check(s.hunt.Hunters(got, cmd::MaxArmyUnits) == 0, "the hunt over: no roster");
 }
 
-// N3: Army X menu Off lets go of the X menu's own anchor, never another order's.
+// Army X menu taken off its button lets go of the X menu's own anchor, never another order's.
 void TestDefendRelease() {
     Sim s;
     xhunt::Defend d;

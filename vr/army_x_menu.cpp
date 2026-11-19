@@ -111,7 +111,7 @@ struct State {
     char pendingHead[400] = "";
     int pendingHand = 0;
     bool drawn = false;           // the last published list was not empty
-    // The bind (the hand wheel's Edit Slots pick or the ring wheel's hold to assign): its request while the reply is awaited.
+    // The bind (the hand wheel's Edit Slots pick): its request while the reply is awaited.
     xm::BindWatch bind;
     bool injected = false;        // the catalog entry is in the engine's snapshot right now
     uint64_t boundAtMs = 0;       // GetTickCount64 of the last bind (a snapshot from before it may still show the old skill)
@@ -129,7 +129,7 @@ struct State {
     double groundHeroDist = 0;
 };
 State st;
-// The hands' aimed monsters (Picks, vrcam's UpdateThread, each update while the switch is On), read at a press (transport's
+// The hands' aimed monsters (Picks, vrcam's UpdateThread, each update while the menu is on a button), read at a press (transport's
 // Input thread). A lock of its own, uncontended: the press takes it once an open. [0] right hand, [1] left, [2] the eyes (only
 // while the outline would show the eyes' monster).
 std::mutex g_picksLock;
@@ -249,7 +249,7 @@ void Fallback(seam::ArmyXPressFrame& f, const char* head, FallWhy why, uint32_t 
     if (f.say) f.say(line);
 }
 // Each frame while Attack my target is out on the game thread: its outcome, once. Took: the buzz, the toast and the line;
-// refused or not taken in time: the wedge (Fallback). off: the switch's Off call: a queued one is dropped; one the game thread
+// refused or not taken in time: the wedge (Fallback). off: the menu taken off its button: a queued one is dropped; one the game thread
 // already took is only logged.
 // Move and hold's outcome: Took: the buzz, the toast and the line; not taken in time: "Move and hold" over "No army" or
 // "Canceled" and the line with why (no fallback order).
@@ -288,7 +288,7 @@ void Settle(seam::ArmyXPressFrame& f, double nowMs, const xm::Tuning& t, bool of
     }
     const auto o = g_focus.Poll(nowMs);
     if (o == xm::FocusQueue::Outcome::None) return;
-    // Switched Off while the game thread was giving it: its outcome, after the next On, is only logged.
+    // Taken off its button while the game thread was giving it: its outcome, after the next bind, is only logged.
     const bool quiet = g_focus.TakeQuiet() || off;
     if (spot) { SettleSpot(f, o, quiet, nowMs, t); return; }
     if (o != xm::FocusQueue::Outcome::Took && st.mark.id == a.id) st.mark.Clear();   // not focused: no arrow over it
@@ -382,8 +382,8 @@ void Input(seam::WheelInputFrame f) {
     s.catalog[s.skillCount++] = item;
     st.injected = true;
 }
-// After interactions.Step (after the ring wheel's row): the entry out again; a BindSkill for it, from Edit Slots or the ring
-// wheel's hold to assign, made the commander's clear of the button's game skill; the reply kept.
+// After interactions.Step: the entry out again; a BindSkill for it, from Edit Slots, is
+// made the commander's clear of the button's game skill; the reply kept.
 void Request(seam::WheelRequestFrame f) {
     if (auto* in = static_cast<ia::Input*>(f.engineIn); in && st.injected) {
         auto& s = in->snapshot;
@@ -491,7 +491,7 @@ void ArmyTick(seam::ArmyMovesFrame& f) {
         w.spot = g_defend.Spot(); w.radius = radius; w.atMs = f.nowMs;
     }
     if (!on && !owned) return;
-    // Switched Off (N3, recommended yes): the X menu's own anchor (Move and hold, Hold here's claimed spot) goes
+    // Taken off its button: the X menu's own anchor (Move and hold, Hold here's claimed spot) goes
     // too, the coordinator's ClearAnchor (the army re-forms on the hero); another order's anchor is never touched.
     if (!on && g_defend.Release(c) && f.say) {
         std::snprintf(line, sizeof line, "Frame army x menu: taken off its button: the X menu's held spot (%.1f %.1f) let go (the coordinator's ClearAnchor: the army re-forms on you)", sp.x, sp.y);
@@ -575,7 +575,7 @@ void Press(seam::ArmyXPressFrame f) {
     if (g_focus.Waiting()) Settle(f, in.nowMs, t, !on);   // Attack my target's outcome from the game thread
     const auto& hi = *static_cast<const framevr::skills::HandInput*>(f.hands);
     const xm::WorldMap map = f.engineIn ? xm::MapOf(*static_cast<const ia::Input*>(f.engineIn), f.upm) : xm::WorldMap{};
-    // The mark's life: the commander's priority target (the game thread's), the switch.
+    // The mark's life: the commander's priority target (the game thread's), the bind.
     if (st.mark.id) {
         const uint32_t was = st.mark.id;
         const uint64_t at = g_priorityAt.load(std::memory_order_relaxed), now = GetTickCount64();
@@ -641,7 +641,7 @@ void Press(seam::ArmyXPressFrame f) {
     // Move and hold's spot pick: the targeting mode on the ground. The hand's laser meets the floor (xm::FloorCell);
     // within the commander's 40 sub-tiles of the hero (companionai::ElasticCombatLeashDistance, read from the commander) the candidate is
     // that cell: the tactical chord's green preview ring there, its trigger sets it; past it the chord's red ring and its boundary
-    // click, and a pull is refused with the chord's error buzz. The grip or the time row cancels.
+    // click, and a pull is refused with the chord's error buzz. The grip or the time limit cancels.
     if (st.ground.Busy()) {
         const int h = st.ground.hand;
         float gx = 0, gy = 0, px = 0, py = 0;
@@ -859,8 +859,8 @@ std::shared_ptr<const framevr::interaction::icons::Image> Icon(const std::string
     return image;
 }
 const bool g_iconMaker = (framevr::interaction::icons::SetBuiltIn(&Icon), true);
-// SetupStatic (each session start, before the upload): the X menu's sheet into its region, premultiplied. Its tab On or Off
-// (the static picture is uploaded once a session; the switch can turn On later).
+// SetupStatic (each session start, before the upload): the X menu's sheet into its region, premultiplied. Bound or not
+// (the static picture is uploaded once a session; the menu can be bound later).
 void PaintMark(const seam::StaticAtlasFrame& f);
 void Paint(const seam::StaticAtlasFrame& f) {
     PaintMark(f);   // its own region and checks, whatever the sheet's do
