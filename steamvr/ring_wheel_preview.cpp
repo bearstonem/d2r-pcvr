@@ -12,7 +12,7 @@
 #include "../vr/ring_wheel_compose.h"
 #include "../vr/ring_wheel_atlas.h"
 #include "ring_wheel_shader_blob.h"   // generated at build time (steamvr/lab.cmake)
-#include "png_file.h"
+#include "ring_wheel_png.h"
 #include "ring_wheel_shot.h"
 #include "ring_wheel_menu_art.h"   // T036 (2026-11-16): the sub-menus' pictures (ring_wheel_menu_art.rc is linked in)
 #include "ring_wheel_glyph_art_decode.h"   // Glyph icon: the painted glyph and sigil squares (the sheet is in ring_wheel_menu_art.rc)
@@ -223,8 +223,8 @@ void Save(const std::filesystem::path& folder, const std::string& name, const st
         }
         straight[i + 3] = px[i + 3]; dark[i + 3] = 255;
     }
-    framevr::png::Save((folder / (name + ".png")).c_str(), straight, UINT(w), UINT(h));
-    framevr::png::Save((folder / (name + "-on-dark.png")).c_str(), dark, UINT(w), UINT(h));
+    framevr::ringwheel::png::Save((folder / (name + ".png")).c_str(), straight, UINT(w), UINT(h));
+    framevr::ringwheel::png::Save((folder / (name + "-on-dark.png")).c_str(), dark, UINT(w), UINT(h));
 }
 // R8 match stage 1b (rest-brightness.md): the kit's busy stand-in ground (r8-match/busy-plate-1x.png, its grout transparent),
 // put on black and premultiplied, 768 x 800 wheel px; empty when the file is missing.
@@ -407,7 +407,7 @@ int main(int argc, char** argv) {
                     t1 = rw::shot::NowMs();
                     const auto rgba = rw::shot::Picture(raw);
                     t2 = rw::shot::NowMs();
-                    const bool ok = !why && framevr::png::Save((shotMs / ("before-" + std::to_string(k) + ".png")).c_str(), rgba, UINT(raw.w), UINT(raw.h));
+                    const bool ok = !why && framevr::ringwheel::png::Save((shotMs / ("before-" + std::to_string(k) + ".png")).c_str(), rgba, UINT(raw.w), UINT(raw.h));
                     t3 = rw::shot::NowMs();
                     if (!ok) throw std::runtime_error(why ? why : "the old save's file");
                 }
@@ -419,7 +419,7 @@ int main(int argc, char** argv) {
                 const bool pushed = !why && saver.Push([&, rows, f0, file = (shotMs / ("now-" + std::to_string(k) + ".png")).wstring()](const rw::shot::SaveQueue::Ticket& t) {
                     rw::shot::Raw raw;
                     rows->Read(raw);
-                    rw::shot::Finish(raw, file, f0, t, framevr::png::Save, [&](const char* text) { line = text; });
+                    rw::shot::Finish(raw, file, f0, t, framevr::ringwheel::png::Save, [&](const char* text) { line = text; });
                     worker = rw::shot::NowMs() - t.begun;
                 });
                 const double f1 = rw::shot::NowMs();
@@ -1262,7 +1262,7 @@ int main(int argc, char** argv) {
                         { std::unique_lock l(m); cv.wait_for(l, std::chrono::seconds(30), [&] { return open; }); on.push_back(std::this_thread::get_id()); }
                         rw::shot::Raw raw;
                         rows->Read(raw);
-                        rw::shot::Finish(raw, file, t0, t, framevr::png::Save, [&](const char* s) { std::lock_guard l(m); lines.push_back(s); });
+                        rw::shot::Finish(raw, file, t0, t, framevr::ringwheel::png::Save, [&](const char* s) { std::lock_guard l(m); lines.push_back(s); });
                     });
                 }
                 bool early; { std::lock_guard l(m); early = !lines.empty() || !on.empty(); }
@@ -1998,7 +1998,7 @@ int main(int argc, char** argv) {
                                 s.step.under.kind = rw::Kind::Seat; s.step.under.index = i; s.fxSeat = i; s.fxAgeMs = age; s.fxAlpha = 1;
                                 char nm[96]; std::snprintf(nm, sizeof nm, "%s-game-%s-t%04d", cname.c_str(), rw::RestKindName[uint32_t(hk)], int(age));
                                 const auto on = render(s);
-                                framevr::png::Save((stageDir / (std::string(nm) + "-on-busy.png")).c_str(), OverPlate(on, c.w, c.h, c, plate, pw, ph), UINT(c.w), UINT(c.h));
+                                framevr::ringwheel::png::Save((stageDir / (std::string(nm) + "-on-busy.png")).c_str(), OverPlate(on, c.w, c.h, c, plate, pw, ph), UINT(c.w), UINT(c.h));
                                 if (hk == rw::RestKind::Poison) {   // S3a recheck (Boss): the cloud over the face only adds light
                                     rw::Scene s0 = s; s0.fxSeat = -1;
                                     const auto off = render(s0);
@@ -2020,7 +2020,7 @@ int main(int argc, char** argv) {
                         for (int i = 0; i < shown.layout.count; ++i) {   // designer: one Trees shown pointed frame per class (the first seat)
                             rw::Scene s = scene(shown, -1, 2800, rest.data());
                             s.step.under.kind = rw::Kind::Seat; s.step.under.index = i; s.fxSeat = i; s.fxAgeMs = 800; s.fxAlpha = 1;
-                            framevr::png::Save((stageDir / (cname + "-shown-pointed-on-busy.png")).c_str(), OverPlate(render(s), c.w, c.h, c, plate, pw, ph), UINT(c.w), UINT(c.h));
+                            framevr::ringwheel::png::Save((stageDir / (cname + "-shown-pointed-on-busy.png")).c_str(), OverPlate(render(s), c.w, c.h, c, plate, pw, ph), UINT(c.w), UINT(c.h));
                             break;
                         }
                     }
@@ -2037,7 +2037,7 @@ int main(int argc, char** argv) {
                                 for (char* ch = nm; *ch; ++ch) if (*ch == '/') *ch = '-';
                                 const auto px = render(s);
                                 Save(stageDir, nm, px, c.w, c.h);
-                                framevr::png::Save((stageDir / (std::string(nm) + "-on-busy.png")).c_str(), OverPlate(px, c.w, c.h, c, plate, pw, ph), UINT(c.w), UINT(c.h));
+                                framevr::ringwheel::png::Save((stageDir / (std::string(nm) + "-on-busy.png")).c_str(), OverPlate(px, c.w, c.h, c, plate, pw, ph), UINT(c.w), UINT(c.h));
                             }
                             ++done;
                         }
@@ -2046,7 +2046,7 @@ int main(int argc, char** argv) {
                         for (int k = 0; k <= 10; ++k) { char nm[64]; std::snprintf(nm, sizeof nm, "assassin-traps-t%04d", 1000 + k * 200); Save(stageDir, nm, render(scene(orbs, pos, 1000 + k * 200, rest.data())), c.w, c.h); }
                     {   // the open tree over the busy ground, as the designer's sheets show it; Trees shown too (designer, 2026-11-07)
                         const auto busy = OverPlate(render(scene(orbs, pos, 2000, rest.data())), c.w, c.h, c, plate, pw, ph);
-                        framevr::png::Save((stageDir / (cname + "-orbs-open-" + std::to_string(page + 1) + "-on-busy.png")).c_str(), busy, UINT(c.w), UINT(c.h));
+                        framevr::ringwheel::png::Save((stageDir / (cname + "-orbs-open-" + std::to_string(page + 1) + "-on-busy.png")).c_str(), busy, UINT(c.w), UINT(c.h));
                     }
                     // S1, Tree orbs with this tree open; then Trees shown at rest, this tree's icons only (no reference yet).
                     const auto [mean, high, nSeats] = measure(orbs, pos, pos);
@@ -2421,7 +2421,7 @@ int main(int argc, char** argv) {
                 { std::unique_lock l(m); cv.wait_for(l, std::chrono::seconds(30), [&] { return open; }); }
                 rw::shot::Raw raw;
                 rows->Read(raw);
-                rw::shot::Finish(raw, name, t0, t, framevr::png::Save, [&](const char* s) { std::lock_guard l(m); line = s; });
+                rw::shot::Finish(raw, name, t0, t, framevr::ringwheel::png::Save, [&](const char* s) { std::lock_guard l(m); line = s; });
             });
             rows.reset();   // the save's own now
             Check(pushed, std::string("shot save at Off: a shot taken and queued") + (no ? std::string(": ") + no : ""));

@@ -484,7 +484,7 @@ int RenderPct() { return rw::ScalePct(int(std::lround(cfg::Value(cfg::RenderPct)
 struct Quad { rw::ContentRect c; float w = 0, h = 0; ia::Pose pose{}; };
 Quad QuadOf(const ia::Pose& wheel, float widthM, bool developer) {
     Quad q;
-    q.c = rw::Content(rw::FooterWidth(cfg::On(cfg::FooterFull), developer ? 6 : 5), RenderPct());
+    q.c = rw::Content(rw::FooterWidth(cfg::On(cfg::FooterFull), developer ? 5 : 4), RenderPct());
     const auto m = rw::QuadFor(q.c.x0, q.c.y0, q.c.canvasW, float(rw::ContentRows), widthM);
     q.w = m.w; q.h = m.h;
     q.pose = {wheel.p + math::Rotate(wheel.q, {m.dx, m.dy, 0}), wheel.q};
@@ -1163,7 +1163,6 @@ const char* CellWhy(int cell) {
     if (cell == CenterCell) return "center";
     if (cell == ia::GlyphsCell) return "glyphs";
     if (cell == ia::MotionsCell) return "gestures";
-    if (cell == 13) return "footer-developer";
     switch (cell) {
     case 9: return "footer-equipment";
     case 10: return "footer-vr-settings";
@@ -1304,6 +1303,7 @@ void HoldStep(const rw::QuickOut& e, float frac, const rw::QuickIn& q, const ia:
 void Input(host::InputFrame f) {
     if (f.say) sayKept = f.say;
     if (!EnabledNow()) { ringActive = false; engineOpen = false; return; }
+    if (const int slot = framevr::quickradial::link::bindApplied.exchange(-1); slot >= 0) buttons::Claim(slot, buttons::Owner::QuickCast, f.say);   // the radial's own bind landed: other menus on that button let go
     if (f.hands) {   // item 2: the grab's buttons, read by the next Pointer
         const auto& hi = *static_cast<const framevr::skills::HandInput*>(f.hands);
         for (int h = 0; h < 2; ++h) { gripIn[h] = hi.grip[h] > rw::GripDown; triggerIn[h] = hi.trigger[h] > .55f; faceIn[h] = hi.face[h][0] || hi.face[h][1]; }
@@ -2234,7 +2234,12 @@ void LoadStoredOnce() {   // the two sub-menu buttons the ring keeps itself, rea
 }  // namespace
 namespace ringwheelimpl { bool EnabledNow() { return framevr::ringwheel::host::Enabled(); } }
 namespace framevr::ringwheel::host {
-bool Enabled() { LoadStoredOnce(); return vrsettings::Read().values[framevr::settings::RingSkillMenu] > .5f; }
+bool Enabled() {
+    LoadStoredOnce();
+    const bool on = vrsettings::Read().values[framevr::settings::RingSkillMenu] > .5f;
+    framevr::quickradial::SetEnabled(on);   // Quick cast lives in the ring menu: it runs only while the ring menu does
+    return on;
+}
 void Pointer(PointerFrame f) { ringwheelimpl::Pointer(f); }
 void Input(InputFrame f) { ringwheelimpl::Input(f); }
 void Tracking(TrackingFrame f) { ringwheelimpl::Tracking(f); }

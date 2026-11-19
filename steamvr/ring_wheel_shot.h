@@ -19,9 +19,17 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include "layer_shot.h"
+#include <cmath>
+#include <cstdint>
 
 namespace framevr::ringwheel::shot {
+// sRGB encoding of a linear 0-1 channel (the screenshot's layer PNGs are sRGB with straight alpha).
+inline uint8_t LinearToSrgb8(float c) {
+    if (!(c > 0.f)) return 0;
+    if (c >= 1.f) return 255;
+    const float e = c <= .0031308f ? c * 12.92f : 1.055f * std::pow(c, 1.f / 2.4f) - .055f;
+    return uint8_t(e * 255.f + .5f);
+}
 inline float SrgbToLinear(uint8_t v) {
     static const std::array<float, 256> table = [] {
         std::array<float, 256> t{};
@@ -46,7 +54,7 @@ inline std::vector<uint8_t> ToStraightRgba8(const uint8_t* rows, size_t rowPitch
             const uint8_t c[3] = {in[r], in[1], in[b]};
             for (int k = 0; k < 3; ++k) {
                 if (a == 255) o[k] = c[k];
-                else if (srgb) o[k] = layershot::LinearToSrgb8(SrgbToLinear(c[k]) * 255.f / float(a));
+                else if (srgb) o[k] = LinearToSrgb8(SrgbToLinear(c[k]) * 255.f / float(a));
                 else o[k] = uint8_t(std::min(255, (int(c[k]) * 255 + a / 2) / int(a)));
             }
         }

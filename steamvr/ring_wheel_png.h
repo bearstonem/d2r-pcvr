@@ -6,6 +6,8 @@
 #include <wincodec.h>
 #include <algorithm>
 #include <memory>
+#include <utility>
+#include <vector>
 #include "interaction_icons.h"
 
 namespace framevr::ringwheel::png {
@@ -38,4 +40,24 @@ inline std::shared_ptr<const Image> Decode(IWICImagingFactory* wic, const void* 
     if (result->rgba.empty()) return nullptr;
     return result;
 }
-}  // namespace framevr::ringwheel::png
+
+// An RGBA8 image written as a PNG file with WIC: the preview's proof pictures and the screenshot readback tests (Compose::Shot).
+inline bool Save(const wchar_t* file, const std::vector<uint8_t>& rgba, UINT width, UINT height) {
+    if (!file || !width || !height || rgba.size() < size_t(width) * height * 4) return false;
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    IWICImagingFactory* wic = nullptr; IWICStream* stream = nullptr;
+    IWICBitmapEncoder* encoder = nullptr; IWICBitmapFrameEncode* frame = nullptr;
+    auto bgra = rgba; for (size_t i = 0; i + 3 < bgra.size(); i += 4) std::swap(bgra[i], bgra[i + 2]);
+    WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+    const bool ok = SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic))) &&
+        SUCCEEDED(wic->CreateStream(&stream)) && SUCCEEDED(stream->InitializeFromFilename(file, GENERIC_WRITE)) &&
+        SUCCEEDED(wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) &&
+        SUCCEEDED(encoder->Initialize(stream, WICBitmapEncoderNoCache)) && SUCCEEDED(encoder->CreateNewFrame(&frame, nullptr)) &&
+        SUCCEEDED(frame->Initialize(nullptr)) && SUCCEEDED(frame->SetSize(width, height)) &&
+        SUCCEEDED(frame->SetPixelFormat(&format)) && IsEqualGUID(format, GUID_WICPixelFormat32bppBGRA) &&
+        SUCCEEDED(frame->WritePixels(height, width * 4, UINT(size_t(width) * height * 4), bgra.data())) &&
+        SUCCEEDED(frame->Commit()) && SUCCEEDED(encoder->Commit());
+    for (IUnknown* p : {static_cast<IUnknown*>(frame), static_cast<IUnknown*>(encoder), static_cast<IUnknown*>(stream), static_cast<IUnknown*>(wic)}) if (p) p->Release();
+    if (SUCCEEDED(co)) CoUninitialize();
+    return ok;
+}}  // namespace framevr::ringwheel::png

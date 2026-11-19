@@ -1063,8 +1063,7 @@ public:
 inline const char* FooterCloseName(int cell, bool developer) {
     if (cell == 11) return "footer-inventory";
     if (cell == 10) return "footer-vr-settings";
-    if (cell == 13) return "footer-developer";
-    return nullptr;
+    return nullptr;   // the developer tab (13) switches to upstream's developer page: the wheel stays open
 }
 class FooterClick {
     bool down = false;

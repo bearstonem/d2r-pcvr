@@ -1803,16 +1803,15 @@ int main() {
                 if (at(cx, cy) != b.cell || at(b.x0 + 1, cy) != b.cell || at(b.x1 - 1, cy) != b.cell || at(cx, b.y0 + 1) != b.cell || at(cx, b.y1 - 1) != b.cell) ++bad;
                 if (at(b.x0 - 1, cy) == b.cell || at(b.x1 + 1, cy) == b.cell || at(cx, b.y0 - 1) == b.cell || at(cx, b.y1 + 1) == b.cell) ++bad;
             }
-        Check(boxes == 2 * (3 * 5 + 9) + 2 * (3 * 6 + 9) && bad == 0, "item 4: every drawn tab box is FooterAt's box (5 and 6 tabs, both widths, every ring page and the editors)");
+        Check(boxes == 2 * (3 * 4 + 9) + 2 * (3 * 5 + 9) && bad == 0, "item 4: every drawn tab box is FooterAt's box (4 and 5 tabs, both widths, every ring page and the editors)");
         Check(std::string(rw::FooterLabel(0, P::Spells, false, true)) == "EQUIPMENT" && std::string(rw::FooterLabel(0, P::Glyphs, false, true)) == "SPELLS" &&
-              std::string(rw::FooterLabel(3, P::Spells, false, true)) == "INVENTORY" && std::string(rw::FooterLabel(4, P::Spells, true, true)) == "DEV" &&
-              std::string(rw::FooterLabel(4, P::Spells, false, true)) == "LAB" && std::string(rw::FooterLabel(5, P::Spells, true, true)) == "LAB", "item 4: the labels as upstream's");
+              std::string(rw::FooterLabel(3, P::Spells, false, true)) == "INVENTORY" && std::string(rw::FooterLabel(4, P::Spells, true, true)) == "DEV", "item 4: the labels as upstream's");
         Check(std::string(rw::FooterLabel(0, P::EditSkills, false, true)) == "PREVIOUS" && std::string(rw::FooterLabel(1, P::EditSkills, false, true)) == "NEXT" &&
               std::string(rw::FooterLabel(2, P::EditSkills, false, true)) == "BACK", "item 4: the editor footer reads PREVIOUS / NEXT / BACK");
         // Upstream's own lines, so a rename there fails here (the Lab's copy stays upstream's words).
         std::string ui;
         { std::string here = __FILE__; here = here.substr(0, here.find_last_of("/\\") + 1); std::ifstream in(here + "interaction_ui.cpp"); std::stringstream ss; ss << in.rdbuf(); ui = ss.str(); }
-        Check(ui.find(R"(const char* footer[6]={(o.utility||o.map||o.developer||o.glyphs||o.motions)?"SPELLS":"EQUIPMENT","MAP","VR SETTINGS",handWheel?"INVENTORY":"EDIT SKILLS",FifthFooterLabel(s.developer),"LAB"};)") != std::string::npos &&
+        Check(ui.find(R"(const char* footer[5]={(o.utility||o.map||o.developer||o.glyphs||o.motions)?"SPELLS":"EQUIPMENT","MAP","VR SETTINGS",handWheel?"INVENTORY":"EDIT SKILLS","DEV"};)") != std::string::npos &&
               ui.find(R"(if(o.editor==1){footer[0]="BACK";footer[1]="";footer[2]="DONE";})") != std::string::npos &&
               ui.find(R"(if(o.editor>=2){footer[0]="PREVIOUS";footer[1]="NEXT";footer[2]="BACK";})") != std::string::npos,
               "item 4: upstream's footer label lines unchanged (interaction_ui.cpp)");
@@ -1824,28 +1823,28 @@ int main() {
         s.step.under = {rw::Kind::Footer, ia::FooterCell(2, P::Spells)};
         static rw::Instance list[rw::MaxDraw];
         auto rims = [&](float r) { int c = 0; const int n = rw::Build(s, list); for (int i = 0; i < n; ++i) if (list[i].recipe == rw::RecipeRect && std::fabs(list[i].r - r) < .002f) ++c; return c; };
-        Check(rims(183 / 255.f) == 1 && rims(104 / 255.f) == 5, "item 4: the pointed tab's rim gold, the other five upstream's");
+        Check(rims(183 / 255.f) == 1 && rims(104 / 255.f) == 4, "item 4: the pointed tab's rim gold, the other four upstream's");
         const auto hot = rw::FooterBoxAt(2, P::Spells, true, false);
         int found = 0; { const int n = rw::Build(s, list); for (int i = 0; i < n; ++i) if (list[i].recipe == rw::RecipeRect && std::fabs(list[i].r - 183 / 255.f) < .002f &&
             std::fabs(list[i].cx - (hot.x0 + hot.x1) / 2) < .01f && std::fabs(list[i].w - (hot.x1 - hot.x0)) < .01f && std::fabs(list[i].h - (hot.y1 - hot.y0)) < .01f) ++found; }
         Check(found == 1, "item 4: the gold rim is exactly the hit box");
         s.footer.on = false; Check(rims(104 / 255.f) == 0, "item 4: footer off, none drawn");
         // One size per row (designer, after f1-footer) with a 5 px margin inside each side (review-r8 I4-2): fake fonts, every
-        // capital 0.7 em wide. EQUIPMENT (9) fits the 132 px tabs (5 tabs, 768 px) up to 19 px, the 121 px six tabs up to 17;
-        // VR SETTINGS wraps at the row's size; full width (176 px tabs) takes 22. At 0.8 em the six tabs shrink to 15.
+        // capital 0.7 em wide. EQUIPMENT (9) fits the 174 px tabs (4 tabs, 768 px) at 22 px, the five tabs (developer mode) up to 19;
+        // VR SETTINGS wraps at the five tabs' size; full width takes 22. At 0.8 em the five tabs shrink to 16.
         static rw::text::Metrics fake;
         for (int st = 0; st < rw::text::Styles; ++st) for (auto& g : fake.g[size_t(st)]) g.advance = .7f * rw::text::Specs[st].px;
-        Check(rw::FooterRowStyle(fake, P::Spells, false, false, true) == rw::text::Footer19 && rw::FooterRowStyle(fake, P::Spells, true, false, true) == rw::text::Footer17,
-              "item 4: the row's one size is the largest that fits every label (19 px with 5 tabs, 17 with 6)");
+        Check(rw::FooterRowStyle(fake, P::Spells, false, false, true) == rw::text::Footer22 && rw::FooterRowStyle(fake, P::Spells, true, false, true) == rw::text::Footer19,
+              "item 4: the row's one size is the largest that fits every label (22 px with 4 tabs, 19 with 5)");
         Check(rw::FooterRowStyle(fake, P::Spells, false, true, true) == rw::text::Footer22, "item 4: full width, 22 px");
-        const auto vr = rw::FooterBoxAt(2, P::Spells, false, false);
+        const auto vr = rw::FooterBoxAt(2, P::Spells, true, false);
         const auto wrap = rw::FooterFitAt(fake, rw::text::Footer19, "VR SETTINGS", vr.x1 - vr.x0);
-        Check(wrap.fits && wrap.split == 2, "item 4: VR SETTINGS wraps to two lines at the row's size");
-        const auto inv = rw::FooterBoxAt(3, P::Spells, false, false);
+        Check(wrap.fits && wrap.split == 2, "item 4: VR SETTINGS wraps to two lines at the five tabs' size");
+        const auto inv = rw::FooterBoxAt(3, P::Spells, true, false);
         Check(!rw::FooterFitAt(fake, rw::text::Footer20, "INVENTORY", inv.x1 - inv.x0).fits && rw::FooterFitAt(fake, rw::text::Footer19, "INVENTORY", inv.x1 - inv.x0).fits,
-              "I4-2: INVENTORY over the 5 px margin at 20, inside at 19");
+              "I4-2: INVENTORY over the 5 px margin at 20, inside at 19 (five tabs)");
         for (int st = 0; st < rw::text::Styles; ++st) for (auto& g : fake.g[size_t(st)]) g.advance = .8f * rw::text::Specs[st].px;
-        Check(rw::FooterRowStyle(fake, P::Spells, true, false, true) == rw::text::Footer15, "I4-2: six tabs that keep no margin at 17 shrink the whole row (15 px)");
+        Check(rw::FooterRowStyle(fake, P::Spells, true, false, true) == rw::text::Footer16, "I4-2: five tabs at .8 em shrink the whole row (16 px)");
         for (int st = 0; st < rw::text::Styles; ++st) for (auto& g : fake.g[size_t(st)]) g.advance = .7f * rw::text::Specs[st].px;
         bool caps = true;
         for (P page : {P::Spells, P::Glyphs, P::EditSlots, P::EditSkills}) for (int dev = 0; dev < 2; ++dev) for (int hw = 0; hw < 2; ++hw)
@@ -2229,7 +2228,7 @@ int main() {
                     const char* tab = fc.Step(open, page, f.ii.hover, f.ii.trigger, developer);   // the Request seam, after it
                     if (tab) { edges.Wrote(tab); named = tab; }
                     const bool shut = open && !f.io.wheel;
-                    const char* now = !shut ? nullptr : f.io.inventory ? "footer-inventory" : f.io.settings ? "footer-vr-settings" : f.io.lab ? "footer-lab" : nullptr;
+                    const char* now = !shut ? nullptr : f.io.inventory ? "footer-inventory" : f.io.settings ? "footer-vr-settings" : nullptr;
                     if (now) did = now;                                      // what upstream's engine itself says it closed for
                     if (now && (!tab || std::string(tab) != now)) ++wrong;   // upstream closed for a tab, and it was not named
                     if (tab && shut && !now) ++wrong;                        // a name on some other close
@@ -2247,8 +2246,6 @@ int main() {
                 Check(r.After() == "footer-inventory" && r.closes == 1 && !r.wrong, "bug 3: Inventory clicked on the Map page: footer-inventory, not upstream (" + r.reason + ")");
             }
             Check(closeOn(12, 10, false) == "footer-vr-settings", "bug 3: VR Settings clicked on the Map page: footer-vr-settings (" + closeOn(12, 10, false) + ")");
-            Check(closeOn(12, ia::LabCell, true) == "footer-lab", "bug 3: the DEV window's tab on the Map page, developer mode: footer-lab (" + closeOn(12, ia::LabCell, true) + ")");
-            Check(closeOn(12, 13, false) == "footer-lab", "bug 3: the fifth tab without developer mode opens the DEV window: footer-lab (" + closeOn(12, 13, false) + ")");
             Check(closeOn(9, 11, false) == "footer-inventory" && closeOn(9, 10, true) == "footer-vr-settings", "bug 3: the same on the Equipment page");
             Check(closeOn(-1, 11, false) == "footer-inventory", "bug 3: and on upstream's Spells page (the ring not drawn)");
             Check(closeOn(9, 8, false) == "upstream", "bug 3: the center clicked on the Equipment page stays upstream's own close (" + closeOn(9, 8, false) + ")");
@@ -2296,7 +2293,7 @@ int main() {
                 int tabCloses = 0, ignored = 0, wrong = 0, closes = 0;
                 for (int dev = 0; dev < 2; ++dev) {
                     Run r(dev != 0);
-                    static const int cells[] = {-1, 8, 9, 10, 11, 12, 13, ia::LabCell};
+                    static const int cells[] = {-1, 8, 9, 10, 11, 12, 13, 14};
                     static const float pulls[] = {0, 0, .1f, .3f, .6f, 1, 1};
                     int hover = -1; float pull = 0;
                     for (int i = 0; i < 40000; ++i) {
@@ -2325,7 +2322,7 @@ int main() {
             const auto r = e.Frame(-1, click, safety, sessionAtClose);
             return r.kind == rw::WheelEdges::Closed ? r.reason : std::string("(no close)");
         };
-        for (const char* why : {"center", "back", "glyphs", "footer-inventory", "footer-lab", "quick-cast", "cancel-off-wheel"})
+        for (const char* why : {"center", "back", "glyphs", "footer-inventory", "quick-cast", "cancel-off-wheel"})
             Check(close(why, 0, none, nullptr, 10) == why, std::string("M1: a Lab write the frame before the close names it: ") + why + " (got " + close(why, 0, none, nullptr, 10) + ")");
         Check(close("center", 1, none, nullptr, 10) == "upstream", "M1: a write two frames back is not the reason");
         Check(close("center", 0, left, "panel", 11) == "center", "M1: the Lab's write wins over a click, a safety reason and a session");
@@ -2535,17 +2532,17 @@ int main() {
             return out;
         };
         auto has = [](const std::string& text, const char* what) { return text.find(what) != std::string::npos; };
-        const std::string lab = read("../vr/ring_wheel.cpp"), table = read("../vr/lab_hooks_table.h"), tr = read("transport.cpp");
+        const std::string lab = read("../vr/ring_wheel.cpp"), table = read("ring_wheel_host.h"), tr = read("transport.cpp");
         Check(!lab.empty() && !table.empty() && !tr.empty(), "wiring: the three sources are read");
         // bug 2: the close line at the clear, through upstream's own OnClearInput hook; one line a close
-        Check(has(table, "R(OnClearInput,TabRingWheel,labringwheel,Cleared)"), "wiring bug 2: the ring wheel's OnClearInput row");
-        Check(has(lab, "voidCleared(lab::NoArgs){") && has(lab, "edges.Cleared(why,shut)") && has(lab, "sayKept(rw::ClosedLine("), "wiring bug 2: Cleared writes the close line there");
+        Check(has(table, "voidCleared();"), "wiring bug 2: the ring wheel's Cleared door");
+        Check(has(lab, "voidCleared(){") && has(lab, "edges.Cleared(why,shut)") && has(lab, "sayKept(rw::ClosedLine("), "wiring bug 2: Cleared writes the close line there");
         Check(has(lab, "edges.Frame(f.wheelHand,click,hold.Safety(),session)"), "wiring bug 2: the focused frame no longer names a cleared input's close (never two lines)");
         {   // every clear passes upstream's hook before the wheel is closed, and each Blip seam is followed by ClearInput in the same statement run
-            const size_t at = tr.find("voidClearInput(){"), hook = tr.find("LAB_HOOK(OnClearInput,lab::NoArgs{});", at), suspend = tr.find("handControls.Suspend();", at), end = tr.find("\n}", at);
-            Check(at != std::string::npos && hook < suspend && suspend < end, "wiring bug 2: transport's ClearInput calls OnClearInput before it closes the wheel");
+            const size_t at = tr.find("voidClearInput(){"), hook = tr.find("framevr::ringwheel::host::Cleared();", at), suspend = tr.find("handControls.Suspend();", at), end = tr.find("\n}", at);
+            Check(at != std::string::npos && hook < suspend && suspend < end, "wiring bug 2: transport's ClearInput calls the ring's Cleared before it closes the wheel");
             int seams = 0, cleared = 0;
-            for (size_t i = tr.find("LAB_VETO(VetoWheelBlip,"); i != std::string::npos; i = tr.find("LAB_VETO(VetoWheelBlip,", i + 1)) {
+            for (size_t i = tr.find("framevr::ringwheel::host::Blip("); i != std::string::npos; i = tr.find("framevr::ringwheel::host::Blip(", i + 1)) {
                 ++seams;
                 const size_t stop = tr.find('\n', tr.find('\n', i) + 1);   // its line and the next
                 const size_t clear = tr.find("ClearInput();", i);
@@ -2554,7 +2551,7 @@ int main() {
             Check(seams == 3 && cleared == 3, "wiring bug 2: each of the 3 Blip seams runs into ClearInput (" + std::to_string(cleared) + " of " + std::to_string(seams) + ")");
         }
         // bug 3: upstream's own footer click, read after its engine stepped
-        Check(has(lab, "footerClick.Step(labstore::TabOn(lab::TabRingWheel)&&in.wheelHand>=0&&!ringActive,pageWas,in.hover,in.trigger,in.snapshot.developer))edges.Wrote(tab);"),
+        Check(has(lab, "footerClick.Step(EnabledNow()&&in.wheelHand>=0&&!ringActive,pageWas,in.hover,in.trigger,in.snapshot.developer))edges.Wrote(tab);"),
               "wiring bug 3: the Request seam names a footer click on upstream's page");
         // bug 1: the hold's words and both assign lines ask what the button held
         Check(has(lab, "rw::HoldWordsFor(rw::HeldBy(was,glyphDrawNow,e.hand,e.slot)") && has(lab, "rw::WasText(rw::HeldBy(o.replaced,glyphDrawNow,o.hand,o.slot)"), "wiring bug 1: the center's words and the log's (was ...) ask HeldBy");
@@ -2627,7 +2624,7 @@ int main() {
               has(lab, "if(quickMoveFrom>=0&&!QuickPlaceFilled(quickMoveFrom)){") && has(lab, "pageOut.event==rw::PageEvent::Move)"),
               "wiring Move: no chooser seat, the page's Move, its target ask, its resets and its view");
         {   // Review S3 (the radial's side): edits wait while the save is read; made before it is read, puts are added to the stored ring, never over it
-            const std::string qrc = read("../vr/lab_quick_radial.cpp");
+            const std::string qrc = read("../vr/quick_radial.cpp");
             Check(has(qrc, "if(on&&qr::ClassKnown(st.cls)&&st.session==s.session&&!st.identified&&!st.answered)return;") &&
                   has(qrc, "if(put)st.movedBefore.push_back({*put,-1,\"theringmenu\",true});") && has(qrc, "if(!live.Has(m.it.skill)||st.ring.Has(m.it.skill))continue;") &&
                   has(qrc, "constlk::Savesave=st.identified?lk::Save::Saved:st.answered?lk::Save::ThisGame:lk::Save::Reading;") && !has(qrc, "editedBefore") &&
@@ -2646,15 +2643,6 @@ int main() {
               "wiring S2: HoldStep: ticks and words while the ring shows, the words once at its first frame");
         Check(has(lab, "FillQuick(q,f,s,in.nowMs);q.under=step.under;") && has(lab, "HoldStep(e,e.holdFrac,q,s,f.layout);//thehold,fromthetaplimit"), "wiring S2: the main ring's two calls: every target under the laser, the hold from the Tap limit");
         Check(has(lab, "order=ia::MakeCommanderSkill(id,true);") && has(lab, "rw::orders::Help(seat.id)") && has(lab, "rw::orders::Sub()"), "wiring orders: an order's name is upstream's entry; its help and sub line come from the one header");
-    }
-    {   // Review R6 X2: in developer mode the six tabs are 864 px wide; the pointer must use that quad, as the layer does
-        const auto dev = rw::Content(rw::FooterWidth(false, 6), 150), five = rw::Content(rw::FooterWidth(false, 5), 150);
-        const float x = 110, y = rw::CanvasPx * .93f;   // inside SPELLS, the first of six tabs, left of the 768 px quad's edge
-        Check(rw::FooterAt(x, y, true, false) == ia::FooterCell(0, ia::MenuPage::Spells), "X2 x 110 is on the SPELLS tab in developer mode");
-        const float uDev = (x - dev.x0) / dev.canvasW, uFive = (x - five.x0) / five.canvasW;
-        Check(uDev >= 0 && uDev <= 1 && uFive < 0, "X2 only the 864 px quad reaches it (the pointer and the layer now share the developer flag)");
-        float cx, cy; rw::CanvasOf(uDev, (y - dev.y0) / float(rw::ContentRows), dev.x0, dev.y0, dev.canvasW, float(rw::ContentRows), cx, cy);
-        Check(std::fabs(cx - x) < .01f && std::fabs(cy - y) < .01f, "X2 the developer quad's u, v map back to the same canvas point");
     }
     {   // Review R6 X3: the worker reads only the box; the frame thread fills it from upstream's cache until done or 2 s
         using Image = framevr::interaction::icons::Image;
@@ -3751,16 +3739,6 @@ int main() {
             if (q) q->Drain();
             Check(!unread && lines.size() == 1 && lines[0].rfind("Frame capture: ring wheel not saved (the picture could not be read back for f.png; ", 0) == 0 && wrote.size() == 4, "shot hook: rows the worker could not read: no file, and the line says so");
             delete q;
-        }
-        {   // the Lab's two lines no test can run (vr/ring_wheel.cpp needs the game): its hook goes through Queue and
-            // writes no PNG itself, and Reset (Shutdown, the tab On or Off) waits for the files
-            std::string lab;
-            { std::string here = __FILE__; here = here.substr(0, here.find_last_of("/\\") + 1); std::ifstream in(here + "../vr/ring_wheel.cpp", std::ios::binary); std::stringstream ss; ss << in.rdbuf(); lab = ss.str(); }
-            auto body = [&](const char* head) { const size_t a = lab.find(head), b = a == std::string::npos ? a : lab.find("\n}", a); return b == std::string::npos ? std::string() : lab.substr(a, b - a); };
-            const std::string hook = body("void Shot(lab::LayerShotFrame f) {"), reset = body("void Reset(lab::NoArgs) {");
-            Check(hook.find("rw::shot::Queue(saver, ") != std::string::npos && hook.find("png::Save(") == std::string::npos && hook.find("Picture(") == std::string::npos,
-                  "shot hook (the Lab's): the save goes through the queue; no PNG written and no picture made in the hook");
-            Check(reset.find("if (saver) saver->Drain();") != std::string::npos, "shot hook (the Lab's): Reset waits for the files still being written");
         }
     }
     {   // The On edge's log line: the Lab's state, never a build step
