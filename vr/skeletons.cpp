@@ -44,6 +44,7 @@
 #include "../steamvr/head_shadow.h"
 #include "../steamvr/aged_cache.h"
 #include "../steamvr/ecs_storage.h"
+#include "../steamvr/flail_chain.h"
 #include "sigscan.h"
 #include <chrono>
 #include <memory>
@@ -62,7 +63,7 @@
 #include "../steamvr/limb_board.h"
 #include "../steamvr/look_at.h"
 #include "wall_cells.h"
-namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();uint64_t LocalPlayer();uint32_t HandsKey();uint32_t WeaponSet();}
+namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();uint64_t LocalPlayer();uint32_t HandsKey();uint32_t WeaponSet();uint32_t Flails();}
 #endif
 
 namespace skel {
@@ -115,7 +116,7 @@ std::atomic<uint64_t> g_calls{0};
 constexpr size_t Remembered = 4096;
 constexpr uint64_t RememberedFor = 30000, HeroRigsFor = 600000, SweepEvery = 2000;
 namespace hookstats {
-enum Cache { HeroRigs, HeroEntities, BowRigs, CrossbowRigs, BodyKinds, CacheCount };
+enum Cache { HeroRigs, HeroEntities, BowRigs, CrossbowRigs, FlailRigs, BodyKinds, CacheCount };
 }
 
 #ifdef D2RVR_NATIVE_OPENXR
@@ -165,7 +166,7 @@ void Report(ULONGLONG now) {
 // here, Tell writes from a pose call's end.
 constexpr size_t ForgotAtOnce = 256;
 constexpr ULONGLONG ForgotWatch = 1000;
-constexpr const char* CacheNames[CacheCount] = {"hero rigs", "hero entities", "bow rigs", "crossbow rigs", "bodies and heads"};
+constexpr const char* CacheNames[CacheCount] = {"hero rigs", "hero entities", "bow rigs", "crossbow rigs", "flail rigs", "bodies and heads"};
 struct Forgotten { ULONGLONG at = 0; size_t dropped[CacheCount] = {}, held = 0, crowded = 0; uint64_t identified = 0, identifyNanos = 0; };
 SRWLOCK g_forgotLock = SRWLOCK_INIT;
 Forgotten g_forgotten;                 // g_forgotLock
@@ -334,6 +335,9 @@ struct Noted {
     // for this skeleton and these bones said, for NotedFor - then it is looked up, and stamped, again.
     uintptr_t bowSkeleton = 0, bowBones = 0, crossbowSkeleton = 0, crossbowBones = 0;
     ULONGLONG notBowAt = 0, notCrossbowAt = 0;
+    // Not a flail's chain (PoseFlailChain): the same, for NotedFor.
+    uintptr_t flailSkeleton = 0, flailBones = 0;
+    ULONGLONG notFlailAt = 0;
 };
 constexpr ULONGLONG NotedFor = 1000;
 thread_local std::array<Noted, 1024> t_noted{};
@@ -635,6 +639,12 @@ struct HeldStep {bool primed=false,stamped=false;uint32_t stamp=0;double time=0,
 struct HeldClank {bool waiting=false;float strength=0,speed=0;unsigned arms=0;ULONGLONG at=0;};
 SRWLOCK g_heldLock=SRWLOCK_INIT;
 HeldItems g_heldItems;HeldStep g_heldStep;HeldClank g_heldClank;
+// A flail's chain swings (steamvr/flail_chain.h; [hands] flail_chain): the world as the hero's last pose placed him -
+// its units a metre, the ground's height (his model's origin) and the turn count (a snap turn) - for the chain's own
+// pose (PoseFlailChain). Under g_flailWorldLock.
+struct FlailWorld {float unitsPerMetre=0,floor=0;uint32_t turn=0,generation=0;ULONGLONG at=0;};
+SRWLOCK g_flailWorldLock=SRWLOCK_INIT;FlailWorld g_flailWorld;
+std::atomic<bool> g_flailLive{false};   // Input::flailChain, read without a lock: every skeleton's pose asks
 framevr::held::Solver g_heldSolver;
 // Held items meet the world (steamvr/held_world.h; VR Settings > Physics > Weapons hit walls): its solver, the walls
 // and floor gathered for its last step, and how long HeldCollide took (for the ten-second report). Under g_heldLock.
@@ -3213,9 +3223,14 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
             }
             const V3 origin=Pos(world),axis=Norm({world.m[4],world.m[5],world.m[6]}),player=Pos(model);
             g.melee={{origin.x,origin.y,origin.z},{axis.x,axis.y,axis.z},{player.x,player.y,player.z},in.poseStamp,in.worldEpoch,HeroGen()};
+            if(g_flailLive.load(std::memory_order_relaxed)) {   // a flail's chain swings in the world this pose places him in
+                const FlailWorld here{upm*Len({model.m[0],model.m[1],model.m[2]}),model.m[13],in.worldEpoch,HeroGen(),GetTickCount64()};
+                AcquireSRWLockExclusive(&g_flailWorldLock);g_flailWorld=here;ReleaseSRWLockExclusive(&g_flailWorldLock);
+            }
             g.melee.weaponType=in.weaponType;
+            g.melee.flail=(gamestate::Flails()&4u)!=0;   // the item the kind came from (weapon_reach.h)
             const auto equipment=gamestate::MeleeEquipment();
-            if(framevr::dualwield::Eligible(h.cls,equipment))g.melee.weaponType=equipment.Type(0);
+            if(framevr::dualwield::Eligible(h.cls,equipment)){g.melee.weaponType=equipment.Type(0);g.melee.flail=equipment.Flail(0);}
             const V3 headAxis=back(Norm({attachment.m[4],attachment.m[5],attachment.m[6]}));
             const float* holdRot=in.rot[mainArm];   // the controller of the hand that holds it (a free staff's too)
             const framevr::math::Quat holdTurn{holdRot[0],holdRot[1],holdRot[2],holdRot[3]};
@@ -3282,7 +3297,7 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
             if(Len({world.m[4],world.m[5],world.m[6]})>.001f&&
                std::isfinite(origin.x+origin.y+origin.z+axis.x+axis.y+axis.z+player.x+player.y+player.z)) {
                 offhand={{origin.x,origin.y,origin.z},{axis.x,axis.y,axis.z},{player.x,player.y,player.z},in.poseStamp,in.worldEpoch,HeroGen()};
-                offhand.weaponType=weapons.Type(1);
+                offhand.weaponType=weapons.Type(1);offhand.flail=weapons.Flail(1);
                 const V3 d=Norm({attachment.m[4],attachment.m[5],attachment.m[6]});
                 const V3 headAxis={-(d.x*c-d.z*s),d.y,-(d.x*s+d.z*c)};
                 const framevr::math::Quat grip{in.rot[offArm][0],in.rot[offArm][1],in.rot[offArm][2],in.rot[offArm][3]};
@@ -4016,6 +4031,128 @@ void PoseMotionBow(Posed& p) {
     if(SafeWrite(reinterpret_cast<void*>(matrices+first*sizeof(bow::Mat)),posed.data()+first,(bow::Count-first)*sizeof(bow::Mat))) {
         g_bowHeroGen.store(HeroGen());g_bowPosedAt.store(now);
         g_bowAnchoredAt.store(posedAtHands?now:0);
+    }
+}
+#endif
+
+#ifdef D2RVR_NATIVE_OPENXR
+// ---- A flail's chain swings (steamvr/flail_chain.h; [hands] flail_chain) ----
+// After the game has posed a held flail's own skeleton (its class's animation of the chain), the chain's bones are laid
+// where a rope of them hangs and swings from the handle in the world, as PoseMotionBow lays a bow's string. Only the
+// local hero's held item (its transform's parent is his entity), only bones named as a flail's chain, and only while
+// a flail is in a hand in first person (g_flailLive); anything not usable leaves the game's own pose.
+struct FlailRig {
+    uintptr_t bones=0;
+    framevr::flail::Rig rig;
+    uint32_t entity=0;bool entityKnown=false,told=false;ULONGLONG lookupAt=0;
+    std::unique_ptr<std::array<framevr::flail::Swing,framevr::flail::MaxChains>> swing;   // a flail's only
+};
+SRWLOCK g_flailLock=SRWLOCK_INIT;   // the rigs, their swings and the report
+framevr::AgedCache<std::pair<uintptr_t,uintptr_t>,FlailRig,framevr::PairHash> g_flailRigs{Remembered,RememberedFor,SweepEvery};
+struct FlailReport {framevr::flail::Stats stats;unsigned chains=0,flails=0,notHeld=0,noWorld=0;ULONGLONG windowAt=0;};
+FlailReport g_flailReport;   // under g_flailLock
+// Ten seconds of the swing while a flail is out: how often it was laid and stepped, the fresh starts and why, the snap
+// turns carried, what was left to the game, and the ball's fastest.
+void TellFlails(ULONGLONG now) {
+    FlailReport& r=g_flailReport;
+    if(!r.windowAt){r.windowAt=now;return;}
+    if(now-r.windowAt<10000)return;
+    const auto& s=r.stats;
+    char line[420];
+    std::snprintf(line,sizeof line,"Frame flail chain: ten seconds: %u flail poses, %u chains laid %u times, %u steps; fresh starts %u (first %u, "
+        "pauses %u, jumps %u, new sizes %u), snap turns carried %u; left to the game %u (not ours %u, no world %u, unusable %u); "
+        "the ball up to %.1f m/s",r.flails,r.chains,s.poses,s.steps,s.starts+s.pauses+s.jumps+s.resized,s.starts,s.pauses,s.jumps,s.resized,s.turns,
+        r.notHeld+r.noWorld+s.refused,r.notHeld,r.noWorld,s.refused,s.fastest);
+    framevr::logging::Write(line);
+    r={};r.windowAt=now;
+}
+void PoseFlailChain(Posed& p) {
+    namespace fc=framevr::flail;
+    if(!g_flailLive.load(std::memory_order_relaxed))return;   // no flail out: nothing below would match
+    if(!Identify(p)||!Boned(p))return;
+    const uintptr_t self=p.self,skeleton=p.skeleton,bones=p.bones;const int count=p.boneCount;
+    if(count<6||count>int(fc::MaxBones)||!bones)return;   // a flail's rig is 23 to 51 bones: heroes and most props fail here
+    const auto now=GetTickCount64();
+    Noted* const note=p.note;
+    if(note&&note->notFlailAt&&note->flailSkeleton==skeleton&&note->flailBones==bones&&now-note->notFlailAt<NotedFor)return;
+    AcquireSRWLockExclusive(&g_flailLock);
+    struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&g_flailLock);}} unlock;
+    TellFlails(now);
+    const auto key=std::make_pair(self,skeleton);
+    FlailRig* rig=g_flailRigs.Find(key,now);
+    if(!rig||rig->bones!=bones) {
+        SKELETON_IDENTIFYING;
+        FlailRig learned;learned.bones=bones;
+        std::array<std::string,fc::MaxBones> names;std::array<std::string_view,fc::MaxBones> views;std::array<int,fc::MaxBones> parents{};
+        bool valid=true;
+        for(int i=0;i<count&&valid;++i) {
+            uintptr_t boneName=0;const auto at=bones+uintptr_t(i)*0xA4;
+            valid=Get(at,&boneName)&&Get(at+8,&parents[i])&&!(names[i]=Str(boneName)).empty();views[i]=names[i];
+        }
+        if(valid)learned.rig=fc::Find({views.data(),size_t(count)},{parents.data(),size_t(count)});
+        if(learned.rig.Valid())learned.swing=std::make_unique<std::array<fc::Swing,fc::MaxChains>>();
+        framevr::CacheSweep swept;
+        rig=&g_flailRigs.Put(key,std::move(learned),now,&swept);
+        hookstats::Forgot(hookstats::FlailRigs,swept,now);
+    }
+    auto& held=*rig;
+    if(!held.rig.Valid()||!held.swing) {
+        if(note){note->flailSkeleton=skeleton;note->flailBones=bones;note->notFlailAt=now?now:1;}
+        return;
+    }
+    // The local hero's own held item only (a monster's or another player's flail has the same bones), and where the
+    // game placed it in the world: its transform's world matrix, as the last evaluation left it.
+    HeroXform hero;
+    if(!HeroTransform(&hero)){++g_flailReport.notHeld;return;}
+    fc::Mat item;
+    {
+        ecs::Locked locked(false);   // the registry is only read; the rig written here is under g_flailLock
+        uintptr_t existing=0;
+        if(!held.entityKnown||!ecs::SkeletonOf(held.entity,&existing)||existing!=self) {
+            held.entityKnown=false;
+            if(held.lookupAt&&now-held.lookupAt<500){++g_flailReport.notHeld;return;}
+            held.lookupAt=now;
+            if(!ecs::EntityOf(self,&held.entity)){++g_flailReport.notHeld;return;}
+            held.entityKnown=true;
+        }
+        uint32_t index=0,parent=0;uintptr_t components=0;
+        if(!ecs::Dense(ecs::g_xs,held.entity,&index)||!Get(ecs::g_xs+0x38,&components)||!components||
+           !Get(components+uintptr_t(index)*kTransformSize+0xC0,&parent)||parent!=hero.entity||
+           !SafeCopy(&item,reinterpret_cast<const void*>(components+uintptr_t(index)*kTransformSize+0x40),sizeof item)) {
+            // A monster's flail, another player's or one on the ground: this thread leaves it alone for NotedFor.
+            ++g_flailReport.notHeld;
+            if(note){note->flailSkeleton=skeleton;note->flailBones=bones;note->notFlailAt=now?now:1;}
+            return;
+        }
+    }
+    FlailWorld world;
+    AcquireSRWLockShared(&g_flailWorldLock);world=g_flailWorld;ReleaseSRWLockShared(&g_flailWorldLock);
+    if(!world.at||now<world.at||now-world.at>200||world.generation!=HeroGen()){++g_flailReport.noWorld;return;}
+    uintptr_t matrices=0;int worldCount=0;
+    if(!Get(p.worldPose,&worldCount)||worldCount!=count||!Get(p.worldPose+4,&matrices)||!matrices)return;
+    static LARGE_INTEGER frequency{};if(!frequency.QuadPart)QueryPerformanceFrequency(&frequency);
+    LARGE_INTEGER counter;QueryPerformanceCounter(&counter);
+    const double time=double(counter.QuadPart)/double(frequency.QuadPart);
+    ++g_flailReport.flails;
+    for(int c=0;c<held.rig.chains;++c) {
+        const fc::Chain& chain=held.rig.chain[size_t(c)];
+        std::array<fc::Mat,fc::MaxLinks> native,out;bool read=true;
+        for(int k=0;k<chain.count&&read;++k)read=chain.bone[size_t(k)]<count&&
+            SafeCopy(&native[size_t(k)],reinterpret_cast<const void*>(matrices+uintptr_t(chain.bone[size_t(k)])*sizeof(fc::Mat)),sizeof(fc::Mat));
+        if(!read)continue;
+        fc::Stats stats;
+        if((*held.swing)[size_t(c)].Pose({native.data(),size_t(chain.count)},item,world.unitsPerMetre,world.floor,time,world.turn,
+                                          {out.data(),size_t(chain.count)},stats))
+            for(int k=0;k<chain.count;++k)
+                SafeWrite(reinterpret_cast<void*>(matrices+uintptr_t(chain.bone[size_t(k)])*sizeof(fc::Mat)),&out[size_t(k)],sizeof(fc::Mat));
+        g_flailReport.stats.Add(stats);++g_flailReport.chains;
+    }
+    if(!held.told) {
+        held.told=true;
+        char line[240];
+        std::snprintf(line,sizeof line,"Frame flail chain: the held flail's rig - %d chain(s), %d links; its chain and ball hang from the handle and swing "
+            "with the hand ([hands] flail_chain=1; 0 leaves the game's animation)",held.rig.chains,held.rig.links);
+        framevr::logging::Write(line);
     }
 }
 #endif
@@ -5321,6 +5458,9 @@ void Set(const Input& in) {
     AcquireSRWLockExclusive(&g_inLock);
     g_in = in;
     g_inActive.store(InputActive(in), std::memory_order_relaxed);
+#ifdef D2RVR_NATIVE_OPENXR
+    g_flailLive.store(in.flailChain, std::memory_order_relaxed);
+#endif
     ReleaseSRWLockExclusive(&g_inLock);
 }
 
@@ -5351,6 +5491,7 @@ void __cdecl Hook(uintptr_t self, float a, float b, bool c) {
     RefreshCrossbow(self);
     RefreshShield(posed);
     PoseMotionBow(posed);
+    PoseFlailChain(posed);
     // Heads turn to you first: a body pushed aside is bent from the pose with its head already turned.
     // The two share the instance's identity, pose buffer header, placement and what it is known as
     // (Posed), and the pose too: Turn leaves the turned pose in posed.held and owes its write

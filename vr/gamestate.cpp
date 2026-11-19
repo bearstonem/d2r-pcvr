@@ -50,6 +50,7 @@
 #include "../steamvr/wrist_full_map.h"
 #include "../steamvr/attack_speed.h"
 #include "../steamvr/dual_wield.h"
+#include "../steamvr/weapon_reach.h"
 #include "../steamvr/cinema_screen.h"
 #include <mutex>
 #ifdef D2RVR_NATIVE_OPENXR
@@ -411,6 +412,7 @@ std::vector<std::pair<uint32_t, uint32_t>> g_typeIndex;   // ItemTypes row index
 int g_twoOffset = -2;                        // -2 not tried yet, -1 failed
 std::atomic<uint32_t> g_two{0};
 std::atomic<uint32_t> g_from{0};
+std::atomic<uint32_t> g_flails{0};   // bit 0: body location 4 holds a flail, bit 1: 5; bit 2: the hand the kind came from (g_from) does
 std::atomic<bool> g_leftShield{false};
 std::mutex g_meleeEquipmentMutex;framevr::dualwield::Equipment g_meleeEquipment;
 std::vector<uint32_t> g_shieldTypes;
@@ -734,6 +736,7 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
         g_leftShield=false;
         g_potionHeld=0;g_potionCode[0]=0;g_potionCode[1]=0;
         {std::lock_guard lock(g_meleeEquipmentMutex);g_meleeEquipment={};}
+        g_flails.store(0);
         g_two.store(0);
         g_set.store(0);
 #ifdef D2RVR_NATIVE_OPENXR
@@ -828,7 +831,8 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
     {std::lock_guard lock(g_meleeEquipmentMutex);
         if(g_meleeEquipment.id[0]!=id[0]||g_meleeEquipment.id[1]!=id[1])g_meleeEquipment={};
         g_meleeEquipment.id[0]=id[0];g_meleeEquipment.id[1]=id[1];
-        g_meleeEquipment.type[0]=handTypes[0];g_meleeEquipment.type[1]=handTypes[1];}
+        g_meleeEquipment.type[0]=handTypes[0];g_meleeEquipment.type[1]=handTypes[1];
+        g_meleeEquipment.flail[0]=framevr::reach::FlailCode(code[0]);g_meleeEquipment.flail[1]=framevr::reach::FlailCode(code[1]);}
     if (g_objLitOffset == -2) CalibrateObjectLights();
     if (g_twoOffset == -2 && g_typeOffset >= 0) CalibrateTwoHanded();
     uint32_t kind = KindOf(code[0]);
@@ -849,6 +853,8 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
     if (KindOf(code[1]) != 0) two |= D2RVR_LEFT_WEAPON;   // a weapon in the left hand (KindOf: no shield, no quiver)
     g_two.store(two);
     g_from.store((uint32_t)from);
+    // Flails reach their heads (weapon_reach.h): which hands hold one, and whether the kind's own item is one.
+    g_flails.store((framevr::reach::FlailCode(code[0])?1u:0u)|(framevr::reach::FlailCode(code[1])?2u:0u)|(framevr::reach::FlailCode(code[from])?4u:0u));
     if (g_wsmOffset == -2 && g_typeOffset >= 0) CalibrateAttack();
     {   // The melee attack cycle's weapon: nothing but shields in hand is hand-to-hand.
         int weapon = -1, wsm = 0;
@@ -1171,6 +1177,8 @@ uint32_t PotionHands() {return g_potionHeld.load();}
 uint32_t ThrowingPotionCode(int hand) {return hand==0||hand==1?g_potionCode[hand].load():0u;}
 uint32_t TwoHanded() { return g_two.load(); }
 uint32_t WeaponHand() { return g_from.load(); }
+// Flails (weapon_reach.h): bit 0 body location 4 holds one, bit 1 location 5, bit 2 the item WeaponType() came from.
+uint32_t Flails() { return g_flails.load(); }
 uint32_t HandsKey() { return g_handsKey.load(); }
 framevr::dualwield::Equipment MeleeEquipment(){std::lock_guard lock(g_meleeEquipmentMutex);return g_meleeEquipment;}
 void SetMeleeOrder(uint32_t right,uint32_t left) {

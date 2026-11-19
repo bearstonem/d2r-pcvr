@@ -134,6 +134,9 @@ struct Input {
     // pose and folds the world's pushes into heldPush.
     framevr::held::Reach heldWorld{};
     float heldPush[2][3] = {};
+    // A flail's chain swings (steamvr/flail_chain.h; [hands] flail_chain): a flail in a hand, first person with the
+    // arms on the controllers, the setting on. Off, the game's own animation moves the chain.
+    bool flailChain = false;
 #endif
 };
 
@@ -236,6 +239,7 @@ struct MeleeWeaponPose {
     float length=0,radius=0; // game world units: a shapeshift form's claw, sized from the drawn paw (0 = by weapon type)
     float tipHead[3]{}; // metres from eye in head frame (x right, y up, z back)
     float dirHead[3]{}; // shaft direction in head frame
+    bool flail=false;   // a flail: its contact reaches the head on its chain (steamvr/weapon_reach.h)
 };
 bool MeleeWeapon(MeleeWeaponPose& out,int hand=0);
 bool ShieldWeapon(MeleeWeaponPose& out);
