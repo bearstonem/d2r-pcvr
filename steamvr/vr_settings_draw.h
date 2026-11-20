@@ -79,13 +79,22 @@ enum class Color : uint8_t {
     GemTop,      // #C23A2B corner gem highlight
     UniqueFill,  // #241A0E collection panel: a unique's slot, dark brown
     SetFill,     // #0F1F0C collection panel: a set item's slot, dark green
+    // The Collection page in the D2R stash's own grey stone (owner's preview v3, 2026-11-20).
+    StashStone,  // #2C2B29 the page's stone
+    StashNiche,  // #0D0D0C a card's or control's recess, like a stash cell
+    StashLight,  // #4A4843 a chosen button's lighter stone
+    StashEdge,   // #5E5B55 the recess's lit lower-right bevel
+    StashShadow, // #030303 the recess's dark upper-left bevel
+    Silhouette,  // #BEBBB3 an item-type tile's light grey silhouette
+    Plate,       // #161514 a card's name plate
     Count
 };
 // 0xRRGGBB for a token (Horadric theme). B may tune values, never the names.
 constexpr uint32_t Rgb(Color c){
     constexpr uint32_t table[]={0x1A1612,0x110E0B,0x2A2119,0x0F0C0A,0x14100C,0x3A3022,0x0A0807,0x070504,0x4A3820,0xA07D47,0x5A4426,0xE8C77E,
         0x8D6C3F,0xDDB56C,0xFFF6E3,0xCCC3B0,0x949494,0x7D7364,0xC9A262,0xC7B377,0xE4D49C,0xC7B377,0xF6E2A8,0xF2DFA6,0x7A1712,0x5E120E,
-        0xAFB7FF,0xF0E06A,0x4ED24E,0xFFA800,0xFF6A5A,0xFF5A4A,0x090706,0xF0F0F0,0xC23A2B,0x241A0E,0x0F1F0C};
+        0xAFB7FF,0xF0E06A,0x4ED24E,0xFFA800,0xFF6A5A,0xFF5A4A,0x090706,0xF0F0F0,0xC23A2B,0x241A0E,0x0F1F0C,
+        0x2C2B29,0x0D0D0C,0x4A4843,0x5E5B55,0x030303,0xBEBBB3,0x161514};
     static_assert(sizeof table/sizeof table[0]==size_t(Color::Count),"one value per color token");
     return table[size_t(c)];
 }

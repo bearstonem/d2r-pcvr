@@ -77,23 +77,15 @@ private:
 // inside it and the pointed slot. The slot grid is collection_panel.h's.
 struct ViewState {
     Category     category = Category::Uniques;
-    panel::Size  size     = panel::Size::Small;
+    panel::Size  size     = panel::Size::Medium;
     panel::Show  show     = panel::Show::All;
+    panel::Sort  sort     = panel::Sort::Name;
+    int          group    = panel::NoGroup;   // an item-type tile filtering the grid, or NoGroup
     int          page     = 0;
     panel::Hit   hover {};   // what the laser is over: the slot or control to light
 
-    // Entries the filter keeps. Walking the category is cheap (a few hundred)
-    // and it is asked for once a frame, not once a slot.
-    int VisibleCount(const Library& library) const {
-        const uint32_t count = library.Size(category);
-        if (show == panel::Show::All) return int(count);
-        int kept = 0;
-        for (uint32_t slot = 0; slot < count; ++slot) {
-            const bool found = library.IsFound(category, slot);
-            if ((show == panel::Show::Missing && !found) || (show == panel::Show::Found && found)) ++kept;
-        }
-        return kept;
-    }
+    // Entries the filters keep. Walking the category is cheap (a few hundred).
+    int VisibleCount(const Library& library) const;
     int  Pages(const Library& library) const { return panel::PagesFor(VisibleCount(library), size); }
     void Clamp(const Library& library) {
         page    = std::clamp(page, 0, std::max(0, Pages(library) - 1));
@@ -120,6 +112,20 @@ struct ViewState {
         hover = {};
         Clamp(library);
     }
+    void SelectSort(const Library& library, panel::Sort want) {
+        if (sort == want) return;
+        sort  = want;
+        page  = 0;
+        hover = {};
+        Clamp(library);
+    }
+    // A tile picked again lets go: all types.
+    void ToggleGroup(const Library& library, int want) {
+        group = group == want ? panel::NoGroup : want;
+        page  = 0;
+        hover = {};
+        Clamp(library);
+    }
     void Step(const Library& library, int by) {
         page += by;
         Clamp(library);
@@ -136,9 +142,40 @@ inline std::vector<uint32_t> VisibleSlots(const Library& library, const ViewStat
         const bool found = library.IsFound(view.category, slot);
         if (view.show == panel::Show::Missing && found) continue;
         if (view.show == panel::Show::Found && !found) continue;
+        if (view.group != panel::NoGroup) {
+            const Entry* entry = library.At(view.category, slot);
+            if (entry == nullptr || panel::GroupOfType(entry->type) != view.group) continue;
+        }
         slots.push_back(slot);
     }
+    // Name: alphabetical; Level: the item's level, then the name. Stable, so equal
+    // names keep the catalog's order.
+    std::stable_sort(slots.begin(), slots.end(), [&](uint32_t a, uint32_t b) {
+        const Entry* ea = library.At(view.category, a);
+        const Entry* eb = library.At(view.category, b);
+        if (ea == nullptr || eb == nullptr) return false;
+        if (view.sort == panel::Sort::Level && ea->level != eb->level) return ea->level < eb->level;
+        return ea->name < eb->name;
+    });
     return slots;
+}
+
+inline int ViewState::VisibleCount(const Library& library) const { return int(VisibleSlots(library, *this).size()); }
+
+// One item-type tile's share: how many of the open category's entries of that
+// type are found, out of how many there are.
+struct GroupShare {
+    uint32_t found = 0, total = 0;
+};
+inline GroupShare ShareOf(const Library& library, Category category, int group) {
+    GroupShare share;
+    for (uint32_t slot = 0; slot < library.Size(category); ++slot) {
+        const Entry* entry = library.At(category, slot);
+        if (entry == nullptr || panel::GroupOfType(entry->type) != group) continue;
+        ++share.total;
+        if (library.IsFound(category, slot)) ++share.found;
+    }
+    return share;
 }
 
 // The entry a panel slot shows, or null when the page has fewer entries.

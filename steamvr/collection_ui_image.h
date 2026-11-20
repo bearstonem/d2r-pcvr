@@ -1,9 +1,9 @@
 #pragma once
 // The Collection page in the game's own UI image (variant B): the painter's picture
-// (8-bit RGBA, sRGB-encoded, premultiplied) resampled to the page's rectangle of the
-// UI image and converted to that image's own format - R16G16B16A16_FLOAT, linear light,
-// premultiplied, alpha = coverage (as UiBlit writes it). Done on the background painter,
-// so the render thread only copies finished rows (transport.cpp CopyUi).
+// (8-bit straight RGBA, sRGB-encoded; Painter::End) resampled to the page's rectangle
+// of the UI image and converted to that image's own format - R16G16B16A16_FLOAT,
+// linear light, premultiplied, alpha = coverage (as UiBlit writes it). Done on the
+// background painter, so the render thread only copies finished rows (CopyUi).
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -34,12 +34,13 @@ inline float Linear(float e) {
     return e <= 0.04045f ? e / 12.92f : std::pow((e + 0.055f) / 1.055f, 2.4f);
 }
 
-// src: srcW x srcH RGBA bytes, premultiplied, sRGB-encoded. Out: outW x outH x 4 halves.
-// Bilinear on the premultiplied bytes (no dark fringes), then each pixel unpremultiplied,
-// decoded to linear and premultiplied again. A 4096-entry table keeps it cheap.
-inline std::vector<uint16_t> Convert(const std::vector<uint8_t>& src, int srcW, int srcH, int outW, int outH) {
+// src: the painter's bitmap, stride pixels a row; its left srcW x srcH is the page.
+// Out: outW x outH x 4 halves. Bilinear on the colour weighted by coverage (no dark
+// fringes at a see-through edge), then decoded to linear light and premultiplied.
+inline std::vector<uint16_t> Convert(const std::vector<uint8_t>& src, int stride, int srcW, int srcH, int outW, int outH) {
     std::vector<uint16_t> out;
-    if (srcW <= 0 || srcH <= 0 || outW <= 0 || outH <= 0 || src.size() < size_t(srcW) * size_t(srcH) * 4) return out;
+    if (srcW <= 0 || srcH <= 0 || stride < srcW || outW <= 0 || outH <= 0 ||
+        src.size() < size_t(stride) * size_t(srcH) * 4) return out;
     out.resize(size_t(outW) * size_t(outH) * 4);
     static const std::vector<float> table = [] {
         std::vector<float> t(4097);
@@ -51,26 +52,27 @@ inline std::vector<uint16_t> Convert(const std::vector<uint8_t>& src, int srcW, 
         const float fy = std::fmax((float(y) + .5f) * sy - .5f, 0.f);
         const int y0 = int(fy) < srcH - 1 ? int(fy) : srcH - 1, y1 = y0 + 1 < srcH ? y0 + 1 : srcH - 1;
         const float ty = fy - float(y0);
-        const uint8_t* r0 = src.data() + size_t(y0) * srcW * 4;
-        const uint8_t* r1 = src.data() + size_t(y1) * srcW * 4;
+        const uint8_t* r0 = src.data() + size_t(y0) * size_t(stride) * 4;
+        const uint8_t* r1 = src.data() + size_t(y1) * size_t(stride) * 4;
         uint16_t* o = out.data() + size_t(y) * outW * 4;
         for (int x = 0; x < outW; ++x, o += 4) {
             const float fx = std::fmax((float(x) + .5f) * sx - .5f, 0.f);
             const int x0 = int(fx) < srcW - 1 ? int(fx) : srcW - 1, x1 = x0 + 1 < srcW ? x0 + 1 : srcW - 1;
             const float tx = fx - float(x0);
-            float c[4];
+            const float w[4] = {(1 - tx) * (1 - ty), tx * (1 - ty), (1 - tx) * ty, tx * ty};
+            const uint8_t* p[4] = {r0 + x0 * 4, r0 + x1 * 4, r1 + x0 * 4, r1 + x1 * 4};
+            float a = 0, c[3] = {0, 0, 0};
             for (int k = 0; k < 4; ++k) {
-                const float top = r0[x0 * 4 + k] + (r0[x1 * 4 + k] - float(r0[x0 * 4 + k])) * tx;
-                const float bot = r1[x0 * 4 + k] + (r1[x1 * 4 + k] - float(r1[x0 * 4 + k])) * tx;
-                c[k] = (top + (bot - top) * ty) / 255.f;
+                const float pa = p[k][3] / 255.f * w[k];
+                a += pa;
+                for (int ch = 0; ch < 3; ++ch) c[ch] += p[k][ch] / 255.f * pa;
             }
-            const float a = c[3];
             if (a <= 1.f / 512.f) { o[0] = o[1] = o[2] = o[3] = 0; continue; }
-            for (int k = 0; k < 3; ++k) {
-                const float e = std::fmin(c[k] / a, 1.f);
-                o[k] = Half(table[int(e * 4096.f + .5f)] * a);
+            for (int ch = 0; ch < 3; ++ch) {
+                const float e = std::fmin(c[ch] / a, 1.f);
+                o[ch] = Half(table[int(e * 4096.f + .5f)] * a);
             }
-            o[3] = Half(a);
+            o[3] = Half(std::fmin(a, 1.f));
         }
     }
     return out;

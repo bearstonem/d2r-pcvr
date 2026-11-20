@@ -639,7 +639,8 @@ LatestWorker<CollectionPaintJob,CollectionPainted> collectionPainter([](const Co
     collection::draw::Paint(*painter,job.library,job.view,CollectionIcon,job.tooltip,job.tooltipRanges);
     CollectionPainted out{painter->End(),{},0.0};
     if(job.uiW>0&&job.uiH>0&&!out.pixels.empty()) {   // variant B: ready for the UI image, off the render thread
-        out.ui=collection::uiimage::Convert(out.pixels,panelatlas::Collection.w,panelatlas::Collection.h,job.uiW,job.uiH);
+        out.ui=collection::uiimage::Convert(out.pixels,panelatlas::Collection.w,int(collection::panel::CanvasWidth),
+                                            int(collection::panel::CanvasHeight),job.uiW,job.uiH);
         if(!out.ui.empty()){out.uiW=job.uiW;out.uiH=job.uiH;}
     }
     out.ms=(hookmetrics::Nanos()-start)/1e6;
@@ -700,7 +701,7 @@ bool collectionTriggerWas=false;   // the previous frame's trigger, for the pres
 std::atomic<bool> uiShotWanted{false};   // both grips held: write the captured UI layer as a PNG in pcvr_shots
 bool collectionWasOpen=false;
 XrPosef collectionPose{};
-constexpr float collectionWidth=.95f,collectionHeight=collectionWidth*settings::Height/settings::Width;
+constexpr float collectionWidth=.95f,collectionHeight=collectionWidth*collection::panel::CanvasHeight/collection::panel::CanvasWidth;
 float collectionShownWidth=collectionWidth,collectionShownHeight=collectionHeight;   // the size it is drawn at
 // Variant B ([collection] in_ui): the page drawn into the game's own UI image in CopyUi,
 // over the stash's grid, instead of on a quad of its own. collectionUiW/H: the page's
@@ -3267,6 +3268,8 @@ void CollectionPress(const collection::panel::Hit& hit) {
     case HitKind::Next:     collection::TabStep(1); break;
     case HitKind::Size:     collection::TabSetSize(static_cast<collection::panel::Size>(hit.index)); break;
     case HitKind::Show:     collection::TabSetShow(static_cast<collection::panel::Show>(hit.index)); break;
+    case HitKind::Sort:     collection::TabSetSort(static_cast<collection::panel::Sort>(hit.index)); break;
+    case HitKind::Group:    collection::TabToggleGroup(hit.index); break;
     case HitKind::Slot: {
         const auto& library=collection::TabLibrary();const auto& view=collection::TabView();
         const auto visible=collection::VisibleSlots(library,view);
@@ -8437,7 +8440,8 @@ void EndPair() {
         collectionWasOnScreen=collectionOnScreen;
     }
     if(collectionOnScreen){
-        motionQuad(collectionPanel,collectionPose,collectionShownWidth,collectionShownHeight,Rect(panelatlas::Collection),sharedChain);
+        motionQuad(collectionPanel,collectionPose,collectionShownWidth,collectionShownHeight,
+            At(panelatlas::Collection,{{0,0},{int(collection::panel::CanvasWidth),int(collection::panel::CanvasHeight)}}),sharedChain);
     }
     // (No held-item patch: the game's cursor is withheld over the whole page, so the dragged
     // item is drawn just OUTSIDE the page, where the cursor stopped - never under it.)

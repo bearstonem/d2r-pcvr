@@ -20,8 +20,9 @@ Library Build() {
     assert(library.LoadLine("# collection 1"));
     assert(library.LoadLine("# category\tcode\trecordId\tname\tlevel\ttype\textra"));
     assert(library.LoadLine(""));
+    // Names padded to two digits, so the panel's name order is the catalog's.
     for (int i = 0; i < 100; ++i)
-        assert(library.LoadLine(Line("uniques", "rin", 1000 + i, ("Unique " + std::to_string(i)).c_str(), i % 90, "ring")));
+        assert(library.LoadLine(Line("uniques", "rin", 1000 + i, ((i < 10 ? "Unique 0" : "Unique ") + std::to_string(i)).c_str(), i % 90, "ring")));
     assert(library.LoadLine(Line("sets", "lrg", 56, "Civerb's Ward", 3, "shie", "Civerb's Vestments")));
     assert(library.LoadLine(Line("sets", "amu", 57, "Civerb's Icon", 3, "amul", "Civerb's Vestments")));
     assert(library.LoadLine(Line("runewords", "", 3, "Beast", 0, "axe", "r30 r03 r22 r23 r17")));
@@ -42,7 +43,7 @@ int main() {
 
     // The file's order inside a category is the slot; fields are parsed as written.
     const Entry* first = library.At(Category::Uniques, 0);
-    assert(first != nullptr && first->name == "Unique 0" && first->recordId == 1000 && first->type == "ring");
+    assert(first != nullptr && first->name == "Unique 00" && first->recordId == 1000 && first->type == "ring");
     assert(first->code == Library::CodeOf("rin"));
     assert(library.At(Category::Uniques, 100) == nullptr);
     const Entry* set = library.At(Category::Sets, 0);
@@ -138,7 +139,8 @@ int main() {
     assert(CounterText(library, view) == "1 / 2");
     {
         const auto visible = VisibleSlots(library, view);
-        assert(SlotFound(library, view, visible, 0) && !SlotFound(library, view, visible, 1));
+        // By name "Civerb's Icon" (57) comes first, so the found Ward (56) is the second card.
+        assert(!SlotFound(library, view, visible, 0) && SlotFound(library, view, visible, 1));
     }
 
     // The filter: Missing keeps what the stash does not hold, Found what it does,
@@ -172,6 +174,29 @@ int main() {
     assert(SlotEntry(library, view, VisibleSlots(library, view), 0) == nullptr);
     view.SelectShow(library, panel::Show::All);
     assert(view.VisibleCount(library) == 1);
+
+    // Sort by level (then name): levels are i % 90, so level 0 is entries 0 and 90.
+    view.SelectCategory(library, Category::Uniques);
+    view.SelectSort(library, panel::Sort::Level);
+    {
+        const auto visible = VisibleSlots(library, view);
+        assert(SlotEntry(library, view, visible, 0)->recordId == 1000);
+        assert(SlotEntry(library, view, visible, 1)->recordId == 1090);
+        assert(SlotEntry(library, view, visible, 2)->recordId == 1001);
+    }
+    view.SelectSort(library, panel::Sort::Name);
+
+    // A type tile filters the grid, and picked again lets go; its share counts the category.
+    view.ToggleGroup(library, 7);   // rings: all 100 uniques
+    assert(view.group == 7 && view.VisibleCount(library) == 100);
+    view.ToggleGroup(library, 2);   // shields: no unique here
+    assert(view.group == 2 && view.VisibleCount(library) == 0 && view.Pages(library) == 1);
+    view.ToggleGroup(library, 2);
+    assert(view.group == panel::NoGroup && view.VisibleCount(library) == 100);
+    const GroupShare rings = ShareOf(library, Category::Uniques, 7);
+    assert(rings.total == 100 && rings.found == 1);   // 1042 is still marked
+    const GroupShare shields = ShareOf(library, Category::Sets, 2);
+    assert(shields.total == 1 && shields.found == 1);   // Civerb's Ward (56)
 
     std::puts("Collection view: loading, grouping, found flags, paging, the filter and the counter passed");
 }

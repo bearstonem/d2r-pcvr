@@ -206,17 +206,27 @@ void TabShowEntry(Category category, uint32_t recordId) {
     }
     if (slot == UINT32_MAX) return;
     g_view.SelectCategory(g_library, category);
-    if (g_view.show != panel::Show::All) {
-        int position = 0;
-        for (uint32_t at = 0; at < slot; ++at) {
-            const bool found = g_library.IsFound(category, at);
-            if ((g_view.show == panel::Show::Missing && !found) || (g_view.show == panel::Show::Found && found)) ++position;
-        }
-        g_view.page = position / panel::SlotsFor(g_view.size);
-    } else {
-        g_view.page = int(slot) / panel::SlotsFor(g_view.size);
+    // Its position in the filtered, sorted list (VisibleSlots); a type filter that
+    // hides it lets go first, so the entry is always brought into view.
+    auto visible = VisibleSlots(g_library, g_view);
+    auto it      = std::find(visible.begin(), visible.end(), slot);
+    if (it == visible.end() && g_view.group != panel::NoGroup) {
+        g_view.group = panel::NoGroup;
+        visible      = VisibleSlots(g_library, g_view);
+        it           = std::find(visible.begin(), visible.end(), slot);
     }
+    if (it != visible.end()) g_view.page = int(it - visible.begin()) / panel::SlotsFor(g_view.size);
     g_view.Clamp(g_library);
+}
+
+void TabSetSort(panel::Sort sort) {
+    std::lock_guard lock(g_lock);
+    g_view.SelectSort(g_library, sort);
+}
+
+void TabToggleGroup(int group) {
+    std::lock_guard lock(g_lock);
+    g_view.ToggleGroup(g_library, group);
 }
 
 bool TabWanted() { return g_wanted.load(); }
