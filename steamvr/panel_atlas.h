@@ -6,6 +6,7 @@
 #include "guard_strain.h"
 #include "notice_card.h"
 #include "stash_buttons.h"
+#include "stash_tab_highlight.h"
 #include "vr_keyboard.h"
 #include "vr_settings_draw.h"
 #include "vr_settings_help.h"
@@ -57,7 +58,16 @@ constexpr Region KeyboardCapsLit{KeyboardLit.x,KeyboardCaps.y,keyboard::TexelWid
 // One region per face: the two tab buttons and the Collection button, plain then lit.
 constexpr Region Stash(int i){return {KeyboardLit.x+KeyboardLit.w+Gap,Leather.y+RespecPictures*(RespecHeight+Gap)+i*(stashbuttons::Height+Gap),stashbuttons::Width,stashbuttons::Height};}
 constexpr int StashRegions=stashbuttons::ButtonCount*2;
-constexpr int StaticWidth=1536,StaticHeight=KeyboardCaps.y+KeyboardCaps.h>Stash(StashRegions-1).y+Stash(StashRegions-1).h+Gap?KeyboardCaps.y+KeyboardCaps.h:Stash(StashRegions-1).y+Stash(StashRegions-1).h+Gap;
+// The active-tab mark (stash_tab_highlight.h): a bronze frame and a blue diamond,
+// under the plaques in their column.
+constexpr Region TabHighlight{Stash(0).x,Stash(StashRegions-1).y+stashbuttons::Height+Gap,tabhighlight::Width,tabhighlight::Height};
+constexpr int StaticWidth=1536,StaticHeight=[]{
+    int h=KeyboardCaps.y+KeyboardCaps.h;
+    const int stash=Stash(StashRegions-1).y+Stash(StashRegions-1).h+Gap;
+    if(stash>h)h=stash;
+    const int mark=TabHighlight.y+TabHighlight.h+Gap;
+    return mark>h?mark:h;
+}();
 // Dynamic: VR Settings (its help card inside the panel) across the top, the
 // glyph trail beside it, the blood visor under them, then the strain light, the
 // quest card and the bow laser beside it.

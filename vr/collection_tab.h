@@ -70,6 +70,9 @@ void TabSetWanted(bool wanted);
 void TabClearFound();
 void TabMarkFound(Category category, uint32_t recordId);
 void TabMarkFoundCode(Category category, uint32_t code);   // a material (gem or rune), by its code
+// The opposite: a stored copy was taken out, so its slot goes back to missing.
+void TabMarkMissing(Category category, uint32_t recordId);
+void TabMarkMissingCode(Category category, uint32_t code);
 
 // One line for the log: what the catalog holds and how much of it is found.
 void TabReport();

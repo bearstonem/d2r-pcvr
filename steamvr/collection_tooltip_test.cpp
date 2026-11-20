@@ -102,7 +102,7 @@ int main() {
 
     // The whole card stays inside the canvas whatever the slot.
     for (int slot = 0; slot < panel::SlotsFor(panel::Size::Small); ++slot) {
-        const panel::Layout layout = panel::Build(0, 1, int(CategoryCount), panel::Size::Small);
+        const panel::Layout layout = panel::Build(0, 1, int(TabCategoryCount), panel::Size::Small);
         const Box box = PlaceTooltip(layout.slots[slot], 360, 240);
         assert(box.x >= TooltipMargin && box.x + box.w <= panel::CanvasWidth - TooltipMargin + 0.001f);
         assert(box.y >= TooltipTop && box.y + box.h <= panel::CanvasHeight - TooltipMargin + 0.001f);

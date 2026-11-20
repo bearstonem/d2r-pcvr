@@ -79,15 +79,24 @@ int main() {
     assert(library.MarkFoundCode(Category::Materials, Library::CodeOf("xxx")) == UINT32_MAX);
     assert(library.IsFound(Category::Materials, 0) && library.Found(Category::Materials) == 1);
 
-    // The panel's page state: two pages of uniques (96 slots a page), and the
+    // MarkMissing: a stored copy taken out, so its slot goes back to missing at once.
+    assert(library.MarkFound(Category::Uniques, 1042) == 42);
+    assert(library.IsFound(Category::Uniques, 42));
+    assert(library.MarkMissing(Category::Uniques, 1042) == 42);
+    assert(!library.IsFound(Category::Uniques, 42));
+    assert(library.MarkMissing(Category::Uniques, 999999) == UINT32_MAX);
+    assert(library.MarkMissingCode(Category::Materials, Library::CodeOf("gsv")) == 0);
+    assert(!library.IsFound(Category::Materials, 0));
+
+    // The panel's page state: the entries over pages of SlotsFor(size), and the
     // category switch starts at the first page.
     ViewState view;
-    assert(view.Pages(library) == 2);          // 100 entries, 96 a page
+    assert(view.Pages(library) == 9);          // 100 entries, 12 a page
     assert(view.Pages(library) == panel::PagesFor(100));
-    assert(panel::PagesFor(403) == 5);         // the uniques on 3.4.0
+    assert(panel::PagesFor(403) == 34);        // the uniques on 3.4.0
     view.page = 99;
     view.Clamp(library);
-    assert(view.page == 1);
+    assert(view.page == 8);
     view.Step(library, -10);
     assert(view.page == 0);
     view.Step(library, -1);
@@ -104,10 +113,12 @@ int main() {
         const auto visible = VisibleSlots(library, view);
         assert(visible.size() == 100);
         assert(SlotEntry(library, view, visible, 0)->recordId == 1000);
-        assert(SlotEntry(library, view, visible, 95)->recordId == 1095);
-        assert(SlotEntry(library, view, visible, 96) == nullptr);   // the second page, not loaded here
+        assert(SlotEntry(library, view, visible, 11)->recordId == 1011);
+        assert(SlotEntry(library, view, visible, 12) == nullptr);   // the second page, not loaded here
         view.page = 1;
-        assert(SlotEntry(library, view, visible, 0)->recordId == 1096);
+        assert(SlotEntry(library, view, visible, 0)->recordId == 1012);
+        assert(SlotEntry(library, view, visible, 3)->recordId == 1015);
+        view.page = 8;                                             // the last page: entries 96..99
         assert(SlotEntry(library, view, visible, 3)->recordId == 1099);
         assert(SlotEntry(library, view, visible, 4) == nullptr);    // the 100th unique is the last
         assert(SlotEntry(library, view, visible, -1) == nullptr);
@@ -115,11 +126,11 @@ int main() {
     }
 
     // Found state is per slot, and the counter reads the open category.
-    view.page = 0;
+    view.page = 3;   // 1042 is entry 42: slot 6 of page 3 (12 a page)
     library.MarkFound(Category::Uniques, 1042);
     {
         const auto visible = VisibleSlots(library, view);
-        assert(!SlotFound(library, view, visible, 41) && SlotFound(library, view, visible, 42));
+        assert(!SlotFound(library, view, visible, 5) && SlotFound(library, view, visible, 6));
     }
     assert(CounterText(library, view) == "1 / 100");
     view.SelectCategory(library, Category::Sets);
@@ -146,7 +157,7 @@ int main() {
     }
     view.SelectShow(library, panel::Show::Missing);
     assert(view.VisibleCount(library) == 99);
-    assert(view.Pages(library) == 2);
+    assert(view.Pages(library) == 9);
     {
         const auto visible = VisibleSlots(library, view);
         assert(visible.size() == 99);

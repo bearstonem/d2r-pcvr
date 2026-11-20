@@ -34,6 +34,8 @@ inline const Rect* RectOf(const Layout& layout, const Hit& hit) {
     case HitKind::Page:     return hit.index >= 0 && hit.index < layout.pageButtonCount ? &layout.pageButtons[hit.index] : nullptr;
     case HitKind::Previous: return &layout.previous;
     case HitKind::Next:     return &layout.next;
+    case HitKind::Size:     return hit.index >= 0 && hit.index < int(panel::Size::Count) ? &layout.sizeSteps[hit.index] : nullptr;
+    case HitKind::Show:     return hit.index >= 0 && hit.index < int(panel::Show::Count) ? &layout.showSteps[hit.index] : nullptr;
     case HitKind::Slot:     return hit.index >= 0 && hit.index < layout.slotCount ? &layout.slots[hit.index] : nullptr;
     default:                return nullptr;
     }

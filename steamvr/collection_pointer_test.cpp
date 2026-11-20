@@ -116,5 +116,24 @@ int main() {
         assert(filter.Step(x, y, layout, false, 200).kind == HitKind::None);
     }
 
+    // The Size and Show controls click like any other control: their steps are
+    // pressable, so the release lands on them (regression: RectOf once left Size
+    // and Show out, so every such click was dropped and the controls did nothing).
+    {
+        Filter size;
+        const float sizeX = CentreX(layout.sizeSteps[2]);
+        const float sizeY = CentreY(layout.sizeSteps[2]);
+        size.Step(sizeX, sizeY, layout, false, 0);
+        size.Step(sizeX, sizeY, layout, true, 16);
+        assert(Is(size.Step(sizeX, sizeY, layout, false, 200), HitKind::Size, 2));
+
+        Filter show;
+        const float showX = CentreX(layout.showSteps[1]);
+        const float showY = CentreY(layout.showSteps[1]);
+        show.Step(showX, showY, layout, false, 0);
+        show.Step(showX, showY, layout, true, 16);
+        assert(Is(show.Step(showX, showY, layout, false, 200), HitKind::Show, 1));
+    }
+
     std::puts("Collection pointer: hover, hysteresis, lock, click on release and the held-trigger guard passed");
 }

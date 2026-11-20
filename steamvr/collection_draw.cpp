@@ -143,13 +143,11 @@ void DrawTooltip(Painter& painter, const panel::Rect& anchor, const tooltip::Too
 
 void Paint(Painter& painter, const Library& library, const ViewState& view, const IconLookup& icons,
            std::string_view gameText, std::string_view rangeText) {
-    const panel::Layout layout = panel::Build(view.page, view.Pages(library), int(CategoryCount), view.size);
+    const panel::Layout layout = panel::Build(view.page, view.Pages(library), int(TabCategoryCount), view.size);
 
     // The panel's own surface: stone inside a bronze frame.
     painter.Stone({0, 0, panel::CanvasWidth, panel::CanvasHeight}, Color::Stone, 0.30f);
     painter.Outline({3, 3, panel::CanvasWidth - 6, panel::CanvasHeight - 6}, Color::FrameB, 6.f);
-    painter.Text("Collection", TextStyle::Small,
-                 {panel::CanvasWidth * 0.5f - 200.f, 5.f, 400.f, 18.f}, Color::Section, Align::Center);
 
     // The category tabs, then the page numbers on the same row.
     for (int i = 0; i < layout.tabCount; ++i) {
@@ -172,7 +170,14 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
     const auto visible = VisibleSlots(library, view);
     for (int slot = 0; slot < layout.slotCount; ++slot) {
         const Entry* entry = SlotEntry(library, view, visible, slot);
-        if (entry == nullptr) continue;
+        if (entry == nullptr) {
+            // The page (or a filter such as Found) holds fewer entries than the grid
+            // has slots: the rest stay grey sockets, so the grid always reads full.
+            const RectF empty = Box(layout.slots[slot]);
+            painter.Fill(empty, Color::Socket, 0.9f);
+            painter.Outline(empty, Color::EdgeOff, 1.f, true);
+            continue;
+        }
         const bool   found = SlotFound(library, view, visible, slot);
         const bool   pointed = view.hover.kind == panel::HitKind::Slot && view.hover.index == slot;
         const RectF  box   = Box(layout.slots[slot]);

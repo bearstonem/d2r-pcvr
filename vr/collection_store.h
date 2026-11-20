@@ -37,6 +37,12 @@ void TickStore(bool stashOpen);
 // Called from the update thread; the move itself runs on the game thread.
 void RequestSlotAction(Category category, uint32_t identity);
 
+// A click on the page's grid with an item in the hand: stores the item the game holds on
+// its cursor in the collection's tab for its own category, so it lands in its catalog slot
+// wherever on the page it was clicked. Called from the update thread; the move runs on the
+// game thread.
+void DepositCarried();
+
 // One line for the log: whether affinity is on and where the collection's tabs
 // are, then what the last sweep did.
 void StoreReport();

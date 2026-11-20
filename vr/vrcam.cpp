@@ -373,6 +373,9 @@ struct Settings {
     std::atomic<bool>  campfireMenuBoard{true}; // [campfire] menu_board: the menu's lower strip as a board in the scene, not over the eyes
     std::atomic<float> campfireMenuWidth{1.1f}, campfireMenuDistance{1.0f}, campfireMenuDrop{0.9f};   // [campfire] menu_width, menu_distance, menu_drop (metres)
     std::atomic<float> stashScale{2.0f};   // [interaction] stash_scale: the stash window's own scale (isolated to it)
+    std::atomic<float> stashDrop{0.0f};    // [interaction] stash_drop: extra metres to lower the stash window
+    std::atomic<float> stashDistance{0.25f}; // [interaction] stash_distance: extra metres to push the stash away
+    std::atomic<bool> stashWorld{false};    // [interaction] stash_world: keep the world behind the stash (experimental)
     std::atomic<bool>  campfireCaption{true};   // [campfire] caption: the picked hero's class and words on a board over the heroes
     std::atomic<float> campfireCaptionRect[4]{{0.25f},{0.0f},{0.75f},{0.33f}};   // [campfire] caption_left/top/right/bottom: shares of the menu band
     std::atomic<float> campfireCaptionWidth{3.0f}, campfireCaptionDistance{6.5f}, campfireCaptionRise{2.0f};   // [campfire] caption_width/distance/rise (metres)
@@ -1689,7 +1692,10 @@ void LoadSettings() {
         g_set.campfireMenuWidth.store(std::clamp(IniF(L"campfire", L"menu_width", 1.1f), 0.3f, 3.0f));
         g_set.campfireMenuDistance.store(std::clamp(IniF(L"campfire", L"menu_distance", 1.0f), 0.4f, 3.0f));
         g_set.campfireMenuDrop.store(std::clamp(IniF(L"campfire", L"menu_drop", 0.9f), -0.5f, 1.5f));
-        g_set.stashScale.store(std::clamp(IniF(L"interaction", L"stash_scale", 2.0f), 0.5f, 4.0f));
+        g_set.stashScale.store(std::clamp(IniF(L"interactions", L"stash_scale", 2.0f), 0.5f, 4.0f));
+        g_set.stashDrop.store(std::clamp(IniF(L"interactions", L"stash_drop", 0.0f), -1.5f, 1.5f));
+        g_set.stashDistance.store(std::clamp(IniF(L"interactions", L"stash_distance", 0.25f), -0.5f, 1.5f));
+        g_set.stashWorld.store(IniB(L"interactions", L"stash_world", false));
         g_set.campfireMenuTop.store(std::clamp(IniF(L"campfire", L"menu_top", 0.78f), 0.0f, 0.98f));
         {   // [frontend]
             const bool front = IniB(L"frontend", L"scene", true);   // the menu in 3D: on by default (2026-11-17)
@@ -7810,6 +7816,9 @@ void CampfireTick() {
     else
         framevr::SetCampfireMenu(g_set.campfireMenuWidth.load(), g_set.campfireMenuDistance.load(), g_set.campfireMenuDrop.load());
     framevr::SetStashScale(g_set.stashScale.load());   // the stash window's own scale (isolated to the stash)
+    framevr::SetStashDrop(g_set.stashDrop.load());     // and its extra lowering ([interaction] stash_drop)
+    framevr::SetStashDistance(g_set.stashDistance.load());   // and how far it is pushed away ([interaction] stash_distance)
+    framevr::SetStashWorld(g_set.stashWorld.load());         // and whether the world stays behind it ([interaction] stash_world)
     {   // the caption over the heroes ([campfire] caption...)
         const float rect[4] = { g_set.campfireCaptionRect[0].load(), g_set.campfireCaptionRect[1].load(), g_set.campfireCaptionRect[2].load(), g_set.campfireCaptionRect[3].load() };
         framevr::SetCampfireCaption(g_campfire.load() && !g_frontend3d.load() && g_set.campfireMenuBoard.load() && g_set.campfireCaption.load(), rect,
@@ -10980,7 +10989,8 @@ bool WorldMenuBlocksEffects() {
     // The leather keeps the world round it (leather_world), so its effects too.
     // A cinematic: no sky, fog or ceiling over the movie (the game draws no world under it).
     if(gamestate::CinemaPlaying())return true;
-    return framevr::panels::BlockWorldEffects(gamestate::MenuOpen(),framevr::SpatialMenu(),gamestate::OpaqueMenuOpen()&&!framevr::LeatherMenuWorld());
+    return framevr::panels::BlockWorldEffects(gamestate::MenuOpen(),framevr::SpatialMenu(),
+        gamestate::OpaqueMenuOpen()&&!framevr::LeatherMenuWorld()&&!framevr::StashMenuWorld());
 #else
     return gamestate::MenuOpen();
 #endif
@@ -13575,6 +13585,25 @@ D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
 }
 // The monster nearest a cell (transport.h): an aimed throw's sigil takes the monster under it (toss.h).
 namespace framevr {
+// A picture of the game's own frame at the next present (shot::Take), saved as a PNG in
+// pcvr_shots\ beside the plugin: the picture Ctrl+F11 / [debug] shot take, for the in-headset
+// trigger transport binds to both grips (screenshot.h).
+void RequestScreenshot() { g_shotWanted.store(true); }
+// The mod's own captured UI layer, read back by transport, saved as a PNG in pcvr_shots\:
+// the interface itself (the tabs, the stash page), which the game's frame does not carry.
+void SaveUiPicture(std::vector<uint8_t> rgba, int width, int height) {
+    if (width <= 0 || height <= 0 || rgba.size() < size_t(width) * size_t(height) * 4) return;
+    std::wstring dir(g_iniPath);
+    dir.resize(dir.find_last_of(L'\\') + 1);
+    dir += L"pcvr_shots";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    wchar_t file[64];
+    swprintf_s(file, L"\\ui_%04u%02u%02u_%02u%02u%02u_%03u.png",
+               st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    fx::shot::Save(std::move(rgba), uint32_t(width), uint32_t(height), dir + file);
+}
 bool MonsterNearCell(float x, float y, float within, float& monsterX, float& monsterY, uint32_t* id) {
     const auto s = targetlock::Get();
     if (!s.at || GetTickCount64() - s.at > 500) return false;

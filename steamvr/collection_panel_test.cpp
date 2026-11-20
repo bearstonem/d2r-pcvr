@@ -2,6 +2,7 @@
 // - where they land and what the laser hits. Pure geometry, so this runs
 // without D2R.
 #include "collection_panel.h"
+#include "stash_tab_highlight.h"
 #include <cassert>
 #include <cstdio>
 
@@ -42,21 +43,22 @@ void CheckGrid(Size size) {
 
 int main() {
     // The three sizes and their slot counts.
-    static_assert(SlotsFor(Size::Small) == 96);
-    static_assert(SlotsFor(Size::Medium) == 60);
-    static_assert(SlotsFor(Size::Large) == 40);
-    static_assert(MaxSlots == SlotsFor(Size::Small));
-    static_assert(GridOf(Size::Medium).columns == 10 && GridOf(Size::Medium).rows == 6);
-    static_assert(GridOf(Size::Large).columns == 8 && GridOf(Size::Large).rows == 5);
+    static_assert(SlotsFor(Size::Small) == 12);
+    static_assert(SlotsFor(Size::Medium) == 35);
+    static_assert(SlotsFor(Size::Large) == 70);
+    static_assert(MaxSlots == SlotsFor(Size::Large));
+    static_assert(GridOf(Size::Small).columns == 4 && GridOf(Size::Small).rows == 3);
+    static_assert(GridOf(Size::Medium).columns == 7 && GridOf(Size::Medium).rows == 5);
+    static_assert(GridOf(Size::Large).columns == 10 && GridOf(Size::Large).rows == 7);
 
     // Pages hold SlotsFor(size) entries each, and never fewer than one page.
     static_assert(PagesFor(0) == 1);
     static_assert(PagesFor(1) == 1);
-    static_assert(PagesFor(96) == 1);
-    static_assert(PagesFor(97) == 2);
-    static_assert(PagesFor(403) == 5);                                        // the uniques on 3.4.0
-    static_assert(PagesFor(403, Size::Medium) == 7);
-    static_assert(PagesFor(403, Size::Large) == 11);
+    static_assert(PagesFor(12) == 1);
+    static_assert(PagesFor(13) == 2);
+    static_assert(PagesFor(403) == 34);                                       // the uniques on 3.4.0
+    static_assert(PagesFor(403, Size::Medium) == 12);
+    static_assert(PagesFor(403, Size::Large) == 6);
 
     // Every size keeps its grid inside the panel and out of the bars.
     CheckGrid(Size::Small);
@@ -100,8 +102,8 @@ int main() {
     // Pointing: each control takes the point at its centre and nothing else.
     assert(Pick(layout, CentreX(layout.tabs[1]), CentreY(layout.tabs[1])).kind == HitKind::Tab);
     assert(Pick(layout, CentreX(layout.tabs[1]), CentreY(layout.tabs[1])).index == 1);
-    const Hit slot = Pick(layout, CentreX(layout.slots[17]), CentreY(layout.slots[17]));
-    assert(slot.kind == HitKind::Slot && slot.index == 17);
+    const Hit slot = Pick(layout, CentreX(layout.slots[5]), CentreY(layout.slots[5]));
+    assert(slot.kind == HitKind::Slot && slot.index == 5);
     const Hit page = Pick(layout, CentreX(layout.pageButtons[1]), CentreY(layout.pageButtons[1]));
     assert(page.kind == HitKind::Page && page.index == 1);
     assert(Pick(layout, CentreX(layout.previous), CentreY(layout.previous)).kind == HitKind::Previous);
@@ -116,9 +118,9 @@ int main() {
     // A slot past this size's count is not pressable: the layout leaves the rest
     // of the array zeroed, so nothing is under the laser there.
     const Layout medium = Build(0, 2, 3, Size::Medium);
-    assert(medium.slotCount == 60);
+    assert(medium.slotCount == 35);
     assert(Pick(medium, CentreX(medium.slots[0]), CentreY(medium.slots[0])).kind == HitKind::Slot);
-    assert(Pick(medium, CentreX(medium.slots[59]), CentreY(medium.slots[59])).index == 59);
+    assert(Pick(medium, CentreX(medium.slots[34]), CentreY(medium.slots[34])).index == 34);
     for (int i = medium.slotCount; i < MaxSlots; ++i) assert(medium.slots[i].width == 0 && medium.slots[i].height == 0);
 
     // The page is clamped, and page numbers that would not fit are dropped.
@@ -137,5 +139,21 @@ int main() {
     const uint32_t gem = uint32_t('g') | (uint32_t('c') << 8) | (uint32_t('v') << 16) | (uint32_t(' ') << 24);
     assert(IconKey(Category::Materials, 0, gem) == "i20766367");
 
-    std::puts("Collection panel: sizes, tabs, grid, footer, Size control, hit testing and icon keys passed");
+    // The active-tab mark: the frame is painted and the game's own gem (tab_gem.h) blitted
+    // onto a straight-RGBA canvas of the atlas region's size.
+    {
+        const auto mark = framevr::tabhighlight::Paint();
+        assert(mark.size() == size_t(framevr::tabhighlight::Width) * framevr::tabhighlight::Height * 4);
+        int opaque = 0, gold = 0, blue = 0;
+        for (size_t i = 0; i + 3 < mark.size(); i += 4) {
+            if (mark[i + 3] == 0) continue;
+            ++opaque;
+            if (mark[i] > mark[i + 2]) ++gold;                        // R over B: the gold frame
+            if (mark[i + 2] > mark[i] && mark[i + 2] > 90) ++blue;    // B over R: the gem
+        }
+        assert(opaque > 0 && gold > 0 && blue > 0);   // the frame and the gem both drew
+        assert(framevr::tabhighlight::GemWidth > 0 && framevr::tabhighlight::GemHeight > 0);
+    }
+
+    std::puts("Collection panel: sizes, tabs, grid, footer, Size control, hit testing, icon keys and the tab mark passed");
 }

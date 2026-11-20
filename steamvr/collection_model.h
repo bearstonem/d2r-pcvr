@@ -28,6 +28,11 @@ enum class Category : uint32_t {
 
 inline constexpr std::size_t CategoryCount = static_cast<std::size_t>(Category::Count);
 
+// The categories the panel shows as its own tabs. Materials stays in the enum
+// (the catalog and its tags still use it) but the owner does not want its tab
+// (2026-11-19: "remove Materials, why is it there").
+inline constexpr std::size_t TabCategoryCount = 3;
+
 // Tab labels, UTF-8 for the painter (the mod draws UTF-8 everywhere).
 inline constexpr const char* CategoryName(Category category) {
     switch (category) {

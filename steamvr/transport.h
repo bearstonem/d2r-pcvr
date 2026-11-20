@@ -152,6 +152,13 @@ void OpenCampfireFrame();   // the campfire: the headset frame opened before an 
 void SetCampfireMenu(float width, float distance, float drop);
 // The stash window's own scale, isolated to it ([interaction] stash_scale).
 void SetStashScale(float scale);
+// Extra metres to lower the stash window, on top of its band centring ([interaction] stash_drop).
+void SetStashDrop(float drop);
+// Extra metres to push the whole stash window away from the eyes ([interaction] stash_distance).
+void SetStashDistance(float metres);
+// Keep the world behind the stash (experimental, [interaction] stash_world) - like the leather.
+void SetStashWorld(bool on);
+bool StashMenuWorld();
 // The campfire's caption: the part of the game's menu band (shares of it: left, top, right, bottom) where the
 // game writes the picked hero's class and words, on a board of its own above the heroes (width, distance
 // ahead and rise over the eyes, metres). on=false: none.

@@ -237,6 +237,16 @@ void TabMarkFound(Category category, uint32_t recordId) {
     if (g_loaded) g_library.MarkFound(category, recordId);
 }
 
+void TabMarkMissingCode(Category category, uint32_t code) {
+    std::lock_guard lock(g_lock);
+    if (g_loaded) g_library.MarkMissingCode(category, code);
+}
+
+void TabMarkMissing(Category category, uint32_t recordId) {
+    std::lock_guard lock(g_lock);
+    if (g_loaded) g_library.MarkMissing(category, recordId);
+}
+
 void TabReport() {
     std::lock_guard lock(g_lock);
     if (!g_loaded) {

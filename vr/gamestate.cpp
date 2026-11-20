@@ -1020,8 +1020,11 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         if (!strcmp(command, framevr::collection::TabCommand)) {
             framevr::collection::TabSetWanted(true);
             Log("gamestate: the Collection page was chosen");
-        } else if (!strcmp(command, "SelectTab")) {
-            framevr::collection::TabSetWanted(false);   // a normal stash tab was chosen
+        } else if (framevr::collection::TabWanted()) {
+            // Any other message from the stash bar means one of its own tabs was
+            // chosen: the Collection page goes.
+            framevr::collection::TabSetWanted(false);
+            Log("gamestate: a stash tab was switched; the Collection page goes with it");
         }
         return SharedEvents::UiMessageAction::Continue;
     }

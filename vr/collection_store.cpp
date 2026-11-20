@@ -29,6 +29,7 @@ std::atomic<int>      g_tabs{24};
 std::atomic<uint64_t> g_lastSweep{0};
 std::atomic<bool>     g_sweeping{false};
 std::atomic<int>      g_movedTotal{0};
+std::atomic<bool>     g_depositing{false};   // a click on the page with an item in hand
 
 // Where each category's items live inside the collection's tab range. The counts
 // add up to the 24 tabs the mod asks D2RLoader for.
@@ -109,7 +110,117 @@ bool MoveToBand(const D2RL::PlayerHandle player, const D2RL::ItemHandle item, Ca
     return false;
 }
 
-// The pending slot action (a click on the panel), and whether its move is running.
+// Moves one item onto the player's cursor: a stored copy taken out lands in the hand,
+// like a native pick-up, instead of in the first free inventory cell.
+bool MoveToCursor(const D2RL::PlayerHandle player, const D2RL::ItemHandle item) {
+    if (g_items == nullptr) return false;
+    D2RL::Items::ExistingItemOperation operation {};
+    operation.structSize = D2RL::Items::ExistingItemOperationSize;
+    operation.kind       = D2RL::Items::ExistingItemOperationKind::Move;
+    operation.item       = item;
+    operation.move.destination.structSize = D2RL::Items::ItemDestinationSize;
+    operation.move.destination.container  = D2RL::Items::ItemContainer::Cursor;
+    operation.move.destination.placement  = D2RL::Items::Placement::Automatic;
+
+    D2RL::Items::ExistingItemTransaction transaction {};
+    transaction.structSize     = D2RL::Items::ExistingItemTransactionSize;
+    transaction.player         = player;
+    transaction.operationCount = 1;
+    transaction.operations     = &operation;
+    D2RL::Items::ExistingItemTransactionResult result {};
+    result.structSize = D2RL::Items::ExistingItemTransactionResultSize;
+    return g_items->executeExistingItemTransaction(g_ctx, &transaction, &result) == D2RL::Items::Result::Success;
+}
+
+// The item the game holds on its cursor now: the store-carried wrapper (getCursorItem).
+struct CursorItem {
+    uint64_t handle   = 0;
+    uint32_t code     = 0;
+    uint32_t recordId = UINT32_MAX;
+    uint32_t quality  = UINT32_MAX;
+    bool     unique   = false;
+    bool     set      = false;
+    bool     ok       = false;
+};
+
+D2RL::Inventory::IterationAction __cdecl CollectCursor(const D2RL::PluginContext*, const D2RL::Items::ItemInfo* info, void* userData) noexcept {
+    auto& out = *static_cast<CursorItem*>(userData);
+    if (info == nullptr || out.ok) return D2RL::Inventory::IterationAction::Continue;
+    out.handle = info->handle;
+    out.code   = info->code;
+    out.quality = uint32_t(info->quality);
+    out.unique = info->quality == D2RL::Items::Quality::Unique;
+    out.set    = info->quality == D2RL::Items::Quality::Set;
+    if (info->qualityRecordId >= 0 && (out.unique || out.set)) out.recordId = uint32_t(info->qualityRecordId);
+    out.ok = true;
+    return D2RL::Inventory::IterationAction::Continue;
+}
+
+bool MoveToInventory(const D2RL::PlayerHandle player, const D2RL::ItemHandle item);   // defined below
+
+bool MoveIdentityToBand(const D2RL::PlayerHandle player, Category category, uint32_t identity);   // defined below, after FindSlotItem
+
+// Runs on the game thread: an item in the hand and a click on the page. The item goes to
+// its own catalog slot's category; a second copy is left in the hand (only the first of an
+// entry is kept, as the sweep does).
+void DepositCarriedOnGameThread(const D2RL::PluginContext*, void*) noexcept {
+    g_depositing.store(false);
+    if (g_ctx == nullptr || g_inventory == nullptr || g_items == nullptr) return;
+    D2RL::PlayerHandle player {};
+    if (g_inventory->getLocalPlayer(g_ctx, &player) != D2RL::Inventory::Result::Success) return;
+    CursorItem cursor;
+    D2RL::Inventory::ItemFilter filter {};
+    filter.structSize    = D2RL::Inventory::ItemFilterSize;
+    filter.containerMask = D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::Cursor);
+    if (g_inventory->forEachInventoryItem(g_ctx, player, &filter, &CollectCursor, &cursor) != D2RL::Inventory::Result::Success || !cursor.ok) {
+        char line[160];
+        std::snprintf(line, sizeof(line), "Frame collection: nothing on the cursor to store (the game holds no item; enumeration %s)",
+                      cursor.ok ? "ok" : "empty");
+        Log(line);
+        return;
+    }
+    {
+        char line[192];
+        std::snprintf(line, sizeof(line), "Frame collection: the cursor holds a %s item (quality %u, record %u, code 0x%08x)",
+                      cursor.unique ? "unique" : cursor.set ? "set" : "plain", cursor.quality, cursor.recordId, cursor.code);
+        Log(line);
+    }
+    const Library& library = TabLibrary();
+    Category category = Category::Uniques;
+    uint32_t identity = 0;
+    bool     byCode   = false;
+    if (cursor.unique && cursor.recordId != UINT32_MAX && library.SlotOf(Category::Uniques, cursor.recordId) != UINT32_MAX) {
+        category = Category::Uniques; identity = cursor.recordId;
+    } else if (cursor.set && cursor.recordId != UINT32_MAX && library.SlotOf(Category::Sets, cursor.recordId) != UINT32_MAX) {
+        category = Category::Sets; identity = cursor.recordId;
+    } else if (library.SlotOfCode(Category::Materials, cursor.code) != UINT32_MAX) {
+        category = Category::Materials; identity = cursor.code; byCode = true;
+    } else {
+        Log("Frame collection: the cursor item is not a catalog collectible; it stays in hand");
+        return;
+    }
+    // An item on the cursor cannot be moved straight into the shared stash (the game refuses that
+    // move: the log said "could not store"). So it is put into the inventory first, and then the
+    // item with this identity is moved into the collection's band - the move the affinity sweep
+    // already shows works from the inventory.
+    if (!MoveToInventory(player, cursor.handle)) {
+        Log("Frame collection: could not take the cursor item into the inventory; it stays in hand");
+        return;
+    }
+    if (!MoveIdentityToBand(player, category, identity)) {
+        char line[192];
+        std::snprintf(line, sizeof(line), "Frame collection: could not store the carried %s item (id %u)",
+                      CategoryName(category), unsigned(identity));
+        Log(line);
+        return;
+    }
+    if (byCode) TabMarkFoundCode(category, identity);
+    else { TabMarkFound(category, identity); TabShowEntry(category, identity); }
+    char line[192];
+    std::snprintf(line, sizeof(line), "Frame collection: stored the carried %s item (id %u) in its slot",
+                  CategoryName(category), unsigned(identity));
+    Log(line);
+}
 std::atomic<uint32_t> g_actionCategory{UINT32_MAX};
 std::atomic<uint32_t> g_actionId{0};
 std::atomic<bool>     g_acting{false};
@@ -163,6 +274,30 @@ D2RL::Inventory::IterationAction __cdecl FindSlotItem(const D2RL::PluginContext*
 
 // Runs on the game thread: a click on a slot takes the stored copy out, or stores
 // a carried one. Nothing happens when the player holds neither.
+// Moves the item with this identity (wherever it sits - inventory, cube, personal or the shared
+// stash) into the collection's band for its category. True when it is there (or already was). The
+// band is the range the collection owns at the end of the shared stash.
+bool MoveIdentityToBand(const D2RL::PlayerHandle player, Category category, uint32_t identity) {
+    const int      tabs   = std::min(g_tabs.load(), kBandTabs);
+    const uint32_t first  = uint32_t(g_firstTab.load());
+    const uint32_t beyond = first + uint32_t(std::max(0, tabs));
+    SlotMatch match;
+    match.category = category;
+    match.identity = identity;
+    match.first    = first;
+    match.beyond   = beyond;
+    D2RL::Inventory::ItemFilter filter {};
+    filter.structSize    = D2RL::Inventory::ItemFilterSize;
+    filter.containerMask = D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::Inventory)
+                         | D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::Cube)
+                         | D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::PersonalStash)
+                         | D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::SharedStash);
+    g_inventory->forEachInventoryItem(g_ctx, player, &filter, &FindSlotItem, &match);
+    if (match.stored != 0) return true;                       // already in the band
+    if (match.carried != 0) return MoveToBand(player, match.carried, category);
+    return false;
+}
+
 void SlotActionOnGameThread(const D2RL::PluginContext*, void*) noexcept {
     const uint32_t categoryValue = g_actionCategory.exchange(UINT32_MAX);
     const uint32_t identity      = g_actionId.load();
@@ -190,16 +325,28 @@ void SlotActionOnGameThread(const D2RL::PluginContext*, void*) noexcept {
     filter.structSize    = D2RL::Inventory::ItemFilterSize;
     filter.containerMask = D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::Inventory)
                          | D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::Cube)
-                         | D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::SharedStash);
+                         | D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::SharedStash)
+                         | D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::Cursor);   // a carried item is on the cursor
     g_inventory->forEachInventoryItem(g_ctx, player, &filter, &FindSlotItem, &match);
 
     char line[224];
     if (match.stored != 0) {
-        const bool moved = MoveToInventory(player, match.stored);
-        std::snprintf(line, sizeof(line), "Frame collection: %s a %s item (id %u) out of the collection to the inventory",
+        // Out of the collection: the stored copy goes onto the cursor, like a native
+        // pick-up (the inventory is the fallback if the loader refuses the cursor), and
+        // its slot goes back to missing so it reads grey at once.
+        const bool moved = MoveToCursor(player, match.stored) || MoveToInventory(player, match.stored);
+        if (moved) {
+            if (category == Category::Materials) TabMarkMissingCode(category, identity);
+            else TabMarkMissing(category, identity);
+        }
+        std::snprintf(line, sizeof(line), "Frame collection: %s a %s item (id %u) out of the collection to the hand",
                       moved ? "took" : "could not take", CategoryName(category), unsigned(identity));
     } else if (match.carried != 0) {
         const bool moved = MoveToBand(player, match.carried, category);
+        if (moved) {
+            if (category == Category::Materials) TabMarkFoundCode(category, identity);
+            else { TabMarkFound(category, identity); TabShowEntry(category, identity); }
+        }
         std::snprintf(line, sizeof(line), "Frame collection: %s a %s item (id %u) in the collection",
                       moved ? "stored" : "could not store", CategoryName(category), unsigned(identity));
     } else {
@@ -330,6 +477,8 @@ void RequestSlotAction(Category category, uint32_t identity) {
     g_actionCategory.store(uint32_t(category));
 }
 
+void DepositCarried() { g_depositing.store(true); }
+
 void InitStore(const D2RL::PluginContext* ctx, bool affinity, int firstTab, int tabs) {
     g_ctx = ctx;
     g_affinity.store(affinity);
@@ -383,6 +532,11 @@ void TickStore(bool stashOpen) {
         if (!(g_threads != nullptr && g_threads->runOnGameThread != nullptr
               && g_threads->runOnGameThread(g_ctx, &SlotActionOnGameThread, nullptr) == D2RL::Threads::Result::Success))
             SlotActionOnGameThread(g_ctx, nullptr);
+    }
+    if (g_depositing.load()) {
+        if (!(g_threads != nullptr && g_threads->runOnGameThread != nullptr
+              && g_threads->runOnGameThread(g_ctx, &DepositCarriedOnGameThread, nullptr) == D2RL::Threads::Result::Success))
+            DepositCarriedOnGameThread(g_ctx, nullptr);
     }
     if (!g_affinity.load() || !stashOpen || g_sweeping.load()) return;
     const uint64_t now = GetTickCount64();

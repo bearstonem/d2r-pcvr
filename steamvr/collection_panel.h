@@ -25,9 +25,9 @@ inline constexpr float CanvasHeight = 1024.0f;
 // mean more pages. The grid is centred in what is left between the tab row and
 // the footer, so the slot side follows on its own.
 enum class Size : uint32_t {
-    Small  = 0,   // 12 x 8 = 96 slots a page
-    Medium = 1,   // 10 x 6 = 60
-    Large  = 2,   // 8 x 5 = 40
+    Small  = 0,   // 4 x 3 = 12 slots a page
+    Medium = 1,   // 7 x 5 = 35
+    Large  = 2,   // 10 x 7 = 70
     Count  = 3,
 };
 
@@ -37,10 +37,13 @@ struct Grid {
 };
 
 inline constexpr Grid GridOf(Size size) {
+    // The rows come from the Size control: small = the biggest slots (fewest cells), large = the
+    // densest (most cells). The columns are proportional, so the grid keeps the panel's shape.
     switch (size) {
-    case Size::Medium: return {10, 6};
-    case Size::Large:  return {8, 5};
-    default:           return {12, 8};
+    case Size::Small:  return {4, 3};
+    case Size::Medium: return {7, 5};
+    case Size::Large:  return {10, 7};
+    default:           return {4, 3};
     }
 }
 
@@ -60,7 +63,7 @@ inline constexpr const char* SizeName(Size size) {
 }
 
 // The most slots any size shows: the layout's slot array is this long.
-inline constexpr int MaxSlots = 12 * 8;
+inline constexpr int MaxSlots = 10 * 7;
 
 // What the grid shows, from the footer's Show control: everything, or only what
 // is still missing, or only what the stash already holds.
