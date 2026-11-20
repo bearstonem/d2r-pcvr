@@ -32,17 +32,31 @@ void ShutdownStore();
 // to sweep the shared stash, at most a few times a second.
 void TickStore(bool stashOpen);
 
-// A click on a panel slot: the stored copy goes back to the inventory, or a
-// carried copy is stored in the collection's tab. identity is the record id for
-// a unique or set, the base item code for a material (the panel's slot identity).
-// Called from the update thread; the move itself runs on the game thread.
+// Only the hand moves items in and out (owner 2026-11-20). D2RLoader cannot move an item
+// to or from the game's cursor in the shared stash, so each move passes through a free
+// inventory spot and one click of the game's own there, which the frame thread makes.
+
+// An empty-handed click on a lit card: the stored copy goes into the inventory and the
+// game's click lifts it into the hand. identity is the record id for a unique or set, the
+// base item code for a material. A card of an item carried elsewhere does nothing.
 void RequestSlotAction(Category category, uint32_t identity);
 
-// A click on the page's grid with an item in the hand: stores the item the game holds on
-// its cursor in the collection's tab for its own category, so it lands in its catalog slot
-// wherever on the page it was clicked. Called from the update thread; the move runs on the
-// game thread.
+// A click anywhere on the page with an item in the hand: the game's click puts it into a
+// free inventory spot, and from there it goes to its own catalog slot (its own category,
+// whichever one the page shows; the page then shows it).
 void DepositCarried();
+
+// The inventory block the game's click must land in: x, y its top-left cell of the 10 x 4
+// grid, w x h its size. The frame thread clicks the block's middle.
+struct InventoryClick {
+    int x = 0, y = 0, w = 1, h = 1;
+};
+// Frame thread: a click the game must get now (handed out once). After sending the button's
+// down and up, call InventoryClickDone.
+bool TakeInventoryClick(InventoryClick& click);
+void InventoryClickDone();
+// An item is on its way in or out: the frame thread leaves the game's cursor alone.
+bool HandBusy();
 
 // One line for the log: whether affinity is on and where the collection's tabs
 // are, then what the last sweep did.

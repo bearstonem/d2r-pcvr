@@ -2799,6 +2799,11 @@ void MenuPointer(const menus::Pad& controls) {
     // cursor and click are withheld over the whole rect (the game would otherwise act on whatever
     // tab is active underneath - Runes, Gems, a personal tab - and the deposit would go wrong).
     // The click is the mod's: CollectionPress stores the held item in the collection.
+    // The hand's item on its way in or out of the collection (collection_store.h): the game's own
+    // click on an inventory cell puts it down there or lifts it up. While that click is made the
+    // game's cursor is the click's, not the laser's.
+    static int handClickStep=0;static ULONGLONG handClickAt=0;static collection::InventoryClick handClick;
+    const bool handClicking=handClickStep!=0;
     const bool overCollectionPage=collection::TabWanted()&&spatialReady&&pointerHit&&
         hit.u>=CollectionPageLeft&&hit.u<=CollectionPageRight&&hit.v>=CollectionPageTop&&hit.v<=CollectionPageBottom;
     const bool onCollectionPage=overCollectionPage;
@@ -2851,7 +2856,7 @@ void MenuPointer(const menus::Pad& controls) {
     // The campfire: the board owns the game's pointer only while the laser is on it - owned, a
     // pointer event no menu takes never reaches the scene, and the heroes could not be picked.
     if(active&&(!campfirePointer.load()||pointerHit))panelinput::OwnPointer();
-    if(active&&pointerHit&&!onButton&&!dropOwns) {
+    if(active&&pointerHit&&!onButton&&!dropOwns&&!handClicking) {
         RECT client{};
         if(GetClientRect(gameWindow,&client)) {
             math::Vec native{hit.u,hit.v,0};
@@ -2868,7 +2873,7 @@ void MenuPointer(const menus::Pad& controls) {
     // 2026-11-20). With an item in the hand it follows the laser under the page, which hides
     // it (the page draws the item itself); empty-handed it rests on the stash's title bar,
     // where nothing is pointed at. The game's click stays withheld either way (onButton).
-    if(active&&overCollectionPage&&!dropOwns) {
+    if(active&&overCollectionPage&&!dropOwns&&!handClicking) {
         RECT client{};
         if(GetClientRect(gameWindow,&client)) {
             const bool holding=gamestate::CursorItemHeld();
@@ -2878,6 +2883,32 @@ void MenuPointer(const menus::Pad& controls) {
                 POINT pixel{LONG(native.x*(client.right-1)),LONG(native.y*(client.bottom-1))};
                 if(ClientToScreen(gameWindow,&pixel))SetCursorPos(pixel.x,pixel.y);
             }
+        }
+    }
+    // The click itself: the cursor onto the block's middle, the game's left button down, up, and
+    // the store told, a few frames apart so the game sees each step. The inventory grid sits at
+    // 1244,668 of the 2244 x 2352 UI image, 10 x 4 cells of 57.2 px (ui_20261120_201146_378.png).
+    // The point is 0.15 of a cell past the block's middle, so an even-sized item rounds onto the
+    // block whichever way the game rounds.
+    if(handClickStep==0&&collection::TakeInventoryClick(handClick)){handClickStep=1;handClickAt=GetTickCount64();}
+    if(handClickStep!=0) {
+        const ULONGLONG now=GetTickCount64();
+        const float u=(1244.f+(float(handClick.x)+float(handClick.w)*.5f+.15f)*57.2f)/2244.f;
+        const float v=(668.f+(float(handClick.y)+float(handClick.h)*.5f+.15f)*57.2f)/2352.f;
+        RECT client{};math::Vec native{u,v,0};POINT pixel{};
+        const bool placed=GetClientRect(gameWindow,&client)&&
+            journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},u,v,uiWidth,uiHeight,native)&&
+            ((pixel=POINT{LONG(native.x*(client.right-1)),LONG(native.y*(client.bottom-1))}),ClientToScreen(gameWindow,&pixel))&&
+            SetCursorPos(pixel.x,pixel.y);
+        if(!placed&&handClickStep==1) {
+            Say("Frame collection: the inventory cell could not be pointed at; the hand's item stays where it is");
+            handClickStep=0;
+        } else if(now-handClickAt>=60) {
+            INPUT button{};button.type=INPUT_MOUSE;
+            if(handClickStep==1){button.mi.dwFlags=MOUSEEVENTF_LEFTDOWN;SendInput(1,&button,sizeof button);handClickStep=2;}
+            else if(handClickStep==2){button.mi.dwFlags=MOUSEEVENTF_LEFTUP;SendInput(1,&button,sizeof button);handClickStep=3;}
+            else {collection::InventoryClickDone();handClickStep=0;}
+            handClickAt=now;
         }
     }
     // On a button, or off the art with an item to drop, the dot shows and no game click is made there.
@@ -3256,6 +3287,14 @@ void RequestCollectionPaint(bool force=false) {
     if(collectionPaintRequest)return;
     const uint64_t revision=interaction::icons::Revision();
     const collection::tooltip::Answer answer=collection::tooltip::Current();   // the pointed entry's text and ranges
+    // What is found: an item stored or taken out lights or greys its card at once, not only
+    // when the laser next moves to another card (owner 2026-11-20).
+    static uint64_t collectionPaintedFound=~0ull;
+    const auto& foundLibrary=collection::TabLibrary();
+    const uint64_t found=uint64_t(foundLibrary.Found(collection::Category::Uniques))|
+        uint64_t(foundLibrary.Found(collection::Category::Sets))<<16|uint64_t(foundLibrary.Found(collection::Category::Runewords))<<32|
+        uint64_t(foundLibrary.Found(collection::Category::Materials))<<48;
+    if(found!=collectionPaintedFound){collectionPaintedFound=found;force=true;}
     if(!force&&collectionImageReady&&collectionPaintedView.category==collectionView.category&&
        collectionPaintedView.page==collectionView.page&&collectionPaintedView.size==collectionView.size&&
        collectionIconRevision==revision&&collectionPaintedHover.kind==collectionHover.kind&&
@@ -3329,8 +3368,9 @@ void CollectionPress(const collection::panel::Hit& hit) {
             entry->name.c_str(),collection::CategoryName(view.category),entry->recordId,
             collection::SlotFound(library,view,visible,hit.index)?"in the stash":"still missing");
         Say(message);
-        // The click stores the carried copy, or takes the stored one out
-        // (collection_store.h); the move runs on the game thread.
+        // An empty hand on a lit card lifts the stored copy into the hand (collection_store.h).
+        // A grey card does nothing: only the hand stores (owner 2026-11-20).
+        if(!collection::SlotFound(library,view,visible,hit.index))break;
         const uint32_t identity=view.category==collection::Category::Materials?entry->code:entry->recordId;
         collection::RequestSlotAction(view.category,identity);
         break;
