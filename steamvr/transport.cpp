@@ -3299,6 +3299,16 @@ void CollectionPointer(bool grip) {
     // off it, MenuPointer's beam, cursor and click are left untouched, so the inventory
     // and the stash's own tabs keep working while the page is open.
     float canvasX=-1,canvasY=-1;
+    if(collectionDocked&&collectionInUiShown) {
+        // Variant B: the page is part of the stash's own picture, so the menu's own laser
+        // (MenuPointer, this frame) is the page's too - its beam and dot stay as they are;
+        // only where it points is read, as a point of the page's canvas.
+        if(pointerHit&&!keyboardPointer&&uiCursorU>=CollectionPageLeft&&uiCursorU<=CollectionPageRight&&
+           uiCursorV>=CollectionPageTop&&uiCursorV<=CollectionPageBottom) {
+            canvasX=(uiCursorU-CollectionPageLeft)/(CollectionPageRight-CollectionPageLeft)*collection::panel::CanvasWidth;
+            canvasY=(uiCursorV-CollectionPageTop)/(CollectionPageBottom-CollectionPageTop)*collection::panel::CanvasHeight;
+        }
+    } else {
     XrSpaceLocation aim{XR_TYPE_SPACE_LOCATION};
     const auto needed=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT|
                       XR_SPACE_LOCATION_POSITION_TRACKED_BIT|XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
@@ -3316,6 +3326,7 @@ void CollectionPointer(bool grip) {
             const auto p=hit.point+math::Rotate(Q(collectionPose.orientation),{0,0,.004f});dotPose.position={p.x,p.y,p.z};
         }
     }
+    }   // the page's own laser (a floating page, or in_ui=0)
     const uint64_t ms=MenuMs();
     collectionTriggerDown=UiFloat(trigger,0)>(collectionTriggerDown?.20f:.55f);
     const collection::panel::Layout layout=collection::panel::Build(collectionView.page,
