@@ -57,7 +57,7 @@ private:
         math::Vec centre{};bool had=false;float pulse=0;int look=-1;
     };
     std::array<HandState,2> hands{};
-    uint64_t at=0;uint32_t random=0x9E3779B9u;
+    uint64_t at=0,session=0;uint32_t random=0x9E3779B9u;
     float Uniform(){random^=random<<13;random^=random>>17;random^=random<<5;return float(random>>8)*(1.f/16777216.f);}
     float Range(float a,float b){return a+(b-a)*Uniform();}
     math::Vec Ball(float radius,bool shell) {
@@ -89,7 +89,11 @@ private:
                                      {Mist,  4,  1.2f,1.8f, .020f,0,    -.02f,-.01f,.020f,-.03f,.8f,.04f,.025f,.065f,1,   .8f,.9f, 0,    4, 0,    false,false},
                                      {Flare, 6,  .15f,.25f, .032f,0,     0,0,       0,    0,    0,   0,   .010f,.004f,1,   1.6f,0,   0,    1, 0,    true, false},
                                      {Flake, 3,  .90f,1.5f, .045f,.005f,-.01f,0,    0,    0,    0,   0,   .006f,.004f,1,   1.2f,.6f, 0,    4,-1.4f, true, false}};
+        static const Emitter ward[]={{PsychicMist,12,.7f,1.2f,.055f,0,0,0,0,0,0,0,.025f,.045f,1.4f,.9f,1,0,4,2.2f,true,false}};
+        static const Emitter wind[]={{WhiteMist,12,.7f,1.2f,.055f,0,0,0,0,0,0,0,.025f,.045f,1.4f,.9f,1,0,4,2.2f,true,false}};
         switch(look) {
+        case Look::CycloneArmor:count=unsigned(std::size(wind));return wind;
+        case Look::PsychicWard:count=unsigned(std::size(ward));return ward;
         case Look::Fireball:count=unsigned(std::size(fireball));return fireball;
         case Look::ChargedBolt:count=unsigned(std::size(lightning));return lightning;
         case Look::IceBolt:count=unsigned(std::size(cold));return cold;
@@ -108,6 +112,7 @@ private:
         };
         const float flicker=.85f+.15f*std::sin(t*13.1f+seed)*std::sin(t*7.7f+seed*.3f);
         switch(look) {
+        case Look::CycloneArmor:case Look::PsychicWard:break; // only orbiting mist, no bright central glow
         case Look::Fireball:add(Glow,.075f,.60f*flicker,0,0,0);add(Core,.028f,1.4f,.3f,0,t*.9f);break;
         case Look::ChargedBolt: {
             const float crackle=std::floor(t*24+seed);   // a new brightness every 40 ms
@@ -128,7 +133,7 @@ private:
         l.size0=e.size0*scale*Range(.8f,1.2f);l.size1=e.size1*scale*Range(.8f,1.2f);l.rise=e.rise*scale;l.drag=e.drag;l.swirl=e.swirl*scale;
         l.flipbook=e.kind==Flame;
         if(l.flipbook)l.p.frame=uint32_t(Uniform()*6);   // where in the flame's 64 frames it starts
-        l.p.rotation=e.kind==Flame||e.axis?0:Range(0,6.2831853f);l.spin=e.kind==Smoke||e.kind==Mist||e.kind==Flake||e.kind==Chunk?Range(-.8f,.8f):0;
+        l.p.rotation=e.kind==Flame||e.axis?0:Range(0,6.2831853f);l.spin=e.kind==Smoke||e.kind==Mist||e.kind==PsychicMist||e.kind==WhiteMist||e.kind==Flake||e.kind==Chunk?Range(-.8f,.8f):0;
         if(e.kind==Flare){l.p.frame=look==Look::IceBlast?3u:2u;l.spin=Range(-2,2);}
         if(e.axis) {   // an arc from the centre out along a random way
             const auto way=math::Normalized(Ball(1,true));
@@ -153,7 +158,8 @@ public:
     void Step(Scene& scene) {
         scene.count=0;
         if(!scene.Visible()||!scene.at||!std::isfinite(scene.time)){Reset();return;}
-        if(!at||scene.at<at||scene.at-at>GapMs)Reset();
+        if(!at||scene.session!=session||scene.at<at||scene.at-at>GapMs)Reset();
+        session=scene.session;
         const float dt=at?std::min(float(scene.at-at)/1000.f,MaxStep):0.f;
         at=scene.at;
         const float t=scene.time;
@@ -163,9 +169,11 @@ public:
             const Look look=on?SpellLook(hand.skill,hand.element):Look::FireBolt;
             const bool torch=on&&look==Look::Torch;
             const float scale=torch?2.2f:1.f;
-            const math::Vec centre=on?(torch?hand.pose.p:hand.pose.p+math::Rotate(hand.pose.q,{0,0,-.03f})):s.centre;
+            const bool armor=look==Look::PsychicWard||look==Look::CycloneArmor;
+            const math::Vec centre=on?((torch||armor)?hand.pose.p:hand.pose.p+math::Rotate(hand.pose.q,{0,0,-.03f})):s.centre;
             const math::Vec moved=s.had&&dt>0?(centre-s.centre)*(1/dt):math::Vec{};
             const math::Vec velocity=math::Dot(moved,moved)<9?moved:math::Vec{};   // a jump (a recentre) is no motion
+            if((look==Look::PsychicWard||s.look==int(Look::PsychicWard)||look==Look::CycloneArmor||s.look==int(Look::CycloneArmor))&&!on){s={};continue;}
             // the free particles: move, age, die
             unsigned kept=0;
             for(unsigned i=0;i<s.count;++i) {
@@ -221,6 +229,8 @@ public:
                 const auto& l=s.live[i];
                 const float life=std::clamp(l.age/l.lifetime,0.f,1.f),ease=life*life*(3-2*life);
                 Particle p=l.p;p.life=life;p.size=l.size0+(l.size1-l.size0)*ease;
+                if(armor&&l.orbit!=0)
+                    p.p=centre+math::Rotate(hand.pose.q,{std::cos(l.angle)*l.radius,l.height,std::sin(l.angle)*l.radius});
                 p.intensity=l.peak*fade;
                 if(l.flipbook)p.frame=l.p.frame;   // the shader runs the 64 frames over its life from here
                 scene.drawn[scene.count++]=p;

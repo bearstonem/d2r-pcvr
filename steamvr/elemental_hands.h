@@ -4,7 +4,7 @@
 #include <cmath>
 
 namespace framevr::elements {
-enum class Element { None, Fire, Cold, Lightning };
+enum class Element { None, Fire, Cold, Lightning, Psychic, Wind };
 // Explicit Sorceress active skills. Utility skills (including Teleport and
 // Energy Shield) and passives deliberately have no elemental hand cue.
 inline Element Classify(int skill) {
@@ -20,8 +20,10 @@ inline Element Classify(int skill) {
 }
 // The spell effect whose own textures a hand shows (the renderer's sprite
 // looks). Other skills take the closest look of their element.
-enum class Look { FireBolt, Fireball, ChargedBolt, IceBolt, IceBlast, Torch };
+enum class Look { FireBolt, Fireball, ChargedBolt, IceBolt, IceBlast, Torch, PsychicWard, CycloneArmor };
 inline Look SpellLook(int skill,Element element) {
+    if(element==Element::Wind)return Look::CycloneArmor;
+    if(element==Element::Psychic)return Look::PsychicWard;
     if(skill==999)return Look::Torch;
     switch(skill) {
     case 47: case 56: return Look::Fireball;
@@ -71,6 +73,9 @@ enum Kind : uint32_t {
     Flare,   // a star flare (frame: the ramp, as Glow)
     Core,    // a fireball's churning core
     Plasma,  // Charged Bolt's own flash, two layers turning: the lightning ball under its arcs
+    PsychicMist, // soft purple ward wisps, separate from cold spell cues
+    WhiteMist, // Cyclone Armor, independent of the purple ward
+    ChargeOrb, // colour index in frame, native count supplied by Assassin charge state
     KindCount
 };
 struct Particle {
@@ -88,7 +93,8 @@ struct Scene {
     uint64_t session=0,at=0;
     float time=0; // frozen once for the entire stereo pair
     std::array<Particle,MaxDrawn> drawn{};unsigned count=0;   // the effects' particles this frame (elemental_particles.h)
-    bool Visible()const {return hands[0].opacity>0||hands[1].opacity>0;}
+    bool chargeOnly=false;
+    bool Visible()const {return (chargeOnly&&count>0)|| hands[0].opacity>0||hands[1].opacity>0;}
 };
 // A spell hand's light on the world (vrcam lays it among the game's lights, as the held torch's; [torch]
 // spell_hands): its element's colour, how strong (0..1: fire flickers, lightning crackles, frost stays

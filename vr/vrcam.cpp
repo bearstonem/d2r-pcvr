@@ -1317,9 +1317,11 @@ void LoadSettings() {
     billboards::ConfigureBoneArmorHidden(true); // both Off and Bones hide the local native orbit
     // Native Sorceress armor states carry authored icicles on both forearms.
     framevr::ConfigureFrozenArmorGraft(iceVisual==2);
-    billboards::ConfigureArmorVisuals(iceVisual,IniB(L"render",L"cyclone_armor_visual",true));
+    billboards::ConfigureArmorVisuals(iceVisual,framevr::settings::Normalize(framevr::settings::CycloneArmorVisual,IniF(L"render",L"cyclone_armor_visual",1))==1.f);
     aurafilter::Configure(IniB(L"render",L"player_aura_visual",true),IniB(L"render",L"summon_aura_visual",true),
-        IniB(L"render",L"player_shout_visual",true),IniB(L"render",L"summon_shout_visual",true));
+        IniB(L"render",L"player_shout_visual",true),IniB(L"render",L"summon_shout_visual",true),
+        framevr::settings::Normalize(framevr::settings::PsychicWardVisual,IniF(L"render",L"psychic_ward_mode",1))!=1.f,
+        int(framevr::settings::Normalize(framevr::settings::AssassinChargesVisual,IniF(L"render",L"assassin_charges_visual",1))));
     framevr::ConfigureBoneGraft(bonesVisual,IniF(L"render",L"bone_armor_graft_size",1.f),
         IniF(L"render",L"bone_armor_graft_out",.05f),IniF(L"render",L"bone_armor_graft_spread",40.f),IniF(L"render",L"bone_armor_graft_along",.5f),
         IniF(L"render",L"bone_armor_graft_width",.5f));

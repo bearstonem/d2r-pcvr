@@ -21,7 +21,7 @@ int main(){
     Check(vrsettings::Read().values[IceArmorVisual]==1&&vrsettings::Read().values[BoneArmorVisual]==0,"legacy armor keys migrate without losing native ice");
     Check(before.values[PlayerAuraVisual]==1&&before.values[SummonAuraVisual]==1,"missing aura preferences retain visible effects");
     Check(before.values[PlayerShoutVisual]==1&&before.values[SummonShoutVisual]==1,"missing shout preferences retain visible effects");
-    for(auto key:{IceArmorVisual,CycloneArmorVisual,BoneArmorVisual,PlayerAuraVisual,SummonAuraVisual,PlayerShoutVisual,SummonShoutVisual}) {
+    for(auto key:{AssassinChargesVisual,IceArmorVisual,CycloneArmorVisual,BoneArmorVisual,PlayerAuraVisual,SummonAuraVisual,PlayerShoutVisual,SummonShoutVisual}) {
         for(int choice=0;choice<=int(Definitions[key].max);++choice) {
             Model visual;visual.Open(vrsettings::Read());visual.Set(key,float(choice));
             const auto request=visual.Click({Kind::Apply});
@@ -568,6 +568,13 @@ int main(){
         Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"shared summon preference saves");
         Check(vrsettings::Read().values[SummonRangeMultiplier]==multiplier&&Int(path,L"custom",L"keep")==12345,
               "shared fractional multiplier survives reload and preserves other settings");
+    }
+    Check(vrsettings::Read().values[PsychicWardVisual]==1,"new ward preference defaults to native visuals");
+    for(int choice:{0,1,2}) {
+        model.Open(vrsettings::Read());model.Set(PsychicWardVisual,float(choice));request=model.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<PsychicWardVisual),"ward preference is independent");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"ward saves through Apply");
+        Check(vrsettings::Read().values[PsychicWardVisual]==choice&&Int(path,L"render",L"psychic_ward_mode")==choice&&Int(path,L"custom",L"keep")==12345,"ward choice persists without changing unrelated keys");
     }
     model.Open(vrsettings::Read());model.Click({Kind::Change,Motion,-1});request=model.Click({Kind::Apply});
     Check(DeleteFileW(name)&&vrsettings::Submit(request)&&!vrsettings::Poll(name),"missing file fails safely");

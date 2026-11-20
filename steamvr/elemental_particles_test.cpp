@@ -30,6 +30,33 @@ struct Sim {
     }
 };
 int main() {
+    {
+        Sim a(Element::Psychic,387),b(Element::Psychic,387);
+        const math::Quat turn{.70710678f,0,0,.70710678f};b.H().pose.q=turn;
+        a.Run(1.2f);b.Run(1.2f);
+        Check(a.scene.count==b.scene.count&&a.scene.count>0,"tilted forearm keeps mist count");
+        for(unsigned i=0;i<a.scene.count;++i) {
+            const auto expected=b.H().pose.p+math::Rotate(turn,a.scene.drawn[i].p-a.H().pose.p);
+            const auto delta=b.scene.drawn[i].p-expected;
+            Check(math::Dot(delta,delta)<1e-9f,"mist rotates around forearm centre without a spell-hand offset");
+        }
+    }
+    {
+        Sim s(Element::Psychic,387);
+        s.scene.hands[1]={};s.Run(1.2f);
+        Check(s.Of(PsychicMist)>0&&s.Of(Glow)==0,"ward uses mist without a bright central glow");
+        s.scene.hands[1]=s.scene.hands[0];s.scene.hands[0].opacity=0;s.Run(.011f);
+        Check(s.effects.Count(0)==0,"near-face ward hand leaves no lingering particles");
+        s.Run(.5f);const auto count=s.scene.count;Check(count>0,"second hand has live mist");s.scene.session++;s.Run(.011f);
+        Check(s.scene.count<count,"ward particles cannot survive a changed session");
+    }
+
+    {
+        Sim s(Element::Wind,235);s.Run(1.2f);
+        Check(s.Of(WhiteMist)>0&&s.Of(PsychicMist)==0&&s.Of(Glow)==0,"Cyclone uses white mist without purple particles or central glow");
+        s.H().opacity=0;s.scene.hands[1]={{},Element::Wind,1,0,235};s.Run(.011f);
+        Check(s.effects.Count(0)==0,"Cyclone mist clears near-face hand independently");
+    }
     const struct {Element element;int skill;Kind must[3];const char* name;} looks[]={
         {Element::Fire,36,{Flame,Ember,Glow},"Fire Bolt"},{Element::Fire,47,{Flame,Core,Glow},"Fireball"},
         {Element::Lightning,38,{Arc,Spark,Plasma},"Charged Bolt"},{Element::Cold,39,{Mist,Flake,Glow},"Ice Bolt"},
