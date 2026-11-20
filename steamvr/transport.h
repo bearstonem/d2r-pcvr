@@ -158,6 +158,8 @@ void SetStashDrop(float drop);
 void SetStashDistance(float metres);
 // Keep the world behind the stash (experimental, [interaction] stash_world) - like the leather.
 void SetStashWorld(bool on);
+// The Collection page drawn into the game's own UI image (variant B, [collection] in_ui), not on a quad of its own.
+void SetCollectionInUi(bool on);
 bool StashMenuWorld();
 // The campfire's caption: the part of the game's menu band (shares of it: left, top, right, bottom) where the
 // game writes the picked hero's class and words, on a board of its own above the heroes (width, distance

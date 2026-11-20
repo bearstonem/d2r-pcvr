@@ -1461,6 +1461,40 @@ bool SetAutoMap(bool open) {
     return g_threads->runOnUiThread(g_ctx, &DispatchAutoMap, open ? (void*)1 : nullptr) == Threads::Result::Success;
 }
 
+// A test of the game's own UI messages ([collection] probe_ui_action=Target:Command[:Text]):
+// e.g. BankPanelMessage:SelectTab:2 - can the mod choose the stash's tab itself? The
+// message goes on the UI thread, as widget calls must; the result is logged.
+struct ProbeSpec { char target[64]{}, command[64]{}, text[64]{}; };
+ProbeSpec g_probe;
+void __cdecl DispatchProbe(const PluginContext* ctx, void*) noexcept {
+    if (!g_widgets || !g_widgets->dispatchUiAction) { Log("gamestate: probe - no dispatchUiAction"); return; }
+    Widgets::UiAction a{};
+    a.structSize = sizeof a;
+    a.target = g_probe.target;
+    a.command = g_probe.command;
+    a.text = g_probe.text[0] ? g_probe.text : nullptr;
+    const Widgets::Result r = g_widgets->dispatchUiAction(ctx, &a);
+    char b[260];
+    snprintf(b, sizeof b, "gamestate: probe ui action target=%s command=%s text=%s -> result %u",
+             g_probe.target, g_probe.command, g_probe.text[0] ? g_probe.text : "(none)", (unsigned)r);
+    Log(b);
+}
+bool ProbeUiAction(const char* spec) {
+    if (!spec || !*spec) return false;
+    ProbeSpec p;
+    const char* first = strchr(spec, ':');
+    if (!first) { Log("gamestate: probe - expected Target:Command[:Text]"); return false; }
+    const char* second = strchr(first + 1, ':');
+    strncpy_s(p.target, spec, size_t(first - spec));
+    if (second) {
+        strncpy_s(p.command, first + 1, size_t(second - first - 1));
+        strncpy_s(p.text, second + 1, _TRUNCATE);
+    } else strncpy_s(p.command, first + 1, _TRUNCATE);
+    if (!g_ctx || !g_threads || !g_threads->runOnUiThread || !g_widgets) { Log("gamestate: probe - the game is not ready yet"); return false; }
+    g_probe = p;
+    return g_threads->runOnUiThread(g_ctx, &DispatchProbe, nullptr) == Threads::Result::Success;
+}
+
 void __cdecl FinishMenuOpen(const PluginContext* ctx,void*) noexcept {
     if(!g_menuOpenUntil)return;
     if(GetTickCount64()>=g_menuOpenUntil){g_menuOpenUntil=0;Log("gamestate: controller layout not ready; tabbed menu opening cancelled");return;}

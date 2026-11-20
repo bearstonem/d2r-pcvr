@@ -110,6 +110,7 @@
 #include "stash_buttons.h"
 #include "collection_tab_button.h"
 #include "collection_draw.h"
+#include "collection_ui_image.h"
 #include "collection_pointer.h"
 #include "../vr/collection_tab.h"
 #include "../vr/collection_store.h"
@@ -608,11 +609,14 @@ struct CollectionPaintJob {
     collection::ViewState view;
     std::string tooltip;         // the pointed entry's game item text (empty until fetched)
     std::string tooltipRanges;   // the same item's possible ranges, for a found entry
+    int uiW = 0, uiH = 0;        // the page's rectangle in the game's UI image (variant B); 0: none
 };
 struct CollectionPainted {
     std::vector<uint8_t> pixels;
     std::string          error;
     double               ms = 0;   // how long the paint took, for the repaint-lag report
+    std::vector<uint16_t> ui;      // the picture in the UI image's own format, uiW x uiH (collection_ui_image.h)
+    int uiW = 0, uiH = 0;
 };
 // One icon of the mod's own cache by cache key ("u122", "t0"). The picture is a
 // view into the cache's buffer, which stays alive for the whole paint.
@@ -633,8 +637,13 @@ LatestWorker<CollectionPaintJob,CollectionPainted> collectionPainter([](const Co
     if(!painter->Ready())return CollectionPainted{{},painter->Error(),0.0};
     if(!painter->Begin())return CollectionPainted{{},painter->Error(),0.0};
     collection::draw::Paint(*painter,job.library,job.view,CollectionIcon,job.tooltip,job.tooltipRanges);
-    const double ms=(hookmetrics::Nanos()-start)/1e6;
-    return CollectionPainted{painter->End(),{},ms};
+    CollectionPainted out{painter->End(),{},0.0};
+    if(job.uiW>0&&job.uiH>0&&!out.pixels.empty()) {   // variant B: ready for the UI image, off the render thread
+        out.ui=collection::uiimage::Convert(out.pixels,panelatlas::Collection.w,panelatlas::Collection.h,job.uiW,job.uiH);
+        if(!out.ui.empty()){out.uiW=job.uiW;out.uiH=job.uiH;}
+    }
+    out.ms=(hookmetrics::Nanos()-start)/1e6;
+    return out;
 });
 // What a picture shows. Everything that changes the look is compared as is
 // (hover, pressed, the card), and the clock only through buckets: the confirm
@@ -693,6 +702,17 @@ bool collectionWasOpen=false;
 XrPosef collectionPose{};
 constexpr float collectionWidth=.95f,collectionHeight=collectionWidth*settings::Height/settings::Width;
 float collectionShownWidth=collectionWidth,collectionShownHeight=collectionHeight;   // the size it is drawn at
+// Variant B ([collection] in_ui): the page drawn into the game's own UI image in CopyUi,
+// over the stash's grid, instead of on a quad of its own. collectionUiW/H: the page's
+// rectangle in that image (from the last CopyUi), asked of the painter; collectionUiPixels:
+// its last picture at that size; collectionUiSerial counts them; the upload buffer holds the
+// copy the GPU takes into the UI image (CopyCollectionIntoUi).
+int collectionUiW=0,collectionUiH=0,collectionPaintedUiW=0,collectionPaintedUiH=0;
+std::vector<uint16_t> collectionUiPixels;int collectionUiPixelsW=0,collectionUiPixelsH=0;
+uint64_t collectionUiSerial=0;
+bool collectionInUiShown=false;   // the last CopyUi put the page into the UI image
+struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};UINT rows=0;
+        int w=0,h=0;uint64_t serial=~0ull;} collectionUiUpload;
 DXGI_FORMAT atlasFormat=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
 uint32_t layerLimit=16;
 // What each place in the submitted layer list showed last (composition::StablePlaces).
@@ -925,6 +945,7 @@ std::atomic<float> stashScale{2.0f};   // SetStashScale
 std::atomic<float> stashDrop{0.f};     // SetStashDrop: extra metres down, on top of the band centring
 std::atomic<float> stashDistance{0.25f}; // SetStashDistance: extra metres the stash is pushed away
 std::atomic<bool> stashWorld{false};   // SetStashWorld: keep the world behind the stash (experimental)
+std::atomic<bool> collectionInUi{true};   // SetCollectionInUi: the Collection page drawn into the game's UI image (CopyUi)
 std::atomic<bool> campfireCaption{false};std::atomic<float> campfireCaptionRect[4]{{0.f},{0.f},{1.f},{.2f}};   // SetCampfireCaption
 std::atomic<float> campfireCaptionWidth{3.f},campfireCaptionDistance{5.5f},campfireCaptionRise{1.f};
 std::atomic<bool> campfireMenuHit{false};   // the laser on the campfire's menu board (MenuPointer)
@@ -3178,6 +3199,9 @@ int TakeCollectionPicture() {
         collectionOpen=false;
         return -1;
     }
+    if(!painted.ui.empty()) {   // variant B: the picture for the UI image (CopyCollectionIntoUi)
+        collectionUiPixels=std::move(painted.ui);collectionUiPixelsW=painted.uiW;collectionUiPixelsH=painted.uiH;++collectionUiSerial;
+    }
     const bool uploaded=UploadShared(panelatlas::Collection,painted.pixels,&collectionAtlasPending);
     if(uploaded)collectionImageReady=true;
     if(uploaded){   // the owner sees a lag from a click to the repaint; report both the paint and the whole trip
@@ -3201,13 +3225,16 @@ void RequestCollectionPaint(bool force=false) {
     if(!force&&collectionImageReady&&collectionPaintedView.category==collectionView.category&&
        collectionPaintedView.page==collectionView.page&&collectionPaintedView.size==collectionView.size&&
        collectionIconRevision==revision&&collectionPaintedHover.kind==collectionHover.kind&&
-       collectionPaintedHover.index==collectionHover.index&&collectionTooltipRevision==answer.revision)return;
+       collectionPaintedHover.index==collectionHover.index&&collectionTooltipRevision==answer.revision&&
+       collectionPaintedUiW==collectionUiW&&collectionPaintedUiH==collectionUiH)return;
+    collectionPaintedUiW=collectionUiW;collectionPaintedUiH=collectionUiH;
     collectionPaintedView=collectionView;
     collectionPaintedHover=collectionHover;
     collectionIconRevision=revision;
     collectionTooltipRevision=answer.revision;
     collectionRequestAt=GetTickCount64();   // for the "reached the atlas N ms after the click" report
-    collectionPaintRequest=collectionPainter.Submit({collection::TabLibrary(),collection::TabView(),answer.text,answer.ranges});
+    collectionPaintRequest=collectionPainter.Submit({collection::TabLibrary(),collection::TabView(),answer.text,answer.ranges,
+        collectionInUi.load()?collectionUiW:0,collectionInUi.load()?collectionUiH:0});
     if(!collectionPaintRequest){
         static ULONGLONG reportAt=0;const auto now=GetTickCount64();
         if(now>=reportAt){Say("Frame collection: the background painter did not take the request");reportAt=now+5000;}
@@ -7383,6 +7410,56 @@ bool CopyMap(reshade::api::command_queue* rq) {
     if(FAILED(queue->Signal(fence.Get(),++fenceValue)))return false;
     e.copyFence=fenceValue;e.copied=true;return true;
 }
+// Variant B: the Collection page copied into the game's UI image (dest, w x h, the quad shows
+// crop of it) over the stash's grid, after UiBlit wrote it this frame. The painter's picture is
+// already in the image's format at the page's size (collection_ui_image.h); here the page's
+// rectangle is measured for the next paint, the picture staged in an upload buffer when it is
+// new, and one CopyTextureRegion records it. The swapchain image is in the render-target state
+// (as UiBlit leaves it), so it goes to copy-dest and back. Returns whether the page went in.
+bool CopyCollectionIntoUi(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,uint32_t w,uint32_t h,const int32_t crop[4]) {
+    const int cx=crop[2]>0?crop[0]:0,cy=crop[3]>0?crop[1]:0,cw=crop[2]>0?crop[2]:int(w),ch=crop[3]>0?crop[3]:int(h);
+    const int x0=std::clamp(cx+int(CollectionPageLeft*float(cw)+.5f),0,int(w)),x1=std::clamp(cx+int(CollectionPageRight*float(cw)+.5f),0,int(w));
+    const int y0=std::clamp(cy+int(CollectionPageTop*float(ch)+.5f),0,int(h)),y1=std::clamp(cy+int(CollectionPageBottom*float(ch)+.5f),0,int(h));
+    collectionUiW=x1-x0;collectionUiH=y1-y0;   // what the next paint is sized to
+    if(!collectionInUi.load()||!collectionOpen||!collectionDocked||collectionUiW<8||collectionUiH<8)return false;
+    if(collectionUiPixels.empty()||collectionUiPixelsW!=collectionUiW||collectionUiPixelsH!=collectionUiH)return false;   // a picture at this size is coming
+    auto& u=collectionUiUpload;
+    if(!u.upload||u.w!=collectionUiW||u.h!=collectionUiH) {
+        u={};
+        D3D12_RESOURCE_DESC td{};td.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;td.Width=UINT64(collectionUiW);td.Height=UINT(collectionUiH);
+        td.DepthOrArraySize=td.MipLevels=1;td.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;td.SampleDesc.Count=1;
+        UINT64 rowBytes=0,total=0;
+        device->GetCopyableFootprints(&td,0,1,0,&u.footprint,&u.rows,&rowBytes,&total);
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
+        D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=total;bd.Height=bd.DepthOrArraySize=bd.MipLevels=1;
+        bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        if(FAILED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&u.upload)))) {
+            u={};static bool told=false;if(!told){told=true;Say("Frame collection: no upload buffer for the page in the UI image");}
+            return false;
+        }
+        u.w=collectionUiW;u.h=collectionUiH;u.serial=~0ull;
+        char b[160];std::snprintf(b,sizeof b,"Frame collection: the page goes into the UI image at %d,%d %dx%d (of %ux%u)",x0,y0,u.w,u.h,w,h);Say(b);
+    }
+    if(u.serial!=collectionUiSerial) {   // a new picture: its rows into the buffer (the copy before it finished: CopyUi waited for it)
+        uint8_t* mapped=nullptr;const D3D12_RANGE none{0,0};
+        if(FAILED(u.upload->Map(0,&none,reinterpret_cast<void**>(&mapped)))||!mapped)return false;
+        const size_t row=size_t(u.w)*8;
+        for(int y=0;y<u.h;++y)std::memcpy(mapped+u.footprint.Offset+size_t(y)*u.footprint.Footprint.RowPitch,
+                                         reinterpret_cast<const uint8_t*>(collectionUiPixels.data())+size_t(y)*row,row);
+        u.upload->Unmap(0,nullptr);
+        u.serial=collectionUiSerial;
+    }
+    D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.pResource=dest;
+    b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b.Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;b.Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+    list->ResourceBarrier(1,&b);
+    D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=dest;to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;to.SubresourceIndex=0;
+    D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=u.upload.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;from.PlacedFootprint=u.footprint;
+    list->CopyTextureRegion(&to,UINT(x0),UINT(y0),0,&from,nullptr);
+    std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
+    list->ResourceBarrier(1,&b);
+    return true;
+}
 bool CopyUi(reshade::api::command_queue* rq) {
     if(!spatialMode||uiEye.copied)return true;
     uint32_t w=0,h=0;int32_t crop[4]{};
@@ -7457,6 +7534,11 @@ bool CopyUi(reshade::api::command_queue* rq) {
     if(!uiBlit.Render(device.Get(),e.commands.Get(),src,dest,opaqueMenuMode&&!StashMenuWorld(),false,0,0,1.f,1.f,0.f,0.f,0.f,0.f,undim?crop:nullptr)) {
         e.commands->Close();uiSupported=false;
         Say("Frame panels: conversion rejected; native flat menu fallback next frame");return true;
+    }
+    {   // the Collection page into the same image (variant B, [collection] in_ui)
+        const bool shown=CopyCollectionIntoUi(e.commands.Get(),dest,w,h,crop);
+        if(shown!=collectionInUiShown){collectionInUiShown=shown;
+            Say(shown?"Frame collection: the page is drawn into the game's UI image":"Frame collection: the page is no longer in the UI image");}
     }
     if(FAILED(e.commands->Close()))return false;
     ID3D12CommandList* lists[]={e.commands.Get()};queue->ExecuteCommandLists(1,lists);
@@ -7661,6 +7743,7 @@ void SetStashScale(float scale){stashScale.store(std::clamp(scale,0.5f,4.0f));}
 void SetStashDrop(float drop){stashDrop.store(std::clamp(drop,-1.5f,1.5f));}
 void SetStashDistance(float metres){stashDistance.store(std::clamp(metres,-0.5f,1.5f));}
 void SetStashWorld(bool on){stashWorld.store(on);}
+void SetCollectionInUi(bool on){collectionInUi.store(on);}
 // The stash keeps the world behind it (stash_world) like the leather: the game's own
 // black backdrop behind management menus must then be lifted round the stash.
 bool StashMenuWorld(){return stashWorld.load()&&gamestate::StashButtonsShown();}
@@ -8335,7 +8418,8 @@ void EndPair() {
     // The Collection panel: the stash's own page (collection_draw.h), opened from
     // the stash and shown where the stash panel is.
     XrCompositionLayerQuad collectionPanel{XR_TYPE_COMPOSITION_LAYER_QUAD};
-    const bool collectionOnScreen=layer&&collectionOpen&&collectionImageReady;
+    // Variant B: once the page is in the game's own UI image (CopyCollectionIntoUi), no quad of its own.
+    const bool collectionOnScreen=layer&&collectionOpen&&collectionImageReady&&!(collectionDocked&&collectionInUiShown);
     static bool collectionWasOnScreen=false;
     if(collectionOnScreen!=collectionWasOnScreen){
         Say(collectionOnScreen?"Frame collection: the panel is on screen (its quad is submitted)":"Frame collection: the panel is off screen");
