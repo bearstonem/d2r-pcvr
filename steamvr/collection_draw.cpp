@@ -317,7 +317,11 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
         const float share = float(library.Found(view.category)) / float(std::max<uint32_t>(1, library.Size(view.category)));
         p.FillRgb(bar, 0x0A0A0A);
         p.OutlineRgb(bar, 0x3C3C38, Md(1.f));
-        p.FillRgb({bar.x + Md(2.f), bar.y + Md(2.f), (bar.w - Md(4.f)) * share, bar.h - Md(4.f)}, 0xA08448);
+        // In the category's own colour (owner 2026-11-20): unique gold, set green, runeword grey.
+        const uint32_t fill = view.category == Category::Sets      ? SetName
+                            : view.category == Category::Runewords ? Grey
+                                                                   : Unique;
+        p.FillRgb({bar.x + Md(2.f), bar.y + Md(2.f), (bar.w - Md(4.f)) * share, bar.h - Md(4.f)}, fill);
         CapsAt(p, (PX0 + PX1) / 2, layout.counter.y / panel::Scale + PY0 + 12,
                std::string(CategoryName(view.category)) + "  " + CounterText(library, view), 15.f, Txt);
     }

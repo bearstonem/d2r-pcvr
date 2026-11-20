@@ -2727,15 +2727,23 @@ void MenuPointer(const menus::Pad& controls) {
             if(!respec::Request()){respecButton.Refused();Say("Frame panels: Reset Skills & Stats refused (not an offline game, or a reset already running)");}
         } else if(respecButton.Confirming())Say("Frame panels: Reset Skills & Stats - Confirm? shown");
     }
-    stashShown=false;   // the stash bar's own tabs (and its Collection tab) replace the mod's plaques
+    // The two tab plaques under the stash (Previous / Next tab), as before the Collection page
+    // took them away (owner 2026-11-20: someone's work, wanted back). The Collection itself is
+    // the stash bar's sixth tab, so its plaque is not shown.
+    stashShown=stashArtReady&&spatialReady&&!journalMode&&gamestate::StashButtonsShown();
     stashHover=-1;
     if(stashShown&&focused&&aimTracked&&pointerHit&&!(mouseDown||rightMouseDown))
-        for(int i=0;i<stashbuttons::ButtonCount;++i)
+        for(int i=0;i<stashbuttons::TabButtonCount;++i)
             if(respecbutton::Hit(stashbuttons::Place(surface.width,surface.height,i),surface.width,surface.height,hit.u,hit.v))stashHover=i;
     const auto stashAction=stashInput.Step(stashShown&&uiActive&&focused,stashHover,pressed,respecNow);
     stashPad=stashAction==stashbuttons::Action::Previous?menus::LeftBumper:
              stashAction==stashbuttons::Action::Next?menus::RightBumper:0;
-    if(stashAction==stashbuttons::Action::Collection)collection::TabSetWanted(!collection::TabWanted());
+    // With the Collection page up, a plaque takes it away: the game's own tab under it shows
+    // again, and the bumper the plaque sends moves on from there.
+    if((stashAction==stashbuttons::Action::Previous||stashAction==stashbuttons::Action::Next)&&collection::TabWanted()) {
+        collection::TabSetWanted(false);
+        Say("Frame panels: a tab plaque was pulled; the Collection page goes");
+    }
     // The Collection tab on the stash bar (collection_tab_button.h): the mod takes the
     // laser on the sixth tab itself, so choosing it shows the Collection page without
     // closing the stash. A pull on it is never the game's.
@@ -2900,15 +2908,18 @@ void MenuPointer(const menus::Pad& controls) {
             journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},u,v,uiWidth,uiHeight,native)&&
             ((pixel=POINT{LONG(native.x*(client.right-1)),LONG(native.y*(client.bottom-1))}),ClientToScreen(gameWindow,&pixel))&&
             SetCursorPos(pixel.x,pixel.y);
+        // As quick as the game takes it (owner 2026-11-20: the item showed in the inventory for
+        // half a second): the down in the frame the cursor gets there, the up a frame or two later,
+        // and the store told at once - it moves the item on as soon as the game has landed it.
         if(!placed&&handClickStep==1) {
             Say("Frame collection: the inventory cell could not be pointed at; the hand's item stays where it is");
             handClickStep=0;
-        } else if(now-handClickAt>=60) {
-            INPUT button{};button.type=INPUT_MOUSE;
-            if(handClickStep==1){button.mi.dwFlags=MOUSEEVENTF_LEFTDOWN;SendInput(1,&button,sizeof button);handClickStep=2;}
-            else if(handClickStep==2){button.mi.dwFlags=MOUSEEVENTF_LEFTUP;SendInput(1,&button,sizeof button);handClickStep=3;}
-            else {collection::InventoryClickDone();handClickStep=0;}
-            handClickAt=now;
+        } else if(handClickStep==1) {
+            INPUT button{};button.type=INPUT_MOUSE;button.mi.dwFlags=MOUSEEVENTF_LEFTDOWN;SendInput(1,&button,sizeof button);
+            handClickStep=2;handClickAt=now;
+        } else if(handClickStep==2&&now-handClickAt>=25) {
+            INPUT button{};button.type=INPUT_MOUSE;button.mi.dwFlags=MOUSEEVENTF_LEFTUP;SendInput(1,&button,sizeof button);
+            collection::InventoryClickDone();handClickStep=0;
         }
     }
     // On a button, or off the art with an item to drop, the dot shows and no game click is made there.
@@ -8512,7 +8523,7 @@ void EndPair() {
     for(auto& quad:stashQuads)quad.type=XR_TYPE_COMPOSITION_LAYER_QUAD;
     if(book.subImage.swapchain&&stashShown&&staticChain) {
         const auto size=UiSurfaceSize();const auto at=UiSurfacePose();const auto q=Q(at.orientation);
-        for(int i=0;i<stashbuttons::ButtonCount;++i) {
+        for(int i=0;i<stashbuttons::TabButtonCount;++i) {
             const auto spot=stashbuttons::Place(size.width,size.height,i);
             const auto p=V(at.position)+math::Rotate(q,{spot.x,spot.y,.004f});
             // The Collection button stays lit while its panel is open.
@@ -8593,7 +8604,10 @@ void EndPair() {
     // the stash and shown where the stash panel is.
     XrCompositionLayerQuad collectionPanel{XR_TYPE_COMPOSITION_LAYER_QUAD};
     // Variant B: once the page is in the game's own UI image (CopyCollectionIntoUi), no quad of its own.
-    const bool collectionOnScreen=layer&&collectionOpen&&collectionImageReady&&!(collectionDocked&&collectionInUiShown);
+    // Docked with [collection] in_ui on, the quad never stands in while the page is on its way into
+    // the UI image: for the first frames after the tab was chosen it showed over the stash (owner
+    // 2026-11-20: a quarter-second flash on choosing the tab).
+    const bool collectionOnScreen=layer&&collectionOpen&&collectionImageReady&&!(collectionDocked&&(collectionInUiShown||collectionInUi.load()));
     static bool collectionWasOnScreen=false;
     if(collectionOnScreen!=collectionWasOnScreen){
         Say(collectionOnScreen?"Frame collection: the panel is on screen (its quad is submitted)":"Frame collection: the panel is off screen");
@@ -8611,7 +8625,7 @@ void EndPair() {
     XrCompositionLayerQuad collectionTabMark{XR_TYPE_COMPOSITION_LAYER_QUAD};
     // (Not while the page is in the UI image: the tab bar itself is laid over there, with the
     // game's own active-tab art on Collection - CopyCollectionIntoUi.)
-    if(collectionOpen&&collectionDocked&&!collectionInUiShown&&collectionTabShown&&stashTabHighlightReady&&staticChain&&book.subImage.swapchain) {
+    if(collectionOpen&&collectionDocked&&!collectionInUiShown&&!collectionInUi.load()&&collectionTabShown&&stashTabHighlightReady&&staticChain&&book.subImage.swapchain) {
         const auto at=UiSurfacePose();const auto q=Q(at.orientation);const auto size=UiSurfaceSize();
         const auto spot=collectiontab::MarkPlace(size.width,size.height);
         const auto p=V(at.position)+math::Rotate(q,{spot.x,spot.y,.0015f});
@@ -8621,7 +8635,7 @@ void EndPair() {
         static bool markTold=false;
         if(!markTold&&collectionTabMark.subImage.swapchain){markTold=true;
             char b[160];std::snprintf(b,sizeof b,"Frame collection: the tab mark is drawn at %.2f,%.2f %.3fx%.3f m",spot.x,spot.y,spot.w,spot.h);Say(b);}
-    } else if(collectionOpen&&collectionDocked&&!collectionInUiShown) {
+    } else if(collectionOpen&&collectionDocked&&!collectionInUiShown&&!collectionInUi.load()) {
         static ULONGLONG at=0;const auto now=GetTickCount64();
         if(now>=at){at=now+2000;char b[176];
             std::snprintf(b,sizeof b,"Frame collection: no tab mark - shown=%d ready=%d static=%d book=%d",

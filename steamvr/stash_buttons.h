@@ -20,6 +20,9 @@ constexpr int LabelHeight=26;
 // the same plaques, one per action.
 inline constexpr const wchar_t* Labels[]={L"< Previous tab",L"Next tab >",L"Collection"};
 inline constexpr int ButtonCount=3;
+// Shown: the two tab plaques. The Collection plaque stays painted but unused - the stash
+// bar's own sixth tab opens the Collection (owner 2026-11-20: bring the plaques back).
+inline constexpr int TabButtonCount=2;
 // Inset into the native recesses flanking the stash gold field. Estimated
 // from the in-game screenshot against the previous known button positions.
 // Rendered faces and pointer hit boxes share this 16:9-band placement.

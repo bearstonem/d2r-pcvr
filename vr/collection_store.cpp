@@ -69,6 +69,7 @@ struct Seen {
     uint32_t         page     = UINT32_MAX;
     bool             unique   = false;
     bool             set      = false;
+    bool             identified = true;   // an unidentified item never enters the collection (owner 2026-11-20)
 };
 
 struct Sweep {
@@ -85,6 +86,7 @@ D2RL::Inventory::IterationAction __cdecl Collect(const D2RL::PluginContext*, con
     seen.page   = info->sharedStashPage;
     seen.unique = info->quality == D2RL::Items::Quality::Unique;
     seen.set    = info->quality == D2RL::Items::Quality::Set;
+    seen.identified = (info->stateFlags & D2RL::Items::ItemStateIdentified) != 0;
     if (info->qualityRecordId >= 0 && (seen.unique || seen.set)) seen.recordId = uint32_t(info->qualityRecordId);
     sweep.items.push_back(seen);
     return D2RL::Inventory::IterationAction::Continue;
@@ -146,6 +148,7 @@ struct CursorItem {
     uint32_t quality  = UINT32_MAX;
     bool     unique   = false;
     bool     set      = false;
+    bool     identified = true;
     bool     ok       = false;
 };
 
@@ -157,6 +160,7 @@ D2RL::Inventory::IterationAction __cdecl CollectCursor(const D2RL::PluginContext
     out.quality = uint32_t(info->quality);
     out.unique = info->quality == D2RL::Items::Quality::Unique;
     out.set    = info->quality == D2RL::Items::Quality::Set;
+    out.identified = (info->stateFlags & D2RL::Items::ItemStateIdentified) != 0;
     if (info->qualityRecordId >= 0 && (out.unique || out.set)) out.recordId = uint32_t(info->qualityRecordId);
     out.ok = true;
     return D2RL::Inventory::IterationAction::Continue;
@@ -287,6 +291,7 @@ D2RL::Inventory::IterationAction __cdecl MarkOccupied(const D2RL::PluginContext*
 enum class Phase : int { Idle, DepositPrepare, DepositClick, DepositClicking, DepositStore, DepositStoring, TakePrepare, TakeClick, TakeClicking };
 std::atomic<int>      g_phase{int(Phase::Idle)};
 std::atomic<uint64_t> g_phaseAt{0};
+std::atomic<uint64_t> g_clickedAt{0};   // the game's click on the inventory cell was sent
 std::mutex            g_clickLock;
 InventoryClick        g_click;
 Category              g_handCategory = Category::Uniques;
@@ -308,6 +313,11 @@ void DepositPrepareOnGameThread(const D2RL::PluginContext*, void*) noexcept {
     filter.containerMask = D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::Cursor);
     if (g_inventory->forEachInventoryItem(g_ctx, player, &filter, &CollectCursor, &cursor) != D2RL::Inventory::Result::Success || !cursor.ok) {
         Log("Frame collection: nothing on the cursor to store");
+        SetPhase(Phase::Idle);
+        return;
+    }
+    if ((cursor.unique || cursor.set) && !cursor.identified) {
+        Log("Frame collection: the hand's item is not identified; it stays in hand");
         SetPhase(Phase::Idle);
         return;
     }
@@ -390,6 +400,12 @@ void DepositStoreOnGameThread(const D2RL::PluginContext*, void*) noexcept {
     filter.containerMask = D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::Inventory);
     g_inventory->forEachInventoryItem(g_ctx, player, &filter, &FindLanded, &match);
     const D2RL::ItemHandle landed = match.exact != 0 ? match.exact : match.any;
+    // Not landed yet: the game takes the click on its next tick or two. Asked again on the next
+    // update (no fixed wait - the item showed in the inventory for half a second with one).
+    if (landed == 0 && GetTickCount64() - g_clickedAt.load() < 1000) {
+        g_phase.store(int(Phase::DepositStore));
+        return;
+    }
     char line[192];
     if (landed == 0) {
         std::snprintf(line, sizeof(line), "Frame collection: the click did not put the hand's %s item (id %u) into the inventory",
@@ -602,6 +618,7 @@ void SweepOnGameThread(const D2RL::PluginContext*, void*) noexcept {
     std::vector<Loose> loose;
     for (const Seen& item : sweep.items) {
         const bool ours = item.page >= first && item.page < beyond;
+        if (!ours && (item.unique || item.set) && !item.identified) continue;   // unidentified: never collected
         if (item.unique && item.recordId != UINT32_MAX && library.SlotOf(Category::Uniques, item.recordId) != UINT32_MAX) {
             if (ours) { heldUnique.push_back(item.recordId); continue; }
             loose.push_back({item, Category::Uniques, item.recordId, false});
@@ -678,7 +695,11 @@ bool TakeInventoryClick(InventoryClick& click) {
 
 void InventoryClickDone() {
     int expected = int(Phase::DepositClicking);
-    if (g_phase.compare_exchange_strong(expected, int(Phase::DepositStore))) { g_phaseAt.store(GetTickCount64()); return; }
+    if (g_phase.compare_exchange_strong(expected, int(Phase::DepositStore))) {
+        g_phaseAt.store(GetTickCount64());
+        g_clickedAt.store(GetTickCount64());
+        return;
+    }
     expected = int(Phase::TakeClicking);
     if (g_phase.compare_exchange_strong(expected, int(Phase::Idle))) {
         g_phaseAt.store(GetTickCount64());
@@ -745,12 +766,12 @@ void TickStore(bool stashOpen) {
               && g_threads->runOnGameThread(g_ctx, &DepositPrepareOnGameThread, nullptr) == D2RL::Threads::Result::Success))
             DepositPrepareOnGameThread(g_ctx, nullptr);
     }
-    // The click has put the hand's item into the inventory: a moment for the game to land it,
-    // then the move into the collection.
+    // The click has put the hand's item into the inventory: the move into the collection, asked
+    // on every update until the game has landed it (DepositStoreOnGameThread).
     {
         const uint64_t since = GetTickCount64() - g_phaseAt.load();
         int store = int(Phase::DepositStore);
-        if (since >= 200 && g_phase.compare_exchange_strong(store, int(Phase::DepositStoring))) {
+        if (g_phase.compare_exchange_strong(store, int(Phase::DepositStoring))) {
             if (!(g_threads != nullptr && g_threads->runOnGameThread != nullptr
                   && g_threads->runOnGameThread(g_ctx, &DepositStoreOnGameThread, nullptr) == D2RL::Threads::Result::Success))
                 DepositStoreOnGameThread(g_ctx, nullptr);

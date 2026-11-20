@@ -698,6 +698,35 @@ void ReadNoticeTexts() {
     std::lock_guard lock(noticeMutex);std::memcpy(noticeTexts,texts,sizeof texts);
 }
 
+// On the UI thread, diagnostic: which of the stash's own widgets this loader reports, and their
+// rects, while the stash is open - logged when they change. The Collection needs to know which
+// native tab is chosen (Gems / Materials / Runes have no grid) and the shared page; the loader
+// has no call for either, so this shows whether a hidden container reads differently.
+void ProbeStashWidgets(const PluginContext* ctx) {
+    static ULONGLONG at = 0;
+    const ULONGLONG now = GetTickCount64();
+    if (!g_stashButtons.load() || now - at < 500 || !g_widgets || !g_widgets->findPanel || !g_widgets->findWidget || !g_widgets->getWidgetRect) return;
+    at = now;
+    Widgets::WidgetHandle panel = 0;
+    if (g_widgets->findPanel(ctx, "BankExpansionLayout", &panel) != Widgets::Result::Success || !panel) return;
+    static const char* const names[] = {"grid", "basicstash_container", "advancedstash_gems", "advancedstash_materials",
+                                        "advancedstash_runes", "SharedStashTabContainer", "StashNavigation",
+                                        "StashLeftArrow", "StashRightArrow", "CurrentSharedStashText", "gold_amount"};
+    std::string line = "gamestate: stash widgets";
+    for (const char* name : names) {
+        Widgets::WidgetHandle widget = 0;
+        Widgets::Rect r {};
+        const auto found = g_widgets->findWidget(ctx, panel, name, &widget);
+        const auto read = found == Widgets::Result::Success && widget ? g_widgets->getWidgetRect(ctx, widget, &r) : found;
+        char part[96];
+        if (read == Widgets::Result::Success) std::snprintf(part, sizeof part, " | %s %d,%d %dx%d", name, int(r.x), int(r.y), int(r.width), int(r.height));
+        else std::snprintf(part, sizeof part, " | %s r%u", name, unsigned(read));
+        line += part;
+    }
+    static std::string last;
+    if (line != last) { last = line; Log(line.c_str()); }
+}
+
 // On the UI thread: the two hands of the active set.
 void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
     {std::lock_guard lock(g_readMutex);if(!g_readTicket.Claim(reinterpret_cast<uintptr_t>(token)))return;}
@@ -710,6 +739,7 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
             g_inventory->getCursorItem(ctx,player,&onCursor)==Inventory::Result::Success&&onCursor!=InvalidItemHandle);
         g_cursorItemAt.store(GetTickCount64());
     }
+    ProbeStashWidgets(ctx);
 #ifdef D2RVR_NATIVE_OPENXR
     respec::Poll();   // Reset Skills & Stats: the minted token's native use (respec.cpp)
     panelinput::MaintainWorldController(havePlayer,g_menu.load()!=0);
