@@ -98,10 +98,10 @@ inline Rect KeyTexelRect(int i) {
 // panel, and growing with the menu distance, so a key stays as easy to hit.
 constexpr float WidthOfWorkspace=.5f,GapOfWorkspace=.02f,TiltDegrees=30;
 struct Board {math::Vec position{};math::Quat orientation{0,0,0,1};float width=0,height=0;};
-inline Board Place(math::Vec surface,math::Quat facing,float width,float height) {
+inline Board Place(math::Vec surface,math::Quat facing,float width,float height,float tiltDegrees=TiltDegrees) {
     if(!(width>0)||!(height>0))return {};
     const float workspace=std::max(width,height*16.f/9.f);
-    const float w=WidthOfWorkspace*workspace,h=w*Rows/Columns,t=TiltDegrees*3.14159265f/180;
+    const float w=WidthOfWorkspace*workspace,h=w*Rows/Columns,t=tiltDegrees*3.14159265f/180;
     const math::Vec up{0,std::cos(t),-std::sin(t)};   // the board's up: its top edge away from the player
     const math::Vec top{0,-height*.5f-GapOfWorkspace*workspace,0};
     const math::Quat tilt{-std::sin(t*.5f),0,0,std::cos(t*.5f)};   // about the panel's x axis
@@ -128,10 +128,23 @@ inline Spot KeySpot(const Board& b,int i) {
 }
 // What a key shows: a letter small, or a capital while Shift waits (Typist);
 // the other keys their name.
-inline std::wstring Label(int i,bool capitals) {
+inline constexpr char ChatSymbols[]="1234567890@#$%&*()!?.,:/'+=";
+inline char ChatCharacter(int i,bool symbols) {
+ if(i<0||i>=KeyCount)return 0;
+ if(Keys[i].ch=='-')return ' ';
+ if(symbols&&Keys[i].ch>='a'&&Keys[i].ch<='z') {
+  int n=0;for(int j=0;j<i;++j)if(Keys[j].ch>='a'&&Keys[j].ch<='z')++n;
+  return n<int(sizeof(ChatSymbols)-1)?ChatSymbols[n]:'?';
+ }
+ return Keys[i].ch;
+}
+inline std::wstring Label(int i,bool capitals,bool chat=false,bool symbols=false) {
     if(i<0||i>=KeyCount)return {};
     const Key& k=Keys[i];
     if(k.action!=Action::Char)return k.label;
+    if(chat&&k.ch=='-')return L"Space";
+    if(chat&&k.ch=='_')return symbols?L"ABC":L"123";
+    if(chat&&symbols)return std::wstring(1,wchar_t(ChatCharacter(i,true)));
     return std::wstring(1,wchar_t(capitals&&k.ch>='a'&&k.ch<='z'?k.ch-'a'+'A':k.ch));
 }
 
@@ -140,18 +153,20 @@ inline std::wstring Label(int i,bool capitals) {
 enum class Send : uint8_t {None,Char,Backspace,Enter};
 struct Output {Send send=Send::None;wchar_t ch=0;bool close=false;};
 class Typist {
-    bool shift=false;
+    bool shift=false,symbols=false;
 public:
     bool Shifted() const{return shift;}
-    void Reset(){shift=false;}
-    Output Press(int i) {
+    bool Symbols() const{return symbols;}
+    void Reset(){shift=symbols=false;}
+    Output Press(int i,bool chat=false) {
         Output out;
         if(i<0||i>=KeyCount)return out;
         const Key& k=Keys[i];
+        if(chat&&k.ch=='_'){symbols=!symbols;shift=false;return out;}
         switch(k.action) {
             case Action::Char:
                 out.send=Send::Char;
-                out.ch=wchar_t(shift&&k.ch>='a'&&k.ch<='z'?k.ch-'a'+'A':k.ch);
+                {const char ch=chat?ChatCharacter(i,symbols):k.ch;out.ch=wchar_t(shift&&ch>='a'&&ch<='z'?ch-'a'+'A':ch);}
                 shift=false;break;
             case Action::Shift:shift=!shift;break;
             case Action::Backspace:out.send=Send::Backspace;break;

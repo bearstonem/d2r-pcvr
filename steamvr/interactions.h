@@ -506,13 +506,13 @@ inline MenuBounds DeveloperBounds(int index) {
     return {x,y,x+.44f,y+.082f};
 }
 inline bool Editing(MenuPage page) {return page==MenuPage::EditSlots||page==MenuPage::EditSkills||page==MenuPage::EditItems;}
-inline int FooterCount(MenuPage page,bool developer=false) {return Editing(page)?3:developer?5:4;}
+inline int FooterCount(MenuPage page,bool developer=false) {return Editing(page)?3:developer?6:5;}
 inline MenuBounds FooterBounds(int index,MenuPage page,bool developer=false) {
     const float step=.96f/FooterCount(page,developer),left=.03f+index*step;
     return {left,.895f,left+step-.02f,.965f};
 }
 inline int FooterCell(int index,MenuPage page) {
-    constexpr int tabs[]={9,12,10,11,13};return Editing(page)?9+index:tabs[index];
+    constexpr int tabs[]={9,12,10,11,217,13};return Editing(page)?9+index:tabs[index];
 }
 inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spells,int hand=-1,bool developer=false,int devPage=0,bool leftStrikes=false,bool motions=false,int motionCount=14) {
     if(!std::isfinite(u)||!std::isfinite(v)||u<0||u>1||v<0||v>1)return -1;
@@ -620,7 +620,7 @@ struct Output {
     bool block=false,wheel=false,utility=false,map=false,stowed=false,wrist=false,cancelPending=false,critical=false,settings=false;
     bool vitals=false,palm=false,navigation=false,navigationPalm=false;
     int wheelHand=-1;
-    bool inventory=false;
+    bool inventory=false,chat=false;
     int leftStrikes=-1;             // the wheel's left-claw box: shown value, -1 hidden
     bool toggleLeftStrikes=false;   // clicked this step: the transport saves the other choice
     bool treePicked=false;          // a skill tree picked in the skill editor this step (editCategory): logged
@@ -1076,6 +1076,7 @@ public:
                 }
                 else if(in.hover==11){developer=glyphs=motions=false;editor=1;editBank=in.snapshot.bindingBank;editSlot=-1;map=false;out.map=false;utility=false;out.utility=false;rearm=true;}
                 else if(in.hover==10){out.settings=true;out.wheel=false;wheelLatch=true;rearm=true;}
+                else if(in.hover==217){out.chat=true;out.wheel=true;rearm=true;}
                 else if(in.hover==12){developer=glyphs=motions=false;map=true;out.map=true;utility=false;out.utility=false;rearm=true;}
                 else if(in.hover==9){utility=(map||developer||glyphs||motions)?false:!utility;developer=glyphs=motions=false;out.utility=utility;map=false;out.map=false;rearm=true;}
                 else if(!map&&in.hover==8) {if(in.wheelHand<0)out.select=-1;stowed=false;wheelLatch=true;out.wheel=false;rearm=true;out.feedback=1;}
