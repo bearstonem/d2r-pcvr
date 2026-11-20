@@ -106,7 +106,12 @@ def folder_reader(excel):
 
 def base_types(read):
     """Map a base item code to its item type code (helm, tors, shld, ...)."""
-    types = {}
+    return {code: kind for code, (kind, _) in base_items(read).items()}
+
+
+def base_items(read):
+    """Map a base item code to (its item type code, its base name: Shako, Cap, ...)."""
+    items = {}
     for name in BASE_TABLES:
         try:
             _, rows = read(name)
@@ -115,8 +120,13 @@ def base_types(read):
         for row in rows:
             code = cell(row, 'code') or cell(row, 'name')
             if code:
-                types[code[:4].ljust(4)] = cell(row, 'type')
-    return types
+                items[code[:4].ljust(4)] = (cell(row, 'type'), cell(row, 'name'))
+    return items
+
+
+# Quest items the unique table also lists (Amulet of the Viper, the Horadric and
+# Kings' staves, the Hell Forge Hammer, both Khalim's Flails): not collectibles.
+QUEST_CODES = {'vip', 'hst', 'msf', 'hfh', 'qf1', 'qf2'}
 
 
 def sort_entries(entries):
@@ -132,7 +142,9 @@ def build(read):
     (which is not the row position once the table has reserved rows), for a
     completed runeword the Runes.txt row. name is the table's own name text.
     """
-    types = base_types(read)
+    bases = base_items(read)
+    types = {code: kind for code, (kind, _) in bases.items()}
+    base_name = lambda code: bases.get(code, ('', ''))[1]
     catalog = {}
 
     _, uniques = read(UNIQUE_TABLE)
@@ -140,12 +152,15 @@ def build(read):
     for row in uniques:
         if not enabled(row) or not code_of(row) or not cell(row, 'index'):
             continue
+        if code_of(row).strip() in QUEST_CODES:
+            continue
         entries.append({
             'code': code_of(row),
             'recordId': number(row, '*ID'),
             'name': cell(row, 'index'),
             'level': number(row, 'lvl'),
             'type': types.get(code_of(row), ''),
+            'base': base_name(code_of(row)),
         })
     catalog['uniques'] = sort_entries(entries)
 
@@ -161,6 +176,7 @@ def build(read):
             'level': number(row, 'lvl'),
             'type': types.get(code_of(row), ''),
             'setName': cell(row, 'set'),
+            'base': base_name(code_of(row)),
         })
     catalog['sets'] = sort_entries(entries)
 
@@ -210,18 +226,19 @@ def write_catalog(catalog, out_dir):
     """Write collection.tsv: one line per entry, tab separated, no dependencies.
 
     Columns: category, code, recordId, name, level, type, extra (a set's name,
-    or a runeword's rune count). The slot is the entry's line number inside its
-    category, so the order here is the order the panel draws.
+    or a runeword's rune count), base (the base item's name: Shako, Cap, ...).
+    The slot is the entry's line number inside its category, so the order here
+    is the order the panel draws.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     lines = ['# collection %d' % VERSION,
-             '# category\tcode\trecordId\tname\tlevel\ttype\textra']
+             '# category\tcode\trecordId\tname\tlevel\ttype\textra\tbase']
     for category in CATEGORIES:
         for entry in catalog[category]:
             extra = entry.get('setName', '') or (' '.join(entry.get('runes', [])) if entry.get('runes') else '')
             lines.append('\t'.join((category, entry['code'].strip(), str(entry['recordId']), entry['name'],
-                                    str(entry['level']), entry['type'], extra)))
+                                    str(entry['level']), entry['type'], extra, entry.get('base', ''))))
     (out_dir / 'collection.tsv').write_text('\n'.join(lines) + '\n', encoding='utf-8')
     return out_dir / 'collection.tsv'
 

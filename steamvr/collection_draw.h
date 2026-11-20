@@ -37,7 +37,15 @@ using IconLookup = std::function<const IconPixels*(const std::string& key)>;
 // not been fetched yet); rangeText is the same item's possible ranges, shown
 // under it so the roll can be compared. The card is drawn only while a slot is
 // pointed.
+// The item in the player's hand while the laser is on the page: the game's own cursor
+// (with the item on it) is kept under the page there, so the page draws the item itself,
+// at the laser, from the icon cache. x, y are canvas pixels; empty key: nothing in hand.
+struct Carried {
+    std::string key;
+    float       x = -1, y = -1;
+};
+
 void Paint(settings::draw::Painter& painter, const Library& library, const ViewState& view, const IconLookup& icons,
-           std::string_view gameText = {}, std::string_view rangeText = {});
+           std::string_view gameText = {}, std::string_view rangeText = {}, const Carried& carried = {});
 
 }   // namespace framevr::collection::draw

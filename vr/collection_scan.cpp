@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "collection_model.h"
+#include "collection_store.h"
 #include "collection_tab.h"
 #include "collection_tooltip_provider.h"
 #include "logging.h"
@@ -70,12 +71,16 @@ D2RL::Inventory::IterationAction __cdecl CountItem(const D2RL::PluginContext*, c
     ++tally.items;
 
     const uint32_t record = item->qualityRecordId < 0 ? UINT32_MAX : static_cast<uint32_t>(item->qualityRecordId);
+    // Found = stored in the collection's own tabs (the copy the page can take out); a copy
+    // anywhere else (inventory, personal stash, the vanilla shared tabs) is still missing
+    // there. Its text is remembered wherever it lies.
+    const bool stored = item->container == D2RL::Items::ItemContainer::SharedStash && InCollectionBand(item->sharedStashPage);
     switch (item->quality) {
     case D2RL::Items::Quality::Unique:
         ++tally.uniques;
         Note(tally.uniqueRows, record);
         if (record != UINT32_MAX) {
-            TabMarkFound(Category::Uniques, record);
+            if (stored) TabMarkFound(Category::Uniques, record);
             tooltip::RememberHandle(Category::Uniques, record, item->handle);   // its exact text, later
         }
         break;
@@ -83,7 +88,7 @@ D2RL::Inventory::IterationAction __cdecl CountItem(const D2RL::PluginContext*, c
         ++tally.sets;
         Note(tally.setRows, record);
         if (record != UINT32_MAX) {
-            TabMarkFound(Category::Sets, record);
+            if (stored) TabMarkFound(Category::Sets, record);
             tooltip::RememberHandle(Category::Sets, record, item->handle);
         }
         break;
@@ -97,7 +102,7 @@ D2RL::Inventory::IterationAction __cdecl CountItem(const D2RL::PluginContext*, c
         } else {
             // Otherwise a plain base item: a gem or rune the stash holds is a
             // found material (its slot is keyed by the code, not a record id).
-            TabMarkFoundCode(Category::Materials, item->code);
+            if (stored) TabMarkFoundCode(Category::Materials, item->code);
         }
         break;
     default:

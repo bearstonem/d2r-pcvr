@@ -611,6 +611,7 @@ struct CollectionPaintJob {
     std::string tooltip;         // the pointed entry's game item text (empty until fetched)
     std::string tooltipRanges;   // the same item's possible ranges, for a found entry
     int uiW = 0, uiH = 0;        // the page's rectangle in the game's UI image (variant B); 0: none
+    collection::draw::Carried carried;   // the item in the hand, at the laser
 };
 struct CollectionPainted {
     std::vector<uint8_t> pixels;
@@ -637,7 +638,7 @@ LatestWorker<CollectionPaintJob,CollectionPainted> collectionPainter([](const Co
     if(!painter)painter=std::make_unique<settings::draw::Painter>();
     if(!painter->Ready())return CollectionPainted{{},painter->Error(),0.0};
     if(!painter->Begin())return CollectionPainted{{},painter->Error(),0.0};
-    collection::draw::Paint(*painter,job.library,job.view,CollectionIcon,job.tooltip,job.tooltipRanges);
+    collection::draw::Paint(*painter,job.library,job.view,CollectionIcon,job.tooltip,job.tooltipRanges,job.carried);
     CollectionPainted out{painter->End(),{},0.0};
     if(job.uiW>0&&job.uiH>0&&!out.pixels.empty()) {   // variant B: ready for the UI image, off the render thread
         out.ui=collection::uiimage::Convert(out.pixels,panelatlas::Collection.w,int(collection::panel::CanvasWidth),
@@ -718,6 +719,7 @@ std::vector<uint16_t> collectionUiPixels;int collectionUiPixelsW=0,collectionUiP
 uint64_t collectionUiSerial=0;
 bool collectionInUiShown=false;   // the last CopyUi put the page into the UI image
 int collectionUiX=0,collectionUiY=0;   // where it went (UI image pixels), for the UI shot
+collection::draw::Carried collectionCarried,collectionPaintedCarried;   // the item in the hand at the laser, and as last painted
 struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};UINT rows=0;
         int w=0,h=0;uint64_t serial=~0ull;} collectionUiUpload;
 // The stash's tab bar with Collection as the active tab (collection_art.h, cut from the owner's
@@ -2739,7 +2741,11 @@ void MenuPointer(const menus::Pad& controls) {
     // closing the stash. A pull on it is never the game's.
     collectionTabShown=spatialReady&&!journalMode&&gamestate::StashButtonsShown();
     collectionTabSpot=collectionTabShown?collectiontab::Place(surface.width,surface.height):collectiontab::Spot{};
-    const bool onCollectionTab=collectionTabShown&&stashHover<0&&aimTracked&&pointerHit&&!(mouseDown||rightMouseDown)&&
+    // The tab bar ends where the Collection page begins (the bar's measured rects reached 30 UI
+    // pixels down over the page's top, so a pull on Uniques / Sets / Runewords there read as
+    // "another tab" and closed the page - owner 2026-11-20).
+    const bool onTabBar=hit.v<CollectionPageTop;
+    const bool onCollectionTab=collectionTabShown&&stashHover<0&&aimTracked&&pointerHit&&!(mouseDown||rightMouseDown)&&onTabBar&&
         collectiontab::Hit(collectionTabSpot,surface.width,surface.height,hit.u,hit.v);
     collectionTabLit=onCollectionTab;
     if(collectionTabPress.Step(onCollectionTab&&uiActive,pressed,respecNow)) {
@@ -2749,7 +2755,7 @@ void MenuPointer(const menus::Pad& controls) {
     // A click on one of the game's own five tabs closes the page: the bar carries no
     // index, and this loader has no widget API to read the chosen tab.
     static bool otherTabWasDown=false;
-    const bool onOtherTab=collectionTabShown&&aimTracked&&pointerHit&&!(mouseDown||rightMouseDown)&&
+    const bool onOtherTab=collectionTabShown&&aimTracked&&pointerHit&&!(mouseDown||rightMouseDown)&&onTabBar&&
         collectiontab::HitOthers(collectionTabSpot,surface.width,surface.height,hit.u,hit.v);
     if(onOtherTab&&pressed&&!otherTabWasDown&&collection::TabWanted()) {
         collection::TabSetWanted(false);
@@ -2855,6 +2861,24 @@ void MenuPointer(const menus::Pad& controls) {
             if(pointerHit&&ClientToScreen(gameWindow,&pixel))pointerHit=SetCursorPos(pixel.x,pixel.y)!=FALSE;
             else pointerHit=false;
         } else pointerHit=false;
+    }
+    // Over the Collection page the game's own cursor may not stay where the laser left the
+    // stash: frozen at the page's edge it held a carried item stuck there in sight, and over
+    // an item of the game's tab underneath it showed that item's tooltip past the page (owner
+    // 2026-11-20). With an item in the hand it follows the laser under the page, which hides
+    // it (the page draws the item itself); empty-handed it rests on the stash's title bar,
+    // where nothing is pointed at. The game's click stays withheld either way (onButton).
+    if(active&&overCollectionPage&&!dropOwns) {
+        RECT client{};
+        if(GetClientRect(gameWindow,&client)) {
+            const bool holding=gamestate::CursorItemHeld();
+            const float u=holding?hit.u:.370f,v=holding?hit.v:.059f;   // the title "Stash": 830,138 of the 2244 x 2352 image
+            math::Vec native{u,v,0};
+            if(journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},u,v,uiWidth,uiHeight,native)) {
+                POINT pixel{LONG(native.x*(client.right-1)),LONG(native.y*(client.bottom-1))};
+                if(ClientToScreen(gameWindow,&pixel))SetCursorPos(pixel.x,pixel.y);
+            }
+        }
     }
     // On a button, or off the art with an item to drop, the dot shows and no game click is made there.
     const bool gamePointer=pointerHit&&!onButton&&!dropOwns&&!(offArt&&cursorItem);
@@ -3238,7 +3262,11 @@ void RequestCollectionPaint(bool force=false) {
        collectionPaintedHover.index==collectionHover.index&&collectionTooltipRevision==answer.revision&&
        collectionPaintedUiW==collectionUiW&&collectionPaintedUiH==collectionUiH&&
        collectionPaintedView.show==collectionView.show&&collectionPaintedView.sort==collectionView.sort&&
-       collectionPaintedView.group==collectionView.group&&collectionPaintedView.open==collectionView.open)return;
+       collectionPaintedView.group==collectionView.group&&collectionPaintedView.open==collectionView.open&&
+       collectionPaintedCarried.key==collectionCarried.key&&
+       (collectionCarried.key.empty()||(std::fabs(collectionPaintedCarried.x-collectionCarried.x)<4.f&&
+                                        std::fabs(collectionPaintedCarried.y-collectionCarried.y)<4.f)))return;
+    collectionPaintedCarried=collectionCarried;
     collectionPaintedUiW=collectionUiW;collectionPaintedUiH=collectionUiH;
     collectionPaintedView=collectionView;
     collectionPaintedHover=collectionHover;
@@ -3246,7 +3274,7 @@ void RequestCollectionPaint(bool force=false) {
     collectionTooltipRevision=answer.revision;
     collectionRequestAt=GetTickCount64();   // for the "reached the atlas N ms after the click" report
     collectionPaintRequest=collectionPainter.Submit({collection::TabLibrary(),collection::TabView(),answer.text,answer.ranges,
-        collectionInUi.load()?collectionUiW:0,collectionInUi.load()?collectionUiH:0});
+        collectionInUi.load()?collectionUiW:0,collectionInUi.load()?collectionUiH:0,collectionCarried});
     if(!collectionPaintRequest){
         static ULONGLONG reportAt=0;const auto now=GetTickCount64();
         if(now>=reportAt){Say("Frame collection: the background painter did not take the request");reportAt=now+5000;}
@@ -3269,6 +3297,7 @@ void CollectionPress(const collection::panel::Hit& hit) {
     // item's identity) wherever on the page it was clicked. A click on a real control,
     // empty-handed, works the control. The click path is the one the log proved runs.
     if(gamestate::CursorItemHeld()) {
+        Say("Frame collection: a pull on the page with an item in the hand - storing it");
         collection::DepositCarried();
         return;
     }
@@ -3361,8 +3390,15 @@ void CollectionPointer(bool grip) {
     // to come back up made every size/filter click feel late. The pointed control acts
     // at once. With an item in the hand, CollectionPress stores it (its own slot) rather
     // than working the control - see CollectionPress.
-    if(collectionTriggerDown&&!collectionTriggerWas&&collectionHover.kind!=collection::panel::HitKind::None)
+    // With an item in the hand a pull anywhere on the page stores it (not only on a card or
+    // a control: the owner's pulls between the cards did nothing - 2026-11-20).
+    const bool holding=canvasX>=0&&gamestate::CursorItemHeld();
+    if(collectionTriggerDown&&!collectionTriggerWas&&(collectionHover.kind!=collection::panel::HitKind::None||holding))
         CollectionPress(collectionHover);
+    // What the hand holds, drawn by the page at the laser (the game's own cursor is hidden under
+    // the page there - MenuPointer).
+    collectionCarried.key=canvasX>=0&&collectionDocked&&collectionInUiShown?collection::CarriedIconKey():std::string();
+    collectionCarried.x=canvasX;collectionCarried.y=canvasY;
     collectionTriggerWas=collectionTriggerDown;
     collection::TabSetHover(collectionHover);   // the picture lights what the laser is over
     // The pointed slot's card: ask the UI thread for the game's own item text
@@ -8545,7 +8581,7 @@ void EndPair() {
         static bool markTold=false;
         if(!markTold&&collectionTabMark.subImage.swapchain){markTold=true;
             char b[160];std::snprintf(b,sizeof b,"Frame collection: the tab mark is drawn at %.2f,%.2f %.3fx%.3f m",spot.x,spot.y,spot.w,spot.h);Say(b);}
-    } else if(collectionOpen&&collectionDocked) {
+    } else if(collectionOpen&&collectionDocked&&!collectionInUiShown) {
         static ULONGLONG at=0;const auto now=GetTickCount64();
         if(now>=at){at=now+2000;char b[176];
             std::snprintf(b,sizeof b,"Frame collection: no tab mark - shown=%d ready=%d static=%d book=%d",

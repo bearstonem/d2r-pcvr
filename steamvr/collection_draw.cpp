@@ -172,7 +172,7 @@ uint32_t NameColor(Category category) { return category == Category::Sets ? SetN
 
 // ---- one card (the mock-up's card loop) ----
 void DrawCard(Painter& p, const panel::Rect& at, const Entry& entry, Category category, bool found, bool pointed,
-              const IconLookup& icons) {
+              const IconLookup& icons, bool plate) {
     // back to mock-up pixels: everything below is the mock-up's own arithmetic
     const float x0 = at.x / panel::Scale + panel::MockLeft, y0 = at.y / panel::Scale + panel::MockTop;
     const float x1 = x0 + at.width / panel::Scale, y1 = y0 + at.height / panel::Scale;
@@ -185,12 +185,17 @@ void DrawCard(Painter& p, const panel::Rect& at, const Entry& entry, Category ca
         p.OutlineRgb(R(x0 + 5, y0 + 5, x1 - 5, y1 - 5), 0x463822, Md(1.f));
     }
     if (pointed) p.OutlineRgb(R(x0 + 2, y0 + 2, x1 - 2, y1 - 2), GoldHi, Md(2.f));
-    // the name plate
-    const float py1 = y0 + 26;
-    p.FillRgb(R(x0 + 7, y0 + 7, x1 - 7, py1), 0x1E1E1D);
-    p.LineRgb(Mx(x0 + 7), My(py1), Mx(x1 - 7), My(py1), 0x383834, Md(1.f));
-    const float size = FitSize(p, entry.name, Caps, 13.f, 9.f, Md(x1 - x0 - 20));
-    CapsAt(p, (x0 + x1) / 2, (y0 + 7 + py1) / 2 + 1, entry.name, size, found ? NameColor(category) : DimT);
+    // the name plate; not on the small cards of size L, where a name does not fit at a size
+    // still readable (owner 2026-11-20): there the picture takes the card and the name is
+    // in the tooltip
+    float py1 = y0;
+    if (plate) {
+        py1 = y0 + 26;
+        p.FillRgb(R(x0 + 7, y0 + 7, x1 - 7, py1), 0x1E1E1D);
+        p.LineRgb(Mx(x0 + 7), My(py1), Mx(x1 - 7), My(py1), 0x383834, Md(1.f));
+        const float size = FitSize(p, entry.name, Caps, 13.f, 9.f, Md(x1 - x0 - 20));
+        CapsAt(p, (x0 + x1) / 2, (y0 + 7 + py1) / 2 + 1, entry.name, size, found ? NameColor(category) : DimT);
+    }
     // the picture, scaled to the card
     const RectF area = R(x0 + 12, py1 + 8, x1 - 12, y1 - 8);
     const std::string key    = panel::IconKey(category, entry.recordId, entry.code);
@@ -206,19 +211,26 @@ void DrawCard(Painter& p, const panel::Rect& at, const Entry& entry, Category ca
 }
 
 // ---- the tooltip in the game's own style (the mock-up's: black, every line centred) ----
+// The base item's own lines are white, its magic properties blue (as the game draws them):
+// a base line starts with its label ("Defense: 141"), a property does not ("+141% Enhanced Defense").
 bool BaseLine(const std::string& line) {
-    for (const char* word : {"Defense", "Damage", "Durability", "Required", "Block", "Speed"})
-        if (line.find(word) != std::string::npos) return true;
+    for (const char* label : {"Defense:", "One-Hand Damage:", "Two-Hand Damage:", "Throw Damage:", "Kick Damage:",
+                              "Smite Damage:", "Durability:", "Required ", "Chance to Block:", "Quantity:", "Item Level:"})
+        if (line.rfind(label, 0) == 0) return true;
     return false;
 }
 
-void DrawTooltip(Painter& p, const panel::Rect& card, const tooltip::Tooltip& tip, Category category) {
+void DrawTooltip(Painter& p, const panel::Rect& card, const tooltip::Tooltip& tip, Category category, const std::string& base) {
     if (tip.Empty()) return;
     struct Line { std::string text; uint32_t rgb; float size; };
     std::vector<Line> lines;
     lines.push_back({tip.title, NameColor(category), 16.f});
-    for (const std::string& line : tip.body)
+    // the kind of item, grey, between the name and its text (owner: Harlequin Crest - Shako)
+    if (!base.empty()) lines.push_back({base, Grey, 13.f});
+    for (const std::string& line : tip.body) {
+        if (line == tip.title || (!base.empty() && line == base)) continue;   // the game's text repeats both
         lines.push_back({line.empty() ? " " : line, BaseLine(line) ? White : Blue, 13.f});
+    }
     if (!tip.ranges.empty()) {
         lines.push_back({"Possible ranges", Grey, 12.f});
         for (const std::string& line : tip.ranges) lines.push_back({line, Grey, 12.f});
@@ -244,7 +256,7 @@ void DrawTooltip(Painter& p, const panel::Rect& card, const tooltip::Tooltip& ti
 }   // namespace
 
 void Paint(Painter& painter, const Library& library, const ViewState& view, const IconLookup& icons,
-           std::string_view gameText, std::string_view rangeText) {
+           std::string_view gameText, std::string_view rangeText, const Carried& carried) {
     Painter& p = painter;
     const auto          visible = VisibleSlots(library, view);
     const int           pages   = panel::PagesFor(int(visible.size()), view.size);
@@ -281,7 +293,7 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
             continue;
         }
         DrawCard(p, layout.slots[slot], *entry, view.category, SlotFound(library, view, visible, slot),
-                 pointed(panel::HitKind::Slot, slot), icons);
+                 pointed(panel::HitKind::Slot, slot), icons, view.size != panel::Size::Large);
     }
 
     // The scroll bar: the dark track, a stone arrow at each end, the lit stone thumb.
@@ -393,11 +405,23 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
                     [](int i) { return panel::ShowName(static_cast<panel::Show>(i)); });
     }
 
-    // The pointed card's tooltip, last so it sits over everything.
-    if (view.hover.kind == panel::HitKind::Slot) {
+    // The pointed card's tooltip (not with an item in hand: the item is what is looked at then).
+    if (view.hover.kind == panel::HitKind::Slot && carried.key.empty()) {
         if (const Entry* entry = SlotEntry(library, view, visible, view.hover.index)) {
             const bool found = SlotFound(library, view, visible, view.hover.index);
-            DrawTooltip(p, layout.slots[view.hover.index], tooltip::BuildTooltip(*entry, found, gameText, rangeText), view.category);
+            DrawTooltip(p, layout.slots[view.hover.index], tooltip::BuildTooltip(*entry, found, gameText, rangeText),
+                        view.category, entry->base);
+        }
+    }
+
+    // The item in the hand, at the laser, over everything (as the game draws a carried item):
+    // at the size it has in the stash (an inventory cell is 57 UI pixels; the icons are the
+    // game's own art at 98 per cell), centred on the pointer.
+    if (!carried.key.empty() && carried.x >= 0 && icons) {
+        if (const IconPixels* icon = icons(carried.key); icon != nullptr && icon->rgba != nullptr) {
+            const float s = Md(57.f / 98.f);
+            const float w = float(icon->width) * s, h = float(icon->height) * s;
+            p.Image({carried.x - w / 2, carried.y - h / 2, w, h}, icon->rgba, icon->width, icon->height);
         }
     }
 }

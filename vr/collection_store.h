@@ -12,6 +12,7 @@
 // D2RLoader's [d2rcore.stash] add_shared_tabs: firstTab is the first one the
 // collection owns (the vanilla tabs come before it) and tabs is how many.
 #include <cstdint>
+#include <string>
 
 #include "collection_model.h"
 
@@ -46,5 +47,16 @@ void DepositCarried();
 // One line for the log: whether affinity is on and where the collection's tabs
 // are, then what the last sweep did.
 void StoreReport();
+
+// Whether a shared-stash page is one of the collection's own tabs. An entry counts as
+// found (its card lit) only while a copy is stored there: that is the copy the page
+// can take out (owner 2026-11-20: deposit and withdraw are the page's job).
+bool InCollectionBand(uint32_t sharedStashPage);
+
+// What the player holds on the game's cursor, for the page to draw under the laser:
+// its icon cache key ("u248", "t12", "i..."; empty when the hand is empty or the item
+// is no catalog collectible). Read on the game thread a few times a second while the
+// stash is open (TickStore).
+std::string CarriedIconKey();
 
 }   // namespace framevr::collection

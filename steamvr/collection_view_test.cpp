@@ -50,6 +50,19 @@ int main() {
     assert(set != nullptr && set->extra == "Civerb's Vestments");
     assert(library.At(Category::Runewords, 0)->extra == "r30 r03 r22 r23 r17");
 
+    // The base item's name (the eighth column), and quest items left out of the uniques.
+    {
+        Library bases;
+        assert(bases.LoadLine("uniques\tuap\t248\tHarlequin Crest\t69\thelm\t\tShako"));
+        assert(bases.LoadLine("uniques\tvip\t123\tAmulet of the Viper\t0\tamul\t\t"));   // a quest item: skipped
+        assert(bases.LoadLine("uniques\tqf1\t127\tKhalimFlail\t0\tmace"));               // an older catalog's line too
+        assert(bases.LoadLine("uniques\tcap\t71\tWar Bonnet\t4\thelm"));                 // no base column: empty
+        bases.Finish();
+        assert(bases.Size(Category::Uniques) == 2);
+        assert(bases.At(Category::Uniques, 0)->base == "Shako");
+        assert(bases.At(Category::Uniques, 1)->base.empty());
+    }
+
     // A malformed data line is refused and adds nothing.
     Library broken;
     assert(!broken.LoadLine("uniques\thax\t0\tOnly five fields\t7"));

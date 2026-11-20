@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <mutex>
+#include <string>
 #include <vector>
 
 #include "../steamvr/collection_view.h"
@@ -154,6 +156,39 @@ D2RL::Inventory::IterationAction __cdecl CollectCursor(const D2RL::PluginContext
     if (info->qualityRecordId >= 0 && (out.unique || out.set)) out.recordId = uint32_t(info->qualityRecordId);
     out.ok = true;
     return D2RL::Inventory::IterationAction::Continue;
+}
+
+// What the hand holds, for the page to draw under the laser (CarriedIconKey): read on the
+// game thread a few times a second while the stash is open.
+std::mutex            g_carriedLock;
+std::string           g_carriedKey;
+std::atomic<bool>     g_carriedPolling{false};
+std::atomic<uint64_t> g_carriedAt{0};
+void PollCarriedOnGameThread(const D2RL::PluginContext*, void*) noexcept {
+    std::string key;
+    D2RL::PlayerHandle player {};
+    if (g_ctx != nullptr && g_inventory != nullptr &&
+        g_inventory->getLocalPlayer(g_ctx, &player) == D2RL::Inventory::Result::Success) {
+        CursorItem cursor;
+        D2RL::Inventory::ItemFilter filter {};
+        filter.structSize    = D2RL::Inventory::ItemFilterSize;
+        filter.containerMask = D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::Cursor);
+        if (g_inventory->forEachInventoryItem(g_ctx, player, &filter, &CollectCursor, &cursor) == D2RL::Inventory::Result::Success && cursor.ok) {
+            if (cursor.unique && cursor.recordId != UINT32_MAX)   key = panel::IconKey(Category::Uniques, cursor.recordId, 0);
+            else if (cursor.set && cursor.recordId != UINT32_MAX) key = panel::IconKey(Category::Sets, cursor.recordId, 0);
+            else                                                  key = panel::IconKey(Category::Materials, 0, cursor.code);
+        }
+    }
+    {
+        std::lock_guard lock(g_carriedLock);
+        if (key != g_carriedKey) {
+            char line[128];
+            std::snprintf(line, sizeof(line), "Frame collection: the hand now holds %s", key.empty() ? "nothing" : key.c_str());
+            Log(line);
+        }
+        g_carriedKey = std::move(key);
+    }
+    g_carriedPolling.store(false);
 }
 
 bool MoveToInventory(const D2RL::PlayerHandle player, const D2RL::ItemHandle item);   // defined below
@@ -538,6 +573,17 @@ void TickStore(bool stashOpen) {
               && g_threads->runOnGameThread(g_ctx, &DepositCarriedOnGameThread, nullptr) == D2RL::Threads::Result::Success))
             DepositCarriedOnGameThread(g_ctx, nullptr);
     }
+    // What the hand holds, while the stash is open (the page draws it under the laser).
+    if (stashOpen && !g_carriedPolling.load() && GetTickCount64() - g_carriedAt.load() >= 150) {
+        g_carriedAt.store(GetTickCount64());
+        g_carriedPolling.store(true);
+        if (!(g_threads != nullptr && g_threads->runOnGameThread != nullptr
+              && g_threads->runOnGameThread(g_ctx, &PollCarriedOnGameThread, nullptr) == D2RL::Threads::Result::Success))
+            PollCarriedOnGameThread(g_ctx, nullptr);
+    } else if (!stashOpen) {
+        std::lock_guard lock(g_carriedLock);
+        g_carriedKey.clear();
+    }
     if (!g_affinity.load() || !stashOpen || g_sweeping.load()) return;
     const uint64_t now = GetTickCount64();
     const uint64_t last = g_lastSweep.load();
@@ -550,6 +596,16 @@ void TickStore(bool stashOpen) {
     }
     // No thread service: run where we are, which is what the sweep needs anyway.
     SweepOnGameThread(g_ctx, nullptr);
+}
+
+bool InCollectionBand(uint32_t sharedStashPage) {
+    const uint32_t first = uint32_t(std::max(0, g_firstTab.load()));
+    return sharedStashPage >= first && sharedStashPage < first + uint32_t(std::max(0, std::min(g_tabs.load(), kBandTabs)));
+}
+
+std::string CarriedIconKey() {
+    std::lock_guard lock(g_carriedLock);
+    return g_carriedKey;
 }
 
 void StoreReport() {

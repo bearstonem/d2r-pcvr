@@ -22,7 +22,17 @@ struct Entry {
     std::string name;
     std::string type;
     std::string extra;          // a set's name, or a runeword's runes
+    std::string base;           // the base item's name (Shako, Cap, ...); empty in an older catalog
 };
+
+// Quest items the game's unique table also lists (Amulet of the Viper, the Horadric
+// Staff, the Staff of Kings, the Hell Forge Hammer, both Khalim's Flails): not
+// collectibles, so a catalog line for one is skipped (an older collection.tsv has them).
+inline bool QuestUnique(std::string_view code) {
+    for (const char* quest : {"vip", "hst", "msf", "hfh", "qf1", "qf2"})
+        if (code == quest) return true;
+    return false;
+}
 
 // The catalog plus the found flag per entry. Entries keep the file's order and
 // are grouped by category; the order inside a category is the slot the panel
@@ -225,10 +235,10 @@ inline uint32_t Library::CodeOf(std::string_view text) {
 
 inline bool Library::LoadLine(std::string_view line) {
     if (line.empty() || line[0] == '#') return true;   // a comment, not a data line
-    std::string_view field[7];
+    std::string_view field[8];
     int              count = 0;
     std::size_t      at    = 0;
-    while (count < 7) {
+    while (count < 8) {
         const std::size_t tab = line.find('\t', at);
         field[count++] = line.substr(at, tab == std::string_view::npos ? std::string_view::npos : tab - at);
         if (tab == std::string_view::npos) break;
@@ -237,8 +247,10 @@ inline bool Library::LoadLine(std::string_view line) {
     if (count < 6) return false;
     Category category = Category::Count;
     if (!CategoryFromTag(field[0], category)) return false;
+    if (category == Category::Uniques && QuestUnique(field[1])) return true;   // a quest item: not a collectible
     entries_.push_back({category, CodeOf(field[1]), detail::ParseU32(field[2]), detail::ParseU32(field[4]),
-                        std::string(field[3]), std::string(field[5]), count > 6 ? std::string(field[6]) : std::string()});
+                        std::string(field[3]), std::string(field[5]), count > 6 ? std::string(field[6]) : std::string(),
+                        count > 7 ? std::string(field[7]) : std::string()});
     return true;
 }
 
