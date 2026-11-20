@@ -403,7 +403,10 @@ void DepositStoreOnGameThread(const D2RL::PluginContext*, void*) noexcept {
     // Not landed yet: the game takes the click on its next tick or two. Asked again on the next
     // update (no fixed wait - the item showed in the inventory for half a second with one).
     if (landed == 0 && GetTickCount64() - g_clickedAt.load() < 1000) {
-        g_phase.store(int(Phase::DepositStore));
+        // Asked again on the game's next tick, not the next update (the item would sit there).
+        if (!(g_threads != nullptr && g_threads->runOnGameThread != nullptr
+              && g_threads->runOnGameThread(g_ctx, &DepositStoreOnGameThread, nullptr) == D2RL::Threads::Result::Success))
+            g_phase.store(int(Phase::DepositStore));
         return;
     }
     char line[192];
@@ -676,10 +679,20 @@ void DepositCarried() {
     int idle = int(Phase::Idle);
     if (!g_phase.compare_exchange_strong(idle, int(Phase::DepositPrepare))) return;
     g_phaseAt.store(GetTickCount64());
-    g_depositing.store(true);
+    if (!(g_threads != nullptr && g_threads->runOnGameThread != nullptr
+          && g_threads->runOnGameThread(g_ctx, &DepositPrepareOnGameThread, nullptr) == D2RL::Threads::Result::Success))
+        g_depositing.store(true);   // the next update runs it
 }
 
 bool HandBusy() { return g_phase.load() != int(Phase::Idle); }
+
+bool PassingBlock(InventoryClick& block) {
+    const int phase = g_phase.load();
+    if (phase == int(Phase::Idle) || phase == int(Phase::DepositPrepare) || phase == int(Phase::TakePrepare)) return false;
+    std::lock_guard lock(g_clickLock);
+    block = g_click;
+    return true;
+}
 
 bool TakeInventoryClick(InventoryClick& click) {
     int expected = int(Phase::DepositClick);
@@ -695,9 +708,13 @@ bool TakeInventoryClick(InventoryClick& click) {
 
 void InventoryClickDone() {
     int expected = int(Phase::DepositClicking);
-    if (g_phase.compare_exchange_strong(expected, int(Phase::DepositStore))) {
+    if (g_phase.compare_exchange_strong(expected, int(Phase::DepositStoring))) {
         g_phaseAt.store(GetTickCount64());
         g_clickedAt.store(GetTickCount64());
+        // Straight to the game thread: waiting for the next update left the item in sight.
+        if (!(g_threads != nullptr && g_threads->runOnGameThread != nullptr
+              && g_threads->runOnGameThread(g_ctx, &DepositStoreOnGameThread, nullptr) == D2RL::Threads::Result::Success))
+            g_phase.store(int(Phase::DepositStore));
         return;
     }
     expected = int(Phase::TakeClicking);

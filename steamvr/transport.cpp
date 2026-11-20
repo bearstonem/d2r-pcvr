@@ -725,6 +725,12 @@ struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_F
 // The stash's tab bar with Collection as the active tab (collection_art.h, cut from the owner's
 // shot as the mock-up did), in the UI image's format, laid over the bar while the page is shown.
 struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};bool tried=false;} collectionTabsUpload;
+// The inventory cells an item passes through on its way in or out of the collection: drawn
+// empty over the UI image while it does (owner 2026-11-21: the item flashed there). Packed
+// x | y<<4 | w<<8 | h<<12 (cells), and until when (GetTickCount64).
+std::atomic<uint32_t> inventoryMaskBlock{0};std::atomic<uint64_t> inventoryMaskUntil{0};
+struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+        int w=0,h=0;uint32_t block=~0u;} inventoryMaskUpload;
 DXGI_FORMAT atlasFormat=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
 uint32_t layerLimit=16;
 // What each place in the submitted layer list showed last (composition::StablePlaces).
@@ -2727,10 +2733,10 @@ void MenuPointer(const menus::Pad& controls) {
             if(!respec::Request()){respecButton.Refused();Say("Frame panels: Reset Skills & Stats refused (not an offline game, or a reset already running)");}
         } else if(respecButton.Confirming())Say("Frame panels: Reset Skills & Stats - Confirm? shown");
     }
-    // The two tab plaques under the stash (Previous / Next tab), as before the Collection page
-    // took them away (owner 2026-11-20: someone's work, wanted back). The Collection itself is
-    // the stash bar's sixth tab, so its plaque is not shown.
-    stashShown=stashArtReady&&spatialReady&&!journalMode&&gamestate::StashButtonsShown();
+    // The old tab plaques stay away: back in for a test (2026-11-20) they pulsed the bumpers,
+    // which turn the shared pages, not the tabs, covered the page's filters and left the page
+    // unable to take or give items (owner 2026-11-21). The mod's own tab plaques replace them.
+    stashShown=false;
     stashHover=-1;
     if(stashShown&&focused&&aimTracked&&pointerHit&&!(mouseDown||rightMouseDown))
         for(int i=0;i<stashbuttons::TabButtonCount;++i)
@@ -2898,6 +2904,13 @@ void MenuPointer(const menus::Pad& controls) {
     // 1244,668 of the 2244 x 2352 UI image, 10 x 4 cells of 57.2 px (ui_20261120_201146_378.png).
     // The point is 0.15 of a cell past the block's middle, so an even-sized item rounds onto the
     // block whichever way the game rounds.
+    {   // the cells it passes through drawn empty (CopyInventoryMask) until a moment after it left
+        collection::InventoryClick passing;
+        if(collection::PassingBlock(passing)) {
+            inventoryMaskBlock.store(uint32_t(passing.x&15)|uint32_t(passing.y&15)<<4|uint32_t(passing.w&15)<<8|uint32_t(passing.h&15)<<12);
+            inventoryMaskUntil.store(GetTickCount64()+200);
+        }
+    }
     if(handClickStep==0&&collection::TakeInventoryClick(handClick)){handClickStep=1;handClickAt=GetTickCount64();}
     if(handClickStep!=0) {
         const ULONGLONG now=GetTickCount64();
@@ -7614,6 +7627,66 @@ bool CopyCollectionIntoUi(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,u
     collectionUiX=x0;collectionUiY=y0;
     return true;
 }
+// Empty inventory cells over the block an item is passing through (inventoryMaskBlock). The
+// grid in the 2244 x 2352 UI image: cell interiors from 1245,670, 53 px, every 57 px; between
+// them 4 px rules in the frame's browns (read off ui_20261120_201146_378.png).
+void CopyInventoryMask(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,uint32_t w,uint32_t h,const int32_t crop[4]) {
+    if(GetTickCount64()>=inventoryMaskUntil.load())return;
+    const uint32_t block=inventoryMaskBlock.load();
+    const int bx=int(block&15),by=int((block>>4)&15),bw=std::max(1,int((block>>8)&15)),bh=std::max(1,int((block>>12)&15));
+    const int cx=crop[2]>0?crop[0]:0,cy=crop[3]>0?crop[1]:0,cw=crop[2]>0?crop[2]:int(w),ch=crop[3]>0?crop[3]:int(h);
+    const float sx0=1245.f+57.f*float(bx),sy0=670.f+57.f*float(by),sx1=1245.f+57.f*float(bx+bw)-4.f,sy1=670.f+57.f*float(by+bh)-4.f;
+    const int x0=std::clamp(cx+int(sx0/2244.f*float(cw)+.5f),0,int(w)),x1=std::clamp(cx+int(sx1/2244.f*float(cw)+.5f),0,int(w));
+    const int y0=std::clamp(cy+int(sy0/2352.f*float(ch)+.5f),0,int(h)),y1=std::clamp(cy+int(sy1/2352.f*float(ch)+.5f),0,int(h));
+    const int tw=x1-x0,th=y1-y0;
+    if(tw<4||th<4)return;
+    auto& m=inventoryMaskUpload;
+    if(!m.upload||m.w!=tw||m.h!=th||m.block!=block) {
+        m={};
+        D3D12_RESOURCE_DESC td{};td.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;td.Width=UINT64(tw);td.Height=UINT(th);
+        td.DepthOrArraySize=td.MipLevels=1;td.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;td.SampleDesc.Count=1;
+        UINT rows=0;UINT64 rowBytes=0,total=0;
+        device->GetCopyableFootprints(&td,0,1,0,&m.footprint,&rows,&rowBytes,&total);
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
+        D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=total;bd.Height=bd.DepthOrArraySize=bd.MipLevels=1;
+        bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        uint8_t* mapped=nullptr;const D3D12_RANGE none{0,0};
+        if(FAILED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&m.upload)))||
+           FAILED(m.upload->Map(0,&none,reinterpret_cast<void**>(&mapped)))||!mapped){m={};return;}
+        static const uint8_t ruleX[4][3]={{86,72,65},{66,56,47},{46,39,34},{98,84,77}},ruleY[4][3]={{114,99,79},{112,96,81},{70,60,47},{162,146,136}};
+        for(int y=0;y<th;++y) {
+            uint16_t* row=reinterpret_cast<uint16_t*>(mapped+m.footprint.Offset+size_t(y)*m.footprint.Footprint.RowPitch);
+            const float sy=sy0+(float(y)+.5f)*(sy1-sy0)/float(th);
+            const int py=int(sy-670.f)%57;
+            for(int x=0;x<tw;++x) {
+                const float sx=sx0+(float(x)+.5f)*(sx1-sx0)/float(tw);
+                const int px=int(sx-1245.f)%57;
+                float rgb[3];
+                if(px>=53&&py>=53){for(int k=0;k<3;++k)rgb[k]=(ruleX[px-53][k]+ruleY[py-53][k])*.5f;}
+                else if(px>=53){for(int k=0;k<3;++k)rgb[k]=ruleX[px-53][k];}
+                else if(py>=53){for(int k=0;k<3;++k)rgb[k]=ruleY[py-53][k];}
+                else {   // the cell's own black, a shade darker at its edges
+                    const int edge=std::min({px,py,52-px,52-py});
+                    const float v=edge<1?3.f:edge<3?5.f:edge<6?7.f:8.f;
+                    rgb[0]=rgb[1]=rgb[2]=v;
+                }
+                for(int k=0;k<3;++k)row[x*4+k]=collection::uiimage::Half(collection::uiimage::Linear(rgb[k]/255.f));
+                row[x*4+3]=collection::uiimage::Half(1.f);
+            }
+        }
+        m.upload->Unmap(0,nullptr);
+        m.w=tw;m.h=th;m.block=block;
+    }
+    D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.pResource=dest;
+    b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b.Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;b.Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+    list->ResourceBarrier(1,&b);
+    D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=dest;to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;to.SubresourceIndex=0;
+    D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=m.upload.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;from.PlacedFootprint=m.footprint;
+    list->CopyTextureRegion(&to,UINT(x0),UINT(y0),0,&from,nullptr);
+    std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
+    list->ResourceBarrier(1,&b);
+}
 bool CopyUi(reshade::api::command_queue* rq) {
     if(!spatialMode||uiEye.copied)return true;
     uint32_t w=0,h=0;int32_t crop[4]{};
@@ -7693,6 +7766,7 @@ bool CopyUi(reshade::api::command_queue* rq) {
         const bool shown=CopyCollectionIntoUi(e.commands.Get(),dest,w,h,crop);
         if(shown!=collectionInUiShown){collectionInUiShown=shown;
             Say(shown?"Frame collection: the page is drawn into the game's UI image":"Frame collection: the page is no longer in the UI image");}
+        CopyInventoryMask(e.commands.Get(),dest,w,h,crop);
     }
     if(FAILED(e.commands->Close()))return false;
     ID3D12CommandList* lists[]={e.commands.Get()};queue->ExecuteCommandLists(1,lists);

@@ -57,6 +57,9 @@ bool TakeInventoryClick(InventoryClick& click);
 void InventoryClickDone();
 // An item is on its way in or out: the frame thread leaves the game's cursor alone.
 bool HandBusy();
+// The inventory block the item is passing through now (to be drawn empty over the UI image,
+// so it does not flash there). False when no item is in an inventory cell on its way.
+bool PassingBlock(InventoryClick& block);
 
 // One line for the log: whether affinity is on and where the collection's tabs
 // are, then what the last sweep did.
