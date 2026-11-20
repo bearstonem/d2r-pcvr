@@ -251,6 +251,13 @@ public:
     // collection panel's item icons, which come from the mod's icon cache. A
     // bitmap is made per call, so draw each icon once a frame.
     void Image(RectF r,const uint8_t* rgba,int width,int height,float alpha=1.f);
+    // Exact colours (0xRRGGBB) and text sizes, for a page that copies the game's own look
+    // pixel for pixel (the Collection page, its owner's accepted mock-up): not theme tokens.
+    void FillRgb(RectF r,uint32_t rgb,float alpha=1.f);
+    void LineRgb(float x0,float y0,float x1,float y1,uint32_t rgb,float width=1.f,float alpha=1.f);
+    void OutlineRgb(RectF r,uint32_t rgb,float width=1.f,float alpha=1.f);
+    // One line (or wrapped, wrap=true) at the given size, with the style's family and shadow.
+    TextSize TextRgb(std::string_view utf8,TextStyle style,float size,RectF box,uint32_t rgb,Align align=Align::Center,bool wrap=false);
     // A rail tab: icon + name. chosen: the current page's tongue (crimson notch,
     // gold, bold) out to the seam; pointed: slab + ring; changed: the ember on the icon.
     // level 1: a page under its group, its icon (36 px) and name 22 px further in, on

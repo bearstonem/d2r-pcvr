@@ -92,9 +92,9 @@ int main() {
     assert(right.x == 164 && right.y == TooltipTop);   // below the tab row, not over it
 
     // ...to the left when the right would leave the panel...
-    const panel::Rect nearRight{900, 100, 50, 50};
+    const panel::Rect nearRight{700, 100, 50, 50};
     const Box left = PlaceTooltip(nearRight, 300, 200);
-    assert(left.x == 586 && left.y == TooltipTop);
+    assert(left.x == 386 && left.y == TooltipTop);
 
     // ...and kept clear of the top and bottom edges.
     const Box low = PlaceTooltip(panel::Rect{100, 1000, 50, 50}, 300, 200);

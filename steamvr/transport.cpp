@@ -111,6 +111,7 @@
 #include "collection_tab_button.h"
 #include "collection_draw.h"
 #include "collection_ui_image.h"
+#include "collection_art.h"
 #include "collection_pointer.h"
 #include "../vr/collection_tab.h"
 #include "../vr/collection_store.h"
@@ -695,7 +696,11 @@ bool collectionDocked=false;                                // shown inside the 
 // (whatever is active under it) is neither seen nor clicked. Measured from the owner's UI shot
 // (2026-11-20): the stash window is u 0.126..0.499, v 0.026..0.462 of the surface; the tab bar
 // ends about v 0.10. The page keeps the tab bar free, so the bar still switches tabs.
-constexpr float CollectionPageLeft=.135f,CollectionPageRight=.495f,CollectionPageTop=.105f,CollectionPageBottom=.455f;
+// (2026-11-20, later) The owner's accepted mock-up was drawn on that same shot with the page at
+// 393,230 - 1013,976 of its 2244 x 2352 pixels: the stash's content under its tab bar, no more.
+// The earlier .135-.495 / .105-.455 ran over the stash's frame ("the grid is too big").
+constexpr float CollectionPageLeft=(280.f+collection::panel::MockLeft)/2244.f,CollectionPageRight=(280.f+collection::panel::MockRight)/2244.f,
+                CollectionPageTop=(50.f+collection::panel::MockTop)/2352.f,CollectionPageBottom=(50.f+collection::panel::MockBottom)/2352.f;
 bool collectionTriggerDown=false;
 bool collectionTriggerWas=false;   // the previous frame's trigger, for the press-edge click
 std::atomic<bool> uiShotWanted{false};   // both grips held: write the captured UI layer as a PNG in pcvr_shots
@@ -712,8 +717,12 @@ int collectionUiW=0,collectionUiH=0,collectionPaintedUiW=0,collectionPaintedUiH=
 std::vector<uint16_t> collectionUiPixels;int collectionUiPixelsW=0,collectionUiPixelsH=0;
 uint64_t collectionUiSerial=0;
 bool collectionInUiShown=false;   // the last CopyUi put the page into the UI image
+int collectionUiX=0,collectionUiY=0;   // where it went (UI image pixels), for the UI shot
 struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};UINT rows=0;
         int w=0,h=0;uint64_t serial=~0ull;} collectionUiUpload;
+// The stash's tab bar with Collection as the active tab (collection_art.h, cut from the owner's
+// shot as the mock-up did), in the UI image's format, laid over the bar while the page is shown.
+struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};bool tried=false;} collectionTabsUpload;
 DXGI_FORMAT atlasFormat=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
 uint32_t layerLimit=16;
 // What each place in the submitted layer list showed last (composition::StablePlaces).
@@ -3227,7 +3236,9 @@ void RequestCollectionPaint(bool force=false) {
        collectionPaintedView.page==collectionView.page&&collectionPaintedView.size==collectionView.size&&
        collectionIconRevision==revision&&collectionPaintedHover.kind==collectionHover.kind&&
        collectionPaintedHover.index==collectionHover.index&&collectionTooltipRevision==answer.revision&&
-       collectionPaintedUiW==collectionUiW&&collectionPaintedUiH==collectionUiH)return;
+       collectionPaintedUiW==collectionUiW&&collectionPaintedUiH==collectionUiH&&
+       collectionPaintedView.show==collectionView.show&&collectionPaintedView.sort==collectionView.sort&&
+       collectionPaintedView.group==collectionView.group&&collectionPaintedView.open==collectionView.open)return;
     collectionPaintedUiW=collectionUiW;collectionPaintedUiH=collectionUiH;
     collectionPaintedView=collectionView;
     collectionPaintedHover=collectionHover;
@@ -3261,7 +3272,16 @@ void CollectionPress(const collection::panel::Hit& hit) {
         collection::DepositCarried();
         return;
     }
+    // An open Sort / Show list: a pull on one of its options chooses it, on its box closes
+    // it, anywhere else only closes it (as the game's own lists do).
+    if(collection::TabView().open!=collection::panel::Drop::None&&hit.kind!=HitKind::Sort&&hit.kind!=HitKind::Show&&
+       hit.kind!=HitKind::SortBox&&hit.kind!=HitKind::ShowBox) {
+        collection::TabToggleDrop(collection::TabView().open);
+        return;
+    }
     switch(hit.kind) {
+    case HitKind::SortBox:  collection::TabToggleDrop(collection::panel::Drop::Sort); break;
+    case HitKind::ShowBox:  collection::TabToggleDrop(collection::panel::Drop::Show); break;
     case HitKind::Tab:      collection::TabSelectCategory(static_cast<collection::Category>(hit.index)); break;
     case HitKind::Page:     collection::TabSetPage(hit.index); break;
     case HitKind::Previous: collection::TabStep(-1); break;
@@ -3334,7 +3354,7 @@ void CollectionPointer(bool grip) {
     collectionTriggerDown=UiFloat(trigger,0)>(collectionTriggerDown?.20f:.55f);
     const collection::panel::Layout layout=collection::panel::Build(collectionView.page,
         collectionView.Pages(collection::TabLibrary()),
-        int(collection::TabCategoryCount),collectionView.size);
+        int(collection::TabCategoryCount),collectionView.size,collectionView.open);
     collectionPointer.Step(canvasX,canvasY,layout,collectionTriggerDown,ms);   // hover, hysteresis, the pre-trigger lock
     collectionHover=collectionPointer.Hover();
     // A menu of buttons answers on the PRESS, not the release: waiting for the trigger
@@ -7470,8 +7490,41 @@ bool CopyCollectionIntoUi(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,u
     D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=dest;to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;to.SubresourceIndex=0;
     D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=u.upload.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;from.PlacedFootprint=u.footprint;
     list->CopyTextureRegion(&to,UINT(x0),UINT(y0),0,&from,nullptr);
+    // The tab bar: Collection lit, the game's tabs idle (only at the shot's own size, where the
+    // art's place is known).
+    auto& t=collectionTabsUpload;
+    if(!t.tried) {
+        t.tried=true;
+        using namespace collection::art;
+        D3D12_RESOURCE_DESC td{};td.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;td.Width=UINT64(TabsWidth);td.Height=UINT(TabsHeight);
+        td.DepthOrArraySize=td.MipLevels=1;td.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;td.SampleDesc.Count=1;
+        UINT rows=0;UINT64 rowBytes=0,total=0;
+        device->GetCopyableFootprints(&td,0,1,0,&t.footprint,&rows,&rowBytes,&total);
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
+        D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=total;bd.Height=bd.DepthOrArraySize=bd.MipLevels=1;
+        bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        uint8_t* mapped=nullptr;const D3D12_RANGE none{0,0};
+        if(SUCCEEDED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&t.upload)))&&
+           SUCCEEDED(t.upload->Map(0,&none,reinterpret_cast<void**>(&mapped)))&&mapped) {
+            const std::vector<uint8_t> art(Tabs,Tabs+sizeof Tabs);
+            const auto half=collection::uiimage::Convert(art,TabsWidth,TabsWidth,TabsHeight,TabsWidth,TabsHeight);
+            for(int y=0;y<TabsHeight;++y)std::memcpy(mapped+t.footprint.Offset+size_t(y)*t.footprint.Footprint.RowPitch,
+                                                    reinterpret_cast<const uint8_t*>(half.data())+size_t(y)*TabsWidth*8,size_t(TabsWidth)*8);
+            t.upload->Unmap(0,nullptr);
+            Say("Frame collection: the tab bar with Collection lit is ready");
+        } else {t.upload.Reset();Say("Frame collection: no upload buffer for the tab bar");}
+    }
+    if(t.upload&&w==uint32_t(collection::art::ShotWidth)&&h==uint32_t(collection::art::ShotHeight)) {
+        D3D12_TEXTURE_COPY_LOCATION tabsFrom{};tabsFrom.pResource=t.upload.Get();tabsFrom.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;tabsFrom.PlacedFootprint=t.footprint;
+        list->CopyTextureRegion(&to,UINT(collection::art::TabsX),UINT(collection::art::TabsY),0,&tabsFrom,nullptr);
+    } else {
+        static bool told=false;
+        if(!told){told=true;char line[160];std::snprintf(line,sizeof line,"Frame collection: UI image %ux%u is not the shot's %dx%d; the tab bar is left as the game draws it",
+            w,h,collection::art::ShotWidth,collection::art::ShotHeight);Say(line);}
+    }
     std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
     list->ResourceBarrier(1,&b);
+    collectionUiX=x0;collectionUiY=y0;
     return true;
 }
 bool CopyUi(reshade::api::command_queue* rq) {
@@ -7562,7 +7615,7 @@ bool CopyUi(reshade::api::command_queue* rq) {
 // The in-headset "UI shot": transport binds it to both grips held (Input). The picture is
 // read back from the mod's own captured UI layer (hud::UiTexture) and saved by vrcam.
 // Half (R16) to an 8-bit channel, clamped.
-uint8_t HalfByte(uint16_t h) {
+float HalfFloat(uint16_t h) {
     const uint32_t sign=uint32_t(h&0x8000u)<<16;
     uint32_t exp=(h>>10)&0x1Fu,mant=h&0x3FFu,bits=0;
     if(exp==0) {
@@ -7571,8 +7624,9 @@ uint8_t HalfByte(uint16_t h) {
     } else if(exp==31)bits=sign|0x7F800000u|(mant<<13);
     else bits=sign|((exp-15+127)<<23)|(mant<<13);
     float f;std::memcpy(&f,&bits,4);
-    return uint8_t(std::clamp(f,0.f,1.f)*255.f+.5f);
+    return f;
 }
+uint8_t HalfByte(uint16_t h){return uint8_t(std::clamp(HalfFloat(h),0.f,1.f)*255.f+.5f);}
 // Read the captured UI image (the menu's own layer, hud::UiTexture) back to the CPU and hand
 // it to vrcam as a PNG. The game's own frame (shot::Take) has no UI; this is the layer the
 // stash, the tab bar and our page are drawn in, so it is how the interface can be seen off the
@@ -7621,6 +7675,36 @@ void TakeUiShot(reshade::api::command_queue* rq) {
         }
     }
     const D3D12_RANGE none{0,0};readback->Unmap(0,&none);
+    // The game's own image has no Collection page: it is added on the way to the headset
+    // (CopyCollectionIntoUi). The shot gets the same pixels at the same place, so it shows
+    // what the headset shows. Those are linear and premultiplied; the shot is sRGB.
+    if(collectionInUiShown&&!collectionUiPixels.empty()) {
+        const auto encode=[](uint16_t h){
+            const float l=std::clamp(HalfFloat(h),0.f,1.f);
+            const float e=l<=.0031308f?l*12.92f:1.055f*std::pow(l,1.f/2.4f)-.055f;
+            return uint8_t(std::clamp(e,0.f,1.f)*255.f+.5f);
+        };
+        for(int y=0;y<collectionUiPixelsH;++y) {
+            const LONG oy=collectionUiY+y-y0;if(oy<0||oy>=ch)continue;
+            for(int x=0;x<collectionUiPixelsW;++x) {
+                const LONG ox=collectionUiX+x-x0;if(ox<0||ox>=cw)continue;
+                const uint16_t* p=&collectionUiPixels[(size_t(y)*size_t(collectionUiPixelsW)+size_t(x))*4];
+                const float a=float(HalfByte(p[3]))/255.f;
+                uint8_t* out=&rgba[(size_t(oy)*size_t(cw)+size_t(ox))*4];
+                for(int c=0;c<3;++c)out[c]=uint8_t(std::clamp(float(encode(p[c]))+float(out[c])*(1.f-a),0.f,255.f));
+            }
+        }
+        // and the tab bar laid over the game's (already sRGB)
+        if(w==uint32_t(collection::art::ShotWidth)&&h==uint32_t(collection::art::ShotHeight))
+            for(int y=0;y<collection::art::TabsHeight;++y) {
+                const LONG oy=collection::art::TabsY+y-y0;if(oy<0||oy>=ch)continue;
+                for(int x=0;x<collection::art::TabsWidth;++x) {
+                    const LONG ox=collection::art::TabsX+x-x0;if(ox<0||ox>=cw)continue;
+                    const uint8_t* s=&collection::art::Tabs[(size_t(y)*collection::art::TabsWidth+size_t(x))*4];
+                    std::memcpy(&rgba[(size_t(oy)*size_t(cw)+size_t(ox))*4],s,3);
+                }
+            }
+    }
     framevr::SaveUiPicture(std::move(rgba),int(cw),int(ch));
     char line[96];std::snprintf(line,sizeof line,"Frame UI shot: saved %dx%d (crop %d,%d)",int(cw),int(ch),int(x0),int(y0));Say(line);
 }
@@ -8449,7 +8533,9 @@ void EndPair() {
     // open: the game marks whichever of its own tabs is chosen, and the mod cannot
     // set that, so it draws the same frame and blue diamond itself (stash_tab_highlight.h).
     XrCompositionLayerQuad collectionTabMark{XR_TYPE_COMPOSITION_LAYER_QUAD};
-    if(collectionOpen&&collectionDocked&&collectionTabShown&&stashTabHighlightReady&&staticChain&&book.subImage.swapchain) {
+    // (Not while the page is in the UI image: the tab bar itself is laid over there, with the
+    // game's own active-tab art on Collection - CopyCollectionIntoUi.)
+    if(collectionOpen&&collectionDocked&&!collectionInUiShown&&collectionTabShown&&stashTabHighlightReady&&staticChain&&book.subImage.swapchain) {
         const auto at=UiSurfacePose();const auto q=Q(at.orientation);const auto size=UiSurfaceSize();
         const auto spot=collectiontab::MarkPlace(size.width,size.height);
         const auto p=V(at.position)+math::Rotate(q,{spot.x,spot.y,.0015f});

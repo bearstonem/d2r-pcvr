@@ -49,6 +49,7 @@ void            TabSetPage(int page);
 void            TabSetSize(panel::Size size);
 void            TabSetShow(panel::Show show);
 void            TabSetSort(panel::Sort sort);
+void            TabToggleDrop(panel::Drop list);   // the footer's Sort / Show list: open or close
 void            TabToggleGroup(int group);   // an item-type tile: filter to it, or let go when picked again
 
 // What the laser is over: the slot or control the picture lights up.

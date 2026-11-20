@@ -81,6 +81,7 @@ struct ViewState {
     panel::Show  show     = panel::Show::All;
     panel::Sort  sort     = panel::Sort::Name;
     int          group    = panel::NoGroup;   // an item-type tile filtering the grid, or NoGroup
+    panel::Drop  open     = panel::Drop::None;   // the footer list that is open
     int          page     = 0;
     panel::Hit   hover {};   // what the laser is over: the slot or control to light
 
@@ -105,7 +106,10 @@ struct ViewState {
         hover = {};
         Clamp(library);
     }
+    // A footer list: opened by its box, closed by the box again or by a choice.
+    void ToggleDrop(panel::Drop list) { open = open == list ? panel::Drop::None : list; }
     void SelectShow(const Library& library, panel::Show want) {
+        open = panel::Drop::None;
         if (show == want) return;
         show    = want;
         page    = 0;
@@ -113,6 +117,7 @@ struct ViewState {
         Clamp(library);
     }
     void SelectSort(const Library& library, panel::Sort want) {
+        open = panel::Drop::None;
         if (sort == want) return;
         sort  = want;
         page  = 0;

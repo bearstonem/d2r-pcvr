@@ -224,6 +224,11 @@ void TabSetSort(panel::Sort sort) {
     g_view.SelectSort(g_library, sort);
 }
 
+void TabToggleDrop(panel::Drop list) {
+    std::lock_guard lock(g_lock);
+    g_view.ToggleDrop(list);
+}
+
 void TabToggleGroup(int group) {
     std::lock_guard lock(g_lock);
     g_view.ToggleGroup(g_library, group);

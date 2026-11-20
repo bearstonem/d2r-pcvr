@@ -32,12 +32,14 @@ inline const Rect* RectOf(const Layout& layout, const Hit& hit) {
     switch (hit.kind) {
     case HitKind::Tab:      return hit.index >= 0 && hit.index < layout.tabCount ? &layout.tabs[hit.index] : nullptr;
     case HitKind::Page:     return &layout.track;
-    case HitKind::Sort:     return hit.index >= 0 && hit.index < int(panel::Sort::Count) ? &layout.sortSteps[hit.index] : nullptr;
+    case HitKind::Sort:     return hit.index >= 0 && hit.index < int(panel::Sort::Count) ? &layout.sortOptions[hit.index] : nullptr;
+    case HitKind::SortBox:  return &layout.sortBox;
+    case HitKind::ShowBox:  return &layout.showBox;
     case HitKind::Group:    return hit.index >= 0 && hit.index < panel::GroupCount ? &layout.groups[hit.index] : nullptr;
     case HitKind::Previous: return &layout.previous;
     case HitKind::Next:     return &layout.next;
     case HitKind::Size:     return hit.index >= 0 && hit.index < int(panel::Size::Count) ? &layout.sizeSteps[hit.index] : nullptr;
-    case HitKind::Show:     return hit.index >= 0 && hit.index < int(panel::Show::Count) ? &layout.showSteps[hit.index] : nullptr;
+    case HitKind::Show:     return hit.index >= 0 && hit.index < int(panel::Show::Count) ? &layout.showOptions[hit.index] : nullptr;
     case HitKind::Slot:     return hit.index >= 0 && hit.index < layout.slotCount ? &layout.slots[hit.index] : nullptr;
     default:                return nullptr;
     }

@@ -1,21 +1,20 @@
 // Collection panel painting. See collection_draw.h.
 //
-// The owner's accepted preview v3 (2026-11-20): a page of the D2R stash in its own
-// grey stone, not Path of Exile's brown. A thin gold double line round the content;
-// Uniques / Sets / Runewords with their counts on top and the found bar under them;
-// cards like stash cells with a name plate (a unique's name in the game's unique
-// gold), the found ones in a thin gold frame, the missing ones greyed; a scroll bar
-// on the right; the item types with their share found below the grid, their light
-// grey silhouettes sized as the items are in the inventory; Size, Sort and Show at
-// the bottom. The card under the laser shows the game's item text in the game's own
-// tooltip look: black, centred, the properties in magic blue.
+// A port of the owner's accepted mock-up v3 (2026-11-20, render2.py + render3.py), element
+// by element, with its own colours, line widths and text sizes, in its own pixels scaled to
+// the canvas (collection_panel.h Mx / My / Md). The page is the stash's own stone (a patch
+// cut out of the owner's UI shot, collection_art.h), its buttons that stone lighter or
+// darker with a bevel, its labels in small capitals like the game's (Cinzel here), the item
+// pictures from the mod's icon cache, missing items greyed.
 #include "collection_draw.h"
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "collection_art.h"
 #include "collection_tooltip.h"
 #include "vr_settings_draw.h"
 
@@ -23,94 +22,131 @@ namespace framevr::collection::draw {
 namespace {
 
 using settings::draw::Align;
-using settings::draw::Color;
-using settings::draw::Icon;
 using settings::draw::Painter;
 using settings::draw::RectF;
 using settings::draw::TextSize;
 using settings::draw::TextStyle;
+using panel::Md;
+using panel::Mx;
+using panel::My;
 
-RectF Box(const panel::Rect& rect) { return {rect.x, rect.y, rect.width, rect.height}; }
-RectF Inset(const RectF& r, float by) { return {r.x + by, r.y + by, r.w - 2 * by, r.h - 2 * by}; }
+// The mock-up's colours (0xRRGGBB).
+constexpr uint32_t Unique  = 0xC7B377;   // the game's unique-item gold (199,179,119)
+constexpr uint32_t SetName = 0x4ED24E;   // the game's set-item green
+constexpr uint32_t Txt     = 0xCDCDC6;   // the game's light grey labels (205,205,198)
+constexpr uint32_t DimT    = 0x787874;   // (120,120,116)
+constexpr uint32_t Gold    = 0x967A46;   // the thin gold rule of the stash's inner frames (150,122,70)
+constexpr uint32_t GoldHi  = 0xCDAA64;   // (205,170,100)
+constexpr uint32_t OnText  = 0xEEEEE8, OffText = 0xA0A09B;   // a chosen / an idle button's word
+constexpr uint32_t Blue    = 0x6969FF, White = 0xFFFFFF, Grey = 0xAAAAAA;   // the tooltip's lines
 
-// The item image keeps its own proportions inside its box, centred, never stretched.
+// Small capitals like the game's labels: Cinzel (the Section style's family) at the
+// mock-up's size, scaled.
+constexpr TextStyle Caps = TextStyle::Section;
+constexpr TextStyle Plain = TextStyle::Value;
+
+RectF R(float x0, float y0, float x1, float y1) { return {Mx(x0), My(y0), Md(x1 - x0), Md(y1 - y0)}; }
+RectF Box(const panel::Rect& r) { return {r.x, r.y, r.width, r.height}; }
+
+// ---- the stash's stone: the patch mirror-tiled (the mock-up's tile), in mock-up pixels ----
+uint32_t StoneAt(int x, int y) {   // straight RGB of the tile at mock-up pixel x, y
+    const int w = art::StoneWidth, h = art::StoneHeight;
+    x = ((x % (2 * w)) + 2 * w) % (2 * w);
+    y = ((y % (2 * h)) + 2 * h) % (2 * h);
+    if (x >= w) x = 2 * w - 1 - x;
+    if (y >= h) y = 2 * h - 1 - y;
+    const uint8_t* p = &art::Stone[(size_t(y) * w + size_t(x)) * 4];
+    return (uint32_t(p[0]) << 16) | (uint32_t(p[1]) << 8) | p[2];
+}
+
+// Stone of w x h canvas pixels at the given brightness, from the tile's origin (as the
+// mock-up's stone() does for each button). Kept by size and brightness.
+const std::vector<uint8_t>& StonePixels(int w, int h, float bright) {
+    thread_local std::unordered_map<uint64_t, std::vector<uint8_t>> cache;
+    const uint64_t key = (uint64_t(w) << 40) | (uint64_t(h) << 20) | uint64_t(bright * 1000.f);
+    auto& out = cache[key];
+    if (out.empty()) {
+        out.resize(size_t(w) * size_t(h) * 4);
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                const uint32_t c = StoneAt(int(float(x) / panel::Scale), int(float(y) / panel::Scale));
+                uint8_t* o = &out[(size_t(y) * w + size_t(x)) * 4];
+                o[0] = uint8_t(std::min(255.f, float((c >> 16) & 255) * bright));
+                o[1] = uint8_t(std::min(255.f, float((c >> 8) & 255) * bright));
+                o[2] = uint8_t(std::min(255.f, float(c & 255) * bright));
+                o[3] = 255;
+            }
+    }
+    return out;
+}
+
+void StoneFill(Painter& p, const RectF& r, float bright) {
+    const int w = std::max(1, int(std::lround(r.w))), h = std::max(1, int(std::lround(r.h)));
+    p.Image(r, StonePixels(w, h, bright).data(), w, h);
+}
+
+// The mock-up's button: stone, lighter when on, with its dark outline and bevel.
+void Button(Painter& p, const RectF& r, bool on) {
+    StoneFill(p, r, on ? 1.18f : 0.62f);
+    const float t = Md(1.f);
+    p.OutlineRgb(r, 0x080808, t);
+    p.LineRgb(r.x + t, r.y + t * 1.5f, r.Right() - t, r.y + t * 1.5f, on ? 0x6E6E68 : 0x4E4E4A, t);
+    p.LineRgb(r.x + t * 1.5f, r.y + t, r.x + t * 1.5f, r.Bottom() - t, on ? 0x60605A : 0x42423E, t);
+    p.LineRgb(r.x + t, r.Bottom() - t * 1.5f, r.Right() - t, r.Bottom() - t * 1.5f, 0x141414, t);
+    p.LineRgb(r.Right() - t * 1.5f, r.y + t, r.Right() - t * 1.5f, r.Bottom() - t, 0x141414, t);
+}
+
+// Small-caps label centred on the mock-up point (cx, cy) at its size.
+void CapsAt(Painter& p, float cx, float cy, std::string_view text, float size, uint32_t rgb) {
+    const float s = Md(size);
+    p.TextRgb(text, Caps, s, {Mx(cx) - Md(150.f), My(cy) - s, Md(300.f), s * 2.f}, rgb, Align::Center);
+}
+
+// The largest size, from the mock-up's start down to its floor, at which the text fits.
+float FitSize(Painter& p, std::string_view text, TextStyle style, float size, float floor, float width) {
+    for (; size > floor; size -= 0.5f)
+        if (p.Measure(text, style, 4096.f, false, 0, Md(size)).width <= width) break;
+    return size;
+}
+
+// ---- the item pictures ----
 RectF FitImage(const RectF& box, int width, int height) {
     if (width <= 0 || height <= 0 || box.w <= 0 || box.h <= 0) return box;
-    const float aspect = float(width) / float(height);
-    if (aspect > box.w / box.h) {
-        const float h = box.w / aspect;
-        return {box.x, box.y + (box.h - h) * 0.5f, box.w, h};
-    }
-    const float w = box.h * aspect;
-    return {box.x + (box.w - w) * 0.5f, box.y, w, box.h};
+    const float s = std::min(box.w / float(width), box.h / float(height));
+    const float w = float(width) * s, h = float(height) * s;
+    return {box.x + (box.w - w) * 0.5f, box.y + (box.h - h) * 0.5f, w, h};
 }
 
-// A recess cut into the stone, like a stash cell: dark inside, the shadow on its
-// upper-left edge and the light on its lower-right.
-void Niche(Painter& painter, const RectF& r, float alpha = 0.92f) {
-    painter.Fill(r, Color::StashNiche, alpha);
-    painter.Line(r.x, r.y + 0.5f, r.Right(), r.y + 0.5f, Color::StashShadow, 2.f);
-    painter.Line(r.x + 0.5f, r.y, r.x + 0.5f, r.Bottom(), Color::StashShadow, 2.f);
-    painter.Line(r.x, r.Bottom() - 0.5f, r.Right(), r.Bottom() - 0.5f, Color::StashEdge, 1.f);
-    painter.Line(r.Right() - 0.5f, r.y, r.Right() - 0.5f, r.Bottom(), Color::StashEdge, 1.f);
-}
-
-// A stone button: raised lighter stone when chosen (gold word), a recess when not;
-// the pointed one gets a brighter gold ring.
-void StoneButton(Painter& painter, const RectF& r, std::string_view word, bool chosen, bool pointed,
-                 bool disabled = false, TextStyle style = TextStyle::Small) {
-    if (chosen) {
-        painter.Fill(r, Color::StashLight, 1.f);
-        painter.Line(r.x, r.y + 0.5f, r.Right(), r.y + 0.5f, Color::StashEdge, 1.f);
-        painter.Line(r.x, r.Bottom() - 1.f, r.Right(), r.Bottom() - 1.f, Color::StashShadow, 2.f);
-    } else {
-        Niche(painter, r);
-    }
-    if (pointed && !disabled) painter.Outline(Inset(r, -2.f), Color::GoldHi, 2.f);
-    const Color text = disabled ? Color::Dim : chosen ? Color::Gold : Color::Quiet;
-    painter.TextFit(word, style, r, text, Align::Center, false);
-}
-
-// The colour a category's names are written in: the game's own item colours.
-Color NameColor(Category category) {
-    return category == Category::Sets ? Color::Ok : Color::Gold;
-}
-
-// Thread-local copies of an icon: greyed (a missing entry) and as a flat light grey
-// silhouette (an item-type tile). Kept by cache key; a few hundred small images.
-const std::vector<uint8_t>& Greyed(const std::string& key, const IconPixels& icon) {
+// A missing item: grey and dark, a little see-through (the mock-up's ghost()).
+const std::vector<uint8_t>& Ghost(const std::string& key, const IconPixels& icon) {
     thread_local std::unordered_map<std::string, std::vector<uint8_t>> cache;
     auto& out = cache[key];
     if (out.size() != size_t(icon.width) * size_t(icon.height) * 4) {
         out.resize(size_t(icon.width) * size_t(icon.height) * 4);
         for (size_t i = 0; i < out.size(); i += 4) {
-            const float l = 0.30f * icon.rgba[i] + 0.59f * icon.rgba[i + 1] + 0.11f * icon.rgba[i + 2];
-            const uint8_t v = uint8_t(std::min(255.f, l * 0.55f));
-            out[i] = out[i + 1] = out[i + 2] = v;
+            const float l = 0.299f * icon.rgba[i] + 0.587f * icon.rgba[i + 1] + 0.114f * icon.rgba[i + 2];
+            out[i] = out[i + 1] = out[i + 2] = uint8_t(std::min(255.f, l * 0.38f));
+            out[i + 3] = uint8_t(icon.rgba[i + 3] * 0.8f);
+        }
+    }
+    return out;
+}
+
+// An item-type tile's silhouette: the icon's shape in one flat grey (on / off).
+const std::vector<uint8_t>& Silhouette(const std::string& key, const IconPixels& icon, uint32_t rgb) {
+    thread_local std::unordered_map<std::string, std::vector<uint8_t>> cache;
+    auto& out = cache[key + "/" + std::to_string(rgb)];
+    if (out.size() != size_t(icon.width) * size_t(icon.height) * 4) {
+        out.resize(size_t(icon.width) * size_t(icon.height) * 4);
+        for (size_t i = 0; i < out.size(); i += 4) {
+            out[i] = uint8_t(rgb >> 16); out[i + 1] = uint8_t(rgb >> 8); out[i + 2] = uint8_t(rgb);
             out[i + 3] = icon.rgba[i + 3];
         }
     }
     return out;
 }
 
-const std::vector<uint8_t>& Silhouette(const std::string& key, const IconPixels& icon) {
-    thread_local std::unordered_map<std::string, std::vector<uint8_t>> cache;
-    auto& out = cache[key];
-    if (out.size() != size_t(icon.width) * size_t(icon.height) * 4) {
-        out.resize(size_t(icon.width) * size_t(icon.height) * 4);
-        const uint32_t rgb = settings::draw::Rgb(Color::Silhouette);
-        for (size_t i = 0; i < out.size(); i += 4) {
-            out[i]     = uint8_t(rgb >> 16);
-            out[i + 1] = uint8_t(rgb >> 8);
-            out[i + 2] = uint8_t(rgb);
-            out[i + 3] = icon.rgba[i + 3] > 160 ? 255 : 0;   // the item itself, not its soft drop shadow
-        }
-    }
-    return out;
-}
-
-// A runeword's recipe as the catalog keeps it ("r08 r09 r07") in the runes' own
-// names ("Ral Ort Tal"); anything else is kept as written.
+// A runeword's recipe ("r08 r09 r07") in the runes' own names ("Ral Ort Tal").
 std::string RuneNames(std::string_view codes) {
     constexpr const char* names[] = {"El", "Eld", "Tir", "Nef", "Eth", "Ith", "Tal", "Ral", "Ort", "Thul", "Amn",
                                      "Sol", "Shael", "Dol", "Hel", "Io", "Lum", "Ko", "Fal", "Lem", "Pul", "Um",
@@ -132,63 +168,76 @@ std::string RuneNames(std::string_view codes) {
     return out;
 }
 
-// One card: a stash-cell recess, the item's picture fitted above its name plate.
-void DrawCard(Painter& painter, const RectF& card, const Entry& entry, Category category, bool found, bool pointed,
-              const IconLookup& icons) {
-    Niche(painter, card);
-    const float plateH = std::clamp(card.h * 0.30f, 50.f, 62.f);
-    const RectF picture = Inset({card.x, card.y, card.w, card.h - plateH}, std::max(6.f, card.w * 0.06f));
-    const RectF plate   = {card.x + 3.f, card.Bottom() - plateH, card.w - 6.f, plateH - 3.f};
+uint32_t NameColor(Category category) { return category == Category::Sets ? SetName : Unique; }
 
+// ---- one card (the mock-up's card loop) ----
+void DrawCard(Painter& p, const panel::Rect& at, const Entry& entry, Category category, bool found, bool pointed,
+              const IconLookup& icons) {
+    // back to mock-up pixels: everything below is the mock-up's own arithmetic
+    const float x0 = at.x / panel::Scale + panel::MockLeft, y0 = at.y / panel::Scale + panel::MockTop;
+    const float x1 = x0 + at.width / panel::Scale, y1 = y0 + at.height / panel::Scale;
+    p.FillRgb(R(x0, y0, x1, y1), 0x0E0E0E, 235.f / 255.f);
+    p.OutlineRgb(R(x0, y0, x1, y1), 0x060606, Md(2.f));
+    p.LineRgb(Mx(x0 + 2), My(y1 - 1), Mx(x1 - 1), My(y1 - 1), 0x464642, Md(1.f));
+    p.LineRgb(Mx(x1 - 1), My(y0 + 2), Mx(x1 - 1), My(y1 - 1), 0x464642, Md(1.f));
+    if (found) {
+        p.OutlineRgb(R(x0 + 3, y0 + 3, x1 - 3, y1 - 3), Gold, Md(1.f));
+        p.OutlineRgb(R(x0 + 5, y0 + 5, x1 - 5, y1 - 5), 0x463822, Md(1.f));
+    }
+    if (pointed) p.OutlineRgb(R(x0 + 2, y0 + 2, x1 - 2, y1 - 2), GoldHi, Md(2.f));
+    // the name plate
+    const float py1 = y0 + 26;
+    p.FillRgb(R(x0 + 7, y0 + 7, x1 - 7, py1), 0x1E1E1D);
+    p.LineRgb(Mx(x0 + 7), My(py1), Mx(x1 - 7), My(py1), 0x383834, Md(1.f));
+    const float size = FitSize(p, entry.name, Caps, 13.f, 9.f, Md(x1 - x0 - 20));
+    CapsAt(p, (x0 + x1) / 2, (y0 + 7 + py1) / 2 + 1, entry.name, size, found ? NameColor(category) : DimT);
+    // the picture, scaled to the card
+    const RectF area = R(x0 + 12, py1 + 8, x1 - 12, y1 - 8);
     const std::string key    = panel::IconKey(category, entry.recordId, entry.code);
     const IconPixels* pixels = icons && !key.empty() ? icons(key) : nullptr;
     if (pixels != nullptr && pixels->rgba != nullptr) {
-        const RectF at = FitImage(picture, pixels->width, pixels->height);
-        if (found) painter.Image(at, pixels->rgba, pixels->width, pixels->height);
-        else       painter.Image(at, Greyed(key, *pixels).data(), pixels->width, pixels->height, 0.8f);
+        const RectF fit = FitImage(area, pixels->width, pixels->height);
+        if (found) p.Image(fit, pixels->rgba, pixels->width, pixels->height);
+        else       p.Image(fit, Ghost(key, *pixels).data(), pixels->width, pixels->height);
     } else if (!entry.extra.empty()) {
-        // A runeword has no item until it is made: its runes stand for the picture.
-        painter.TextFit(RuneNames(entry.extra), TextStyle::Value, picture, found ? Color::Changed : Color::Dim, Align::Center, true, 18.f);
+        // a runeword is no item until it is made: its runes stand for the picture
+        p.TextRgb(RuneNames(entry.extra), Caps, Md(13.f), area, found ? GoldHi : DimT, Align::Center, true);
     }
-
-    painter.Fill(plate, Color::Plate, 0.95f);
-    painter.TextFit(entry.name, TextStyle::Small, Inset(plate, 3.f), found ? NameColor(category) : Color::Dim, Align::Center, true, 16.f);
-
-    if (found) painter.Outline(Inset(card, 1.f), Color::Gold, 1.5f);
-    if (pointed) painter.Outline(Inset(card, -1.f), Color::GoldHi, 3.f);
 }
 
-// The card under the laser, in the game's own tooltip look: black, every line
-// centred, the name in its item colour, the properties in magic blue. Beside the
-// pointed card and never off the page.
-void DrawTooltip(Painter& painter, const panel::Rect& anchor, const tooltip::Tooltip& tip, Category category) {
+// ---- the tooltip in the game's own style (the mock-up's: black, every line centred) ----
+bool BaseLine(const std::string& line) {
+    for (const char* word : {"Defense", "Damage", "Durability", "Required", "Block", "Speed"})
+        if (line.find(word) != std::string::npos) return true;
+    return false;
+}
+
+void DrawTooltip(Painter& p, const panel::Rect& card, const tooltip::Tooltip& tip, Category category) {
     if (tip.Empty()) return;
-    constexpr float Width = 420.0f, Pad = 18.0f, Gap = 6.0f;
-    const float     textWidth = Width - 2 * Pad;
-    std::vector<std::string> lines;
-    std::vector<Color>       colors;
-    std::vector<TextStyle>   styles;
-    lines.push_back(tip.title);    colors.push_back(NameColor(category)); styles.push_back(TextStyle::Value);
-    if (!tip.subtitle.empty()) { lines.push_back(tip.subtitle); colors.push_back(Color::Quiet); styles.push_back(TextStyle::Small); }
-    for (const std::string& line : tip.body) { lines.push_back(line.empty() ? " " : line); colors.push_back(Color::Magic); styles.push_back(TextStyle::Small); }
+    struct Line { std::string text; uint32_t rgb; float size; };
+    std::vector<Line> lines;
+    lines.push_back({tip.title, NameColor(category), 16.f});
+    for (const std::string& line : tip.body)
+        lines.push_back({line.empty() ? " " : line, BaseLine(line) ? White : Blue, 13.f});
     if (!tip.ranges.empty()) {
-        lines.push_back("Possible ranges"); colors.push_back(Color::Dim); styles.push_back(TextStyle::Small);
-        for (const std::string& line : tip.ranges) { lines.push_back(line.empty() ? " " : line); colors.push_back(Color::Quiet); styles.push_back(TextStyle::Small); }
+        lines.push_back({"Possible ranges", Grey, 12.f});
+        for (const std::string& line : tip.ranges) lines.push_back({line, Grey, 12.f});
     }
-    std::vector<float> heights;
-    float height = 2 * Pad;
+    if (!tip.subtitle.empty()) lines.push_back({tip.subtitle, Grey, 12.f});
+    constexpr float tw = 250.f, step = 21.f;
+    const float th = 14.f + step * float(lines.size());
+    // beside the card, in mock-up pixels; to its left when the right would leave the page
+    const float cx0 = card.x / panel::Scale + panel::MockLeft, cy0 = card.y / panel::Scale + panel::MockTop;
+    const float cw  = card.width / panel::Scale;
+    float tx = cx0 + cw + 8, ty = cy0 + 20;
+    if (tx + tw > panel::MockRight - 10) tx = cx0 - tw - 8;
+    tx = std::max(panel::MockLeft + 10, tx);
+    ty = std::min(ty, panel::MockBottom - 10 - th);
+    p.FillRgb(R(tx, ty, tx + tw, ty + th), 0x000000, 215.f / 255.f);
     for (size_t i = 0; i < lines.size(); ++i) {
-        const TextSize size = painter.Measure(lines[i], styles[i], textWidth, true);
-        heights.push_back(size.height);
-        height += size.height + (i == 0 ? Gap : 0.f);
-    }
-    const tooltip::Box box = tooltip::PlaceTooltip(anchor, Width, height);
-    painter.Fill({box.x, box.y, box.w, box.h}, Color::StashShadow, 0.93f);
-    painter.Outline({box.x, box.y, box.w, box.h}, Color::StashEdge, 1.f);
-    float y = box.y + Pad;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        painter.Text(lines[i], styles[i], {box.x + Pad, y, textWidth, heights[i]}, colors[i], Align::Center, true);
-        y += heights[i] + (i == 0 ? Gap : 0.f);
+        const float size = FitSize(p, lines[i].text, Plain, lines[i].size, 9.f, Md(tw - 12));
+        p.TextRgb(lines[i].text, Plain, Md(size), R(tx + 4, ty + 7 + float(i) * step, tx + tw - 4, ty + 7 + float(i + 1) * step),
+                  lines[i].rgb, Align::Center);
     }
 }
 
@@ -196,135 +245,159 @@ void DrawTooltip(Painter& painter, const panel::Rect& anchor, const tooltip::Too
 
 void Paint(Painter& painter, const Library& library, const ViewState& view, const IconLookup& icons,
            std::string_view gameText, std::string_view rangeText) {
-    const auto           visible = VisibleSlots(library, view);
-    const int            pages   = panel::PagesFor(int(visible.size()), view.size);
-    const panel::Layout  layout  = panel::Build(view.page, pages, int(TabCategoryCount), view.size);
-    const RectF          page    = {0, 0, panel::CanvasWidth, panel::CanvasHeight};
+    Painter& p = painter;
+    const auto          visible = VisibleSlots(library, view);
+    const int           pages   = panel::PagesFor(int(visible.size()), view.size);
+    const panel::Layout layout  = panel::Build(view.page, pages, int(TabCategoryCount), view.size, view.open);
     const auto pointed = [&](panel::HitKind kind, int index) { return view.hover.kind == kind && view.hover.index == index; };
+    constexpr float PX0 = panel::MockLeft, PY0 = panel::MockTop, PX1 = panel::MockRight, PY1 = panel::MockBottom;
 
-    // The stash's stone, a thin gold double line round the content.
-    painter.Stone(page, Color::StashStone, 0.35f);
-    painter.Outline(Inset(page, 5.f), Color::Gold, 1.5f);
-    painter.Outline(Inset(page, 9.f), Color::Bronze, 1.f);
+    // The page: the stash's stone (0.92), the game's thin gold double rule round the content.
+    StoneFill(p, {0, 0, panel::CanvasWidth, panel::CanvasHeight}, 0.92f);
+    p.OutlineRgb(R(PX0 + 14, PY0 + 8, PX1 - 14, PY1 - 10), 0x28221A, Md(1.f));
+    p.OutlineRgb(R(PX0 + 15, PY0 + 9, PX1 - 15, PY1 - 11), Gold, Md(1.f));
+    p.OutlineRgb(R(PX0 + 18, PY0 + 12, PX1 - 18, PY1 - 14), 0x1C1814, Md(1.f));
 
-    // Uniques / Sets / Runewords, each with its count.
+    // Uniques / Sets / Runewords: the name in small caps, the count under it.
     for (int i = 0; i < layout.tabCount; ++i) {
         const Category category = static_cast<Category>(i);
-        const std::string word  = std::string(CategoryName(category)) + "  " + std::to_string(library.Found(category)) +
-                                  "/" + std::to_string(library.Size(category));
-        StoneButton(painter, Box(layout.tabs[i]), word, category == view.category, pointed(panel::HitKind::Tab, i),
-                    false, TextStyle::Value);
+        const bool     on       = category == view.category;
+        const RectF    r        = Box(layout.tabs[i]);
+        Button(p, r, on);
+        if (pointed(panel::HitKind::Tab, i)) p.OutlineRgb(r, GoldHi, Md(1.5f));
+        const float kx = r.x / panel::Scale + PX0, ky = r.y / panel::Scale + PY0;
+        CapsAt(p, kx + 93, ky + 15, CategoryName(category), 16.f, on ? OnText : OffText);
+        const std::string count = std::to_string(library.Found(category)) + "/" + std::to_string(library.Size(category));
+        p.TextRgb(count, Plain, Md(11.f), R(kx, ky + 24, kx + 186, ky + 38), on ? 0xBEBEB8 : DimT, Align::Center);
     }
 
-    // The found bar and "Uniques 8 / 403".
-    {
-        const RectF bar   = Box(layout.progress);
-        const float total = float(std::max<uint32_t>(1, library.Size(view.category)));
-        Niche(painter, Inset(bar, -2.f));
-        painter.Fill({bar.x, bar.y, bar.w * float(library.Found(view.category)) / total, bar.h}, Color::Gold, 0.9f);
-        const std::string counter = std::string(CategoryName(view.category)) + "  " + CounterText(library, view);
-        painter.TextFit(counter, TextStyle::Value, Box(layout.counter), Color::Gold, Align::Trailing, false);
-    }
-
-    // The cards. A page with fewer entries leaves empty cells, so the grid always reads full.
+    // The cards.
     for (int slot = 0; slot < layout.slotCount; ++slot) {
-        const RectF  card  = Box(layout.slots[slot]);
         const Entry* entry = SlotEntry(library, view, visible, slot);
-        if (entry == nullptr) {
-            Niche(painter, card, 0.6f);
+        if (entry == nullptr) {   // past the last entry: an empty recess, so the grid reads full
+            const RectF r = Box(layout.slots[slot]);
+            p.FillRgb(r, 0x0E0E0E, 0.55f);
+            p.OutlineRgb(r, 0x060606, Md(2.f));
             continue;
         }
-        DrawCard(painter, card, *entry, view.category, SlotFound(library, view, visible, slot),
+        DrawCard(p, layout.slots[slot], *entry, view.category, SlotFound(library, view, visible, slot),
                  pointed(panel::HitKind::Slot, slot), icons);
     }
 
-    // The scroll bar: its arrows, the track, the thumb at this page.
+    // The scroll bar: the dark track, a stone arrow at each end, the lit stone thumb.
     {
-        const bool canBack = view.page > 0, canForward = view.page + 1 < pages;
-        StoneButton(painter, Box(layout.previous), "", false, pointed(panel::HitKind::Previous, 0), !canBack);
-        painter.IconAt(Icon::ChevronUp, Inset(Box(layout.previous), 6.f), canBack ? Color::Quiet : Color::EdgeOff);
-        StoneButton(painter, Box(layout.next), "", false, pointed(panel::HitKind::Next, 0), !canForward);
-        painter.IconAt(Icon::ChevronDown, Inset(Box(layout.next), 6.f), canForward ? Color::Quiet : Color::EdgeOff);
-        Niche(painter, Box(layout.track));
+        p.FillRgb(Box(layout.scroll), 0x0C0C0C);
+        p.OutlineRgb(Box(layout.scroll), 0x3C3C38, Md(1.f));
+        for (const bool up : {true, false}) {
+            const RectF r = Box(up ? layout.previous : layout.next);
+            Button(p, r, false);
+            if (pointed(up ? panel::HitKind::Previous : panel::HitKind::Next, 0)) p.OutlineRgb(r, GoldHi, Md(1.f));
+            p.IconAt(up ? settings::draw::Icon::ChevronUp : settings::draw::Icon::ChevronDown,
+                     {r.x + Md(2.f), r.y + Md(2.f), r.w - Md(4.f), r.h - Md(4.f)}, settings::draw::Color::Quiet);
+        }
         const panel::Rect thumb = panel::Thumb(layout);
-        painter.Fill(Inset(Box(thumb), 3.f), view.hover.kind == panel::HitKind::Page ? Color::StashEdge : Color::StashLight, 1.f);
+        Button(p, {thumb.x + Md(1.f), thumb.y, thumb.width - Md(1.f), thumb.height}, true);
     }
 
-    // The item types: each tile's silhouette (the first unique of that type with an
-    // icon), sized as the items are in the inventory - one scale for all tiles, so a
-    // ring stays small beside an armour - its name and the share found.
+    // The found bar, and "Uniques  81 / 403" under it.
     {
-        // The silhouette is made at once: the lookup's pixels live only until its next call.
-        struct Pick { const std::vector<uint8_t>* pixels = nullptr; int width = 0, height = 0; };
-        Pick picks[panel::GroupCount];
-        int  tallest = 1, widest = 1;
-        for (int group = 0; group < panel::GroupCount && icons; ++group) {
-            // The lowest-level unique of the tile's plain type: the plainest shape (a cap,
-            // a buckler, a short sword); else of any type of the tile.
-            for (int pass = 0; pass < 2 && picks[group].pixels == nullptr; ++pass) {
-                const Entry* best = nullptr;
-                for (uint32_t slot = 0; slot < library.Size(Category::Uniques); ++slot) {
-                    const Entry* entry = library.At(Category::Uniques, slot);
-                    if (entry == nullptr || panel::GroupOfType(entry->type) != group) continue;
-                    if (pass == 0 && entry->type != panel::GroupMainType(group)) continue;
-                    if (best == nullptr || entry->level < best->level) best = entry;
-                }
-                if (best == nullptr) continue;
-                const std::string key = panel::IconKey(Category::Uniques, best->recordId, best->code);
-                const IconPixels* icon = icons(key);
-                if (icon == nullptr || icon->rgba == nullptr) continue;
-                picks[group] = {&Silhouette(key, *icon), icon->width, icon->height};
-                tallest = std::max(tallest, icon->height);
-                widest  = std::max(widest, icon->width);
-            }
-        }
-        const RectF first = Box(layout.groups[0]);
-        const float imageH = first.h - 40.f, imageW = first.w * 0.42f;
-        const float scale  = std::min(imageH / float(tallest), imageW / float(widest));
+        const RectF bar   = Box(layout.progress);
+        const float share = float(library.Found(view.category)) / float(std::max<uint32_t>(1, library.Size(view.category)));
+        p.FillRgb(bar, 0x0A0A0A);
+        p.OutlineRgb(bar, 0x3C3C38, Md(1.f));
+        p.FillRgb({bar.x + Md(2.f), bar.y + Md(2.f), (bar.w - Md(4.f)) * share, bar.h - Md(4.f)}, 0xA08448);
+        CapsAt(p, (PX0 + PX1) / 2, layout.counter.y / panel::Scale + PY0 + 12,
+               std::string(CategoryName(view.category)) + "  " + CounterText(library, view), 15.f, Txt);
+    }
+
+    // The item types: the silhouette (36 px, a ring or an amulet 22 - they are small items)
+    // with the share found beside it; the chosen tile lit.
+    {
         for (int group = 0; group < panel::GroupCount; ++group) {
-            const RectF tile  = Box(layout.groups[group]);
-            const auto  share = ShareOf(library, view.category, group);
-            const bool  chosen = view.group == group;
-            if (chosen) {
-                painter.Fill(tile, Color::StashLight, 1.f);
-                painter.Outline(Inset(tile, 1.f), Color::Gold, 1.5f);
-            } else {
-                Niche(painter, tile);
+            const RectF r  = Box(layout.groups[group]);
+            const bool  on = view.group == group;
+            Button(p, r, on);
+            if (pointed(panel::HitKind::Group, group)) p.OutlineRgb(r, GoldHi, Md(1.5f));
+            const float x0 = r.x / panel::Scale + PX0, y0 = r.y / panel::Scale + PY0;
+            const float x1 = x0 + r.w / panel::Scale, cbh = r.h / panel::Scale;
+            // the plainest unique of the tile's own type (lowest level), else of any of its types
+            const Entry* best = nullptr;
+            for (int pass = 0; pass < 2 && best == nullptr; ++pass)
+                for (uint32_t slot = 0; slot < library.Size(Category::Uniques); ++slot) {
+                    const Entry* e = library.At(Category::Uniques, slot);
+                    if (e == nullptr || panel::GroupOfType(e->type) != group) continue;
+                    if (pass == 0 && e->type != panel::GroupMainType(group)) continue;
+                    if (best == nullptr || e->level < best->level) best = e;
+                }
+            if (best != nullptr && icons) {
+                const std::string key = panel::IconKey(Category::Uniques, best->recordId, best->code);
+                if (const IconPixels* icon = icons(key); icon != nullptr && icon->rgba != nullptr) {
+                    const float most = (group == 6 || group == 7) ? 22.f : 36.f;
+                    const float s = most / float(std::max(icon->width, icon->height));
+                    const float w = float(icon->width) * s, h = float(icon->height) * s;
+                    const float ix = (x0 + x1) / 2 - w / 2 - 18, iy = y0 + (cbh - h) / 2;
+                    const uint32_t rgb = on ? 0xE1E1DA : 0xA5A5A0;
+                    p.Image(R(ix, iy, ix + w, iy + h), Silhouette(key, *icon, rgb).data(), icon->width, icon->height);
+                }
             }
-            if (pointed(panel::HitKind::Group, group)) painter.Outline(Inset(tile, -2.f), Color::GoldHi, 2.f);
-            if (const Pick& pick = picks[group]; pick.pixels != nullptr) {
-                const float w = pick.width * scale, h = pick.height * scale;
-                const RectF at = {tile.x + 8.f + (imageW - w) * 0.5f, tile.y + 6.f + (imageH - h) * 0.5f, w, h};
-                painter.Image(at, pick.pixels->data(), pick.width, pick.height, share.total ? 0.9f : 0.35f);
-            }
-            const RectF text = {tile.x + imageW + 12.f, tile.y + 6.f, tile.w - imageW - 18.f, imageH};
+            const auto share = ShareOf(library, view.category, group);
             const std::string percent = share.total ? std::to_string(share.found * 100 / share.total) + "%" : "-";
-            painter.TextFit(percent, TextStyle::Value, text, share.total ? (chosen ? Color::Gold : Color::Text) : Color::Dim,
-                            Align::Center, false);
-            painter.TextFit(panel::GroupName(group), TextStyle::Small, {tile.x + 4.f, tile.Bottom() - 34.f, tile.w - 8.f, 30.f},
-                            chosen ? Color::Gold : Color::Quiet, Align::Center, false);
+            p.TextRgb(percent, Plain, Md(15.f), R((x0 + x1) / 2 + 4, y0 + cbh / 2 - 11, x1 - 2, y0 + cbh / 2 + 11),
+                      on ? OnText : 0xAFAFAA, Align::Leading);
         }
     }
 
-    // Size, Sort, Show.
-    painter.Text("Size", TextStyle::Small, Box(layout.sizeLabel), Color::Quiet, Align::Trailing);
-    for (int i = 0; i < int(panel::Size::Count); ++i)
-        StoneButton(painter, Box(layout.sizeSteps[i]), panel::SizeName(static_cast<panel::Size>(i)), i == int(view.size),
-                    pointed(panel::HitKind::Size, i));
-    painter.Text("Sort", TextStyle::Small, Box(layout.sortLabel), Color::Quiet, Align::Trailing);
-    for (int i = 0; i < int(panel::Sort::Count); ++i)
-        StoneButton(painter, Box(layout.sortSteps[i]), panel::SortName(static_cast<panel::Sort>(i)), i == int(view.sort),
-                    pointed(panel::HitKind::Sort, i));
-    painter.Text("Show", TextStyle::Small, Box(layout.showLabel), Color::Quiet, Align::Trailing);
-    for (int i = 0; i < int(panel::Show::Count); ++i)
-        StoneButton(painter, Box(layout.showSteps[i]), panel::ShowName(static_cast<panel::Show>(i)), i == int(view.show),
-                    pointed(panel::HitKind::Show, i));
+    // Footer: Size and S / M / L; the Sort and Show lists.
+    {
+        const float by = layout.sizeLabel.y / panel::Scale + PY0;
+        CapsAt(p, 141 + 26, by + 18, "Size", 15.f, Txt);
+        for (int i = 0; i < int(panel::Size::Count); ++i) {
+            const RectF r  = Box(layout.sizeSteps[i]);
+            const bool  on = i == int(view.size);
+            Button(p, r, on);
+            if (pointed(panel::HitKind::Size, i)) p.OutlineRgb(r, GoldHi, Md(1.5f));
+            CapsAt(p, r.x / panel::Scale + PX0 + 19, by + 18, panel::SizeName(static_cast<panel::Size>(i)), 15.f, on ? OnText : OffText);
+        }
+        const auto list = [&](const panel::Rect& boxRect, const char* label, const char* value, bool lit) {
+            const RectF r = Box(boxRect);
+            const float x0 = r.x / panel::Scale + PX0, x1 = x0 + r.w / panel::Scale;
+            CapsAt(p, x0 - 29, by + 18, label, 13.f, Txt);   // 13: Cinzel's spacing is wider than the mock-up's font
+            p.FillRgb(r, 0x0A0A0A);
+            p.OutlineRgb(r, lit ? GoldHi : Gold, Md(1.f));
+            p.TextRgb(value, Plain, Md(15.f), R(x0 + 10, by, x1 - 34, by + 36), 0xE6E6E0, Align::Leading);
+            const RectF arrow = R(x1 - 32, by + 2, x1 - 2, by + 34);
+            Button(p, arrow, false);
+            p.IconAt(settings::draw::Icon::ChevronDown, {arrow.x + Md(5.f), arrow.y + Md(5.f), arrow.w - Md(10.f), arrow.h - Md(10.f)},
+                     settings::draw::Color::Quiet);
+        };
+        list(layout.sortBox, "Sort", panel::SortName(view.sort),
+             view.open == panel::Drop::Sort || pointed(panel::HitKind::SortBox, 0));
+        list(layout.showBox, "Show", panel::ShowName(view.show),
+             view.open == panel::Drop::Show || pointed(panel::HitKind::ShowBox, 0));
+        // An open list: its options above its box, the chosen one in gold.
+        const auto options = [&](const panel::Rect* rects, int count, int chosen, panel::HitKind kind, auto name) {
+            for (int i = 0; i < count; ++i) {
+                const RectF r = Box(rects[i]);
+                p.FillRgb(r, pointed(kind, i) ? 0x2A2A28 : 0x0A0A0A, 0.97f);
+                p.OutlineRgb(r, Gold, Md(1.f));
+                const float x0 = r.x / panel::Scale + PX0, y0 = r.y / panel::Scale + PY0;
+                p.TextRgb(name(i), Plain, Md(15.f), R(x0 + 10, y0, x0 + r.w / panel::Scale - 6, y0 + 36),
+                          i == chosen ? Unique : 0xE6E6E0, Align::Leading);
+            }
+        };
+        if (view.open == panel::Drop::Sort)
+            options(layout.sortOptions, int(panel::Sort::Count), int(view.sort), panel::HitKind::Sort,
+                    [](int i) { return panel::SortName(static_cast<panel::Sort>(i)); });
+        if (view.open == panel::Drop::Show)
+            options(layout.showOptions, int(panel::Show::Count), int(view.show), panel::HitKind::Show,
+                    [](int i) { return panel::ShowName(static_cast<panel::Show>(i)); });
+    }
 
     // The pointed card's tooltip, last so it sits over everything.
     if (view.hover.kind == panel::HitKind::Slot) {
         if (const Entry* entry = SlotEntry(library, view, visible, view.hover.index)) {
             const bool found = SlotFound(library, view, visible, view.hover.index);
-            DrawTooltip(painter, layout.slots[view.hover.index], tooltip::BuildTooltip(*entry, found, gameText, rangeText), view.category);
+            DrawTooltip(p, layout.slots[view.hover.index], tooltip::BuildTooltip(*entry, found, gameText, rangeText), view.category);
         }
     }
 }

@@ -797,6 +797,18 @@ void Painter::Image(RectF r,const uint8_t* rgba,int width,int height,float alpha
         D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,D2D1_ALPHA_MODE_PREMULTIPLIED)),bitmap.Put())))return;
     i.rt->DrawBitmap(bitmap.operator->(),R(r),alpha,D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
 }
+void Painter::FillRgb(RectF r,uint32_t rgb,float alpha){auto& i=*impl;if(i.drawing)i.rt->FillRectangle(R(r),i.Solid(rgb,alpha));}
+void Painter::LineRgb(float x0,float y0,float x1,float y1,uint32_t rgb,float width,float alpha){
+    auto& i=*impl;if(i.drawing)i.rt->DrawLine({x0,y0},{x1,y1},i.Solid(rgb,alpha),width);
+}
+void Painter::OutlineRgb(RectF r,uint32_t rgb,float width,float alpha){
+    auto& i=*impl;if(!i.drawing)return;
+    const float h=width/2;i.rt->DrawRectangle({r.x+h,r.y+h,r.Right()-h,r.Bottom()-h},i.Solid(rgb,alpha),width);
+}
+TextSize Painter::TextRgb(std::string_view utf8,TextStyle style,float size,RectF box,uint32_t rgb,Align align,bool wrap){
+    auto& i=*impl;if(!i.drawing)return Measure(utf8,style,box.w,wrap,box.h,size);
+    return i.DrawText(utf8,style,box,rgb,align,wrap,size);
+}
 void Painter::Line(float x0,float y0,float x1,float y1,Color c,float width){auto& i=*impl;if(i.drawing)i.rt->DrawLine({x0,y0},{x1,y1},i.Token(c),width);}
 void Painter::Outline(RectF r,Color c,float width,bool dashed){
     auto& i=*impl;if(!i.drawing)return;

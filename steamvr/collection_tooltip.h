@@ -73,7 +73,7 @@ struct Box {
 inline constexpr float TooltipMargin = 18.0f;
 inline constexpr float TooltipGap    = 14.0f;
 // The card starts below the tab row, so a top-row slot never covers the tabs.
-inline constexpr float TooltipTop    = panel::Margin + panel::TabHeight + 16.0f;
+inline constexpr float TooltipTop    = panel::My(258.0f);   // the cards' top (the mock-up's gy0)
 
 Box PlaceTooltip(const panel::Rect& anchor, float width, float height);
 

@@ -1,19 +1,14 @@
 #pragma once
-// Collection panel: where the category buttons, the card grid, the scroll bar,
-// the item-type tiles and the footer controls go, and what the laser hits.
-// Geometry only - no drawing and no game calls - so the layout is unit tested
-// (collection_panel_test.cpp) and the painter and the pointer share one source
-// of truth.
+// Collection panel: where the kind buttons, the card grid, the scroll bar, the found bar,
+// the item-type tiles and the footer go, and what the laser hits. Geometry only - no
+// drawing and no game calls - so the layout is unit tested (collection_panel_test.cpp)
+// and the painter and the pointer share one source of truth.
 //
-// The look is the owner's accepted preview v3 (2026-11-20): a page of the D2R
-// stash in grey stone - category buttons with counters on top, a progress bar,
-// cards with a name plate, a scroll bar on the right, the item types with their
-// share found below the grid, and Size / Sort / Show at the bottom.
-//
-// The canvas is the page's own shape: the page is drawn into the stash's own
-// picture over its grid (u .135-.495, v .105-.455 of the 2244 x 2352 UI image =
-// 808 x 823 px), so 1004 x 1024 keeps its proportions. The painter's bitmap is
-// wider (1280); only the left CanvasWidth columns are the page.
+// The layout is the owner's accepted mock-up v3 (2026-11-20, render2.py / render3.py),
+// which was drawn on the owner's own UI shot of the stash. Its page sat at 113,180 -
+// 733,926 of that crop (the shot cropped at 280,50): 620 x 746 UI pixels, exactly the
+// stash's content under its tab bar. Every place below is the mock-up's, in its own
+// pixels (Mx / My), scaled by one factor to this canvas (746 mock-up px = 1024 here).
 #include <algorithm>
 #include <cstdint>
 #include <string>
@@ -23,14 +18,19 @@
 
 namespace framevr::collection::panel {
 
-inline constexpr float CanvasWidth  = 1004.0f;
+// The mock-up's page, in its own pixels, and the scale to the canvas.
+inline constexpr float MockLeft = 113.0f, MockTop = 180.0f, MockRight = 733.0f, MockBottom = 926.0f;
+inline constexpr float Scale        = 1024.0f / (MockBottom - MockTop);
 inline constexpr float CanvasHeight = 1024.0f;
+inline constexpr float CanvasWidth  = 851.0f;   // 620 * Scale
+inline constexpr float Mx(float x) { return (x - MockLeft) * Scale; }
+inline constexpr float My(float y) { return (y - MockTop) * Scale; }
+inline constexpr float Md(float d) { return d * Scale; }
 
-// How big the cards are, from the footer's Size control: fewer, larger cards
-// mean more pages.
+// How big the cards are, from the footer's Size control.
 enum class Size : uint32_t {
     Small  = 0,   // 3 x 2 = 6 cards a page
-    Medium = 1,   // 4 x 3 = 12
+    Medium = 1,   // 4 x 3 = 12 (the mock-up)
     Large  = 2,   // 6 x 4 = 24
     Count  = 3,
 };
@@ -63,10 +63,9 @@ inline constexpr const char* SizeName(Size size) {
     }
 }
 
-// The most cards any size shows: the layout's slot array is this long.
 inline constexpr int MaxSlots = 6 * 4;
 
-// What the grid shows, from the footer's Show control.
+// What the grid shows: the footer's Show list.
 enum class Show : uint32_t {
     All     = 0,
     Missing = 1,
@@ -82,7 +81,7 @@ inline constexpr const char* ShowName(Show show) {
     }
 }
 
-// The order of the cards, from the footer's Sort control (owner: Name / Level).
+// The order of the cards: the footer's Sort list (owner: name / required level).
 enum class Sort : uint32_t {
     Name  = 0,
     Level = 1,
@@ -93,11 +92,13 @@ inline constexpr const char* SortName(Sort sort) {
     return sort == Sort::Level ? "Level" : "Name";
 }
 
-// The item types under the grid: two rows of six, each with its share found.
-// A tile filters the grid to its type (again: all types). The codes are the
-// game's item types (ItemTypes.txt) as collection.tsv carries them; types the
-// owner's preview has no tile for (maces, staves, wands, daggers, javelins,
-// claws, charms, jewels) show only under "all types".
+// The footer's lists: which one is open.
+enum class Drop : uint32_t { None = 0, Sort = 1, Show = 2 };
+
+// The item types under the grid: two rows of six, each with its share found. A tile
+// filters the grid to its type (again: all types). The codes are the game's item types
+// (ItemTypes.txt) as collection.tsv carries them; types the mock-up has no tile for
+// (maces, staves, wands, daggers, javelins, claws, charms, jewels) show under all types.
 inline constexpr int GroupCount = 12;
 inline constexpr int NoGroup    = -1;
 
@@ -107,14 +108,13 @@ inline constexpr const char* GroupName(int group) {
     return group >= 0 && group < GroupCount ? names[group] : "";
 }
 
-// Each tile's own plain type (a plain helm, not a circlet): its silhouette is taken from it first.
+// Each tile's plain type: its silhouette is taken from it first.
 inline constexpr const char* GroupMainType(int group) {
     constexpr const char* types[GroupCount] = {"helm", "tors", "shie", "glov", "boot", "belt",
                                                "amul", "ring", "axe", "swor", "bow", "pole"};
     return group >= 0 && group < GroupCount ? types[group] : "";
 }
 
-// The tile an item type belongs to, or NoGroup.
 inline int GroupOfType(std::string_view type) {
     struct Pair { const char* type; int group; };
     constexpr Pair pairs[] = {
@@ -132,14 +132,7 @@ inline int GroupOfType(std::string_view type) {
     return NoGroup;
 }
 
-inline constexpr int MaxTabs = 3;   // Uniques, Sets, Runewords (Materials keeps no tab)
-
-inline constexpr float Margin      = 16.0f;
-inline constexpr float TabHeight   = 60.0f;
-inline constexpr float TabWidth    = 236.0f;
-inline constexpr float TabGap      = 10.0f;
-inline constexpr float ScrollWidth = 34.0f;
-inline constexpr float CardGap     = 10.0f;
+inline constexpr int MaxTabs = 3;   // Uniques, Sets, Runewords
 
 struct Rect {
     float x = 0, y = 0, width = 0, height = 0;
@@ -149,100 +142,107 @@ inline constexpr bool Inside(const Rect& rect, float x, float y) {
     return x >= rect.x && y >= rect.y && x < rect.x + rect.width && y < rect.y + rect.height;
 }
 
+// A rect from the mock-up's own corners.
+inline constexpr Rect FromMock(float x0, float y0, float x1, float y1) { return {Mx(x0), My(y0), Md(x1 - x0), Md(y1 - y0)}; }
+
 struct Layout {
     Rect tabs[MaxTabs] {};
     int  tabCount = 0;
-    Rect progress {}, counter {};                 // the found bar and "Uniques 8 / 403"
-    Rect grid {};                                 // the card field
+    Rect grid {};
     Rect slots[MaxSlots] {};
     int  slotCount = 0;
     int  columns   = 4;
     int  rows      = 3;
-    Rect previous {}, next {}, track {};          // the scroll bar: its arrows and the track between
+    Rect scroll {}, previous {}, next {}, track {};   // the scroll bar, its arrows and the track between
     int  page = 0, pages = 1;
+    Rect progress {}, counter {};                     // the found bar and "Uniques  81 / 403" under it
     Rect groups[GroupCount] {};
     Rect sizeLabel {}, sizeSteps[static_cast<int>(Size::Count)] {};
-    Rect sortLabel {}, sortSteps[static_cast<int>(Sort::Count)] {};
-    Rect showLabel {}, showSteps[static_cast<int>(Show::Count)] {};
+    Rect sortLabel {}, sortBox {}, sortOptions[static_cast<int>(Sort::Count)] {};
+    Rect showLabel {}, showBox {}, showOptions[static_cast<int>(Show::Count)] {};
+    Drop open = Drop::None;                           // a list that is open shows its options above it
 };
 
-// Pages a category needs for its entries at this card size, at least one.
 inline constexpr int PagesFor(int entries, Size size = Size::Medium) {
     const int slots = SlotsFor(size);
     return entries <= 0 ? 1 : (entries + slots - 1) / slots;
 }
 
-// The scroll bar's thumb for this page of pages, inside the track.
+// The scroll bar's thumb (the mock-up's: 70 px tall) at this page of pages.
 inline Rect Thumb(const Layout& layout) {
-    const float height = std::max(28.0f, layout.track.height / float(std::max(1, layout.pages)));
+    const float height = std::min(layout.track.height, Md(70.0f));
     const float travel = layout.track.height - height;
     const float at     = layout.pages > 1 ? float(layout.page) / float(layout.pages - 1) : 0.0f;
     return {layout.track.x, layout.track.y + travel * at, layout.track.width, height};
 }
 
-// Places everything for one page. page is clamped to the available pages.
-inline Layout Build(int page, int pages, int tabs, Size size = Size::Medium) {
+inline Layout Build(int page, int pages, int tabs, Size size = Size::Medium, Drop open = Drop::None) {
     Layout layout;
     layout.tabCount = std::clamp(tabs, 0, MaxTabs);
     layout.pages    = std::max(1, pages);
     layout.page     = std::clamp(page, 0, layout.pages - 1);
-    const float right = CanvasWidth - Margin;
+    layout.open     = open;
 
-    for (int i = 0; i < layout.tabCount; ++i)
-        layout.tabs[i] = {Margin + i * (TabWidth + TabGap), Margin, TabWidth, TabHeight};
+    // The kind buttons: 186 x 40, 8 apart, from PX0+28, PY0+24.
+    for (int i = 0; i < layout.tabCount; ++i) {
+        const float x = 141.0f + float(i) * 194.0f;
+        layout.tabs[i] = FromMock(x, 204.0f, x + 186.0f, 244.0f);
+    }
 
-    const float progressY = Margin + TabHeight + 14.0f;
-    layout.progress = {Margin, progressY + 9.0f, 560.0f, 14.0f};
-    layout.counter  = {Margin + 580.0f, progressY, right - (Margin + 580.0f), 32.0f};
-
-    // The card field, the scroll bar beside it.
-    const float gridTop    = progressY + 32.0f + 12.0f;
-    const float gridBottom = 690.0f;
-    layout.grid = {Margin, gridTop, right - Margin - ScrollWidth - 10.0f, gridBottom - gridTop};
-    const float scrollX = right - ScrollWidth;
-    layout.previous = {scrollX, gridTop, ScrollWidth, ScrollWidth};
-    layout.next     = {scrollX, gridBottom - ScrollWidth, ScrollWidth, ScrollWidth};
-    layout.track    = {scrollX, gridTop + ScrollWidth + 4.0f, ScrollWidth, gridBottom - gridTop - 2 * ScrollWidth - 8.0f};
-
+    // The cards: gx0 141 .. gx1 681, gy0 258 .. gy1 662, 10 apart.
+    constexpr float gx0 = 141.0f, gy0 = 258.0f, gx1 = 681.0f, gy1 = 662.0f, gap = 10.0f;
+    layout.grid      = FromMock(gx0, gy0, gx1, gy1);
     const Grid grid  = GridOf(size);
     layout.columns   = grid.columns;
     layout.rows      = grid.rows;
     layout.slotCount = grid.columns * grid.rows;
-    const float cellW = layout.grid.width / float(grid.columns);
-    const float cellH = layout.grid.height / float(grid.rows);
+    const float cw = (gx1 - gx0 - gap * float(grid.columns - 1)) / float(grid.columns);
+    const float ch = (gy1 - gy0 - gap * float(grid.rows - 1)) / float(grid.rows);
     for (int row = 0; row < grid.rows; ++row)
-        for (int column = 0; column < grid.columns; ++column)
-            layout.slots[row * grid.columns + column] = {layout.grid.x + column * cellW + CardGap * 0.5f,
-                                                         layout.grid.y + row * cellH + CardGap * 0.5f,
-                                                         cellW - CardGap, cellH - CardGap};
+        for (int column = 0; column < grid.columns; ++column) {
+            const float x0 = gx0 + float(column) * (cw + gap), y0 = gy0 + float(row) * (ch + gap);
+            layout.slots[row * grid.columns + column] = FromMock(x0, y0, x0 + cw, y0 + ch);
+        }
 
-    // Footer: Size, Sort, Show - a label, then one stone step per choice.
-    const float footerY = CanvasHeight - Margin - 52.0f;
+    // The scroll bar: sx0 689 .. sx1 707 beside the cards, an 18 px arrow at each end.
+    layout.scroll   = FromMock(689.0f, gy0, 707.0f, gy1);
+    layout.previous = FromMock(690.0f, gy0 + 1.0f, 707.0f, gy0 + 19.0f);
+    layout.next     = FromMock(690.0f, gy1 - 19.0f, 707.0f, gy1 - 1.0f);
+    layout.track    = FromMock(691.0f, gy0 + 22.0f, 706.0f, gy1 - 22.0f);
 
-    // The item types: two rows of six filling what is left between the grid and the footer.
-    constexpr float GroupGap = 8.0f;
-    const float groupTop    = gridBottom + 12.0f;
-    const float groupHeight = (footerY - 12.0f - groupTop - GroupGap) * 0.5f;
-    const float groupW      = (right - Margin - 5 * GroupGap) / 6.0f;
-    for (int i = 0; i < GroupCount; ++i)
-        layout.groups[i] = {Margin + (i % 6) * (groupW + GroupGap), groupTop + (i / 6) * (groupHeight + GroupGap), groupW, groupHeight};
-    constexpr float StepH = 44.0f, LabelW = 62.0f, StepGap = 6.0f, Between = 26.0f;
-    float x = Margin;
-    layout.sizeLabel = {x, footerY, LabelW, 52.0f};
-    x += LabelW + 8.0f;
-    for (int i = 0; i < static_cast<int>(Size::Count); ++i, x += 46.0f + StepGap)
-        layout.sizeSteps[i] = {x, footerY + 4.0f, 46.0f, StepH};
-    x += Between;
-    layout.sortLabel = {x, footerY, LabelW, 52.0f};
-    x += LabelW + 8.0f;
-    for (int i = 0; i < static_cast<int>(Sort::Count); ++i, x += 96.0f + StepGap)
-        layout.sortSteps[i] = {x, footerY + 4.0f, 96.0f, StepH};
-    x += Between;
-    layout.showLabel = {x, footerY, LabelW + 6.0f, 52.0f};
-    x += LabelW + 14.0f;
-    const float showW = (right - x - 2 * StepGap) / 3.0f;
-    for (int i = 0; i < static_cast<int>(Show::Count); ++i, x += showW + StepGap)
-        layout.showSteps[i] = {x, footerY + 4.0f, showW, StepH};
+    // The found bar under the cards, and the count under it.
+    layout.progress = FromMock(gx0, 676.0f, 707.0f, 686.0f);
+    layout.counter  = FromMock(gx0, 692.0f, 707.0f, 716.0f);
+
+    // The item types: 6 a row, 6 apart, 58 tall, from 724.
+    const float cbw = (707.0f - gx0 - 6.0f * 5.0f) / 6.0f;
+    for (int i = 0; i < GroupCount; ++i) {
+        const float x0 = gx0 + float(i % 6) * (cbw + 6.0f), y0 = 724.0f + float(i / 6) * (58.0f + 6.0f);
+        layout.groups[i] = FromMock(x0, y0, x0 + cbw, y0 + 58.0f);
+    }
+
+    // Footer at 858: Size and its S / M / L, the Sort list (402..542) and the Show list (600..707).
+    constexpr float by = 858.0f;
+    layout.sizeLabel = FromMock(gx0, by, gx0 + 52.0f, by + 36.0f);
+    for (int i = 0; i < static_cast<int>(Size::Count); ++i) {
+        const float x0 = gx0 + 56.0f + float(i) * 44.0f;
+        layout.sizeSteps[i] = FromMock(x0, by, x0 + 38.0f, by + 36.0f);
+    }
+    layout.sortLabel = FromMock(342.0f, by, 398.0f, by + 36.0f);
+    layout.sortBox   = FromMock(402.0f, by, 542.0f, by + 36.0f);
+    layout.showLabel = FromMock(540.0f, by, 596.0f, by + 36.0f);
+    layout.showBox   = FromMock(600.0f, by, 707.0f, by + 36.0f);
+    // An open list's options stand above its box, the first at the top.
+    if (open == Drop::Sort)
+        for (int i = 0; i < static_cast<int>(Sort::Count); ++i) {
+            const float y1 = by - 2.0f - float(static_cast<int>(Sort::Count) - 1 - i) * 36.0f;
+            layout.sortOptions[i] = FromMock(402.0f, y1 - 36.0f, 542.0f, y1);
+        }
+    if (open == Drop::Show)
+        for (int i = 0; i < static_cast<int>(Show::Count); ++i) {
+            const float y1 = by - 2.0f - float(static_cast<int>(Show::Count) - 1 - i) * 36.0f;
+            layout.showOptions[i] = FromMock(600.0f, y1 - 36.0f, 707.0f, y1);
+        }
     return layout;
 }
 
@@ -254,9 +254,11 @@ enum class HitKind {
     Next,
     Slot,
     Size,
-    Show,
-    Sort,
+    Show,       // an option of the open Show list
+    Sort,       // an option of the open Sort list
     Group,
+    SortBox,    // the Sort list itself: opens / closes it
+    ShowBox,
 };
 
 struct Hit {
@@ -264,8 +266,15 @@ struct Hit {
     int     index = -1;
 };
 
-// What the laser at (x, y) points at.
+// What the laser at (x, y) points at. An open list's options lie over the tiles,
+// so they are asked first.
 inline Hit Pick(const Layout& layout, float x, float y) {
+    if (layout.open == Drop::Sort)
+        for (int i = 0; i < static_cast<int>(Sort::Count); ++i)
+            if (Inside(layout.sortOptions[i], x, y)) return {HitKind::Sort, i};
+    if (layout.open == Drop::Show)
+        for (int i = 0; i < static_cast<int>(Show::Count); ++i)
+            if (Inside(layout.showOptions[i], x, y)) return {HitKind::Show, i};
     for (int i = 0; i < layout.tabCount; ++i)
         if (Inside(layout.tabs[i], x, y)) return {HitKind::Tab, i};
     if (Inside(layout.previous, x, y)) return {HitKind::Previous, 0};
@@ -276,10 +285,8 @@ inline Hit Pick(const Layout& layout, float x, float y) {
     }
     for (int i = 0; i < static_cast<int>(Size::Count); ++i)
         if (Inside(layout.sizeSteps[i], x, y)) return {HitKind::Size, i};
-    for (int i = 0; i < static_cast<int>(Sort::Count); ++i)
-        if (Inside(layout.sortSteps[i], x, y)) return {HitKind::Sort, i};
-    for (int i = 0; i < static_cast<int>(Show::Count); ++i)
-        if (Inside(layout.showSteps[i], x, y)) return {HitKind::Show, i};
+    if (Inside(layout.sortBox, x, y)) return {HitKind::SortBox, 0};
+    if (Inside(layout.showBox, x, y)) return {HitKind::ShowBox, 0};
     for (int i = 0; i < GroupCount; ++i)
         if (Inside(layout.groups[i], x, y)) return {HitKind::Group, i};
     for (int i = 0; i < layout.slotCount; ++i)
@@ -287,10 +294,9 @@ inline Hit Pick(const Layout& layout, float x, float y) {
     return {};
 }
 
-// The icon cache key for a catalog entry: the mod already extracts exactly
-// these (interaction_icons.h ItemKey). A runeword has no item of its own until
-// it is made, so it has no icon key; a gem or rune is a base item, keyed by its
-// four-character code.
+// The icon cache key for a catalog entry (interaction_icons.h ItemKey). A runeword has
+// no item of its own until it is made, so it has no icon key; a gem or rune is keyed by
+// its four-character code.
 inline std::string IconKey(Category category, uint32_t recordId, uint32_t code) {
     if (category == Category::Uniques) return "u" + std::to_string(recordId);
     if (category == Category::Sets) return "t" + std::to_string(recordId);

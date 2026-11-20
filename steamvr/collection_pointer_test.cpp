@@ -127,12 +127,21 @@ int main() {
         size.Step(sizeX, sizeY, layout, true, 16);
         assert(Is(size.Step(sizeX, sizeY, layout, false, 200), HitKind::Size, 2));
 
+        // The Show list's box, and with the list open one of its options.
+        Filter box;
+        const float boxX = CentreX(layout.showBox), boxY = CentreY(layout.showBox);
+        box.Step(boxX, boxY, layout, false, 0);
+        box.Step(boxX, boxY, layout, true, 16);
+        assert(Is(box.Step(boxX, boxY, layout, false, 200), HitKind::ShowBox, 0));
+
+        const auto open = framevr::collection::panel::Build(0, 3, 3, framevr::collection::panel::Size::Medium,
+                                                            framevr::collection::panel::Drop::Show);
         Filter show;
-        const float showX = CentreX(layout.showSteps[1]);
-        const float showY = CentreY(layout.showSteps[1]);
-        show.Step(showX, showY, layout, false, 0);
-        show.Step(showX, showY, layout, true, 16);
-        assert(Is(show.Step(showX, showY, layout, false, 200), HitKind::Show, 1));
+        const float showX = CentreX(open.showOptions[1]);
+        const float showY = CentreY(open.showOptions[1]);
+        show.Step(showX, showY, open, false, 0);
+        show.Step(showX, showY, open, true, 16);
+        assert(Is(show.Step(showX, showY, open, false, 200), HitKind::Show, 1));
     }
 
     std::puts("Collection pointer: hover, hysteresis, lock, click on release and the held-trigger guard passed");
