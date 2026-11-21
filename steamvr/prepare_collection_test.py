@@ -104,7 +104,7 @@ class TestPrepareCollection(unittest.TestCase):
         text = (out / 'collection.tsv').read_text(encoding='utf-8').splitlines()
         start = next(index for index, line in enumerate(text) if line.startswith('# category'))
         header = text[start][2:].split('\t')
-        self.assertEqual(header, ['category', 'code', 'recordId', 'name', 'level', 'type', 'extra', 'base'])
+        self.assertEqual(header, ['category', 'code', 'recordId', 'name', 'level', 'type', 'extra', 'base', 'stats'])
         rows = [dict(zip(header, line.split('\t'))) for line in text[start + 1:] if line.strip()]
         self.assertEqual(len([row for row in rows if row['category'] == 'uniques']), 3)
         self.assertEqual(len([row for row in rows if row['category'] == 'runewords']), 2)

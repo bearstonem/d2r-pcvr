@@ -134,7 +134,34 @@ def sort_entries(entries):
     return sorted(entries, key=lambda e: (e['type'], e['level'], e['name'], e['code']))
 
 
-def build(read):
+def stat_tables(read):
+    """The tables collection_stats words the properties with."""
+    tables = {}
+    for name in ('properties', 'itemstatcost', 'skills', 'skilldesc'):
+        try:
+            tables[name] = read(name + '.txt')[1]
+        except (FileNotFoundError, ValueError, KeyError):
+            tables[name] = []
+    return tables
+
+
+def read_strings(game, casclib=None):
+    """(item-modifiers, skill names) from the install's string tables; empty when unreadable."""
+    from collection_stats import load_strings
+    try:
+        from game_assets import open_assets
+        assets = open_assets(game, casclib)
+        texts = {}
+        for name in ('item-modifiers', 'skills'):
+            data = assets.read('data/local/lng/strings/%s.json' % name)
+            texts[name] = (data[3:] if data.startswith(b'\xef\xbb\xbf') else data).decode('utf-8')
+        return load_strings([texts['item-modifiers']]), load_strings([texts['skills']])
+    except Exception as error:   # the catalog still builds; the tooltips go without stat lines
+        print('collection: no string tables (%s); tooltips without stat lines' % error)
+        return {}, {}
+
+
+def build(read, strings=None, skill_names=None):
     """The catalog: per category, entries in a stable order.
 
     recordId is the id the game stores on the item and reports back as
@@ -142,6 +169,10 @@ def build(read):
     (which is not the row position once the table has reserved rows), for a
     completed runeword the Runes.txt row. name is the table's own name text.
     """
+    from collection_stats import stat_lines
+    tables = stat_tables(read)
+    tables['skillnames'] = skill_names or {}
+    stats = lambda row, kind: stat_lines(row, kind, tables, strings or {})
     bases = base_items(read)
     types = {code: kind for code, (kind, _) in bases.items()}
     base_name = lambda code: bases.get(code, ('', ''))[1]
@@ -161,6 +192,7 @@ def build(read):
             'level': number(row, 'lvl'),
             'type': types.get(code_of(row), ''),
             'base': base_name(code_of(row)),
+            'stats': stats(row, 'unique'),
         })
     catalog['uniques'] = sort_entries(entries)
 
@@ -177,6 +209,7 @@ def build(read):
             'type': types.get(code_of(row), ''),
             'setName': cell(row, 'set'),
             'base': base_name(code_of(row)),
+            'stats': stats(row, 'set'),
         })
     catalog['sets'] = sort_entries(entries)
 
@@ -192,6 +225,7 @@ def build(read):
             'level': 0,
             'type': cell(row, 'itype1'),
             'runes': [cell(row, 'Rune%d' % n) for n in range(1, 7) if cell(row, 'Rune%d' % n)],
+            'stats': stats(row, 'runeword'),
         })
     catalog['runewords'] = sort_entries(entries)
 
@@ -226,19 +260,21 @@ def write_catalog(catalog, out_dir):
     """Write collection.tsv: one line per entry, tab separated, no dependencies.
 
     Columns: category, code, recordId, name, level, type, extra (a set's name,
-    or a runeword's rune count), base (the base item's name: Shako, Cap, ...).
+    or a runeword's rune count), base (the base item's name: Shako, Cap, ...),
+    stats (the tooltip's stat lines with their ranges, joined by '|').
     The slot is the entry's line number inside its category, so the order here
     is the order the panel draws.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     lines = ['# collection %d' % VERSION,
-             '# category\tcode\trecordId\tname\tlevel\ttype\textra\tbase']
+             '# category\tcode\trecordId\tname\tlevel\ttype\textra\tbase\tstats']
     for category in CATEGORIES:
         for entry in catalog[category]:
             extra = entry.get('setName', '') or (' '.join(entry.get('runes', [])) if entry.get('runes') else '')
+            stat_text = '|'.join(line.replace('|', '/').replace('\t', ' ') for line in entry.get('stats', []))
             lines.append('\t'.join((category, entry['code'].strip(), str(entry['recordId']), entry['name'],
-                                    str(entry['level']), entry['type'], extra, entry.get('base', ''))))
+                                    str(entry['level']), entry['type'], extra, entry.get('base', ''), stat_text)))
     (out_dir / 'collection.tsv').write_text('\n'.join(lines) + '\n', encoding='utf-8')
     return out_dir / 'collection.tsv'
 
@@ -248,7 +284,8 @@ def prepare(game, out_dir, casclib=None):
     excel = find_excel(game)
     read = folder_reader(excel) if excel else archive_reader(game, casclib)
 
-    catalog = build(read)
+    strings, skill_names = read_strings(game, casclib)
+    catalog = build(read, strings, skill_names)
     write_catalog(catalog, out_dir)
 
     summary = {category: len(catalog[category]) for category in CATEGORIES}
@@ -260,8 +297,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--game', type=Path, required=True)
     parser.add_argument('--out', type=Path, default=Path('.'))
+    parser.add_argument('--casclib', type=Path, default=None, help='CascLib.dll, for the string tables')
     args = parser.parse_args()
-    print(json.dumps(prepare(args.game, args.out), indent=2))
+    print(json.dumps(prepare(args.game, args.out, args.casclib), indent=2))
 
 
 if __name__ == '__main__':

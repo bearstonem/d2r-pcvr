@@ -122,7 +122,9 @@ std::atomic<int> tooltipTiming{0};
 bool ItemHoverActive() {
     return tooltipsReady.load(std::memory_order_acquire)&&!bindingContext&&itemHover.Active(GetTickCount64());
 }
+std::atomic<uint64_t> itemTooltipAt{0};   // the game asked for an item's tooltip: its cursor is on one
 void OnItemTooltip(uintptr_t widget,uintptr_t item) {
+    if(item)itemTooltipAt.store(GetTickCount64());
     if(ItemHoverActive()&&!tooltipDwell.Ready(widget,item,GetTickCount64(),tooltipTiming.load(),hoverGeneration.load()))return;
     originalItemTooltip(widget,item);
 }
@@ -255,6 +257,7 @@ void MaintainWorldController(bool player,bool menu){
     }
 }
 bool BlocksWorld(){return Owns();}
+bool OverItem(){return GetTickCount64()-itemTooltipAt.load()<150;}
 bool ControllerAction(void (*action)(void*),void* data){
     if(!ready.load(std::memory_order_acquire)||!action)return false;
     const bool previous=bindingContext;bindingContext=true;

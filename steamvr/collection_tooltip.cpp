@@ -43,6 +43,18 @@ Tooltip BuildTooltip(const Entry& entry, bool found, std::string_view gameText, 
         else if (entry.category == Category::Sets)  tip.body.push_back("Set: " + entry.extra);
     }
     for (std::string& line : SplitLines(gameText)) tip.body.push_back(std::move(line));
+    // No item text from the loader: the catalog's own stat lines, with their ranges, worded
+    // from the game's tables (prepare_collection / collection_stats.py).
+    if (gameText.empty() && !entry.stats.empty()) {
+        std::size_t at = 0;
+        while (at <= entry.stats.size()) {
+            const std::size_t bar = entry.stats.find('|', at);
+            const std::size_t end = bar == std::string::npos ? entry.stats.size() : bar;
+            if (end > at) tip.body.push_back(entry.stats.substr(at, end - at));
+            if (bar == std::string::npos) break;
+            at = bar + 1;
+        }
+    }
 
     if (tip.body.empty()) {
         tip.body.push_back(PreviewOf(entry).kind == PreviewKind::Unsupported

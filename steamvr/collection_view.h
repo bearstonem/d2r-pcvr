@@ -23,6 +23,7 @@ struct Entry {
     std::string type;
     std::string extra;          // a set's name, or a runeword's runes
     std::string base;           // the base item's name (Shako, Cap, ...); empty in an older catalog
+    std::string stats;          // the tooltip's stat lines with their ranges, '|' between them (from the game's tables)
 };
 
 // Quest items the game's unique table also lists (Amulet of the Viper, the Horadric
@@ -235,10 +236,10 @@ inline uint32_t Library::CodeOf(std::string_view text) {
 
 inline bool Library::LoadLine(std::string_view line) {
     if (line.empty() || line[0] == '#') return true;   // a comment, not a data line
-    std::string_view field[8];
+    std::string_view field[9];
     int              count = 0;
     std::size_t      at    = 0;
-    while (count < 8) {
+    while (count < 9) {
         const std::size_t tab = line.find('\t', at);
         field[count++] = line.substr(at, tab == std::string_view::npos ? std::string_view::npos : tab - at);
         if (tab == std::string_view::npos) break;
@@ -250,7 +251,8 @@ inline bool Library::LoadLine(std::string_view line) {
     if (category == Category::Uniques && QuestUnique(field[1])) return true;   // a quest item: not a collectible
     entries_.push_back({category, CodeOf(field[1]), detail::ParseU32(field[2]), detail::ParseU32(field[4]),
                         std::string(field[3]), std::string(field[5]), count > 6 ? std::string(field[6]) : std::string(),
-                        count > 7 ? std::string(field[7]) : std::string()});
+                        count > 7 ? std::string(field[7]) : std::string(),
+                        count > 8 ? std::string(field[8]) : std::string()});
     return true;
 }
 

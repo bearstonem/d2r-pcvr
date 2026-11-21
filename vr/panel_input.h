@@ -9,6 +9,7 @@ void ItemHover(bool active,bool hit=false,bool dragging=false); // XR thread: va
 void WorldInput(bool active); // XR thread: bounded ownership of tracked gameplay input
 void MaintainWorldController(bool player,bool menu); // UI thread: restore native interaction targeting
 bool BlocksWorld(); // includes queued release after the menu closes
+bool OverItem(); // the game's cursor is on an item (its tooltip was asked for in the last 150 ms)
 bool ControllerReady(); // UI thread: request native controller mode, report when committed
 bool ControllerAction(void (*action)(void*),void*); // synchronous native binding operation, controller bank only
 }
