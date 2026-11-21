@@ -144,8 +144,10 @@ void __cdecl SampleMerc(const PluginContext*,void* token) noexcept {
     const auto roster=companionstate::Sample(session);
     const auto active=effectstate::Sample(session);
     const auto blocked=cooldownstate::Sample(session);
-    m.known=session==gamestate::LocalPlayer()&&melee::HirelingVitals(hint,m.health,m.maxHealth,m.classId,m.unitId);
+    const auto owned=allyhealthstate::OwnedMercenary(session,GetTickCount64());
+    m.known=session==gamestate::LocalPlayer()&&melee::HirelingVitals(owned?owned:hint,m.health,m.maxHealth,m.classId,m.unitId)&&(!owned||m.unitId==owned);
     hint=m.known?m.unitId:0;
+
     // This callback already runs on the authoritative game thread. Copy values
     // only; the UI/XR reader must never dereference these server units.
     framevr::partyhealth::Report mercReport{};

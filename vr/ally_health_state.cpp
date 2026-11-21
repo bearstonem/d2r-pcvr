@@ -45,7 +45,15 @@ bool Life(uintptr_t unit,uint32_t type,uint32_t id,float* health,float* maximum)
 }
 void Position(allyhealth::Entry& e,const allynative::Unit& u){e.positionKnown=u.position;e.gridPosition=true;e.world={u.x,0,u.z};}
 }
-void PublishMerc(const partyhealth::Report& report){std::lock_guard lock(mutex);serverMerc=report;}
+uint32_t OwnedMercenary(uint64_t session,uint64_t now){std::lock_guard lock(mutex);
+ if(snapshot.Current(session,now))for(unsigned i=0;i<snapshot.count;++i)if(snapshot.entries[i].mercenary)return snapshot.entries[i].id;
+ return 0;
+}
+void PublishMerc(const partyhealth::Report& report){std::lock_guard lock(mutex);
+ // A missed lookup does not extend the lifetime of the last actual measurement.
+ if(!report.known&&serverMerc.Current(report.session,report.at))return;
+ serverMerc=report;
+}
 void Clear(){std::lock_guard lock(mutex);snapshot={};snapshotLocalId=0;serverMerc={};}
 void Capture(uintptr_t player,uint64_t session,uint32_t localId){
  allyhealth::List result;result.session=session;result.at=GetTickCount64();
