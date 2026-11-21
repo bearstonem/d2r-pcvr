@@ -7822,8 +7822,15 @@ void CollectStashReads() {
         if(!r.pending||fence->GetCompletedValue()<r.fence)continue;
         r.pending=false;
         const auto read=[](StashStrip& s,std::vector<uint8_t>& out)->bool{
-            void* mapped=nullptr;const D3D12_RANGE range{0,SIZE_T(s.fp.Offset+size_t(s.fp.Footprint.RowPitch)*size_t(s.h))};
-            if(FAILED(s.buffer->Map(0,&range,&mapped))||!mapped)return false;
+            // The whole buffer: its last row is only as long as the strip, so a range of full row
+            // pitches ran past its end and every Map failed (owner's test 2026-11-21: no reading).
+            void* mapped=nullptr;
+            const HRESULT hr=s.buffer->Map(0,nullptr,&mapped);
+            if(FAILED(hr)||!mapped) {
+                static ULONGLONG toldAt=0;
+                if(GetTickCount64()-toldAt>3000){toldAt=GetTickCount64();char line[96];std::snprintf(line,sizeof line,"Frame stash: a strip did not map (0x%08lx)",long(hr));Say(line);}
+                return false;
+            }
             out.resize(size_t(s.w)*size_t(s.h)*4);
             for(int y=0;y<s.h;++y) {
                 const auto* row=reinterpret_cast<const uint16_t*>(static_cast<const uint8_t*>(mapped)+s.fp.Offset+size_t(y)*s.fp.Footprint.RowPitch);
@@ -7858,6 +7865,16 @@ void RecordStashReads(ID3D12GraphicsCommandList* list,ID3D12Resource* src,uint32
         toldAt=GetTickCount64();
         char line[200];std::snprintf(line,sizeof line,"Frame stash: no strip read this frame - %s (image %ux%u, crop %d,%d %dx%d)",why,w,h,crop[0],crop[1],crop[2],crop[3]);Say(line);
     };
+    {   // diagnostic (owner's test 2026-11-21 read nothing and logged nothing): every 3 s, the gate
+        static ULONGLONG heardAt=0;
+        if(GetTickCount64()-heardAt>3000) {
+            heardAt=GetTickCount64();
+            char line[200];std::snprintf(line,sizeof line,"Frame stash: copy step - stash %d, %u recorded, %u read, slots pending %d%d%d",
+                int(gamestate::StashButtonsShown()),stashReadsRecorded,stashReadsDone,
+                int(stashReads[0].pending),int(stashReads[1].pending),int(stashReads[2].pending));
+            Say(line);
+        }
+    }
     if(!gamestate::StashButtonsShown())return;
     if(!ShotSized(w,h,crop)){skip("the image is not the shots' size");return;}
     auto& r=stashReads[size_t(stashReadNext)];
