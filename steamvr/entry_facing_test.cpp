@@ -48,13 +48,22 @@ int main(){
     Check(-fy*10+fx*10>14.f);          // On the right, never on the left.
     Check(!malah.Heading(109,110,110,h));
     for(int town:{1,40,75,103,109}){
-        Check(TownPortalArrival(8,town,3));
-        Check(!TownPortalArrival(0,town,3));
-        Check(!TownPortalArrival(40,town,3));
-        Check(!TownPortalArrival(8,town,10));
-        Check(!TownPortalArrival(8,town,NAN));
+        Check(TownArrival(8,town));
+        Check(!TownArrival(0,town));
+        Check(!TownArrival(40,town));
     }
-    Check(!TownPortalArrival(8,9,1));
+    Check(!TownArrival(8,9));
+    // Observed failure: second TP landed/auto-walked 7.78 cells from its
+    // marker. Both returns must apply, independent of the marker's distance
+    // or whether that object was loaded on the first visible frame.
+    State portals;
+    Check(!portals.Observe(1,75,0));
+    for(int i=0;i<2;++i){
+        Check(portals.Observe(1,83,100+i*100));
+        const int from=portals.level;
+        Check(portals.Observe(1,75,150+i*100)&&TownArrival(from,portals.level));
+        Check(!portals.Observe(1,75,151+i*100));
+    }
     // Loaded room graph: find an NPC two rooms away, deduplicate cycles,
     // skip other levels and stop a malformed cyclic unit chain.
     std::unordered_map<uintptr_t,unsigned char> memory;
@@ -102,7 +111,13 @@ int main(){
         const float radians=direction*.0174532925f;
         Check(std::abs(std::sin(radians))<.001f&&-std::cos(radians)>.999f);
     }
-    Check(!NativeExitHeading(57,h)); // Other entrances retain their existing resolver.
+    // Kurast surface stairs must face out into +Y, never toward the hole
+    // based on a lateral or overlapping arrival position.
+    Check(NativeExitHeading(57,h)&&h==180.f);
+    Check(NativeExitHeading(58,h)&&h==-90.f);
+    Check(NativeExitHeading(59,h)&&h==180.f);
+    Check(NativeExitHeading(60,h)&&h==-135.f);
+    Check(!NativeExitHeading(56,h)); // Other entrances retain their existing resolver.
     for(float base:{-170.f,0.f,135.f})for(float yaw:{-180.f,30.f,179.f}){
         const float turn=TurnDelta(base,yaw,h);
         Check(std::abs(std::remainder(base-yaw-turn-h,360.f))<.001f);

@@ -5301,6 +5301,10 @@ void AlignAreaEntry(float cameraHeading) {
     if(RightOfPair()||!FullBody()||ThirdPerson())return;
     const auto session=gamestate::LocalPlayer();
     if(!session){entry.Observe(0,0,0);return;}
+    // Camera updates also happen outside an XR frame. Do not consume an
+    // arrival with a stale/unavailable pose, then miss it in the visible view.
+    float headHeading=0;
+    if(!framevr::Active()||!framevr::ViewHeadHeading(headHeading))return;
     if(!SewerInteractionLayoutReady())return;
     static bool geometryReady=false;
     constexpr uint8_t levelSig[]={0x48,0x85,0xc9,0x75,0x03,0x33,0xc0,0xc3,0x48,0x8b,0x49,0x18,0xe9,0x9f,0x13,0x07,0x00};
@@ -5331,7 +5335,7 @@ void AlignAreaEntry(float cameraHeading) {
         return true;
     },px,py);
     float heading=0;
-    const bool townPortal=framevr::entryfacing::TownPortalArrival(previousLevel,level,portalDistance);
+    const bool townPortal=framevr::entryfacing::TownArrival(previousLevel,level);
     if(townPortal){
         framevr::entryfacing::TownTargets targets;
         framevr::entryfacing::WalkTown(room,level,read,levelOf,[&](uintptr_t unit,const uint32_t* h){
@@ -5344,7 +5348,10 @@ void AlignAreaEntry(float cameraHeading) {
             return;
         }
     }else{
-        if(!tile)return;
+        if(!tile){
+            LogF("Frame area entry: from=%d level=%d no nearby entrance tile; keeping facing",previousLevel,level);
+            return;
+        }
         const auto roomAt=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(bowvr::native::RoomPointRva));
         const auto mask=reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(bowvr::native::MaskRva));
         if(!framevr::entryfacing::NativeExitHeading(warp,heading)&&
@@ -5353,19 +5360,14 @@ void AlignAreaEntry(float cameraHeading) {
             return r&&levelOf(r)==level&&!mask(r,x,y,1,0x1);
         },heading))return;
     }
-    float delta=framevr::entryfacing::TurnDelta(cameraHeading,TargetYaw(),heading);
-    if(framevr::Active()){
-        float headHeading=0;
-        if(!framevr::ViewHeadHeading(headHeading))return;
-        const float bodyYaw=g_headHeld.load()?g_heldYaw.load():g_mouseYaw.load()+g_turnYaw.load();
-        delta=framevr::entryfacing::NativeTurnDelta(cameraHeading,bodyYaw,
-            headHeading*57.2957795f,g_recenter.load(),heading);
-    }
+    const float bodyYaw=g_headHeld.load()?g_heldYaw.load():g_mouseYaw.load()+g_turnYaw.load();
+    const float delta=framevr::entryfacing::NativeTurnDelta(cameraHeading,bodyYaw,
+        headHeading*57.2957795f,g_recenter.load(),heading);
     g_turnYaw.fetch_add(delta);
     if(g_headHeld.load())g_heldYaw.fetch_add(delta);
     g_gen.fetch_add(1);g_meleeTurnEpoch.fetch_add(1);
     if(townPortal){
-        LogF("Frame town portal arrival: level=%d player=%.3f,%.3f portalDistance=%.2f facing=%.1f turn=%.1f",level,px,py,portalDistance,heading,delta);
+        LogF("Frame town arrival: from=%d level=%d player=%.3f,%.3f portalDistance=%.2f facing=%.1f turn=%.1f head=%.1f base=%.1f body=%.1f",previousLevel,level,px,py,portalDistance,heading,delta,headHeading*57.2957795f,cameraHeading,bodyYaw);
         return;
     }
     LogF("Frame area entry: first destination view level=%d entrance=%p warp=%u player=%.3f,%.3f tile=%.0f,%.0f distance=%.2f facing=%.1f turn=%.1f",level,reinterpret_cast<void*>(tile),warp,px,py,tx,ty,best,heading,delta);

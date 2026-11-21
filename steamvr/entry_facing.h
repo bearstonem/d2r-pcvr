@@ -30,10 +30,11 @@ struct TownTargets {
         return true;
     }
 };
-inline bool TownPortalArrival(int from,int to,float portalDistance) {
-    // Blue portals have a separate landing area from the town's warp tiles.
-    // Proximity is checked only on the first frame of a non-town -> town change.
-    return from>0&&!Town(from)&&Town(to)&&std::isfinite(portalDistance)&&portalDistance>=0&&portalDistance<=4.f;
+inline bool TownArrival(int from,int to) {
+    // Arrival is a level transition, not proximity to a portal object. The
+    // landing/auto-walk can already be beyond four cells when the first VR
+    // frame renders. Waypoint returns use the same town-facing convention.
+    return from>0&&!Town(from)&&Town(to);
 }
 // The relevant NPC may be beyond the player's immediately adjacent room.
 // Traverse loaded, same-level rooms once at arrival, with hard bounds and
@@ -60,13 +61,16 @@ void WalkTown(uintptr_t room,int level,Read read,Level levelOf,Visit visit) {
         }
     }
 }
-// The stock LvlWarp records for Jail Up (13) and Jail Down (14) both
-// specify ExitWalkX=0, ExitWalkY=5. Their doorway faces +grid Y, regardless
-// of the fractional landing position beside the warp tile.
+// Stock LvlWarp ExitWalkX/Y gives the direction off the stairs, independent
+// of the fractional landing position. Kurast's surface exit (57) faces +Y;
+// its two underground stair orientations (58/59) face +X/+Y respectively.
 inline bool NativeExitHeading(uint32_t warp,float& heading) {
-    if(warp!=13&&warp!=14)return false;
-    heading=180.f;
-    return true;
+    switch(warp){
+    case 13:case 14:case 57:case 59:heading=180.f;return true;
+    case 58:heading=-90.f;return true;
+    case 60:heading=-135.f;return true;
+    default:return false;
+    }
 }
 // Consume a live level change on its first render pass. Never queue a turn
 // for a later visible frame, even if entrance geometry cannot be resolved.
