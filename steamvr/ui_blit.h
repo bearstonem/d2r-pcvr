@@ -47,6 +47,6 @@ public:
     // Unassociated alpha, as the quad composes it. The first square is solid and framed as before.
     // copyTop 0, or both at 1 (NaN counts as 1): only the first.
     bool Render(ID3D12Device*,ID3D12GraphicsCommandList*,ID3D12Resource* source,ID3D12Resource* target,bool blackBackground=false,bool squareMap=false,uint32_t mapFlags=0,float bearing=0,float wallAlpha=1.f,float zoom=1.f,float mapSpan=0.f,
-                float xReach=0.f,float xShiftRight=0.f,float xShiftDown=0.f,const int32_t* undimBand=nullptr,uint32_t copyTop=0,float backAlpha=1.f,float frameAlpha=1.f);
+                float xReach=0.f,float xShiftRight=0.f,float xShiftDown=0.f,const int32_t* undimBand=nullptr,uint32_t copyTop=0,float backAlpha=1.f,float frameAlpha=1.f,uint32_t groundTop=0,float groundBearing=0.f);
 };
 }

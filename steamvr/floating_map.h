@@ -74,7 +74,7 @@ inline float FrameStep(float frame,bool on,float dt){
 
 // The values above, as one struct, so the tests can try each one's other settings (0 is each one's Off).
 struct Tuning {
-    float size=SizeM;
+    float size=SizeM;float groundScale=1.f,groundDistance=2.5f;bool floorMode=false;
     float awayM=AwayM;            // 0: never put away
     float lookDeg=LookDeg;        // 0: always shown
     bool faceOnRelease=FaceMe;
@@ -84,6 +84,7 @@ struct Tuning {
     float bothGripsS=BothGripsS;  // 0: only Left Grip while Right Grip holds it
 };
 struct Input {
+    bool groundKnown=false;math::Vec feet{};float groundYaw=0;uint64_t travelEpoch=0;
     double time=0;            // s
     uint64_t session=0;       // the game's local player (0: none)
     bool gameplay=false;      // it may show: the motion layer on, in the world, no wheel or VR Settings, the snapshot fresh
@@ -302,6 +303,9 @@ class Engine {
     math::Vec hitDir{};       // held: the grabbed point's direction in the aim frame (unit)
     math::Vec centerFromHit{};// held: the center from the grabbed point, in the aim frame
     float reach=0,reachStart=0;int pushes=0;bool pushing=false;
+    bool grounded=false;Pose hudDrop{};
+    uint64_t seenTravel=0;float floorYaw=0;double turnDwell=0;bool floorInitialized=false,catchingUp=false;
+    static constexpr float FloorDiameter=3.f;
     bool placed=false,owned=false,resizing=false,gripWas[2]{},looked=false;
     bool swallow[2]{};        // a grip the map held stays ours until it is let go (never a fresh press for the game)
     bool stickSwallow=false;  // the stick the map held stays ours until it is back at rest
@@ -320,6 +324,8 @@ class Engine {
     void LetGoAll(){owned=resizing=looked=pushing=twoHand=false;wait[0]=wait[1]=-1;}
 public:
     float Size(const Tuning& t)const{return scale>0?scale:std::clamp(t.size,MinSize,MaxSize);}
+    bool Grounded()const{return grounded;}
+    float FloorYaw()const{return floorYaw;}
     bool Placed()const{return placed;}
     Output Step(const Input& in,const Tuning& t){
         Output out;
@@ -334,7 +340,7 @@ public:
         if(in.session&&in.session!=session){
             const bool had=session!=0&&placed;
             session=in.session;LetGoAll();
-            placed=false;scale=0;atWrist=aiming=false;
+            placed=grounded=false;scale=0;atWrist=aiming=false;
             if(had)out.event=Event::PutAwayNewGame;
         }
         // A swallowed grip is let go only by its own release (the map letting go of a grip still squeezed, a wheel
@@ -344,7 +350,26 @@ public:
         out.own[0]=swallow[0];out.own[1]=swallow[1];out.ownStick=stickSwallow;
         if(!in.headValid){wait[0]=wait[1]=-1;gripWas[0]=in.grip[0]>Press;gripWas[1]=in.grip[1]>Press;return out;}
         const bool wasOut=placed;   // a copy out at the frame's start: Aim buzz and the stick's point-to-zoom only then
-        const float size=Size(t);
+        if(!grounded||seenTravel!=in.travelEpoch){seenTravel=in.travelEpoch;floorInitialized=false;turnDwell=0;catchingUp=false;}
+        const auto floorPose=[&](){
+            const auto forward=math::Rotate(in.headQ,{0,0,-1});
+            if(forward.x*forward.x+forward.z*forward.z>.01f){
+                const float target=std::atan2(-forward.x,-forward.z);
+                if(!floorInitialized){floorYaw=target;floorInitialized=true;}
+                const float error=std::remainder(target-floorYaw,6.2831853f);
+                const double tick=dt<=GapS?dt:0;
+                if(std::fabs(error)<.4363323f||tick<=0)turnDwell=0;else turnDwell+=tick;
+                if(turnDwell>=.2)catchingUp=true;
+                if(catchingUp){floorYaw+=error*float(-std::expm1(-4*tick));if(std::fabs(error)<.01745f){floorYaw=target;catchingUp=false;turnDwell=0;}}
+            }else{turnDwell=0;catchingUp=false;}
+            const auto yaw=math::Yaw(floorYaw);return Pose{in.feet+math::Rotate(yaw,{0,.025f,-t.groundDistance}),math::Multiply(yaw,panels::Pitch(-1.57079633f))};
+        };
+        if(placed&&!owned&&t.floorMode!=grounded){
+            if(t.floorMode)hudDrop=at;else at=hudDrop;
+            grounded=t.floorMode;
+        }
+        if(grounded&&in.groundKnown)at=floorPose();
+        const float size=grounded?(FloorDiameter*t.groundScale):Size(t);
         // The right grip: a press that starts with the controller pointing at a map (either face) takes it; a press
         // that started anywhere else never does, even when it sweeps across it.
         const bool right=in.grip[0]>Press,left=in.grip[1]>Press;
@@ -357,7 +382,7 @@ public:
             else if(in.time-wait[h]>t.bothGripsS){wait[h]=-1;out.gaveBack=h+1;}
         }
         const bool look=looked||!(t.lookDeg>0);
-        const bool mapFree=placed&&!owned&&in.gameplay&&in.handFree&&in.aimTracked&&look;
+        const bool mapFree=placed&&!grounded&&!owned&&in.gameplay&&in.handFree&&in.aimTracked&&look;
         const bool wristFree=!owned&&in.gameplay&&in.handFree&&in.aimTracked&&in.wristShown;
         const bool pointing=t.aimDeg>0;
         const float tolerance=pointing&&!in.nearGrab?t.aimDeg:0;   // the wrist map's band, degrees
@@ -376,7 +401,8 @@ public:
         const bool mapIn=onMap.known&&(onMap.miss<=0||(pointing&&onMap.miss<=tolerance&&InBand(in.aim,aim.q,at,size,margin)));
         const int pick=pointing?Choose(mapIn,onWrist.known&&onWrist.miss<=tolerance,onMap,onWrist):onMap.known&&onMap.miss<=0?0:onWrist.known&&onWrist.miss<=0?1:-1;
         bool aimedNow=pick==0,force=false;
-        const bool copyAimed=pick==0;   // Right Grip would take the copy (its frame shows)
+        const MapAim floorAim=grounded&&in.groundKnown&&in.handFree&&in.aimTracked?AimAt(in.aim,aim.q,at,size):MapAim{};
+        const bool copyAimed=pick==0||(floorAim.known&&floorAim.miss<=0); // floor hover shows a frame, never steals grip
         const bool wristNow=pick==1;
         math::Vec hitAt=aimedNow?onMap.point:onWrist.point;
         // Two-hand size: both grips within the window, in either order, with either hand pointing at it. A grip that may be
@@ -385,7 +411,7 @@ public:
         bool leftJoined=false;
         if(both&&!owned&&in.gameplay&&in.handFree&&in.leftFree&&in.aimTracked&&in.handTracked[0]&&in.handTracked[1]&&(leftEdge||rightEdge)){
             const auto leftAim=AimAt(in.aimLeft,Unit(in.aimLeftQ),at,size);
-            const bool leftOn=placed&&look&&in.aimLeftTracked&&(leftAim.miss<=0||(leftAim.miss<=tolerance&&InBand(in.aimLeft,Unit(in.aimLeftQ),at,size,margin)));
+            const bool leftOn=placed&&!grounded&&look&&in.aimLeftTracked&&(leftAim.miss<=0||(leftAim.miss<=tolerance&&InBand(in.aimLeft,Unit(in.aimLeftQ),at,size,margin)));
             const bool leftWaits=wait[1]>=0,rightWaits=wait[0]>=0;
             bool join=false;
             if(rightEdge&&pick>=0)join=leftWaits||leftEdge;   // the right takes it as any press; the left joins
@@ -417,7 +443,7 @@ public:
             const auto d=in.hand[0]-in.wristP;
             const bool touch=in.handTracked[0]&&math::Dot(d,d)<TouchM*TouchM&&(!pointing||(!placed&&!in.nearGrab));
             if(wristNow||touch){
-                placed=true;at=wristAt;
+                grounded=false;placed=true;at=wristAt;
                 hitAt=wristNow?onWrist.point:in.wristP;aimedNow=true;out.event=Event::Pulled;
             }
         }
@@ -446,12 +472,13 @@ public:
             out.reach=reach;out.reachStart=reachStart;out.pushes=pushes;
             // Let go at the wrist (a real let go, not a wheel opening): put away.
             if(atWrist&&t.awayM>0&&!right&&in.gameplay){
-                placed=false;atWrist=false;out.event=Event::PutAway;out.pulse=0;
+                grounded=false;placed=false;atWrist=false;out.event=Event::PutAway;out.pulse=0;
                 out.own[0]=swallow[0];out.own[1]=swallow[1];out.ownStick=stickSwallow;
                 gripWas[0]=right;gripWas[1]=left;
                 return out;
             }
         }
+        if(placed&&!owned&&t.floorMode&&!grounded){hudDrop=at;grounded=true;if(in.groundKnown)at=floorPose();}
         if(owned){
             // Push / pull along the laser: the grabbed point keeps its direction in the hand's frame, its distance moves.
             stickSwallow=true;
@@ -503,12 +530,12 @@ public:
         frame=placed?FrameStep(frame,owned||copyAimed,float(dt)):0.f;
         out.frame=frame;
         if(!placed){gripWas[0]=right;gripWas[1]=left;return out;}   // nothing out
-        out.p=at.p;out.q=at.q;out.size=Size(t);
+        out.p=at.p;out.q=at.q;out.size=grounded?(FloorDiameter*t.groundScale):Size(t);
         // Look to show: within lookDeg it shows, it hides past lookDeg + LookOutExtra; held, always.
         out.lookDeg=LookAngle(in.head,in.headQ,out.p);
         if(t.lookDeg>0)looked=out.lookDeg<(looked?t.lookDeg+LookOutExtra:t.lookDeg);else looked=true;
-        out.shown=in.gameplay&&(looked||owned);
-        out.want=in.gameplay&&(owned||!(t.lookDeg>0)||out.lookDeg<t.lookDeg+WarmExtra);
+        out.shown=in.gameplay&&(grounded?in.groundKnown:(looked||owned));
+        out.want=in.gameplay&&(grounded?in.groundKnown:owned||!(t.lookDeg>0)||out.lookDeg<t.lookDeg+WarmExtra);
         gripWas[0]=right;gripWas[1]=left;
         return out;
     }
@@ -534,6 +561,7 @@ struct InputFrame {
     float& frame;             // the copy's frame, 0 hidden .. 1 shown (Output::frame): the map capture draws it so
     void (*pulse)(int hand, float strength);
     void (*say)(const char*);
+    bool groundKnown=false;math::Vec feet{};float groundYaw=0;uint64_t travelEpoch=0;
 };
 // DrawFrame: transport EndPair, once a headset frame, after the wrist panels (a full layer budget drops the copy, never a
 // wrist panel). visible: the wrist panels' own gate and no wheel; picture: this frame's map image is copied (mapEye.copied).
@@ -545,6 +573,8 @@ struct LayerFrame {
     void (*quad)(void* ctx, math::Vec p, math::Quat q, float side);
     void (*say)(const char*);
 };
+bool Grounded();
+float FloorYaw();
 // DrawHint: transport EndPair, right after DrawFrame (the grab hint, grab_hint.h, which StepFrame steps). visible: as
 // LayerFrame's, and the wrist map drawn this frame; art: the hint's pictures are in the static image this session
 // (panelatlas::GrabHint), signs: its sign pictures too; wrist*: the wrist map quad as drawn this frame; side: +1 the

@@ -133,8 +133,12 @@ void StepHint(const InputFrame& f,const Input& in,const Output& o,const Tuning& 
 }
 }  // namespace
 
+bool Grounded(){return st.engine.Grounded();}
+float FloorYaw(){return st.engine.FloorYaw();}
 void StepFrame(InputFrame& f) {
-    const Tuning t;
+    const auto prefs=vrsettings::Read();Tuning t;t.groundScale=prefs.values[settings::GroundMapSize]*.01f;
+    t.groundDistance=prefs.values[settings::GroundMapDistance]*.01f;
+    t.floorMode=prefs.values[settings::DetachedMapPlacement]>.5f;
     st.nowMs = f.nowMs;
     floatmap::Input in;
     in.time = f.time; in.session = f.session; in.gameplay = f.gameplay; in.handFree = f.handFree; in.leftFree = f.leftFree; in.nearGrab = f.nearGrab;
@@ -146,6 +150,7 @@ void StepFrame(InputFrame& f) {
     in.stickX = f.stickRx / 32767.f; in.stickY = f.stickRy / 32767.f;
     in.wristShown = f.wristMs && f.nowMs >= f.wristMs && f.nowMs - f.wristMs <= WristFreshMs;
     in.wristP = f.wristP; in.wristQ = f.wristQ; in.wristSize = f.wristSize;
+    in.groundKnown=f.groundKnown;in.feet=f.feet;in.groundYaw=f.groundYaw;in.travelEpoch=f.travelEpoch;
     st.out = st.engine.Step(in, t);
     st.fresh = true;
     const auto& o = st.out;

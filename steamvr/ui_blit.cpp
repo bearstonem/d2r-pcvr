@@ -295,6 +295,13 @@ float4 PS(float4 position:SV_Position):SV_Target {
     // fading, over the map beneath it (premultiplied, out unassociated); hidden, the map alone.
     float4 frame=0;
     const bool inFrame=mapSide&&Frame(position.xy,frame);
+    if(mapFlags&32u){
+        float4 ground=Square(position);
+        ground.a*=.55*(1-smoothstep(.62,1.,length(position.xy*(2./mapSide)-1.)));
+        ground.rgb*=ground.a; // the OpenXR floor layer takes premultiplied color
+        if(inFrame){frame.rgb*=frame.a;ground=lerp(ground,frame,frameAlpha);}
+        return ground;
+    }
     if(inFrame&&frameAlpha>=1)return frame;
     const float4 m=Square(position);
     if(!inFrame||frameAlpha<=0)return m;
@@ -348,7 +355,7 @@ float4 PS(float4 position:SV_Position):SV_Target {
     return true;
 }
 bool UiBlit::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D12Resource* source,ID3D12Resource* target,bool blackBackground,bool squareMap,uint32_t mapFlags,float bearing,float wallAlpha,float zoom,float mapSpan,float xReach,float xShiftRight,float xShiftDown,const int32_t* undimBand,
-                    uint32_t copyTop,float backAlpha,float frameAlpha) {
+                    uint32_t copyTop,float backAlpha,float frameAlpha,uint32_t groundTop,float groundBearing) {
     if(!pipeline||!source||!target)return false;
     const auto s=source->GetDesc(),t=target->GetDesc();
     if(!RenderTargetCompatible(s.Format,DXGI_FORMAT_R16G16B16A16_FLOAT)||
@@ -453,6 +460,13 @@ bool UiBlit::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D12R
         rows(copyTop-1,std::min<UINT>(t.Height,copyTop+UINT(t.Width)+1));
         UINT backBits=0,frameBits=0;std::memcpy(&backBits,&backAlpha,sizeof backBits);std::memcpy(&frameBits,&frameAlpha,sizeof frameBits);
         list->SetGraphicsRoot32BitConstant(1,copyTop,10);list->SetGraphicsRoot32BitConstant(1,backBits,11);list->SetGraphicsRoot32BitConstant(1,frameBits,16);
+        list->DrawInstanced(3,1,0,0);
+    }
+    if(squareMap&&groundTop>=UINT(t.Width)+2&&uint64_t(groundTop)+t.Width<=t.Height){
+        rows(groundTop-1,groundTop+UINT(t.Width));
+        UINT backBits,frameBits,angleBits;std::memcpy(&backBits,&backAlpha,4);std::memcpy(&frameBits,&frameAlpha,4);std::memcpy(&angleBits,&groundBearing,4);
+        list->SetGraphicsRoot32BitConstant(1,mapFlags|32u,2);list->SetGraphicsRoot32BitConstant(1,angleBits,3);
+        list->SetGraphicsRoot32BitConstant(1,groundTop,10);list->SetGraphicsRoot32BitConstant(1,backBits,11);list->SetGraphicsRoot32BitConstant(1,frameBits,16);
         list->DrawInstanced(3,1,0,0);
     }
     if(findHero) {
