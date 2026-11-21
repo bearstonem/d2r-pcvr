@@ -2,10 +2,60 @@
 #include <cstdlib>
 #include <initializer_list>
 #include <cstdio>
+#include <unordered_map>
 using namespace framevr::entryfacing;
 void Check(bool ok){if(!ok){std::puts("entry facing check failed");std::exit(1);}}
 int main(){
     State s;float h=0;
+    // Every act uses its own NPC, with unrelated NPCs ignored.
+    for(auto pair:{std::pair{1,146},std::pair{40,178},std::pair{75,245},std::pair{103,257}}){
+        TownTargets targets;
+        targets.Add(pair.first,999,100,90);
+        Check(!targets.Heading(pair.first,100,100,h));
+        targets.Add(pair.first,pair.second,110,100);
+        Check(targets.Heading(pair.first,100,100,h)&&std::abs(h+90)<.01f);
+    }
+    TownTargets traders;
+    traders.Add(103,405,110,110);traders.Add(103,257,110,90);
+    Check(traders.Heading(103,100,100,h)&&std::abs(h+90)<.01f);
+    TownTargets malah;malah.Add(109,513,110,110);
+    Check(malah.Heading(109,100,100,h));
+    const float radians=h*.0174532925f;
+    const float fx=-std::sin(radians),fy=-std::cos(radians);
+    Check(std::abs(fx*10+fy*10)<.001f); // Malah perpendicular to forward.
+    Check(-fy*10+fx*10>14.f);          // On the right, never on the left.
+    Check(!malah.Heading(109,110,110,h));
+    for(int town:{1,40,75,103,109}){
+        Check(TownPortalArrival(8,town,3));
+        Check(!TownPortalArrival(0,town,3));
+        Check(!TownPortalArrival(40,town,3));
+        Check(!TownPortalArrival(8,town,10));
+        Check(!TownPortalArrival(8,town,NAN));
+    }
+    Check(!TownPortalArrival(8,9,1));
+    // Loaded room graph: find an NPC two rooms away, deduplicate cycles,
+    // skip other levels and stop a malformed cyclic unit chain.
+    std::unordered_map<uintptr_t,unsigned char> memory;
+    auto put=[&](uintptr_t at,const auto& value){
+        auto p=reinterpret_cast<const unsigned char*>(&value);
+        for(size_t i=0;i<sizeof value;++i)memory[at+i]=p[i];
+    };
+    auto read=[&](uintptr_t at,auto& value){
+        auto p=reinterpret_cast<unsigned char*>(&value);
+        for(size_t i=0;i<sizeof value;++i){auto it=memory.find(at+i);if(it==memory.end())return false;p[i]=it->second;}
+        return true;
+    };
+    for(uintptr_t r:{0x10000u,0x20000u,0x30000u,0x40000u}){
+        put(r,r+0x1000);put(r+0x40,uint32_t(2));put(r+0xa8,uintptr_t(0));
+        put(r+0x1000,uintptr_t(0x10000));put(r+0x1008,r+0x10000);
+    }
+    put(0x30000+0xa8,uintptr_t(0x90000));
+    uint32_t npc[4]{1,178,1,0};put(0x90000,npc);put(0x90000+0x160,uintptr_t(0x90000));
+    put(0x40000+0xa8,uintptr_t(0x90000)); // Must not visit the other level.
+    int found=0;
+    WalkTown(0x10000,40,read,[](uintptr_t r){return r==0x40000?41:40;},
+        [&](uintptr_t,const uint32_t* header){Check(header[1]==178);++found;});
+    Check(found==1);
     Check(!s.Observe(1,2,0));Check(!s.Observe(1,0,10));
     Check(s.Observe(1,8,100));Check(!s.Observe(1,8,100));Check(!s.Observe(1,8,180));
     Check(s.Observe(1,2,300));Check(!s.Observe(1,2,1800));
@@ -35,5 +85,5 @@ int main(){
         const float turn=TurnDelta(base,yaw,h);
         Check(std::abs(std::remainder(base-yaw-turn-h,360.f))<.001f);
     }
-    std::puts("First-frame entry/exit, overlapping cave warp, blocked geometry, no delayed turn and yaw checks passed");
+    std::puts("Town portal targets (all five acts), bounded room traversal, first-frame entry/exit, cave/Jail and yaw checks passed");
 }

@@ -5315,30 +5315,52 @@ void AlignAreaEntry(float cameraHeading) {
     if(!combat::LocalPlayerUnit(player)||!read(player+0x38,path)||!read(path+0x20,room)||!room)return;
     const auto levelOf=reinterpret_cast<int(*)(uintptr_t)>(d2rsig::Addr(0x2efc10));
     const int level=levelOf(room); // Live destination room, not the delayed UI snapshot.
+    const int previousLevel=entry.level;
     if(!entry.Observe(session,level,GetTickCount64()))return;
     float px=0,py=0,tx=0,ty=0,best=20.f;
+    float portalDistance=1000.f;
     uintptr_t tile=0;uint32_t warp=UINT32_MAX;
     framevr::lootaim::Walk(player,read,[&](uintptr_t unit,const uint32_t* h){
         uint32_t cell[2]{};
+        if(h[0]==2&&h[1]==59&&framevr::lootaim::ItemCell(unit,read,cell))
+            portalDistance=std::min(portalDistance,std::hypot(float(cell[0])-px,float(cell[1])-py));
         if(h[0]!=5||!framevr::lootaim::ItemCell(unit,read,cell))return true;
         const float d=std::hypot(float(cell[0])-px,float(cell[1])-py);
         // Multiple tile units at one entrance are not competing entrances.
         if(d<best){best=d;tile=unit;warp=h[1];tx=float(cell[0]);ty=float(cell[1]);}
         return true;
     },px,py);
-    if(!tile)return;
-    const auto roomAt=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(bowvr::native::RoomPointRva));
-    const auto mask=reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(bowvr::native::MaskRva));
     float heading=0;
-    if(!framevr::entryfacing::NativeExitHeading(warp,heading)&&
-       !framevr::entryfacing::Direction(px,py,tx,ty,[&](int x,int y){
-        const auto r=roomAt(room,x,y);
-        return r&&levelOf(r)==level&&!mask(r,x,y,1,0x1);
-    },heading))return;
+    const bool townPortal=framevr::entryfacing::TownPortalArrival(previousLevel,level,portalDistance);
+    if(townPortal){
+        framevr::entryfacing::TownTargets targets;
+        framevr::entryfacing::WalkTown(room,level,read,levelOf,[&](uintptr_t unit,const uint32_t* h){
+            uintptr_t npcPath=0;uint32_t xy[2]{};
+            if(h[0]==1&&read(unit+0x38,npcPath)&&read(npcPath,xy))
+                targets.Add(level,h[1],xy[0]/65536.f,xy[1]/65536.f);
+        });
+        if(!targets.Heading(level,px,py,heading)){
+            LogF("Frame town portal arrival: level=%d target NPC unavailable; keeping facing",level);
+            return;
+        }
+    }else{
+        if(!tile)return;
+        const auto roomAt=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(bowvr::native::RoomPointRva));
+        const auto mask=reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(bowvr::native::MaskRva));
+        if(!framevr::entryfacing::NativeExitHeading(warp,heading)&&
+           !framevr::entryfacing::Direction(px,py,tx,ty,[&](int x,int y){
+            const auto r=roomAt(room,x,y);
+            return r&&levelOf(r)==level&&!mask(r,x,y,1,0x1);
+        },heading))return;
+    }
     const float delta=framevr::entryfacing::TurnDelta(cameraHeading,TargetYaw(),heading);
     g_turnYaw.fetch_add(delta);
     if(g_headHeld.load())g_heldYaw.fetch_add(delta);
     g_gen.fetch_add(1);g_meleeTurnEpoch.fetch_add(1);
+    if(townPortal){
+        LogF("Frame town portal arrival: level=%d player=%.3f,%.3f portalDistance=%.2f facing=%.1f turn=%.1f",level,px,py,portalDistance,heading,delta);
+        return;
+    }
     LogF("Frame area entry: first destination view level=%d entrance=%p warp=%u player=%.3f,%.3f tile=%.0f,%.0f distance=%.2f facing=%.1f turn=%.1f",level,reinterpret_cast<void*>(tile),warp,px,py,tx,ty,best,heading,delta);
 }
 

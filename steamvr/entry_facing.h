@@ -2,6 +2,64 @@
 #include <cmath>
 #include <cstdint>
 namespace framevr::entryfacing {
+inline bool Town(int level) {
+    return level==1||level==40||level==75||level==103||level==109;
+}
+// MonStats IDs from the stock game. Keep the two traders separate so their
+// midpoint is independent of room/unit iteration order.
+struct TownTargets {
+    struct Point {float x=0,y=0;bool valid=false;};
+    Point first,second;
+    void Add(int level,uint32_t id,float x,float y) {
+        if(!std::isfinite(x+y)||x<=0||y<=0)return;
+        if((level==1&&(id==146||id==265))||(level==40&&id==178)||
+           (level==75&&id==245)||(level==103&&id==257)||(level==109&&id==513))
+            first={x,y,true};
+        if(level==103&&id==405)second={x,y,true};
+    }
+    bool Heading(int level,float px,float py,float& heading) const {
+        if(!Town(level)||(!first.valid&&!second.valid))return false;
+        Point target=first.valid?first:second;
+        if(first.valid&&second.valid)target={(first.x+second.x)*.5f,(first.y+second.y)*.5f,true};
+        float dx=target.x-px,dy=target.y-py;
+        if(!std::isfinite(dx+dy)||std::hypot(dx,dy)<.5f)return false;
+        // Harrogath: turn perpendicular to Malah, placing her to the right
+        // while looking into town instead of up toward her elevated shop.
+        if(level==109){const float x=dx;dx=dy;dy=-x;}
+        heading=std::atan2(-dx,-dy)*57.2957795f;
+        return true;
+    }
+};
+inline bool TownPortalArrival(int from,int to,float portalDistance) {
+    // Blue portals have a separate landing area from the town's warp tiles.
+    // Proximity is checked only on the first frame of a non-town -> town change.
+    return from>0&&!Town(from)&&Town(to)&&std::isfinite(portalDistance)&&portalDistance>=0&&portalDistance<=4.f;
+}
+// The relevant NPC may be beyond the player's immediately adjacent room.
+// Traverse loaded, same-level rooms once at arrival, with hard bounds and
+// deduplication; do not load rooms or retain native pointers across frames.
+template<class Read,class Level,class Visit>
+void WalkTown(uintptr_t room,int level,Read read,Level levelOf,Visit visit) {
+    uintptr_t rooms[128]{room};int count=1,visited=0;
+    for(int r=0;r<count&&visited<2048;++r){
+        if(rooms[r]<0x10000||levelOf(rooms[r])!=level)continue;
+        uintptr_t near=0,unit=0;uint32_t n=0;
+        if(read(rooms[r],near)&&read(rooms[r]+0x40,n)&&n<=64&&near>=0x10000)
+            for(uint32_t i=0;i<n&&count<128;++i){
+                uintptr_t next=0;if(!read(near+i*8,next))break;
+                bool seen=false;for(int j=0;j<count;++j)if(rooms[j]==next){seen=true;break;}
+                if(next>=0x10000&&!seen)rooms[count++]=next;
+            }
+        if(!read(rooms[r]+0xa8,unit))continue;
+        for(int chain=0;unit>=0x10000&&chain<256&&visited<2048;++chain){
+            ++visited;uintptr_t next=0;uint32_t header[4]{};
+            if(!read(unit,header)||!read(unit+0x160,next))break;
+            visit(unit,header);
+            if(next==unit)break;
+            unit=next;
+        }
+    }
+}
 // The stock LvlWarp records for Jail Up (13) and Jail Down (14) both
 // specify ExitWalkX=0, ExitWalkY=5. Their doorway faces +grid Y, regardless
 // of the fractional landing position beside the warp tile.
