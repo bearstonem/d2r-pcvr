@@ -5317,20 +5317,21 @@ void AlignAreaEntry(float cameraHeading) {
     const int level=levelOf(room); // Live destination room, not the delayed UI snapshot.
     if(!entry.Observe(session,level,GetTickCount64()))return;
     float px=0,py=0,tx=0,ty=0,best=20.f;
-    uintptr_t tile=0;
+    uintptr_t tile=0;uint32_t warp=UINT32_MAX;
     framevr::lootaim::Walk(player,read,[&](uintptr_t unit,const uint32_t* h){
         uint32_t cell[2]{};
         if(h[0]!=5||!framevr::lootaim::ItemCell(unit,read,cell))return true;
         const float d=std::hypot(float(cell[0])-px,float(cell[1])-py);
         // Multiple tile units at one entrance are not competing entrances.
-        if(d<best){best=d;tile=unit;tx=float(cell[0]);ty=float(cell[1]);}
+        if(d<best){best=d;tile=unit;warp=h[1];tx=float(cell[0]);ty=float(cell[1]);}
         return true;
     },px,py);
     if(!tile)return;
     const auto roomAt=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(bowvr::native::RoomPointRva));
     const auto mask=reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(bowvr::native::MaskRva));
     float heading=0;
-    if(!framevr::entryfacing::Direction(px,py,tx,ty,[&](int x,int y){
+    if(!framevr::entryfacing::NativeExitHeading(warp,heading)&&
+       !framevr::entryfacing::Direction(px,py,tx,ty,[&](int x,int y){
         const auto r=roomAt(room,x,y);
         return r&&levelOf(r)==level&&!mask(r,x,y,1,0x1);
     },heading))return;
@@ -5338,7 +5339,7 @@ void AlignAreaEntry(float cameraHeading) {
     g_turnYaw.fetch_add(delta);
     if(g_headHeld.load())g_heldYaw.fetch_add(delta);
     g_gen.fetch_add(1);g_meleeTurnEpoch.fetch_add(1);
-    LogF("Frame area entry: first destination view level=%d entrance=%p distance=%.2f facing=%.1f turn=%.1f",level,reinterpret_cast<void*>(tile),best,heading,delta);
+    LogF("Frame area entry: first destination view level=%d entrance=%p warp=%u player=%.3f,%.3f tile=%.0f,%.0f distance=%.2f facing=%.1f turn=%.1f",level,reinterpret_cast<void*>(tile),warp,px,py,tx,ty,best,heading,delta);
 }
 
 uintptr_t NearbySewerInteraction();

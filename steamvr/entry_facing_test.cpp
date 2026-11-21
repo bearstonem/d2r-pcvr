@@ -22,6 +22,15 @@ int main(){
     // Leaving a cave: the entrance to the east must be behind the view.
     Check(Direction(100,100,102,100,[](int x,int){return x<=100;},h));Check(std::abs(h-90)<.01f);
     Check(!Direction(100,100,100,100,[](int,int){return false;},h));
+    // Jail landings vary sideways and along the stairs. The native doorway
+    // direction must stay +Y even when the spawn-to-tile vector is diagonal.
+    for(uint32_t warp:{13u,14u})for(float x:{99.5f,100.f,100.5f})for(float y:{100.8f,102.f,104.f}) {
+        float direction=0;
+        Check(NativeExitHeading(warp,direction)||Direction(x,y,100,100,[](int,int){return true;},direction));
+        const float radians=direction*.0174532925f;
+        Check(std::abs(std::sin(radians))<.001f&&-std::cos(radians)>.999f);
+    }
+    Check(!NativeExitHeading(57,h)); // Other entrances retain their existing resolver.
     for(float base:{-170.f,0.f,135.f})for(float yaw:{-180.f,30.f,179.f}){
         const float turn=TurnDelta(base,yaw,h);
         Check(std::abs(std::remainder(base-yaw-turn-h,360.f))<.001f);

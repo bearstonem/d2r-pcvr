@@ -2,6 +2,14 @@
 #include <cmath>
 #include <cstdint>
 namespace framevr::entryfacing {
+// The stock LvlWarp records for Jail Up (13) and Jail Down (14) both
+// specify ExitWalkX=0, ExitWalkY=5. Their doorway faces +grid Y, regardless
+// of the fractional landing position beside the warp tile.
+inline bool NativeExitHeading(uint32_t warp,float& heading) {
+    if(warp!=13&&warp!=14)return false;
+    heading=180.f;
+    return true;
+}
 // Consume a live level change on its first render pass. Never queue a turn
 // for a later visible frame, even if entrance geometry cannot be resolved.
 struct State {
