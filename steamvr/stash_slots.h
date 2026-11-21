@@ -106,6 +106,12 @@ inline const Slot* Find(uint32_t code) {
     for(const auto& s:Slots)if(std::memcmp(s.code,text,3)==0)return &s;
     return nullptr;
 }
-// The slots' area on each of the three tabs (the cube below it stays the game's).
-constexpr int AreaLeft=410,AreaRight=995,AreaTop=240,AreaBottom=590;
+// Where a pull sends the hand's item to its slot: the whole stash page under the tab bar
+// (owner 2026-11-21: "anywhere"; the log showed pulls at y 600-700 missed the slots-only area),
+// all but the Horadric Cube's box, which stays the game's (gems go into the cube there).
+constexpr int AreaLeft=395,AreaRight=1005,AreaTop=232,AreaBottom=990;
+constexpr int CubeLeft=600,CubeRight=802,CubeTop=556,CubeBottom=815;
+inline bool InArea(float x,float y) {
+    return x>=AreaLeft&&x<=AreaRight&&y>=AreaTop&&y<=AreaBottom&&!(x>=CubeLeft&&x<=CubeRight&&y>=CubeTop&&y<=CubeBottom);
+}
 }   // namespace framevr::stashslots

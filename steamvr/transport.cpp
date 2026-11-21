@@ -2877,12 +2877,17 @@ void MenuPointer(const menus::Pad& controls) {
         static float slotU=0,slotV=0;static ULONGLONG slotAt=0;static bool slotQueued=false;
         const ULONGLONG now=GetTickCount64();
         const auto& read=stashnav::Last();
-        const int tab=now-read.at.load()<400?read.tab.load():-1;
+        // The read drops to -1 for a frame or two while the laser lights a tab (the log): the last
+        // good one holds for a second.
+        static int goodTab=-1;static ULONGLONG goodAt=0;
+        const int fresh=now-read.at.load()<400?read.tab.load():-1;
+        if(fresh>=0){goodTab=fresh;goodAt=now;}
+        const int tab=fresh>=0?fresh:(now-goodAt<1000?goodTab:-1);
         const auto* slot=stashslots::Find(collection::CarriedCode());
         if(slot&&pointerHit&&spatialReady&&aimTracked&&!(mouseDown||rightMouseDown)&&gamestate::StashButtonsShown()&&
            !collection::TabWanted()&&gamestate::CursorItemHeld()&&tab>=stashnav::Gems&&tab<=stashnav::Runes) {
             const float px=hit.u*2244.f,py=hit.v*2352.f;
-            onNativeSlots=px>=stashslots::AreaLeft&&px<=stashslots::AreaRight&&py>=stashslots::AreaTop&&py<=stashslots::AreaBottom;
+            onNativeSlots=plaqueHover<0&&stashslots::InArea(px,py);
         }
         static bool slotWasDown=false;
         if(onNativeSlots&&uiActive&&focused&&pressed&&!slotWasDown&&!handClicking&&!uiClickPending) {
