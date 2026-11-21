@@ -120,4 +120,10 @@ bool Direction(float px,float py,float tx,float ty,Walkable walkable,float& head
 inline float TurnDelta(float cameraHeading,float currentYaw,float destinationHeading) {
     return std::remainder(cameraHeading-currentYaw-destinationHeading,360.f);
 }
+// Native OpenXR composes Yaw(camera - body - recenter) * head orientation.
+// TargetYaw uses the legacy opposite head sign, so using it here leaves an
+// error of twice the physical head yaw. All inputs/outputs are degrees.
+inline float NativeTurnDelta(float cameraHeading,float bodyYaw,float headHeading,float recenter,float destinationHeading) {
+    return std::remainder(cameraHeading-bodyYaw-recenter+headHeading-destinationHeading,360.f);
+}
 }

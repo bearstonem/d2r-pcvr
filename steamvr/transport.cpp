@@ -8655,6 +8655,15 @@ bool BowPreviewPose(bowflight::Shot& pose,bool& visible) {
     if(!bowflight::Allowed(bowPreviewPose,gate,GetTickCount64()))return false;
     pose=bowPreviewPose;visible=bowPreviewVisible;return true;
 }
+bool ViewHeadHeading(float& heading) {
+    std::lock_guard lock(mutex);
+    if(!Active())return false;
+    const auto forward=math::Rotate(Q(head.orientation),{0,0,-1});
+    if(!std::isfinite(forward.x+forward.z)||std::hypot(forward.x,forward.z)<1e-5f)return false;
+    heading=std::atan2(-forward.x,-forward.z);
+    return true;
+}
+
 bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,float bodyHeading,float recenterYaw,int eye,float mapNorth,float scaleHeight,bool stale) {
     std::lock_guard lock(mutex);
     if(!Active()) {   // stale: the last poses, while no headset frame is open

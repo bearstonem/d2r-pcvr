@@ -4,6 +4,7 @@
 #include <windows.h> // Exercise Windows macros used by the real vrcam translation unit.
 #endif
 #include "entry_facing.h"
+#include "frame_math.h"
 #include <cstdlib>
 #include <initializer_list>
 #include <cstdio>
@@ -12,6 +13,22 @@ using namespace framevr::entryfacing;
 void Check(bool ok){if(!ok){std::puts("entry facing check failed");std::exit(1);}}
 int main(){
     State s;float h=0;
+    // Verify against the actual native quaternion composition, not the legacy
+    // TargetYaw expression. Includes physical head turns, stick/mouse turns,
+    // recenter offsets and pitched/rolled heads on either side of the portal.
+    constexpr float rad=.017453292519943295f;
+    for(float camera:{-135.f,45.f})for(float body:{-170.f,0.f,120.f})
+    for(float head:{-179.f,-90.f,0.f,45.f,179.f})for(float recenter:{-60.f,0.f,90.f})
+    for(float target:{-90.f,0.f,70.f,180.f}){
+        using namespace framevr::math;
+        const auto pitch=Quat{std::sin(.2f),0,0,std::cos(.2f)};
+        const auto roll=Quat{0,0,std::sin(.1f),std::cos(.1f)};
+        const auto pose=Multiply(Yaw(head*rad),Multiply(pitch,roll));
+        const float measured=Heading(pose)/rad;
+        const float delta=NativeTurnDelta(camera,body,measured,recenter,target);
+        const auto actual=Multiply(Yaw((camera-body-delta-recenter)*rad),pose);
+        Check(std::abs(std::remainder(Heading(actual)/rad-target,360.f))<.001f);
+    }
     // Every act uses its own NPC, with unrelated NPCs ignored.
     for(auto pair:{std::pair{1,146},std::pair{40,178},std::pair{75,245},std::pair{103,257}}){
         TownTargets targets;

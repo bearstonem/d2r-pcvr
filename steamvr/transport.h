@@ -317,6 +317,8 @@ bool Active();
 // False in desktop/flat play, so VR-only world effects stay out of it.
 bool VrGameplay(uint64_t now);
 bool SpatialMenu();
+// Horizontal heading of the same frozen head pose used by native View, radians.
+bool ViewHeadHeading(float& heading);
 // mapNorth is the unmodified native camera's horizontal heading (map-up).
 // scaleHeight: the eye height the world's scale is taken from (units per metre over
 // userEyeHeight), 0 = eyeHeight; a druid's form stands its eyes apart from it.

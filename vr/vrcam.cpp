@@ -5353,7 +5353,14 @@ void AlignAreaEntry(float cameraHeading) {
             return r&&levelOf(r)==level&&!mask(r,x,y,1,0x1);
         },heading))return;
     }
-    const float delta=framevr::entryfacing::TurnDelta(cameraHeading,TargetYaw(),heading);
+    float delta=framevr::entryfacing::TurnDelta(cameraHeading,TargetYaw(),heading);
+    if(framevr::Active()){
+        float headHeading=0;
+        if(!framevr::ViewHeadHeading(headHeading))return;
+        const float bodyYaw=g_headHeld.load()?g_heldYaw.load():g_mouseYaw.load()+g_turnYaw.load();
+        delta=framevr::entryfacing::NativeTurnDelta(cameraHeading,bodyYaw,
+            headHeading*57.2957795f,g_recenter.load(),heading);
+    }
     g_turnYaw.fetch_add(delta);
     if(g_headHeld.load())g_heldYaw.fetch_add(delta);
     g_gen.fetch_add(1);g_meleeTurnEpoch.fetch_add(1);
