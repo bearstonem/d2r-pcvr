@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "../steamvr/collection_view.h"
+#include "../steamvr/stash_slots.h"
 #include "collection_model.h"
 #include "collection_tab.h"
 #include "logging.h"
@@ -428,6 +429,11 @@ void DepositPrepareOnGameThread(const D2RL::PluginContext*, void*) noexcept {
         category = Category::Uniques; identity = cursor.recordId;
     } else if (cursor.set && cursor.recordId != UINT32_MAX && library.SlotOf(Category::Sets, cursor.recordId) != UINT32_MAX) {
         category = Category::Sets; identity = cursor.recordId;
+    } else if (stashslots::Find(cursor.code) != nullptr) {
+        // The game's own Gems / Materials / Runes tab takes it (the frame thread clicks it there).
+        Log("Frame collection: a gem, rune or material goes to the game's own tab, not the collection; it stays in hand");
+        SetPhase(Phase::Idle);
+        return;
     } else if (library.SlotOfCode(Category::Materials, cursor.code) != UINT32_MAX) {
         category = Category::Materials; identity = cursor.code; byCode = true;
     } else {
@@ -756,6 +762,7 @@ void SweepOnGameThread(const D2RL::PluginContext*, void*) noexcept {
         bool     byCode;
     };
     std::vector<Loose> loose;
+    std::vector<Seen>  strays;   // in the collection's hidden tabs but not the collection's
     for (const Seen& item : sweep.items) {
         const bool ours = item.page >= first && item.page < beyond;
         if (!ours && (item.unique || item.set) && !item.identified) continue;   // unidentified: never collected
@@ -765,10 +772,37 @@ void SweepOnGameThread(const D2RL::PluginContext*, void*) noexcept {
         } else if (item.set && item.recordId != UINT32_MAX && library.SlotOf(Category::Sets, item.recordId) != UINT32_MAX) {
             if (ours) { heldSet.push_back(item.recordId); continue; }
             loose.push_back({item, Category::Sets, item.recordId, false});
+        } else if (stashslots::Find(item.code) != nullptr) {
+            // A gem, rune or material belongs in the game's own Gems / Materials / Runes tab
+            // (owner 2026-11-21): never collected, and one found in the hidden tabs goes back.
+            if (ours) strays.push_back(item);
         } else if (library.SlotOfCode(Category::Materials, item.code) != UINT32_MAX) {
             if (ours) { heldMaterial.push_back(item.code); continue; }
             loose.push_back({item, Category::Materials, item.code, true});
+        } else if (ours) {
+            strays.push_back(item);   // no collectible at all (an item set aside and never put back)
         }
+    }
+    // The strays out of the hidden tabs, to the player's own shared pages (or the inventory),
+    // only while no item is on its way (a full inventory's set-aside items wait there then).
+    bool settled = g_phase.load() == int(Phase::Idle);
+    { std::lock_guard lock(g_roomLock); settled = settled && g_displaced.empty(); }
+    int returned = 0;
+    for (const Seen& item : settled ? strays : std::vector<Seen> {}) {
+        bool done = false;
+        for (uint32_t page = 0; page < first && !done; ++page)
+            done = MoveExisting(player, item.handle, D2RL::Items::ItemContainer::SharedStash, D2RL::Items::Placement::Automatic, 0, 0, page);
+        if (!done) done = MoveExisting(player, item.handle, D2RL::Items::ItemContainer::Inventory, D2RL::Items::Placement::Automatic, 0, 0, 0);
+        char line[160];
+        std::snprintf(line, sizeof(line), "Frame collection: a stray item (code %.3s) %s hidden tab %u",
+                      reinterpret_cast<const char*>(&item.code), done ? "moved out of" : "could not leave", unsigned(item.page));
+        Log(line);
+        returned += done ? 1 : 0;
+    }
+    if (returned > 0) {
+        char line[128];
+        std::snprintf(line, sizeof(line), "Frame collection: %d stray item(s) back on the player's own pages", returned);
+        Log(line);
     }
 
     int moved = 0;

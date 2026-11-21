@@ -746,6 +746,9 @@ struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_F
 struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp[4]{};bool tried=false;} plaqueUpload;
 std::atomic<int> plaqueLit{-1};
 bool PlaquesShown();
+// A gem, rune or material pulled on the Collection page: its code, for the frame thread to
+// take it to the game's own tab and slot (0 none).
+std::atomic<uint32_t> nativeSlotRequest{0};
 DXGI_FORMAT atlasFormat=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
 uint32_t layerLimit=16;
 // What each place in the submitted layer list showed last (composition::StablePlaces).
@@ -2901,14 +2904,28 @@ void MenuPointer(const menus::Pad& controls) {
             Say(line);
         }
         slotWasDown=pressed;
+        // From the Collection page (CollectionPress): the item's tab clicked, then its slot.
+        if(const uint32_t asked=nativeSlotRequest.load();asked!=0&&!handClicking&&!uiClickPending) {
+            nativeSlotRequest.store(0);
+            if(const auto* wanted=stashslots::Find(asked)) {
+                slotU=float(wanted->x)/2244.f;slotV=float(wanted->y)/2352.f;
+                uiClickU=(float(stashnav::TabsX+stashnav::TabStep*wanted->tab)+stashnav::TabStep*.5f)/2244.f;uiClickV=200.f/2352.f;
+                uiClickPending=true;slotQueued=true;slotAt=now+350;
+            }
+        }
         // The slot's click once the game shows the item's tab (or give up after a second).
         if(slotQueued&&now>=slotAt&&!uiClickPending&&!handClicking) {
             const auto* held=stashslots::Find(collection::CarriedCode());
             if(held&&tab==held->tab){uiClickU=slotU;uiClickV=slotV;uiClickPending=true;slotQueued=false;}
             else if(now>slotAt+1000){slotQueued=false;Say("Frame stash: the item's tab did not come up; its slot was not clicked");}
         }
+        // While the item is on its way the game gets no click of the laser's (the trigger still
+        // held would drop it on whatever tab shows meanwhile).
+        if(slotQueued)onNativeSlots=true;
     }
-    const bool onButton=onNativeSlots||onStats||onRespec||stashHover>=0||onKeyboard||onCollectionTab||onCollectionPage||onBlockedArrow||plaqueHover>=0;   // a stamped button: no game cursor, no game trigger
+    // Over the slots the game's cursor still follows the laser with the item (owner 2026-11-21:
+    // "it must reach everywhere"); only the game's click is the mod's there (gamePointer below).
+    const bool onButton=onStats||onRespec||stashHover>=0||onKeyboard||onCollectionTab||onCollectionPage||onBlockedArrow||plaqueHover>=0;   // a stamped button: no game cursor, no game trigger
     // An item on the game's cursor and a trigger pull begun off the menu's art (past or on the
     // hide, or the band's see-through margins): the pad's X, the controller menu's own Drop for
     // the item held (menu_drop.h). The tabbed menu (and its cube) only; never without an item on
@@ -2939,7 +2956,7 @@ void MenuPointer(const menus::Pad& controls) {
     // navigation" / "laser navigation" every second while walking and turning), hiding it.
     menus::Pad navigation=controls;
     if(leatherMode&&leatherShown.load())navigation.lx=navigation.ly=navigation.rx=navigation.ry=0;
-    if(onButton||statsPress.Held()||respecPress.Held()||stashInput.Held()||keyboardPress.Held()||dropOwns)navigation.rt=0;   // a button's or the drop's trigger is never the game's RT
+    if(onButton||onNativeSlots||statsPress.Held()||respecPress.Held()||stashInput.Held()||keyboardPress.Held()||dropOwns)navigation.rt=0;   // a button's or the drop's trigger is never the game's RT
     // At the stash a stick pushed left or right turns the tab (below), so it does not take the
     // laser's place either (owner 2026-11-21).
     const bool stashControls=spatialReady&&!journalMode&&gamestate::StashButtonsShown();
@@ -3121,7 +3138,7 @@ void MenuPointer(const menus::Pad& controls) {
         }
     }
     // On a button, or off the art with an item to drop, the dot shows and no game click is made there.
-    const bool gamePointer=pointerHit&&!onButton&&!dropOwns&&!(offArt&&cursorItem);
+    const bool gamePointer=pointerHit&&!onButton&&!onNativeSlots&&!dropOwns&&!(offArt&&cursorItem);
     const bool modifiers=active&&(gamePointer||mouseDown||rightMouseDown);
     PanelModifier(VK_CONTROL,modifiers&&controls.lt>140,controlDown);
     PanelModifier(VK_SHIFT,modifiers&&!grabbing&&(controls.buttons&menus::RightBumper),shiftDown);
@@ -3549,6 +3566,14 @@ void CollectionPress(const collection::panel::Hit& hit) {
     // An item in the hand: the click stores it in the collection (its own slot, by the
     // item's identity) wherever on the page it was clicked. A click on a real control,
     // empty-handed, works the control. The click path is the one the log proved runs.
+    if(gamestate::CursorItemHeld()&&stashslots::Find(collection::CarriedCode())) {
+        // A gem, rune or material is never the collection's (owner 2026-11-21): the page goes and
+        // the item goes to its own slot on the game's tab.
+        nativeSlotRequest.store(collection::CarriedCode());
+        collection::TabSetWanted(false);
+        Say("Frame collection: a gem, rune or material pulled on the page - to its own tab instead");
+        return;
+    }
     if(gamestate::CursorItemHeld()) {
         Say("Frame collection: a pull on the page with an item in the hand - storing it");
         collection::DepositCarried();
