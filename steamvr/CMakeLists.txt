@@ -292,6 +292,8 @@ add_executable(walk-direction-test walk_direction_test.cpp)   # Walk direction: 
 add_executable(room-scale-test room_scale_test.cpp)   # room-scale: a turn pivots at the head
 add_executable(room-steps-test room_steps_test.cpp)   # Room follows you: the neck, the dead zone, pauses, walls, the origin follow
 add_executable(sewer-interaction-test sewer_interaction_test.cpp)
+add_executable(portal-placement-test portal_placement_test.cpp)
+add_test(NAME portal-placement-test COMMAND portal-placement-test)
 add_executable(notice-card-test notice_card_test.cpp)
 add_executable(melee-weapon-test melee_weapon_test.cpp)
 add_executable(breakables-test breakables_test.cpp)
