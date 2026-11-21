@@ -43,10 +43,10 @@ void WalkTown(uintptr_t room,int level,Read read,Level levelOf,Visit visit) {
     uintptr_t rooms[128]{room};int count=1,visited=0;
     for(int r=0;r<count&&visited<2048;++r){
         if(rooms[r]<0x10000||levelOf(rooms[r])!=level)continue;
-        uintptr_t near=0,unit=0;uint32_t n=0;
-        if(read(rooms[r],near)&&read(rooms[r]+0x40,n)&&n<=64&&near>=0x10000)
+        uintptr_t nearby=0,unit=0;uint32_t n=0;
+        if(read(rooms[r],nearby)&&read(rooms[r]+0x40,n)&&n<=64&&nearby>=0x10000)
             for(uint32_t i=0;i<n&&count<128;++i){
-                uintptr_t next=0;if(!read(near+i*8,next))break;
+                uintptr_t next=0;if(!read(nearby+i*8,next))break;
                 bool seen=false;for(int j=0;j<count;++j)if(rooms[j]==next){seen=true;break;}
                 if(next>=0x10000&&!seen)rooms[count++]=next;
             }

@@ -1,3 +1,8 @@
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h> // Exercise Windows macros used by the real vrcam translation unit.
+#endif
 #include "entry_facing.h"
 #include <cstdlib>
 #include <initializer_list>
