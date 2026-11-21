@@ -38,6 +38,7 @@
 #include "room_subscription.h"
 #include "../steamvr/interact_press.h"
 #include "../steamvr/sewer_interaction.h"
+#include "../steamvr/entry_facing.h"
 #include "../steamvr/dropped_item_labels.h"
 #include "../steamvr/loot_aim.h"
 #include "../steamvr/arm_pointing.h"
@@ -3446,6 +3447,7 @@ bool VrView(const d2rcam::WorldView& in, float out[16]) {
     }
     return ours;
 }
+void AlignAreaEntry(float cameraHeading);
 bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
     AcquireSRWLockExclusive(&g_lookLock);
     memcpy(g_lookAt, in.lookAt, sizeof g_lookAt);
@@ -3483,6 +3485,7 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
     const float heading0 = atan2f(-gameFwd.x, -gameFwd.z);
     const float down0 = asinf(std::clamp(-gameFwd.y, -1.0f, 1.0f));
     const float d2r = 3.14159265f / 180.0f;
+    AlignAreaEntry(heading0 / d2r);
     yaw = TargetYaw();                                   // + turns right
     const float heading = heading0 - yaw * d2r;
     const float down = std::clamp(down0 + TargetPitch() * d2r, -1.55f, 1.55f);   // + looks further down
@@ -5289,6 +5292,37 @@ bool NativeSpellAimDecide(float playerX,float playerY,framevr::spellaim::Cast& c
         cast.x=pointX;cast.y=pointY;cast.contactPoint=true;
     }
     return cast.directed;
+}
+// At most once after a level transition, before either eye uses its yaw.
+bool SewerInteractionLayoutReady();
+void AlignAreaEntry(float cameraHeading) {
+    static framevr::entryfacing::State entry;
+    if(RightOfPair()||!FullBody()||ThirdPerson())return;
+    const auto now=GetTickCount64(),session=gamestate::LocalPlayer();
+    const int level=interactionstate::CurrentLevel(session,now);
+    if(!entry.Observe(session,level,now)||!SewerInteractionLayoutReady())return;
+    uintptr_t player=0;
+    if(!combat::LocalPlayerUnit(player))return;
+    auto read=[](uintptr_t at,auto& value){return at>=0x10000&&at<=UINTPTR_MAX-sizeof value&&SafeRead(&value,reinterpret_cast<const void*>(at),sizeof value);};
+    float px=0,py=0,tx=0,ty=0,best=10.f,second=10.f;
+    uintptr_t tile=0;
+    framevr::lootaim::Walk(player,read,[&](uintptr_t unit,const uint32_t* h){
+        uint32_t cell[2]{};
+        if(h[0]!=5||!framevr::lootaim::ItemCell(unit,read,cell))return true;
+        const float d=std::hypot(float(cell[0])-px,float(cell[1])-py);
+        if(d<best){second=best;best=d;tile=unit;tx=float(cell[0]);ty=float(cell[1]);}
+        else if(d<second)second=d;
+        return true;
+    },px,py);
+    // Two equally close exits cannot identify the one just used.
+    if(second-best<1.f)tile=0;
+    float heading=0;
+    if(!entry.Choose(now,tile,px,py,tx,ty,heading))return;
+    const float delta=framevr::entryfacing::TurnDelta(cameraHeading,TargetYaw(),heading);
+    g_turnYaw.fetch_add(delta);
+    if(g_headHeld.load())g_heldYaw.fetch_add(delta);
+    g_gen.fetch_add(1);g_meleeTurnEpoch.fetch_add(1);
+    LogF("Frame area entry: level=%d entrance=%p distance=%.2f facing=%.1f turn=%.1f",level,reinterpret_cast<void*>(tile),best,heading,delta);
 }
 uintptr_t NearbySewerInteraction();
 namespace lootaimvr { uintptr_t Selected(); bool PickInReach(); bool IsItem(uintptr_t unit); }
