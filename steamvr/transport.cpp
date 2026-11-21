@@ -736,7 +736,7 @@ struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_F
 // (stash_nav.h): a ring of three, each with its two strips, and the fence its copy waits on.
 struct StashStrip {Microsoft::WRL::ComPtr<ID3D12Resource> buffer;D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp{};int w=0,h=0;};
 struct StashRead {StashStrip tabs,counter;uint64_t fence=0;bool pending=false;};
-std::array<StashRead,3> stashReads;int stashReadNext=0,stashReadRecorded=-1;
+std::array<StashRead,3> stashReads;int stashReadNext=0,stashReadRecorded=-1;unsigned stashReadsDone=0,stashReadsRecorded=0;
 // "Page N / 5" (stash_counter_art.h) in the UI image's format, laid over the game's counter.
 struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp[5]{};bool tried=false;} counterUpload;
 DXGI_FORMAT atlasFormat=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
@@ -2825,6 +2825,9 @@ void MenuPointer(const menus::Pad& controls) {
     // click on an inventory cell puts it down there or lifts it up. While that click is made the
     // game's cursor is the click's, not the laser's.
     static int handClickStep=0;static ULONGLONG handClickAt=0;static collection::InventoryClick handClick;
+    // The same click for the stash's own controls (a tab, a page arrow) when the pad turns them
+    // with the laser in charge: the game takes no pad then (owner 2026-11-21: "still A first").
+    static bool uiClickPending=false,handIsUi=false;static float uiClickU=0,uiClickV=0;
     const bool handClicking=handClickStep!=0;
     const bool overCollectionPage=collection::TabWanted()&&spatialReady&&pointerHit&&
         hit.u>=CollectionPageLeft&&hit.u<=CollectionPageRight&&hit.v>=CollectionPageTop&&hit.v<=CollectionPageBottom;
@@ -2936,30 +2939,39 @@ void MenuPointer(const menus::Pad& controls) {
             }
         } else {lbSpoiled=rbSpoiled=true;stickWas=0;queued=0;}
         rtWas=rt;ltWas=lt;lbWas=lb;rbWas=rb;
+        // With controller navigation the game takes the pad: a pulse. With the laser it takes no
+        // pad (the "A first" the owner met), so the mod clicks the game's own tab or page arrow.
         const auto send=[&](bool next,bool isTab){
             pulse={};
             if(isTab){if(next)pulse.rt=255;else pulse.lt=255;}
             else pulse.buttons=next?menus::RightBumper:menus::LeftBumper;
             pulseUntil=now+80;nextPulseAt=now+170;
         };
+        const auto clickTab=[&](int to){
+            uiClickU=(float(stashnav::TabsX+stashnav::TabStep*to)+stashnav::TabStep*.5f)/2244.f;uiClickV=200.f/2352.f;uiClickPending=true;
+        };
+        const auto clickArrow=[&](bool next){uiClickU=(next?810.f:584.f)/2244.f;uiClickV=861.f/2352.f;uiClickPending=true;};
         if(tabNext||tabPrev) {
             const bool next=tabNext;
+            const int under=tab>=0&&tab<stashnav::Collection?tab:-1;
             if(collection::TabWanted()) {
-                // Out of the Collection: to Personal going on, to Runes going back, from whichever
-                // of the game's tabs is under the page (the tab read off the image).
+                // Out of the Collection: to Personal going on, to Runes going back.
                 collection::TabSetWanted(false);
-                const int under=tab>=0&&tab<stashnav::Collection?tab:(next?stashnav::Runes:stashnav::Personal);
-                queued=next?(5-under)%5:(under+1)%5;queuedNext=next;
+                const int to=next?stashnav::Personal:stashnav::Runes;
+                if(native){const int from=under>=0?under:(next?stashnav::Runes:stashnav::Personal);queued=next?(5-from)%5:(from+1)%5;queuedNext=next;}
+                else if(under!=to)clickTab(to);
                 Say(next?"Frame stash: on from the Collection":"Frame stash: back from the Collection");
-            } else if((next&&tab==stashnav::Runes)||(!next&&tab==stashnav::Personal)) {
+            } else if((next&&under==stashnav::Runes)||(!next&&under==stashnav::Personal)) {
                 collection::TabSetWanted(true);   // the Collection is the sixth tab, between Runes and Personal
                 Say("Frame stash: the Collection, by the pad");
-            } else {queued=1;queuedNext=next;}
+            } else if(native) {queued=1;queuedNext=next;}
+            else if(under>=0)clickTab(next?under+1:under-1);
+            else Say("Frame stash: the chosen tab is not read off the image; the pad cannot turn it");
         }
         if(pageNext||pagePrev) {
             const bool allowed=tab!=stashnav::Shared||page==stashnav::PageUnknown||
                 (pageNext&&page<stashnav::PlayerPages)||(pagePrev&&page>1);
-            if(allowed&&!collection::TabWanted())send(pageNext,false);
+            if(allowed&&!collection::TabWanted()){if(native)send(pageNext,false);else if(tab==stashnav::Shared)clickArrow(pageNext);}
             else if(!allowed)Say("Frame stash: the shared pages stop at the player's five");
         }
         if(queued>0&&now>=nextPulseAt){send(queuedNext,true);--queued;}
@@ -3019,11 +3031,12 @@ void MenuPointer(const menus::Pad& controls) {
             inventoryMaskUntil.store(GetTickCount64()+200);
         }
     }
-    if(handClickStep==0&&collection::TakeInventoryClick(handClick)){handClickStep=1;handClickAt=GetTickCount64();}
+    if(handClickStep==0&&collection::TakeInventoryClick(handClick)){handClickStep=1;handIsUi=false;handClickAt=GetTickCount64();}
+    if(handClickStep==0&&uiClickPending){uiClickPending=false;handClickStep=1;handIsUi=true;handClickAt=GetTickCount64();}
     if(handClickStep!=0) {
         const ULONGLONG now=GetTickCount64();
-        const float u=(1244.f+(float(handClick.x)+float(handClick.w)*.5f+.15f)*57.2f)/2244.f;
-        const float v=(668.f+(float(handClick.y)+float(handClick.h)*.5f+.15f)*57.2f)/2352.f;
+        const float u=handIsUi?uiClickU:(1244.f+(float(handClick.x)+float(handClick.w)*.5f+.15f)*57.2f)/2244.f;
+        const float v=handIsUi?uiClickV:(668.f+(float(handClick.y)+float(handClick.h)*.5f+.15f)*57.2f)/2352.f;
         RECT client{};math::Vec native{u,v,0};POINT pixel{};
         const bool placed=GetClientRect(gameWindow,&client)&&
             journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},u,v,uiWidth,uiHeight,native)&&
@@ -3040,7 +3053,8 @@ void MenuPointer(const menus::Pad& controls) {
             handClickStep=2;handClickAt=now;
         } else if(handClickStep==2&&now-handClickAt>=25) {
             INPUT button{};button.type=INPUT_MOUSE;button.mi.dwFlags=MOUSEEVENTF_LEFTUP;SendInput(1,&button,sizeof button);
-            collection::InventoryClickDone();handClickStep=0;
+            if(!handIsUi)collection::InventoryClickDone();
+            handClickStep=0;
         }
     }
     // On a button, or off the art with an item to drop, the dot shows and no game click is made there.
@@ -7821,10 +7835,16 @@ void CollectStashReads() {
         std::vector<uint8_t> tabs,counter;
         if(!read(r.tabs,tabs)||!read(r.counter,counter))continue;
         auto& last=stashnav::Last();
-        const int tab=stashnav::ActiveTab(tabs.data(),r.tabs.w,r.tabs.h,r.tabs.w);
+        float means[stashnav::TabCount]{};
+        const int tab=stashnav::ActiveTab(tabs.data(),r.tabs.w,r.tabs.h,r.tabs.w,means);
         const int page=tab==stashnav::Shared?stashnav::SharedPage(counter.data(),r.counter.w,r.counter.h,r.counter.w):stashnav::PageUnknown;
-        if(tab!=last.tab.load()||page!=last.page.load()) {
-            char line[120];std::snprintf(line,sizeof line,"Frame stash: tab %d, shared page %d (read off the UI image)",tab,page);Say(line);
+        ++stashReadsDone;
+        static ULONGLONG toldAt=0;
+        if(tab!=last.tab.load()||page!=last.page.load()||GetTickCount64()-toldAt>3000) {
+            toldAt=GetTickCount64();
+            const uint8_t* c=counter.data()+(size_t(14)*size_t(r.counter.w)+70)*4;   // a pixel in the counter's digit
+            char line[260];std::snprintf(line,sizeof line,"Frame stash: tab %d, shared page %d (read off the UI image; %u read, %u recorded; plates %.0f %.0f %.0f %.0f %.0f %.0f; counter pixel %u,%u,%u)",
+                tab,page,stashReadsDone,stashReadsRecorded,means[0],means[1],means[2],means[3],means[4],means[5],c[0],c[1],c[2]);Say(line);
         }
         last.tab=tab;last.page=page;last.at=GetTickCount64();
     }
@@ -7832,9 +7852,16 @@ void CollectStashReads() {
 // This frame's strips: copied out of the game's own UI image (src) into the next free slot.
 void RecordStashReads(ID3D12GraphicsCommandList* list,ID3D12Resource* src,uint32_t w,uint32_t h,const int32_t crop[4]) {
     stashReadRecorded=-1;
-    if(!gamestate::StashButtonsShown()||!ShotSized(w,h,crop))return;
+    static ULONGLONG toldAt=0;
+    const auto skip=[&](const char* why){
+        if(GetTickCount64()-toldAt<3000)return;
+        toldAt=GetTickCount64();
+        char line[200];std::snprintf(line,sizeof line,"Frame stash: no strip read this frame - %s (image %ux%u, crop %d,%d %dx%d)",why,w,h,crop[0],crop[1],crop[2],crop[3]);Say(line);
+    };
+    if(!gamestate::StashButtonsShown())return;
+    if(!ShotSized(w,h,crop)){skip("the image is not the shots' size");return;}
     auto& r=stashReads[size_t(stashReadNext)];
-    if(r.pending)return;   // the GPU is behind: skip a frame
+    if(r.pending){skip("the slot still waits for the GPU");return;}
     const int cx=crop[2]>0?crop[0]:0,cy=crop[3]>0?crop[1]:0;
     const auto make=[&](StashStrip& s,int sw,int sh)->bool{
         if(s.buffer)return true;
@@ -7847,8 +7874,9 @@ void RecordStashReads(ID3D12GraphicsCommandList* list,ID3D12Resource* src,uint32
         if(FAILED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&s.buffer)))){s={};return false;}
         s.w=sw;s.h=sh;return true;
     };
-    if(src->GetDesc().Format!=DXGI_FORMAT_R16G16B16A16_FLOAT||
-       !make(r.tabs,stashnav::TabsW,stashnav::TabsH)||!make(r.counter,stashnav::CounterW,stashnav::CounterH))return;
+    if(src->GetDesc().Format!=DXGI_FORMAT_R16G16B16A16_FLOAT){skip("the image is not R16G16B16A16_FLOAT");return;}
+    if(!make(r.tabs,stashnav::TabsW,stashnav::TabsH)||!make(r.counter,stashnav::CounterW,stashnav::CounterH)){skip("no readback buffer");return;}
+    ++stashReadsRecorded;
     D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     b.Transition={src,D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COPY_SOURCE};
     list->ResourceBarrier(1,&b);

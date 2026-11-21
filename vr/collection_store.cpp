@@ -287,6 +287,101 @@ D2RL::Inventory::IterationAction __cdecl MarkOccupied(const D2RL::PluginContext*
     return D2RL::Inventory::IterationAction::Continue;
 }
 
+// ---- Room in a full inventory ----------------------------------------------------------
+// The way in and out needs a free spot in the inventory. When there is none (owner 2026-11-21:
+// "a full inventory and the item cannot come out"), the items covering the spot that needs the
+// fewest moved go to the collection's last page for the moment, and come back to the very
+// cells they had once the item has passed.
+struct Placed {
+    D2RL::ItemHandle handle = 0;
+    int x = 0, y = 0, w = 1, h = 1;
+};
+D2RL::Inventory::IterationAction __cdecl CollectPlaced(const D2RL::PluginContext*, const D2RL::Items::ItemInfo* info, void* userData) noexcept {
+    if (info != nullptr && info->container == D2RL::Items::ItemContainer::Inventory) {
+        const auto [w, h] = SizeOf(info->code);
+        static_cast<std::vector<Placed>*>(userData)->push_back({info->handle, info->x, info->y, w, h});
+    }
+    return D2RL::Inventory::IterationAction::Continue;
+}
+
+bool MoveExisting(const D2RL::PlayerHandle player, const D2RL::ItemHandle item, D2RL::Items::ItemContainer container,
+                  D2RL::Items::Placement placement, int x, int y, uint32_t page) {
+    if (g_items == nullptr) return false;
+    D2RL::Items::ExistingItemOperation operation {};
+    operation.structSize = D2RL::Items::ExistingItemOperationSize;
+    operation.kind       = D2RL::Items::ExistingItemOperationKind::Move;
+    operation.item       = item;
+    operation.move.destination.structSize      = D2RL::Items::ItemDestinationSize;
+    operation.move.destination.container       = container;
+    operation.move.destination.placement       = placement;
+    operation.move.destination.x               = uint32_t(std::max(0, x));
+    operation.move.destination.y               = uint32_t(std::max(0, y));
+    operation.move.destination.sharedStashPage = page;
+    D2RL::Items::ExistingItemTransaction transaction {};
+    transaction.structSize     = D2RL::Items::ExistingItemTransactionSize;
+    transaction.player         = player;
+    transaction.operationCount = 1;
+    transaction.operations     = &operation;
+    D2RL::Items::ExistingItemTransactionResult result {};
+    result.structSize = D2RL::Items::ExistingItemTransactionResultSize;
+    return g_items->executeExistingItemTransaction(g_ctx, &transaction, &result) == D2RL::Items::Result::Success;
+}
+
+std::mutex          g_roomLock;
+std::vector<Placed> g_displaced;   // set aside for a full inventory; back at their own cells after
+
+uint32_t SparePage() {
+    const int tabs = std::min(g_tabs.load(), kBandTabs);
+    return uint32_t(g_firstTab.load() + std::max(1, tabs) - 1);
+}
+
+// Puts back what MakeRoom set aside, each at its own cell (anywhere free if that is taken).
+void RestoreDisplaced(const D2RL::PlayerHandle player) {
+    std::vector<Placed> back;
+    { std::lock_guard lock(g_roomLock); back.swap(g_displaced); }
+    for (const Placed& item : back) {
+        if (MoveExisting(player, item.handle, D2RL::Items::ItemContainer::Inventory, D2RL::Items::Placement::Exact, item.x, item.y, 0)) continue;
+        if (MoveExisting(player, item.handle, D2RL::Items::ItemContainer::Inventory, D2RL::Items::Placement::Automatic, 0, 0, 0)) continue;
+        Log("Frame collection: an item set aside for the move could not go back to the inventory; it waits on the collection's last page");
+    }
+}
+
+// A w x h spot in a full inventory: the block whose items are fewest, those set aside. False
+// (nothing moved) when no block can be cleared.
+bool MakeRoom(const D2RL::PlayerHandle player, int w, int h, int& bx, int& by) {
+    std::vector<Placed> all;
+    D2RL::Inventory::ItemFilter filter {};
+    filter.structSize    = D2RL::Inventory::ItemFilterSize;
+    filter.containerMask = D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::Inventory);
+    g_inventory->forEachInventoryItem(g_ctx, player, &filter, &CollectPlaced, &all);
+    int best = -1;
+    std::vector<Placed> bestCover;
+    for (int x = 0; x + w <= kInventoryWidth; ++x)
+        for (int y = 0; y + h <= kInventoryHeight; ++y) {
+            std::vector<Placed> cover;
+            for (const Placed& item : all)
+                if (item.x < x + w && item.x + item.w > x && item.y < y + h && item.y + item.h > y) cover.push_back(item);
+            if (best < 0 || int(cover.size()) < best) { best = int(cover.size()); bestCover = cover; bx = x; by = y; }
+        }
+    if (best < 0) return false;
+    std::vector<Placed> moved;
+    for (const Placed& item : bestCover) {
+        if (MoveExisting(player, item.handle, D2RL::Items::ItemContainer::SharedStash, D2RL::Items::Placement::Automatic, 0, 0, SparePage())) {
+            moved.push_back(item);
+            continue;
+        }
+        { std::lock_guard lock(g_roomLock); g_displaced.insert(g_displaced.end(), moved.begin(), moved.end()); }
+        RestoreDisplaced(player);
+        Log("Frame collection: the inventory is full and could not be cleared for the move");
+        return false;
+    }
+    { std::lock_guard lock(g_roomLock); g_displaced.insert(g_displaced.end(), moved.begin(), moved.end()); }
+    char line[128];
+    std::snprintf(line, sizeof(line), "Frame collection: the inventory is full; %u item(s) set aside for the move", unsigned(moved.size()));
+    Log(line);
+    return true;
+}
+
 // What the frame thread is asked to click, and where the hand's item is on its way.
 enum class Phase : int { Idle, DepositPrepare, DepositClick, DepositClicking, DepositStore, DepositStoring, TakePrepare, TakeClick, TakeClicking };
 std::atomic<int>      g_phase{int(Phase::Idle)};
@@ -358,6 +453,16 @@ void DepositPrepareOnGameThread(const D2RL::PluginContext*, void*) noexcept {
             SetPhase(Phase::DepositClick);
             return;
         }
+    int x = 0, y = 0;
+    if (MakeRoom(player, w, h, x, y)) {
+        {
+            std::lock_guard lock(g_clickLock);
+            g_click = InventoryClick {x, y, w, h};
+            g_handCategory = category; g_handIdentity = identity; g_handByCode = byCode;
+        }
+        SetPhase(Phase::DepositClick);
+        return;
+    }
     Log("Frame collection: no room in the inventory to pass the hand's item through; it stays in hand");
     SetPhase(Phase::Idle);
 }
@@ -423,6 +528,7 @@ void DepositStoreOnGameThread(const D2RL::PluginContext*, void*) noexcept {
                       CategoryName(category), unsigned(identity));
     }
     Log(line);
+    RestoreDisplaced(player);   // a full inventory's items back at their cells
     SetPhase(Phase::Idle);
 }
 std::atomic<uint32_t> g_actionCategory{UINT32_MAX};
@@ -480,6 +586,26 @@ struct HandleCell {
     D2RL::ItemHandle handle = 0;
     int              x = -1, y = -1;
 };
+std::atomic<uint64_t> g_taken{0};       // the item on its way out, lifted by the game's click
+std::atomic<uint64_t> g_liftedAt{0};
+D2RL::Inventory::IterationAction __cdecl FindHandleCell(const D2RL::PluginContext*, const D2RL::Items::ItemInfo* info, void* userData) noexcept;
+
+// Runs on the game thread after the lift: once the item has left the inventory (it is in the
+// hand), what a full inventory set aside goes back to its cells. Asked each tick for a second.
+void RestoreAfterLiftOnGameThread(const D2RL::PluginContext*, void*) noexcept {
+    D2RL::PlayerHandle player {};
+    if (g_ctx == nullptr || g_inventory == nullptr || g_inventory->getLocalPlayer(g_ctx, &player) != D2RL::Inventory::Result::Success) return;
+    HandleCell cell;
+    cell.handle = g_taken.load();
+    D2RL::Inventory::ItemFilter filter {};
+    filter.structSize    = D2RL::Inventory::ItemFilterSize;
+    filter.containerMask = D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::Inventory);
+    g_inventory->forEachInventoryItem(g_ctx, player, &filter, &FindHandleCell, &cell);
+    if (cell.x >= 0 && GetTickCount64() - g_liftedAt.load() < 1000 && g_threads != nullptr && g_threads->runOnGameThread != nullptr &&
+        g_threads->runOnGameThread(g_ctx, &RestoreAfterLiftOnGameThread, nullptr) == D2RL::Threads::Result::Success)
+        return;
+    RestoreDisplaced(player);
+}
 D2RL::Inventory::IterationAction __cdecl FindHandleCell(const D2RL::PluginContext*, const D2RL::Items::ItemInfo* info, void* userData) noexcept {
     auto& found = *static_cast<HandleCell*>(userData);
     if (info != nullptr && info->handle == found.handle && info->container == D2RL::Items::ItemContainer::Inventory) {
@@ -522,16 +648,28 @@ void SlotActionOnGameThread(const D2RL::PluginContext*, void*) noexcept {
         return;
     }
     if (!MoveToInventory(player, match.stored)) {
-        std::snprintf(line, sizeof(line), "Frame collection: no room in the inventory to take the %s item (id %u) out",
-                      CategoryName(category), unsigned(identity));
-        Log(line);
-        SetPhase(Phase::Idle);
-        return;
+        // A full inventory: room made for the item's size (its items set aside for the moment).
+        D2RL::Items::ItemInfo info {};
+        info.structSize = D2RL::Items::ItemInfoSize;
+        const auto [w, h] = g_items->getItemInfo(g_ctx, match.stored, &info) == D2RL::Items::Result::Success
+                                ? SizeOf(info.code) : std::pair<int, int> {2, 4};
+        int x = 0, y = 0;
+        const bool room = MakeRoom(player, w, h, x, y);
+        if (!room || !MoveExisting(player, match.stored, D2RL::Items::ItemContainer::Inventory, D2RL::Items::Placement::Exact, x, y, 0)) {
+            if (room) RestoreDisplaced(player);
+            std::snprintf(line, sizeof(line), "Frame collection: no room in the inventory to take the %s item (id %u) out",
+                          CategoryName(category), unsigned(identity));
+            Log(line);
+            SetPhase(Phase::Idle);
+            return;
+        }
     }
+    g_taken.store(match.stored);
     HandleCell cell;
     cell.handle = match.stored;
     filter.containerMask = D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::Inventory);
     g_inventory->forEachInventoryItem(g_ctx, player, &filter, &FindHandleCell, &cell);
+    if (cell.x < 0) RestoreDisplaced(player);
     if (category == Category::Materials) TabMarkMissingCode(category, identity);
     else TabMarkMissing(category, identity);
     if (cell.x < 0) {
@@ -721,6 +859,12 @@ void InventoryClickDone() {
     if (g_phase.compare_exchange_strong(expected, int(Phase::Idle))) {
         g_phaseAt.store(GetTickCount64());
         Log("Frame collection: the game's click lifted the item into the hand");
+        bool aside = false;
+        { std::lock_guard lock(g_roomLock); aside = !g_displaced.empty(); }
+        if (aside && g_threads != nullptr && g_threads->runOnGameThread != nullptr) {
+            g_liftedAt.store(GetTickCount64());
+            g_threads->runOnGameThread(g_ctx, &RestoreAfterLiftOnGameThread, nullptr);
+        }
     }
 }
 
@@ -801,6 +945,9 @@ void TickStore(bool stashOpen) {
             std::snprintf(line, sizeof(line), "Frame collection: the hand's item move timed out (step %d); the way is free again", phase);
             Log(line);
             SetPhase(Phase::Idle);
+            g_liftedAt.store(0);   // anything set aside for a full inventory goes back now
+            if (g_threads != nullptr && g_threads->runOnGameThread != nullptr)
+                g_threads->runOnGameThread(g_ctx, &RestoreAfterLiftOnGameThread, nullptr);
         }
     }
     // What the hand holds, while the stash is open (the page draws it under the laser).

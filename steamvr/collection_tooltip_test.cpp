@@ -81,10 +81,12 @@ int main() {
     const Tooltip runeTip = BuildTooltip(rune, false, "");
     assert(!runeTip.body.empty() && runeTip.body[0] == "Runes: r30 r03 r22 r23 r17");
 
-    // No text and no catalog detail still leaves one honest line.
-    const Tooltip empty = BuildTooltip(gem, false, "");
+    // No text and no catalog detail: a found entry still has one honest line; a missing one
+    // shows its name only (stat lines only for what is in the collection, owner 2026-11-21).
+    const Tooltip empty = BuildTooltip(gem, true, "");
     assert(empty.body.size() == 1 && empty.body[0] == "Item text unavailable.");
     assert(!empty.Empty());
+    assert(BuildTooltip(gem, false, "").body.empty());
 
     // Beside the slot it describes: to the right when it fits...
     const panel::Rect middle{100, 100, 50, 50};

@@ -166,6 +166,13 @@ def _line(code, par, lo, hi, look, strings):
             return None
         name, cls = SKILL_TABS[tab].split('/')
         return prio, '%s to %s (%s Only)' % (_value(lo, hi, True), name, CLASSES[cls])
+    # A class's skill levels (ama, pal, ... war): the class is the property's val1, not the stat's
+    # text (which reads Amazon for every class).
+    if stat and prop.get('stat1', '').strip() == 'item_addclassskills' and code != 'randclassskill':
+        names = ['Amazon', 'Sorceress', 'Necromancer', 'Paladin', 'Barbarian', 'Druid', 'Assassin', 'Warlock']
+        cls = _int(prop.get('val1', ''), -1)
+        if 0 <= cls < len(names):
+            return prio, '%s to %s Skill Levels' % (_value(lo, hi, True), names[cls])
     if code == 'randclassskill':   # Hellfire Torch: min..max is the class drawn, the bonus is three
         return prio, '+3 to (Random Class) Skill Levels'
     if code == 'sock':

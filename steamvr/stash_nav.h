@@ -45,9 +45,10 @@ inline uint8_t HalfToByte(uint16_t h) {
 
 // The chosen tab, from the strip's pixels (8-bit RGBA, row stride in pixels), or -1 when no plate
 // stands out (a menu over the bar, a frame mid-change).
-inline int ActiveTab(const uint8_t* rgba, int w, int h, int stride) {
+inline int ActiveTab(const uint8_t* rgba, int w, int h, int stride, float* means = nullptr) {
     if (rgba == nullptr || w < TabsW || h < TabsH) return -1;
-    float mean[TabCount] {};
+    float local[TabCount] {};
+    float* mean = means ? means : local;
     for (int t = 0; t < TabCount; ++t) {
         double sum = 0; int n = 0;
         for (int y = 0; y < TabsH; y += 2)

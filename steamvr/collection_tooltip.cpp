@@ -45,7 +45,8 @@ Tooltip BuildTooltip(const Entry& entry, bool found, std::string_view gameText, 
     for (std::string& line : SplitLines(gameText)) tip.body.push_back(std::move(line));
     // No item text from the loader: the catalog's own stat lines, with their ranges, worded
     // from the game's tables (prepare_collection / collection_stats.py).
-    if (gameText.empty() && !entry.stats.empty()) {
+    // Only for an item that is in the collection (owner 2026-11-21).
+    if (gameText.empty() && found && !entry.stats.empty()) {
         std::size_t at = 0;
         while (at <= entry.stats.size()) {
             const std::size_t bar = entry.stats.find('|', at);
@@ -56,7 +57,7 @@ Tooltip BuildTooltip(const Entry& entry, bool found, std::string_view gameText, 
         }
     }
 
-    if (tip.body.empty()) {
+    if (tip.body.empty() && found) {
         tip.body.push_back(PreviewOf(entry).kind == PreviewKind::Unsupported
                                ? std::string("No preview for this entry.")
                                : std::string("Item text unavailable."));
