@@ -37,6 +37,13 @@ bool Direction(float px,float py,float tx,float ty,Walkable walkable,float& head
             reach=distance;
         }
         if(reach<1.5f)continue;
+        // Facing is not route planning: a longer diagonal must not override
+        // a clear direction away from the entrance. Farther furniture/walls
+        // otherwise pull the view sideways depending on the spawn position.
+        if(i==0&&d>=.5f){
+            heading=std::atan2(-fx,-fy)*180/pi;
+            return true;
+        }
         const float score=reach+alignment*2.f;
         if(score>best){best=score;bestAngle=angle;}
     }

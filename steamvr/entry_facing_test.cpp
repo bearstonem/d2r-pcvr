@@ -11,6 +11,12 @@ int main(){
     Check(s.Observe(1,2,300));Check(!s.Observe(1,2,1800));
     Check(!s.Observe(2,8,2000));Check(!s.Observe(0,0,2100));
     Check(Direction(100,100,98,100,[](int,int){return true;},h));Check(std::abs(h+90)<.01f);
+    // A farther obstacle makes a diagonal ray longer, but the doorway's
+    // forward direction is already clear. Neither side should pull the view.
+    for(int side:{-1,1}) {
+        Check(Direction(100,100,98,100,[&](int x,int y){return x<104||(y-100)*side>0;},h));
+        Check(std::abs(h+90)<.01f);
+    }
     // Cave spawn exactly on the warp: west is a wall, east leads inside.
     Check(Direction(100,100,100,100,[](int x,int y){return x>=100&&y>=99&&y<=101;},h));Check(std::abs(h+90)<.01f);
     // Leaving a cave: the entrance to the east must be behind the view.
