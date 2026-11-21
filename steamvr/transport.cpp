@@ -2905,19 +2905,39 @@ void MenuPointer(const menus::Pad& controls) {
         }
         slotWasDown=pressed;
         // From the Collection page (CollectionPress): the item's tab clicked, then its slot.
+        // The game's tab under the Collection page, to go back to once the item is in (-1 none).
+        static int returnTab=-1;static bool returnOwed=false;static ULONGLONG returnAt=0;
         if(const uint32_t asked=nativeSlotRequest.load();asked!=0&&!handClicking&&!uiClickPending) {
             nativeSlotRequest.store(0);
             if(const auto* wanted=stashslots::Find(asked)) {
                 slotU=float(wanted->x)/2244.f;slotV=float(wanted->y)/2352.f;
-                uiClickU=(float(stashnav::TabsX+stashnav::TabStep*wanted->tab)+stashnav::TabStep*.5f)/2244.f;uiClickV=200.f/2352.f;
-                uiClickPending=true;slotQueued=true;slotAt=now+350;
+                collection::TabKeepUntil(now+2500);   // the game's tab switches leave the page up
+                if(tab==wanted->tab){uiClickU=slotU;uiClickV=slotV;uiClickPending=true;returnTab=-1;}
+                else {
+                    returnTab=tab;
+                    uiClickU=(float(stashnav::TabsX+stashnav::TabStep*wanted->tab)+stashnav::TabStep*.5f)/2244.f;uiClickV=200.f/2352.f;
+                    uiClickPending=true;slotQueued=true;slotAt=now+350;
+                }
             }
         }
         // The slot's click once the game shows the item's tab (or give up after a second).
         if(slotQueued&&now>=slotAt&&!uiClickPending&&!handClicking) {
             const auto* held=stashslots::Find(collection::CarriedCode());
-            if(held&&tab==held->tab){uiClickU=slotU;uiClickV=slotV;uiClickPending=true;slotQueued=false;}
+            if(held&&tab==held->tab){
+                uiClickU=slotU;uiClickV=slotV;uiClickPending=true;slotQueued=false;
+                if(returnTab>=0&&collection::TabWanted()){returnOwed=true;returnAt=now+250;}
+            }
             else if(now>slotAt+1000){slotQueued=false;Say("Frame stash: the item's tab did not come up; its slot was not clicked");}
+        }
+        // Under the Collection page the game's own tab goes back to what it was.
+        if(returnOwed&&now>=returnAt&&!uiClickPending&&!handClicking) {
+            returnOwed=false;
+            if(returnTab>=0&&returnTab<stashnav::Collection&&collection::TabWanted()) {
+                collection::TabKeepUntil(now+1500);
+                uiClickU=(float(stashnav::TabsX+stashnav::TabStep*returnTab)+stashnav::TabStep*.5f)/2244.f;uiClickV=200.f/2352.f;
+                uiClickPending=true;
+            }
+            returnTab=-1;
         }
         // While the item is on its way the game gets no click of the laser's (the trigger still
         // held would drop it on whatever tab shows meanwhile).
@@ -3567,11 +3587,10 @@ void CollectionPress(const collection::panel::Hit& hit) {
     // item's identity) wherever on the page it was clicked. A click on a real control,
     // empty-handed, works the control. The click path is the one the log proved runs.
     if(gamestate::CursorItemHeld()&&stashslots::Find(collection::CarriedCode())) {
-        // A gem, rune or material is never the collection's (owner 2026-11-21): the page goes and
-        // the item goes to its own slot on the game's tab.
+        // A gem, rune or material is never the collection's (owner 2026-11-21): it goes to its
+        // own slot on the game's tab under the page, and the page stays up and where it was.
         nativeSlotRequest.store(collection::CarriedCode());
-        collection::TabSetWanted(false);
-        Say("Frame collection: a gem, rune or material pulled on the page - to its own tab instead");
+        Say("Frame collection: a gem, rune or material pulled on the page - to its own tab's slot");
         return;
     }
     if(gamestate::CursorItemHeld()) {

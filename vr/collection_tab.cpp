@@ -237,6 +237,9 @@ void TabToggleGroup(int group) {
 bool TabWanted() { return g_wanted.load(); }
 
 void TabSetWanted(bool wanted) { g_wanted.store(wanted); }
+std::atomic<uint64_t> g_keepUntil{0};
+void TabKeepUntil(uint64_t tick) { g_keepUntil.store(tick); }
+bool TabKept() { return GetTickCount64() < g_keepUntil.load(); }
 
 void TabClearFound() {
     std::lock_guard lock(g_lock);

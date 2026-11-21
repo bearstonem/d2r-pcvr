@@ -68,6 +68,10 @@ void            TabDumpPanel();
 // shows the panel while it is true.
 bool TabWanted();
 void TabSetWanted(bool wanted);
+// The mod's own clicks on the game's tabs under the Collection page (a gem taken to its slot):
+// the stash bar's switch messages until this tick (GetTickCount64) leave the page up.
+void TabKeepUntil(uint64_t tick);
+bool TabKept();
 
 // Called by the scan: the found flags start empty for the character's stash.
 void TabClearFound();

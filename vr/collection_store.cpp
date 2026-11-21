@@ -12,6 +12,7 @@
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -218,6 +219,7 @@ bool MoveToInventory(const D2RL::PlayerHandle player, const D2RL::ItemHandle ite
 // An item's size in inventory cells, by its base code: armor.txt, weapons.txt and misc.txt from
 // the tables D2RLoader extracts beside the game (<game>\d2rloader\data\compiler\<version>).
 std::map<uint32_t, std::pair<int, int>> g_sizes;
+std::set<uint32_t> g_quest;   // quest items (the tables' "quest" column): never the collection's
 bool g_sizesRead = false;
 
 uint32_t CodeKey(const std::string& code) {
@@ -255,13 +257,15 @@ void ReadSizes() {
             for (size_t i = 0; i < header.size(); ++i) if (header[i] == wanted) return int(i);
             return -1;
         };
-        const int code = column("code"), width = column("invwidth"), height = column("invheight");
+        const int code = column("code"), width = column("invwidth"), height = column("invheight"), quest = column("quest");
         if (code < 0 || width < 0 || height < 0) continue;
         while (std::getline(file, line)) {
             std::vector<std::string> row;
             std::stringstream cells(line); std::string cell;
             while (std::getline(cells, cell, '\t')) row.push_back(cell);
             if (int(row.size()) <= std::max({code, width, height}) || row[size_t(code)].empty()) continue;
+            if (quest >= 0 && quest < int(row.size()) && std::atoi(row[size_t(quest)].c_str()) > 0)
+                g_quest.insert(CodeKey(row[size_t(code)]));
             const int w = std::atoi(row[size_t(width)].c_str()), h = std::atoi(row[size_t(height)].c_str());
             if (w >= 1 && w <= 4 && h >= 1 && h <= 4) g_sizes[CodeKey(row[size_t(code)])] = {w, h};
         }
@@ -276,6 +280,7 @@ std::pair<int, int> SizeOf(uint32_t code) {
     const auto found = g_sizes.find(code);
     return found != g_sizes.end() ? found->second : std::pair<int, int> {2, 4};
 }
+bool IsQuest(uint32_t code) { ReadSizes(); return g_quest.count(code) != 0; }
 
 constexpr int kInventoryWidth = 10, kInventoryHeight = 4;
 
@@ -425,6 +430,11 @@ void DepositPrepareOnGameThread(const D2RL::PluginContext*, void*) noexcept {
     Category category = Category::Uniques;
     uint32_t identity = 0;
     bool     byCode   = false;
+    if (IsQuest(cursor.code)) {
+        Log("Frame collection: a quest item is never the collection's; it stays in hand");
+        SetPhase(Phase::Idle);
+        return;
+    }
     if (cursor.unique && cursor.recordId != UINT32_MAX && library.SlotOf(Category::Uniques, cursor.recordId) != UINT32_MAX) {
         category = Category::Uniques; identity = cursor.recordId;
     } else if (cursor.set && cursor.recordId != UINT32_MAX && library.SlotOf(Category::Sets, cursor.recordId) != UINT32_MAX) {
@@ -766,6 +776,10 @@ void SweepOnGameThread(const D2RL::PluginContext*, void*) noexcept {
     for (const Seen& item : sweep.items) {
         const bool ours = item.page >= first && item.page < beyond;
         if (!ours && (item.unique || item.set) && !item.identified) continue;   // unidentified: never collected
+        if (IsQuest(item.code)) {   // a quest item: never collected, and out of the hidden tabs
+            if (ours) strays.push_back(item);
+            continue;
+        }
         if (item.unique && item.recordId != UINT32_MAX && library.SlotOf(Category::Uniques, item.recordId) != UINT32_MAX) {
             if (ours) { heldUnique.push_back(item.recordId); continue; }
             loose.push_back({item, Category::Uniques, item.recordId, false});
