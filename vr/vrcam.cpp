@@ -39,6 +39,7 @@
 #include "../steamvr/interact_press.h"
 #include "../steamvr/sewer_interaction.h"
 #include "../steamvr/entry_facing.h"
+#include "bow_signatures.h"
 #include "../steamvr/dropped_item_labels.h"
 #include "../steamvr/loot_aim.h"
 #include "../steamvr/arm_pointing.h"
@@ -5298,32 +5299,48 @@ bool SewerInteractionLayoutReady();
 void AlignAreaEntry(float cameraHeading) {
     static framevr::entryfacing::State entry;
     if(RightOfPair()||!FullBody()||ThirdPerson())return;
-    const auto now=GetTickCount64(),session=gamestate::LocalPlayer();
-    const int level=interactionstate::CurrentLevel(session,now);
-    if(!entry.Observe(session,level,now)||!SewerInteractionLayoutReady())return;
-    uintptr_t player=0;
-    if(!combat::LocalPlayerUnit(player))return;
+    const auto session=gamestate::LocalPlayer();
+    if(!session){entry.Observe(0,0,0);return;}
+    if(!SewerInteractionLayoutReady())return;
+    static bool geometryReady=false;
+    constexpr uint8_t levelSig[]={0x48,0x85,0xc9,0x75,0x03,0x33,0xc0,0xc3,0x48,0x8b,0x49,0x18,0xe9,0x9f,0x13,0x07,0x00};
+    if(!geometryReady){
+        geometryReady=d2rsig::Check(0x2efc10,levelSig,sizeof levelSig)&&
+            d2rsig::Check(bowvr::native::RoomPointRva,bowvr::native::RoomPointSig,sizeof bowvr::native::RoomPointSig)&&
+            d2rsig::Check(bowvr::native::MaskRva,bowvr::native::MaskSig,sizeof bowvr::native::MaskSig);
+        if(!geometryReady)return;
+    }
     auto read=[](uintptr_t at,auto& value){return at>=0x10000&&at<=UINTPTR_MAX-sizeof value&&SafeRead(&value,reinterpret_cast<const void*>(at),sizeof value);};
-    float px=0,py=0,tx=0,ty=0,best=10.f,second=10.f;
+    uintptr_t player=0,path=0,room=0;
+    if(!combat::LocalPlayerUnit(player)||!read(player+0x38,path)||!read(path+0x20,room)||!room)return;
+    const auto levelOf=reinterpret_cast<int(*)(uintptr_t)>(d2rsig::Addr(0x2efc10));
+    const int level=levelOf(room); // Live destination room, not the delayed UI snapshot.
+    if(!entry.Observe(session,level,GetTickCount64()))return;
+    float px=0,py=0,tx=0,ty=0,best=20.f;
     uintptr_t tile=0;
     framevr::lootaim::Walk(player,read,[&](uintptr_t unit,const uint32_t* h){
         uint32_t cell[2]{};
         if(h[0]!=5||!framevr::lootaim::ItemCell(unit,read,cell))return true;
         const float d=std::hypot(float(cell[0])-px,float(cell[1])-py);
-        if(d<best){second=best;best=d;tile=unit;tx=float(cell[0]);ty=float(cell[1]);}
-        else if(d<second)second=d;
+        // Multiple tile units at one entrance are not competing entrances.
+        if(d<best){best=d;tile=unit;tx=float(cell[0]);ty=float(cell[1]);}
         return true;
     },px,py);
-    // Two equally close exits cannot identify the one just used.
-    if(second-best<1.f)tile=0;
+    if(!tile)return;
+    const auto roomAt=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(bowvr::native::RoomPointRva));
+    const auto mask=reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(bowvr::native::MaskRva));
     float heading=0;
-    if(!entry.Choose(now,tile,px,py,tx,ty,heading))return;
+    if(!framevr::entryfacing::Direction(px,py,tx,ty,[&](int x,int y){
+        const auto r=roomAt(room,x,y);
+        return r&&levelOf(r)==level&&!mask(r,x,y,1,0x1);
+    },heading))return;
     const float delta=framevr::entryfacing::TurnDelta(cameraHeading,TargetYaw(),heading);
     g_turnYaw.fetch_add(delta);
     if(g_headHeld.load())g_heldYaw.fetch_add(delta);
     g_gen.fetch_add(1);g_meleeTurnEpoch.fetch_add(1);
-    LogF("Frame area entry: level=%d entrance=%p distance=%.2f facing=%.1f turn=%.1f",level,reinterpret_cast<void*>(tile),best,heading,delta);
+    LogF("Frame area entry: first destination view level=%d entrance=%p distance=%.2f facing=%.1f turn=%.1f",level,reinterpret_cast<void*>(tile),best,heading,delta);
 }
+
 uintptr_t NearbySewerInteraction();
 namespace lootaimvr { uintptr_t Selected(); bool PickInReach(); bool IsItem(uintptr_t unit); }
 // 0x18DDE0 (controller manager, skill) is the controller's own target for a
