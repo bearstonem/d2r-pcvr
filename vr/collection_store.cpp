@@ -172,8 +172,10 @@ std::mutex            g_carriedLock;
 std::string           g_carriedKey;
 std::atomic<bool>     g_carriedPolling{false};
 std::atomic<uint64_t> g_carriedAt{0};
+std::atomic<uint32_t> g_carriedCode{0};   // the hand's item base code (CodeKey packing), 0 for none
 void PollCarriedOnGameThread(const D2RL::PluginContext*, void*) noexcept {
     std::string key;
+    uint32_t code = 0;
     D2RL::PlayerHandle player {};
     if (g_ctx != nullptr && g_inventory != nullptr &&
         g_inventory->getLocalPlayer(g_ctx, &player) == D2RL::Inventory::Result::Success) {
@@ -182,6 +184,7 @@ void PollCarriedOnGameThread(const D2RL::PluginContext*, void*) noexcept {
         filter.structSize    = D2RL::Inventory::ItemFilterSize;
         filter.containerMask = D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::Cursor);
         if (g_inventory->forEachInventoryItem(g_ctx, player, &filter, &CollectCursor, &cursor) == D2RL::Inventory::Result::Success && cursor.ok) {
+            code = cursor.code;
             if (cursor.unique && cursor.recordId != UINT32_MAX)   key = panel::IconKey(Category::Uniques, cursor.recordId, 0);
             else if (cursor.set && cursor.recordId != UINT32_MAX) key = panel::IconKey(Category::Sets, cursor.recordId, 0);
             else                                                  key = panel::IconKey(Category::Materials, 0, cursor.code);
@@ -196,6 +199,7 @@ void PollCarriedOnGameThread(const D2RL::PluginContext*, void*) noexcept {
         }
         g_carriedKey = std::move(key);
     }
+    g_carriedCode.store(code);
     g_carriedPolling.store(false);
 }
 
@@ -586,6 +590,7 @@ struct HandleCell {
     D2RL::ItemHandle handle = 0;
     int              x = -1, y = -1;
 };
+std::atomic<uint64_t> g_noRoomAt{0};    // when a take-out last found the inventory full
 std::atomic<uint64_t> g_taken{0};       // the item on its way out, lifted by the game's click
 std::atomic<uint64_t> g_liftedAt{0};
 D2RL::Inventory::IterationAction __cdecl FindHandleCell(const D2RL::PluginContext*, const D2RL::Items::ItemInfo* info, void* userData) noexcept;
@@ -648,21 +653,15 @@ void SlotActionOnGameThread(const D2RL::PluginContext*, void*) noexcept {
         return;
     }
     if (!MoveToInventory(player, match.stored)) {
-        // A full inventory: room made for the item's size (its items set aside for the moment).
-        D2RL::Items::ItemInfo info {};
-        info.structSize = D2RL::Items::ItemInfoSize;
-        const auto [w, h] = g_items->getItemInfo(g_ctx, match.stored, &info) == D2RL::Items::Result::Success
-                                ? SizeOf(info.code) : std::pair<int, int> {2, 4};
-        int x = 0, y = 0;
-        const bool room = MakeRoom(player, w, h, x, y);
-        if (!room || !MoveExisting(player, match.stored, D2RL::Items::ItemContainer::Inventory, D2RL::Items::Placement::Exact, x, y, 0)) {
-            if (room) RestoreDisplaced(player);
-            std::snprintf(line, sizeof(line), "Frame collection: no room in the inventory to take the %s item (id %u) out",
-                          CategoryName(category), unsigned(identity));
-            Log(line);
-            SetPhase(Phase::Idle);
-            return;
-        }
+        // A full inventory: the item stays stored and the card says so. Making room by setting
+        // items aside and putting them back while the item rode the cursor left the hand's
+        // container invisible and stuck until relog (owner 2026-11-21).
+        g_noRoomAt.store(GetTickCount64());
+        std::snprintf(line, sizeof(line), "Frame collection: no room in the inventory to take the %s item (id %u) out",
+                      CategoryName(category), unsigned(identity));
+        Log(line);
+        SetPhase(Phase::Idle);
+        return;
     }
     g_taken.store(match.stored);
     HandleCell cell;
@@ -823,6 +822,7 @@ void DepositCarried() {
 }
 
 bool HandBusy() { return g_phase.load() != int(Phase::Idle); }
+bool NoRoomRecently() { const uint64_t at = g_noRoomAt.load(); return at != 0 && GetTickCount64() - at < 3000; }
 
 bool PassingBlock(InventoryClick& block) {
     const int phase = g_phase.load();
@@ -960,6 +960,7 @@ void TickStore(bool stashOpen) {
     } else if (!stashOpen) {
         std::lock_guard lock(g_carriedLock);
         g_carriedKey.clear();
+        g_carriedCode.store(0);
     }
     if (!g_affinity.load() || !stashOpen || g_sweeping.load()) return;
     const uint64_t now = GetTickCount64();
@@ -984,6 +985,7 @@ std::string CarriedIconKey() {
     std::lock_guard lock(g_carriedLock);
     return g_carriedKey;
 }
+uint32_t CarriedCode() { return g_carriedCode.load(); }
 
 void StoreReport() {
     char line[192];

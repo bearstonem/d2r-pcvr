@@ -57,6 +57,8 @@ bool TakeInventoryClick(InventoryClick& click);
 void InventoryClickDone();
 // An item is on its way in or out: the frame thread leaves the game's cursor alone.
 bool HandBusy();
+// A take-out found no room in the inventory within the last 3 s (the card says so).
+bool NoRoomRecently();
 // The inventory block the item is passing through now (to be drawn empty over the UI image,
 // so it does not flash there). False when no item is in an inventory cell on its way.
 bool PassingBlock(InventoryClick& block);
@@ -75,5 +77,8 @@ bool InCollectionBand(uint32_t sharedStashPage);
 // is no catalog collectible). Read on the game thread a few times a second while the
 // stash is open (TickStore).
 std::string CarriedIconKey();
+// The hand's item base code, chars packed little-endian ("gcw " etc.); 0 for an empty hand.
+// Read with CarriedIconKey.
+uint32_t CarriedCode();
 
 }   // namespace framevr::collection
