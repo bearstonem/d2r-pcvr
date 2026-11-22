@@ -79,7 +79,7 @@ int main() {
     const Tooltip setTip = BuildTooltip(set, false, "");
     assert(!setTip.body.empty() && setTip.body[0] == "Set: Civerb's Vestments");
     const Tooltip runeTip = BuildTooltip(rune, false, "");
-    assert(!runeTip.body.empty() && runeTip.body[0] == "Runes: r30 r03 r22 r23 r17");
+    assert(!runeTip.body.empty() && runeTip.body[0] == "Runes: Ber Tir Um Mal Lum");
 
     // No text and no catalog detail: a found entry still has one honest line; a missing one
     // shows its name only (stat lines only for what is in the collection, owner 2026-11-21).

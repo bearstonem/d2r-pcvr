@@ -50,6 +50,7 @@ void DepositCarried();
 // grid, w x h its size. The frame thread clicks the block's middle.
 struct InventoryClick {
     int x = 0, y = 0, w = 1, h = 1;
+    int grid = 0;   // 0 the inventory; 1 the personal stash's 10 x 10 (a take-out with a full inventory)
 };
 // Frame thread: a click the game must get now (handed out once). After sending the button's
 // down and up, call InventoryClickDone.

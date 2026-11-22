@@ -605,6 +605,7 @@ D2RL::Inventory::IterationAction __cdecl FindSlotItem(const D2RL::PluginContext*
 struct HandleCell {
     D2RL::ItemHandle handle = 0;
     int              x = -1, y = -1;
+    D2RL::Items::ItemContainer container = D2RL::Items::ItemContainer::Inventory;
 };
 std::atomic<uint64_t> g_noRoomAt{0};    // when a take-out last found the inventory full
 std::atomic<uint64_t> g_taken{0};       // the item on its way out, lifted by the game's click
@@ -629,7 +630,7 @@ void RestoreAfterLiftOnGameThread(const D2RL::PluginContext*, void*) noexcept {
 }
 D2RL::Inventory::IterationAction __cdecl FindHandleCell(const D2RL::PluginContext*, const D2RL::Items::ItemInfo* info, void* userData) noexcept {
     auto& found = *static_cast<HandleCell*>(userData);
-    if (info != nullptr && info->handle == found.handle && info->container == D2RL::Items::ItemContainer::Inventory) {
+    if (info != nullptr && info->handle == found.handle && info->container == found.container) {
         found.x = info->x;
         found.y = info->y;
     }
@@ -668,21 +669,28 @@ void SlotActionOnGameThread(const D2RL::PluginContext*, void*) noexcept {
         SetPhase(Phase::Idle);
         return;
     }
+    // A full inventory: the item goes to the personal stash instead, and the frame thread lifts it
+    // from there (the game's Personal tab clicked under the Collection page, then the cell -
+    // owner 2026-11-22: gloves taken off with a full inventory could not come back out). Making
+    // room by setting items aside while the item rode the cursor left the hand's container stuck
+    // (2026-11-21), so that is never done.
+    bool viaStash = false;
     if (!MoveToInventory(player, match.stored)) {
-        // A full inventory: the item stays stored and the card says so. Making room by setting
-        // items aside and putting them back while the item rode the cursor left the hand's
-        // container invisible and stuck until relog (owner 2026-11-21).
-        g_noRoomAt.store(GetTickCount64());
-        std::snprintf(line, sizeof(line), "Frame collection: no room in the inventory to take the %s item (id %u) out",
-                      CategoryName(category), unsigned(identity));
-        Log(line);
-        SetPhase(Phase::Idle);
-        return;
+        viaStash = MoveExisting(player, match.stored, D2RL::Items::ItemContainer::PersonalStash, D2RL::Items::Placement::Automatic, 0, 0, 0);
+        if (!viaStash) {
+            g_noRoomAt.store(GetTickCount64());
+            std::snprintf(line, sizeof(line), "Frame collection: no room in the inventory or the personal stash to take the %s item (id %u) out",
+                          CategoryName(category), unsigned(identity));
+            Log(line);
+            SetPhase(Phase::Idle);
+            return;
+        }
     }
     g_taken.store(match.stored);
     HandleCell cell;
     cell.handle = match.stored;
-    filter.containerMask = D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::Inventory);
+    cell.container = viaStash ? D2RL::Items::ItemContainer::PersonalStash : D2RL::Items::ItemContainer::Inventory;
+    filter.containerMask = D2RL::Items::ContainerBit(cell.container);
     g_inventory->forEachInventoryItem(g_ctx, player, &filter, &FindHandleCell, &cell);
     if (cell.x < 0) RestoreDisplaced(player);
     if (category == Category::Materials) TabMarkMissingCode(category, identity);
@@ -696,7 +704,12 @@ void SlotActionOnGameThread(const D2RL::PluginContext*, void*) noexcept {
     }
     {
         std::lock_guard lock(g_clickLock);
-        g_click = InventoryClick {cell.x, cell.y, 1, 1};
+        g_click = InventoryClick {cell.x, cell.y, 1, 1, viaStash ? 1 : 0};
+    }
+    if (viaStash) {
+        std::snprintf(line, sizeof(line), "Frame collection: the inventory is full; the %s item (id %u) goes out through the personal stash (cell %d,%d)",
+                      CategoryName(category), unsigned(identity), cell.x, cell.y);
+        Log(line);
     }
     std::snprintf(line, sizeof(line), "Frame collection: took the %s item (id %u) out to inventory cell %d,%d; lifting it into the hand",
                   CategoryName(category), unsigned(identity), cell.x, cell.y);

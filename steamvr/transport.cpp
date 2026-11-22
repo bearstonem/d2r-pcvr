@@ -749,10 +749,24 @@ struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_F
 // the game's (owner 2026-11-22: tooltips over the plaques).
 struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp[2*stashplaques::Variants]{};bool tried=false;} plaqueUpload;
 std::atomic<int> plaqueLit{-1};
-std::atomic<uint64_t> plaqueCover[2]{};
-constexpr int PlaqueCells=8;
-// The shared counter's columns a tooltip covers (CollectStashReads): those stay the game's.
-std::atomic<uint32_t> counterCover{0};constexpr int CounterColumns=11;
+// 16 x 16 cells a side, four words of bits each (owner 2026-11-22: a comparison tooltip's last
+// line still went under the plaque with 8 x 8).
+constexpr int PlaqueCells=16,PlaqueWords=PlaqueCells*PlaqueCells/64;
+std::atomic<uint64_t> plaqueCover[2][PlaqueWords]{};
+// The shared counter's cells (11 columns x 4 rows) a tooltip covers (CollectStashReads): those
+// stay the game's.
+std::atomic<uint64_t> counterCover{0};constexpr int CounterColumns=11,CounterRows=4;
+// Whether a cell of the game's picture differs from the bare reference: a fifth of its pixels
+// off by more than 40 (RGB summed). rgba: 4 bytes a pixel; ref: refStride bytes a pixel.
+bool CellCovered(const uint8_t* rgba,int stride,const uint8_t* ref,int refStride,int refRow,int x0,int y0,int x1,int y1) {
+    int off=0,n=0;
+    for(int y=y0;y<y1;++y)for(int x=x0;x<x1;++x) {
+        const uint8_t* g=rgba+(size_t(y)*size_t(stride)+size_t(x))*4;
+        const uint8_t* b=ref+(size_t(y)*size_t(refRow)+size_t(x))*size_t(refStride);
+        off+=std::abs(int(g[0])-b[0])+std::abs(int(g[1])-b[1])+std::abs(int(g[2])-b[2])>40?1:0;++n;
+    }
+    return n>0&&off*5>n;
+}
 bool PlaquesShown();
 bool PlaquesSplit();
 // A gem, rune or material pulled on the Collection page: its code, for the frame thread to
@@ -760,8 +774,10 @@ bool PlaquesSplit();
 std::atomic<uint32_t> nativeSlotRequest{0};
 // The UI picture held still while the mod clicks the game's tabs for such an item: until when
 // (GetTickCount64), and whether to keep each finished picture meanwhile (an item in the hand).
-std::atomic<uint64_t> uiFreezeUntil{0};std::atomic<bool> uiSnapshotWanted{false};
-Microsoft::WRL::ComPtr<ID3D12Resource> uiFrozen;uint32_t uiFrozenW=0,uiFrozenH=0;bool uiFrozenValid=false;
+// uiFreezeFrom: when the freeze began; a kept picture older than that by more than a moment is
+// stale (from an earlier item) and the freeze is skipped rather than show it.
+std::atomic<uint64_t> uiFreezeUntil{0},uiFreezeFrom{0};std::atomic<bool> uiSnapshotWanted{false};
+Microsoft::WRL::ComPtr<ID3D12Resource> uiFrozen;uint32_t uiFrozenW=0,uiFrozenH=0;bool uiFrozenValid=false;uint64_t uiFrozenAt=0;
 DXGI_FORMAT atlasFormat=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
 uint32_t layerLimit=16;
 // What each place in the submitted layer list showed last (composition::StablePlaces).
@@ -2918,7 +2934,7 @@ void MenuPointer(const menus::Pad& controls) {
             slotU=float(start->x)/2244.f;slotV=float(start->y)/2352.f;
             // The picture holds still from the frame before the first click (owner 2026-11-22:
             // the screen must not change), and the Collection page stays up and unmoved.
-            uiFreezeUntil.store(now+400);
+            uiFreezeUntil.store(now+400);uiFreezeFrom.store(now);
             if(collection::TabWanted())collection::TabKeepUntil(now+2500);
             if(tab==start->tab){uiClickU=slotU;uiClickV=slotV;uiClickPending=true;returnTab=-1;}
             else {
@@ -2950,7 +2966,11 @@ void MenuPointer(const menus::Pad& controls) {
         }
         const bool busy=slotQueued||returnOwed||returnTab>=0;
         if(busy||(start&&uiClickPending))uiFreezeUntil.store(std::max(uiFreezeUntil.load(),now+300));
-        uiSnapshotWanted.store(slot!=nullptr&&gamestate::StashButtonsShown()&&!busy);
+        // The picture is kept while a freeze may come: a gem, rune or material in the hand, or the
+        // laser on a card of the Collection page with the hand empty (a take-out may go through
+        // the personal stash).
+        uiSnapshotWanted.store(gamestate::StashButtonsShown()&&!busy&&
+            (slot!=nullptr||(collection::TabWanted()&&collectionHover.kind==collection::panel::HitKind::Slot&&!gamestate::CursorItemHeld())));
         // While the item is on its way the game gets no click of the laser's (the trigger still
         // held would drop it on whatever tab shows meanwhile).
         if(slotQueued)onNativeSlots=true;
@@ -3066,7 +3086,10 @@ void MenuPointer(const menus::Pad& controls) {
         const auto clickTab=[&](int to){
             uiClickU=(float(stashnav::TabsX+stashnav::TabStep*to)+stashnav::TabStep*.5f)/2244.f;uiClickV=200.f/2352.f;uiClickPending=true;
         };
-        const auto clickArrow=[&](bool next){uiClickU=(next?810.f:584.f)/2244.f;uiClickV=861.f/2352.f;uiClickPending=true;};
+        const auto clickArrow=[&](bool next){
+            uiClickU=(next?810.f:584.f)/2244.f;uiClickV=861.f/2352.f;uiClickPending=true;
+            Say(next?"Frame stash: the next shared page (the game's arrow clicked)":"Frame stash: the previous shared page (the game's arrow clicked)");
+        };
         if(tabNext||tabPrev) {
             const bool next=tabNext;
             const int under=tab>=0&&tab<stashnav::Collection?tab:-1;
@@ -3142,17 +3165,56 @@ void MenuPointer(const menus::Pad& controls) {
     // block whichever way the game rounds.
     {   // the cells it passes through drawn empty (CopyInventoryMask) until a moment after it left
         collection::InventoryClick passing;
-        if(collection::PassingBlock(passing)) {
+        if(collection::PassingBlock(passing)&&passing.grid==0) {
             inventoryMaskBlock.store(uint32_t(passing.x&15)|uint32_t(passing.y&15)<<4|uint32_t(passing.w&15)<<8|uint32_t(passing.h&15)<<12);
             inventoryMaskUntil.store(GetTickCount64()+200);
         }
     }
-    if(handClickStep==0&&collection::TakeInventoryClick(handClick)){handClickStep=1;handIsUi=false;handClickAt=GetTickCount64();}
+    // A take-out with a full inventory comes through the personal stash (collection_store): the
+    // game's Personal tab under the Collection page first, then the item's cell, then the tab
+    // that was up - the picture held still meanwhile.
+    {
+        static bool stashLift=false,stashReturn=false;static int stashFrom=-1;static ULONGLONG stashAt=0;
+        static collection::InventoryClick stashCell;
+        const ULONGLONG now=GetTickCount64();
+        const auto& read=stashnav::Last();
+        const int tabNow=now-read.at.load()<400?read.tab.load():-1;
+        if(handClickStep==0&&!stashLift&&!stashReturn&&collection::TakeInventoryClick(handClick)) {
+            if(handClick.grid==1) {
+                stashLift=true;stashCell=handClick;stashAt=now;stashFrom=tabNow;
+                if(collection::TabWanted())collection::TabKeepUntil(now+3000);
+                uiFreezeUntil.store(now+500);uiFreezeFrom.store(now);
+                if(tabNow!=stashnav::Personal) {
+                    uiClickU=(float(stashnav::TabsX)+stashnav::TabStep*.5f)/2244.f;uiClickV=200.f/2352.f;uiClickPending=true;
+                }
+            } else {handClickStep=1;handIsUi=false;handClickAt=now;}
+        }
+        if(stashLift) {
+            uiFreezeUntil.store(std::max(uiFreezeUntil.load(),now+300));
+            if(handClickStep==0&&!uiClickPending&&tabNow==stashnav::Personal&&now-stashAt>=150) {
+                handClick=stashCell;handClickStep=1;handIsUi=false;handClickAt=now;
+                stashLift=false;stashReturn=stashFrom>=0&&stashFrom!=stashnav::Personal;stashAt=now;
+            } else if(now-stashAt>1500) {
+                stashLift=false;stashReturn=stashFrom>=0&&stashFrom!=stashnav::Personal;stashAt=now;
+                Say("Frame collection: the Personal tab did not come up; the item stays in the personal stash");
+            }
+        }
+        if(stashReturn) {
+            uiFreezeUntil.store(std::max(uiFreezeUntil.load(),now+300));
+            if(handClickStep==0&&!uiClickPending&&now-stashAt>=200) {
+                if(collection::TabWanted())collection::TabKeepUntil(now+1500);
+                uiClickU=(float(stashnav::TabsX+stashnav::TabStep*stashFrom)+stashnav::TabStep*.5f)/2244.f;uiClickV=200.f/2352.f;
+                uiClickPending=true;stashReturn=false;
+            }
+        }
+    }
     if(handClickStep==0&&uiClickPending){uiClickPending=false;handClickStep=1;handIsUi=true;handClickAt=GetTickCount64();}
     if(handClickStep!=0) {
         const ULONGLONG now=GetTickCount64();
-        const float u=handIsUi?uiClickU:(1244.f+(float(handClick.x)+float(handClick.w)*.5f+.15f)*57.2f)/2244.f;
-        const float v=handIsUi?uiClickV:(668.f+(float(handClick.y)+float(handClick.h)*.5f+.15f)*57.2f)/2352.f;
+        // the inventory's cells from 1244,668, the personal stash's from 414,242, 57.2 apart
+        const float gx=handClick.grid==1?414.f:1244.f,gy=handClick.grid==1?242.f:668.f;
+        const float u=handIsUi?uiClickU:(gx+(float(handClick.x)+float(handClick.w)*.5f+.15f)*57.2f)/2244.f;
+        const float v=handIsUi?uiClickV:(gy+(float(handClick.y)+float(handClick.h)*.5f+.15f)*57.2f)/2352.f;
         RECT client{};math::Vec native{u,v,0};POINT pixel{};
         const bool placed=GetClientRect(gameWindow,&client)&&
             journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},u,v,uiWidth,uiHeight,native)&&
@@ -3164,7 +3226,12 @@ void MenuPointer(const menus::Pad& controls) {
         if(!placed&&handClickStep==1) {
             Say("Frame collection: the inventory cell could not be pointed at; the hand's item stays where it is");
             handClickStep=0;
-        } else if(handClickStep==1) {
+        } else if(handClickStep==1&&handIsUi) {
+            // A control of the stash's own (a page arrow, a tab, a slot): the cursor rests on it a
+            // moment first - the page arrows took no click that came with no hover (owner
+            // 2026-11-22: LB / RB and the plaques' upper halves did nothing).
+            handClickStep=3;handClickAt=now;
+        } else if(handClickStep==1||(handClickStep==3&&now-handClickAt>=60)) {
             INPUT button{};button.type=INPUT_MOUSE;button.mi.dwFlags=MOUSEEVENTF_LEFTDOWN;SendInput(1,&button,sizeof button);
             handClickStep=2;handClickAt=now;
         } else if(handClickStep==2&&now-handClickAt>=25) {
@@ -7975,27 +8042,24 @@ void CollectStashReads() {
         if(!read(r.tabs,tabs)||!read(r.counter,counter))continue;
         if(read(r.plaques,plaques)) {   // where the game draws something over the bare carving
             using namespace stashplaques;
+            const auto bits=[](uint64_t v){int n=0;while(v){v&=v-1;++n;}return n;};
+            int counts[2]{};
             for(int side=0;side<2;++side) {
-                uint64_t cover=0;
+                uint64_t cover[PlaqueWords]{};
                 const int ox=side?NextX-PreviousX:0;
                 for(int cy=0;cy<PlaqueCells;++cy)for(int cx=0;cx<PlaqueCells;++cx) {
                     const int x0=cx*Width/PlaqueCells,x1=(cx+1)*Width/PlaqueCells,y0=cy*Height/PlaqueCells,y1=(cy+1)*Height/PlaqueCells;
-                    long sum=0,n=0;
-                    for(int y=y0;y<y1;y+=2)for(int x=x0;x<x1;x+=2) {
-                        const uint8_t* g=plaques.data()+(size_t(y)*size_t(r.plaques.w)+size_t(ox+x))*4;
-                        const uint8_t* bg=Background[side]+(size_t(y)*Width+size_t(x))*3;
-                        sum+=std::abs(int(g[0])-bg[0])+std::abs(int(g[1])-bg[1])+std::abs(int(g[2])-bg[2]);n+=3;
+                    if(CellCovered(plaques.data()+size_t(ox)*4,r.plaques.w,Background[side],3,Width,x0,y0,x1,y1)) {
+                        const int bit=cy*PlaqueCells+cx;cover[bit/64]|=uint64_t(1)<<(bit%64);
                     }
-                    if(n&&sum>n*14)cover|=uint64_t(1)<<(cy*PlaqueCells+cx);
                 }
-                plaqueCover[side].store(cover);
+                for(int w=0;w<PlaqueWords;++w){plaqueCover[side][w].store(cover[w]);counts[side]+=bits(cover[w]);}
             }
-            static uint64_t toldCover[2]{};
-            if(toldCover[0]!=plaqueCover[0].load()||toldCover[1]!=plaqueCover[1].load()) {
-                toldCover[0]=plaqueCover[0].load();toldCover[1]=plaqueCover[1].load();
-                const auto bits=[](uint64_t v){int n=0;while(v){v&=v-1;++n;}return n;};
+            static int toldCounts[2]{};
+            if(toldCounts[0]!=counts[0]||toldCounts[1]!=counts[1]) {
+                toldCounts[0]=counts[0];toldCounts[1]=counts[1];
                 char line[120];std::snprintf(line,sizeof line,"Frame stash: the game draws over %d / %d plaque cells (left / right); those stay the game's",
-                    bits(toldCover[0]),bits(toldCover[1]));Say(line);
+                    counts[0],counts[1]);Say(line);
             }
         }
         auto& last=stashnav::Last();
@@ -8012,21 +8076,27 @@ void CollectStashReads() {
         // The counter as the game drew it at the last good read: where it still looks so, the
         // tooltip leaves it bare and "Page N / 5" goes there; where it does not, the tooltip is
         // over it and stays on top (counterCover, 11 columns of 15 px).
-        static std::vector<uint8_t> counterRef;static int refPage=stashnav::PageUnknown;
-        if(page>=1&&page<=stashnav::PlayerPages){counterRef=counter;refPage=page;counterCover.store(0);}
-        else if(tab==stashnav::Shared&&page==stashnav::PageUnknown&&refPage>=1&&counterRef.size()==counter.size()) {
-            uint32_t cover=0;
-            for(int c=0;c<CounterColumns;++c) {
-                long sum=0,n=0;
-                for(int y=0;y<r.counter.h;++y)for(int x=c*r.counter.w/CounterColumns;x<(c+1)*r.counter.w/CounterColumns;++x) {
-                    const size_t i=(size_t(y)*size_t(r.counter.w)+size_t(x))*4;
-                    sum+=std::abs(int(counter[i])-counterRef[i])+std::abs(int(counter[i+1])-counterRef[i+1])+std::abs(int(counter[i+2])-counterRef[i+2]);n+=3;
-                }
-                if(n&&sum>n*14)cover|=1u<<c;
-            }
-            counterCover.store(cover);
-            if(cover!=(1u<<CounterColumns)-1)page=refPage;   // some of it bare: still that page
+        // A tooltip's see-through black still lets the digits read, so the page alone does not
+        // say the counter is bare (owner 2026-11-22: comparison tooltips went under it): each
+        // page's counter is kept at its brightest (the bare one - a tooltip only darkens) and
+        // the cells that differ from it are the tooltip's.
+        static std::vector<uint8_t> counterRefs[stashnav::PlayerPages+1];static long refLight[stashnav::PlayerPages+1]{};
+        static int refPage=stashnav::PageUnknown;
+        if(page>=1&&page<=stashnav::PlayerPages) {
+            long light=0;for(size_t i=0;i<counter.size();i+=4)light+=counter[i]+counter[i+1]+counter[i+2];
+            if(counterRefs[page].size()!=counter.size()||light>=refLight[page]){counterRefs[page]=counter;refLight[page]=light;}
+            refPage=page;
         }
+        if(tab==stashnav::Shared&&page==stashnav::PageUnknown&&refPage>=1)page=refPage;   // read on from the bare cells below
+        if(tab==stashnav::Shared&&page>=1&&page<=stashnav::PlayerPages&&counterRefs[page].size()==counter.size()) {
+            uint64_t cover=0;
+            for(int cy=0;cy<CounterRows;++cy)for(int c=0;c<CounterColumns;++c)
+                if(CellCovered(counter.data(),r.counter.w,counterRefs[page].data(),4,r.counter.w,
+                               c*r.counter.w/CounterColumns,cy*r.counter.h/CounterRows,(c+1)*r.counter.w/CounterColumns,(cy+1)*r.counter.h/CounterRows))
+                    cover|=uint64_t(1)<<(cy*CounterColumns+c);
+            counterCover.store(cover);
+            if(cover==(uint64_t(1)<<(CounterRows*CounterColumns))-1)page=stashnav::PageUnknown;   // all of it under a tooltip
+        } else counterCover.store(0);
         ++stashReadsDone;
         static ULONGLONG toldAt=0;
         if(tab!=last.tab.load()||page!=last.page.load()||GetTickCount64()-toldAt>3000) {
@@ -8152,13 +8222,18 @@ void CopyPlaqueArt(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,uint32_t
         D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=u.upload.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
         from.PlacedFootprint=u.fp[side*Variants+variant];
         const UINT x=UINT(cx+(side==0?PreviousX:NextX)),y=UINT(cy+Y);
-        const uint64_t cover=onPage?0:plaqueCover[side].load();
-        if(cover==0){list->CopyTextureRegion(&to,x,y,0,&from,nullptr);continue;}
-        for(int gy=0;gy<PlaqueCells;++gy)for(int gx=0;gx<PlaqueCells;++gx) {
-            if(cover&(uint64_t(1)<<(gy*PlaqueCells+gx)))continue;
-            const UINT x0=UINT(gx*Width/PlaqueCells),x1=UINT((gx+1)*Width/PlaqueCells),y0=UINT(gy*Height/PlaqueCells),y1=UINT((gy+1)*Height/PlaqueCells);
+        uint64_t cover[PlaqueWords]{};bool any=false;
+        if(!onPage)for(int w=0;w<PlaqueWords;++w){cover[w]=plaqueCover[side][w].load();any=any||cover[w]!=0;}
+        if(!any){list->CopyTextureRegion(&to,x,y,0,&from,nullptr);continue;}
+        // row by row, each run of bare cells in one copy
+        for(int gy=0;gy<PlaqueCells;++gy)for(int gx=0;gx<PlaqueCells;) {
+            const auto covered=[&](int cx){const int bit=gy*PlaqueCells+cx;return (cover[bit/64]>>(bit%64))&1;};
+            if(covered(gx)){++gx;continue;}
+            int end=gx;while(end<PlaqueCells&&!covered(end))++end;
+            const UINT x0=UINT(gx*Width/PlaqueCells),x1=UINT(end*Width/PlaqueCells),y0=UINT(gy*Height/PlaqueCells),y1=UINT((gy+1)*Height/PlaqueCells);
             const D3D12_BOX box{x0,y0,0,x1,y1,1};
             list->CopyTextureRegion(&to,x+x0,y+y0,0,&from,&box);
+            gx=end;
         }
     }
     std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
@@ -8248,13 +8323,14 @@ void CopyCounterArt(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,uint32_
     list->ResourceBarrier(1,&b);
     D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=dest;to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;to.SubresourceIndex=0;
     D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=u.upload.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;from.PlacedFootprint=u.fp[page-1];
-    const uint32_t cover=counterCover.load();
+    const uint64_t cover=counterCover.load();
     if(cover==0)list->CopyTextureRegion(&to,UINT(cx+stashnav::CounterX),UINT(cy+stashnav::CounterY),0,&from,nullptr);
-    else for(int c=0;c<CounterColumns;++c) {   // a tooltip over part of it: that part stays the game's
-        if(cover&(1u<<c))continue;
-        const UINT x0=UINT(c*collection::counter::Width/CounterColumns),x1=UINT((c+1)*collection::counter::Width/CounterColumns);
-        const D3D12_BOX box{x0,0,0,x1,UINT(collection::counter::Height),1};
-        list->CopyTextureRegion(&to,UINT(cx+stashnav::CounterX)+x0,UINT(cy+stashnav::CounterY),0,&from,&box);
+    else for(int r=0;r<CounterRows;++r)for(int c=0;c<CounterColumns;++c) {   // a tooltip over part of it: that part stays the game's
+        if(cover&(uint64_t(1)<<(r*CounterColumns+c)))continue;
+        using namespace collection::counter;
+        const UINT x0=UINT(c*Width/CounterColumns),x1=UINT((c+1)*Width/CounterColumns),y0=UINT(r*Height/CounterRows),y1=UINT((r+1)*Height/CounterRows);
+        const D3D12_BOX box{x0,y0,0,x1,y1,1};
+        list->CopyTextureRegion(&to,UINT(cx+stashnav::CounterX)+x0,UINT(cy+stashnav::CounterY)+y0,0,&from,&box);
     }
     std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
     list->ResourceBarrier(1,&b);
@@ -8333,7 +8409,8 @@ bool CopyUi(reshade::api::command_queue* rq) {
     }
     // A gem, rune or material on its way to its slot: the picture stays as it was before the
     // mod's clicks on the game's tabs (owner 2026-11-22: "the screen must not change").
-    const bool frozen=GetTickCount64()<uiFreezeUntil.load()&&uiFrozenValid&&uiFrozen&&uiFrozenW==w&&uiFrozenH==h;
+    const bool frozen=GetTickCount64()<uiFreezeUntil.load()&&uiFrozenValid&&uiFrozen&&uiFrozenW==w&&uiFrozenH==h&&
+                      uiFrozenAt+250>=uiFreezeFrom.load();
     if(frozen) {
         D3D12_RESOURCE_BARRIER b[2]{};
         b[0].Type=b[1].Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -8380,7 +8457,7 @@ bool CopyUi(reshade::api::command_queue* rq) {
             e.commands->CopyResource(uiFrozen.Get(),dest);
             std::swap(b[0].Transition.StateBefore,b[0].Transition.StateAfter);std::swap(b[1].Transition.StateBefore,b[1].Transition.StateAfter);
             e.commands->ResourceBarrier(2,b);
-            uiFrozenValid=true;
+            uiFrozenValid=true;uiFrozenAt=GetTickCount64();
         }
     }
     }   // not frozen

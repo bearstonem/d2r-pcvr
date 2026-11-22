@@ -39,7 +39,7 @@ Tooltip BuildTooltip(const Entry& entry, bool found, std::string_view gameText, 
     // The catalog's own detail first: a set's name, or the runes a runeword
     // needs. Then whatever the game's own item text says.
     if (!entry.extra.empty()) {
-        if (entry.category == Category::Runewords) tip.body.push_back("Runes: " + entry.extra);
+        if (entry.category == Category::Runewords) tip.body.push_back("Runes: " + RuneNames(entry.extra));
         else if (entry.category == Category::Sets)  tip.body.push_back("Set: " + entry.extra);
     }
     for (std::string& line : SplitLines(gameText)) tip.body.push_back(std::move(line));

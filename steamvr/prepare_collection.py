@@ -213,6 +213,9 @@ def build(read, strings=None, skill_names=None):
         })
     catalog['sets'] = sort_entries(entries)
 
+    _, misc = read('misc.txt')
+    # A runeword asks the level of its most demanding rune (the game's own rule).
+    rune_level = {cell(row, 'code'): number(row, 'levelreq') for row in misc if cell(row, 'type') == 'rune'}
     _, runes = read(RUNE_TABLE)
     entries = []
     for position, row in enumerate(runes):
@@ -222,8 +225,10 @@ def build(read, strings=None, skill_names=None):
             'code': '',
             'recordId': position,
             'name': cell(row, '*Rune Name'),
-            'level': 0,
+            'level': max([rune_level.get(cell(row, 'Rune%d' % n), 0) for n in range(1, 7)] or [0]),
             'type': cell(row, 'itype1'),
+            # the item types it can be made in (the panel draws them on the card)
+            'base': ' '.join(cell(row, 'itype%d' % n) for n in range(1, 7) if cell(row, 'itype%d' % n)),
             'runes': [cell(row, 'Rune%d' % n) for n in range(1, 7) if cell(row, 'Rune%d' % n)],
             'stats': stats(row, 'runeword'),
         })
@@ -232,7 +237,6 @@ def build(read, strings=None, skill_names=None):
     # Gems and runes: base items, so their own record id is zero and the storage
     # layer matches them by their code. They are stackable, so the tab shows one
     # slot per kind rather than one per copy.
-    _, misc = read('misc.txt')
     entries = []
     for row in misc:
         kind = cell(row, 'type')

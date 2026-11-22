@@ -9,7 +9,9 @@
 #include "collection_draw.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstring>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -146,27 +148,34 @@ const std::vector<uint8_t>& Silhouette(const std::string& key, const IconPixels&
     return out;
 }
 
-// A runeword's recipe ("r08 r09 r07") in the runes' own names ("Ral Ort Tal").
-std::string RuneNames(std::string_view codes) {
-    constexpr const char* names[] = {"El", "Eld", "Tir", "Nef", "Eth", "Ith", "Tal", "Ral", "Ort", "Thul", "Amn",
-                                     "Sol", "Shael", "Dol", "Hel", "Io", "Lum", "Ko", "Fal", "Lem", "Pul", "Um",
-                                     "Mal", "Ist", "Gul", "Vex", "Ohm", "Lo", "Sur", "Ber", "Jah", "Cham", "Zod"};
-    std::string out;
+// A silhouette turned by deg degrees about its middle (nearest pixel), for the runeword cards'
+// crossed sword and axe. Kept by key, colour and angle.
+struct Turned { std::vector<uint8_t> px; int w = 0, h = 0; };
+const Turned& TurnedSilhouette(const std::string& key, const IconPixels& icon, uint32_t rgb, int deg);
+
+// What a runeword can be made in, by its item types (runes.txt itype1..6): the card draws one
+// grey picture for each kind (owner 2026-11-22: melee a crossed sword and axe, a bow beside it
+// when missile weapons take it too).
+enum Kind { Melee, Missile, Armor, Helm, Shield, Kinds };
+std::array<bool, Kinds> KindsOf(std::string_view types) {
+    std::array<bool, Kinds> out {};
     size_t at = 0;
-    while (at < codes.size()) {
-        size_t end = codes.find(' ', at);
-        if (end == std::string_view::npos) end = codes.size();
-        const std::string_view word = codes.substr(at, end - at);
-        std::string name(word);
-        if (word.size() == 3 && word[0] == 'r' && word[1] >= '0' && word[1] <= '9' && word[2] >= '0' && word[2] <= '9') {
-            const int number = (word[1] - '0') * 10 + (word[2] - '0');
-            if (number >= 1 && number <= 33) name = names[number - 1];
-        }
-        if (!name.empty()) out += (out.empty() ? "" : " ") + name;
+    while (at < types.size()) {
+        size_t end = types.find(' ', at);
+        if (end == std::string_view::npos) end = types.size();
+        const std::string_view t = types.substr(at, end - at);
+        if (t == "weap") out[Melee] = out[Missile] = true;
+        else if (t == "miss" || t == "bow" || t == "xbow") out[Missile] = true;
+        else if (t == "tors") out[Armor] = true;
+        else if (t == "helm" || t == "circ" || t == "pelt" || t == "phlm") out[Helm] = true;
+        else if (t == "shld" || t == "ashd" || t == "head" || t == "pala" || t == "grim" || t == "shie") out[Shield] = true;
+        else if (!t.empty()) out[Melee] = true;   // swords, axes, maces, polearms, staves, claws, wands ...
         at = end + 1;
     }
     return out;
 }
+// The item-type tiles' pictures (the plainest unique of each type), set by Paint.
+std::array<std::string, panel::GroupCount> g_groupKeys;
 
 uint32_t NameColor(Category category) { return category == Category::Sets ? SetName : Unique; }
 
@@ -205,9 +214,56 @@ void DrawCard(Painter& p, const panel::Rect& at, const Entry& entry, Category ca
         if (found) p.Image(fit, pixels->rgba, pixels->width, pixels->height);
         else       p.Image(fit, Ghost(key, *pixels).data(), pixels->width, pixels->height);
     } else if (!entry.extra.empty()) {
-        // a runeword is no item until it is made: its runes stand for the picture
-        p.TextRgb(RuneNames(entry.extra), Caps, Md(13.f), area, found ? GoldHi : DimT, Align::Center, true);
+        // a runeword is no item until it is made: its runes stand for the picture, and under them
+        // what it can be made in, in grey (owner 2026-11-22)
+        const auto kinds = KindsOf(entry.base);
+        int count = 0;
+        for (bool k : kinds) count += k ? 1 : 0;
+        const float split = count > 0 && icons ? 0.45f : 1.0f;
+        const RectF text = {area.x, area.y, area.w, area.h * split};
+        p.TextRgb(RuneNames(entry.extra), Caps, Md(13.f), text, found ? GoldHi : DimT, Align::Center, true);
+        if (split < 1.0f) {
+            const uint32_t rgb = found ? 0x8C8C86 : 0x55554F;
+            const float top = area.y + area.h * split, h = area.h * (1.0f - split);
+            const float s = std::min(h, area.w / float(count));
+            float x = area.x + (area.w - s * float(count)) * 0.5f;
+            const auto draw = [&](int group, int deg, float scale) {
+                const std::string& key = g_groupKeys[size_t(group)];
+                const IconPixels* icon = key.empty() ? nullptr : icons(key);
+                if (icon == nullptr || icon->rgba == nullptr) return;
+                const Turned& t = TurnedSilhouette(key, *icon, rgb, deg);
+                const RectF box = {x + s * (1 - scale) * 0.5f, top + (h - s * scale) * 0.5f, s * scale, s * scale};
+                p.Image(FitImage(box, t.w, t.h), t.px.data(), t.w, t.h);
+            };
+            const int groupOf[Kinds] = {9, 10, 1, 0, 2};   // swords, bows, armor, helms, shields
+            for (int k = 0; k < Kinds; ++k) {
+                if (!kinds[size_t(k)]) continue;
+                if (k == Melee) { draw(9, 45, 1.3f); draw(8, -45, 1.3f); }   // the sword and the axe crossed
+                else draw(groupOf[k], 0, 0.8f);
+                x += s;
+            }
+        }
     }
+}
+
+const Turned& TurnedSilhouette(const std::string& key, const IconPixels& icon, uint32_t rgb, int deg) {
+    thread_local std::unordered_map<std::string, Turned> cache;
+    Turned& out = cache[key + "/" + std::to_string(rgb) + "/" + std::to_string(deg)];
+    if (!out.px.empty()) return out;
+    const std::vector<uint8_t>& flat = Silhouette(key, icon, rgb);
+    const float a = float(deg) * 3.14159265f / 180.f, c = std::cos(a), s = std::sin(a);
+    out.w = int(std::ceil(std::fabs(icon.width * c) + std::fabs(icon.height * s)));
+    out.h = int(std::ceil(std::fabs(icon.width * s) + std::fabs(icon.height * c)));
+    out.px.assign(size_t(out.w) * size_t(out.h) * 4, 0);
+    const float cx = out.w * 0.5f, cy = out.h * 0.5f, ix = icon.width * 0.5f, iy = icon.height * 0.5f;
+    for (int y = 0; y < out.h; ++y)
+        for (int x = 0; x < out.w; ++x) {
+            const float dx = x + 0.5f - cx, dy = y + 0.5f - cy;
+            const int sx = int(std::floor(c * dx + s * dy + ix)), sy = int(std::floor(-s * dx + c * dy + iy));
+            if (sx < 0 || sy < 0 || sx >= icon.width || sy >= icon.height) continue;
+            std::memcpy(&out.px[(size_t(y) * out.w + x) * 4], &flat[(size_t(sy) * icon.width + sx) * 4], 4);
+        }
+    return out;
 }
 
 // ---- the tooltip in the game's own style (the mock-up's: black, every line centred) ----
@@ -272,7 +328,8 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
     p.OutlineRgb(R(PX0 + 15, PY0 + 9, PX1 - 15, PY1 - 11), Gold, Md(1.f));
     p.OutlineRgb(R(PX0 + 18, PY0 + 12, PX1 - 18, PY1 - 14), 0x1C1814, Md(1.f));
 
-    // Uniques / Sets / Runewords: the name in small caps, the count under it.
+    // Uniques / Sets / Runewords: the name in small caps (the count is the one under the cards -
+    // the same number twice, owner 2026-11-22).
     for (int i = 0; i < layout.tabCount; ++i) {
         const Category category = static_cast<Category>(i);
         const bool     on       = category == view.category;
@@ -280,9 +337,19 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
         Button(p, r, on);
         if (pointed(panel::HitKind::Tab, i)) p.OutlineRgb(r, GoldHi, Md(1.5f));
         const float kx = r.x / panel::Scale + PX0, ky = r.y / panel::Scale + PY0;
-        CapsAt(p, kx + 93, ky + 15, CategoryName(category), 16.f, on ? OnText : OffText);
-        const std::string count = std::to_string(library.Found(category)) + "/" + std::to_string(library.Size(category));
-        p.TextRgb(count, Plain, Md(11.f), R(kx, ky + 24, kx + 186, ky + 38), on ? 0xBEBEB8 : DimT, Align::Center);
+        CapsAt(p, kx + 93, ky + 20, CategoryName(category), 16.f, on ? OnText : OffText);
+    }
+    // The item-type tiles' pictures, also the runeword cards' (DrawCard).
+    for (int group = 0; group < panel::GroupCount; ++group) {
+        const Entry* best = nullptr;
+        for (int pass = 0; pass < 2 && best == nullptr; ++pass)
+            for (uint32_t slot = 0; slot < library.Size(Category::Uniques); ++slot) {
+                const Entry* e = library.At(Category::Uniques, slot);
+                if (e == nullptr || panel::GroupOfType(e->type) != group) continue;
+                if (pass == 0 && e->type != panel::GroupMainType(group)) continue;
+                if (best == nullptr || e->level < best->level) best = e;
+            }
+        g_groupKeys[size_t(group)] = best ? panel::IconKey(Category::Uniques, best->recordId, best->code) : std::string();
     }
 
     // The cards.
@@ -416,7 +483,7 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
         if (const Entry* entry = SlotEntry(library, view, visible, view.hover.index)) {
             const bool found = SlotFound(library, view, visible, view.hover.index);
             DrawTooltip(p, layout.slots[view.hover.index], tooltip::BuildTooltip(*entry, found, gameText, rangeText),
-                        view.category, entry->base);
+                        view.category, view.category == Category::Runewords ? TypeNames(entry->base) : entry->base);
         }
     }
 

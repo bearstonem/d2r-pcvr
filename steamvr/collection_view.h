@@ -216,6 +216,55 @@ inline std::string CounterText(const Library& library, const ViewState& view) {
     return std::to_string(library.Found(view.category)) + " / " + std::to_string(library.Size(view.category));
 }
 
+// A runeword's recipe ("r08 r09 r07") in the runes' own names ("Ral Ort Tal").
+inline std::string RuneNames(std::string_view codes) {
+    constexpr const char* names[] = {"El", "Eld", "Tir", "Nef", "Eth", "Ith", "Tal", "Ral", "Ort", "Thul", "Amn",
+                                     "Sol", "Shael", "Dol", "Hel", "Io", "Lum", "Ko", "Fal", "Lem", "Pul", "Um",
+                                     "Mal", "Ist", "Gul", "Vex", "Ohm", "Lo", "Sur", "Ber", "Jah", "Cham", "Zod"};
+    std::string out;
+    size_t at = 0;
+    while (at < codes.size()) {
+        size_t end = codes.find(' ', at);
+        if (end == std::string_view::npos) end = codes.size();
+        const std::string_view word = codes.substr(at, end - at);
+        std::string name(word);
+        if (word.size() == 3 && word[0] == 'r' && word[1] >= '0' && word[1] <= '9' && word[2] >= '0' && word[2] <= '9') {
+            const int number = (word[1] - '0') * 10 + (word[2] - '0');
+            if (number >= 1 && number <= 33) name = names[number - 1];
+        }
+        if (!name.empty()) out += (out.empty() ? "" : " ") + name;
+        at = end + 1;
+    }
+    return out;
+}
+
+// A runeword's item types (runes.txt itype codes, "swor axe") as words ("Swords, Axes").
+inline std::string TypeNames(std::string_view codes) {
+    struct Pair { const char* code; const char* name; };
+    constexpr Pair pairs[] = {
+        {"weap", "Weapons"}, {"mele", "Melee Weapons"}, {"miss", "Missile Weapons"}, {"swor", "Swords"},
+        {"axe", "Axes"}, {"mace", "Maces"}, {"club", "Clubs"}, {"hamm", "Hammers"}, {"scep", "Scepters"},
+        {"pole", "Polearms"}, {"spea", "Spears"}, {"staf", "Staves"}, {"knif", "Daggers"}, {"h2h", "Claws"},
+        {"wand", "Wands"}, {"orb", "Orbs"}, {"bow", "Bows"}, {"xbow", "Crossbows"}, {"tors", "Body Armor"},
+        {"helm", "Helms"}, {"circ", "Circlets"}, {"pelt", "Druid Pelts"}, {"phlm", "Barbarian Helms"},
+        {"shld", "Shields"}, {"ashd", "Paladin Shields"}, {"pala", "Paladin Shields"}, {"head", "Necromancer Heads"},
+        {"grim", "Grimoires"},
+    };
+    std::string out;
+    size_t at = 0;
+    while (at < codes.size()) {
+        size_t end = codes.find(' ', at);
+        if (end == std::string_view::npos) end = codes.size();
+        const std::string_view word = codes.substr(at, end - at);
+        std::string name(word);
+        for (const Pair& pair : pairs)
+            if (word == pair.code) name = pair.name;
+        if (!word.empty() && out.find(name) == std::string::npos) out += (out.empty() ? "" : ", ") + name;
+        at = end + 1;
+    }
+    return out;
+}
+
 namespace detail {
 inline uint32_t ParseU32(std::string_view text) {
     uint32_t value = 0;
