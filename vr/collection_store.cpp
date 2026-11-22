@@ -33,26 +33,28 @@ const D2RL::ThreadService*    g_threads   = nullptr;
 
 std::atomic<bool>     g_affinity{false};
 std::atomic<int>      g_firstTab{5};
-std::atomic<int>      g_tabs{24};
+std::atomic<int>      g_tabs{40};
 std::atomic<uint64_t> g_lastSweep{0};
 std::atomic<bool>     g_sweeping{false};
 std::atomic<int>      g_movedTotal{0};
 std::atomic<bool>     g_depositing{false};   // a click on the page with an item in hand
 
 // Where each category's items live inside the collection's tab range. The counts
-// add up to the 24 tabs the mod asks D2RLoader for.
+// add up to the 40 tabs the mod asks D2RLoader for.
 struct Band {
     Category category;
     int      first;
     int      count;
 };
 constexpr Band  kBands[] = {
-    {Category::Uniques,   0, 12},
-    {Category::Sets,     12,  5},
-    {Category::Runewords, 17, 3},
-    {Category::Materials, 20, 4},
+// Sized by the items' cells with room to pack (owner 2026-11-22): uniques ~1840 cells, sets ~570,
+// runewords ~750 with every weapon in a six-socket base, materials ~70.
+    {Category::Uniques,   0, 22},
+    {Category::Sets,     22,  7},
+    {Category::Runewords, 29, 10},
+    {Category::Materials, 39, 1},
 };
-constexpr int   kBandTabs = 24;
+constexpr int   kBandTabs = 40;
 constexpr char  kLog[96]  = "Frame collection: ";
 
 void Log(const std::string& text) { framevr::logging::Write(text.c_str()); }
