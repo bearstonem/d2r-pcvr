@@ -75,6 +75,15 @@ D2RL::Inventory::IterationAction __cdecl CountItem(const D2RL::PluginContext*, c
     // anywhere else (inventory, personal stash, the vanilla shared tabs) is still missing
     // there. Its text is remembered wherever it lies.
     const bool stored = item->container == D2RL::Items::ItemContainer::SharedStash && InCollectionBand(item->sharedStashPage);
+    // A completed runeword (a Normal or Superior item): found by its Runes row.
+    if (item->quality == D2RL::Items::Quality::Normal || item->quality == D2RL::Items::Quality::Superior) {
+        if (const uint32_t runeword = RunewordRecordOf(item->handle); runeword != UINT32_MAX) {
+            ++tally.runewordCandidates;
+            if (stored) TabMarkFound(Category::Runewords, runeword);
+            tooltip::RememberHandle(Category::Runewords, runeword, item->handle);
+            return D2RL::Inventory::IterationAction::Continue;
+        }
+    }
     switch (item->quality) {
     case D2RL::Items::Quality::Unique:
         ++tally.uniques;

@@ -72,6 +72,9 @@ void StoreReport();
 // found (its card lit) only while a copy is stored there: that is the copy the page
 // can take out (owner 2026-11-20: deposit and withdraw are the page's job).
 bool InCollectionBand(uint32_t sharedStashPage);
+// A completed runeword's Runes row (the catalog's runeword record id), or UINT32_MAX.
+// Game or UI thread only (an item iteration callback).
+uint32_t RunewordRecordOf(uint64_t item);
 
 // What the player holds on the game's cursor, for the page to draw under the laser:
 // its icon cache key ("u248", "t12", "i..."; empty when the hand is empty or the item

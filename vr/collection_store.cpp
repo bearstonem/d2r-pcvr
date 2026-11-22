@@ -63,6 +63,20 @@ const Band* BandOf(Category category) {
     return nullptr;
 }
 
+// A completed runeword's Runes row (zero-based: the catalog's runeword record id), or
+// UINT32_MAX. A runeword is a Normal or Superior item, so its quality says nothing;
+// getItemDetails does (it runs in a game or UI callback, as every caller here does).
+uint32_t RunewordOf(D2RL::ItemHandle item) {
+    if (g_items == nullptr || g_ctx == nullptr || item == 0) return UINT32_MAX;
+    if (!D2RL::HasItemServiceField(g_items, D2RL::ItemServiceDetailsFieldEnd) || g_items->getItemDetails == nullptr) return UINT32_MAX;
+    D2RL::Items::ItemDetails details {};
+    details.structSize = D2RL::Items::ItemDetailsSize;
+    const auto result = g_items->getItemDetails(g_ctx, item, &details, nullptr, 0);
+    if (result != D2RL::Items::Result::Success && result != D2RL::Items::Result::InvalidArgument) return UINT32_MAX;
+    if ((details.flags & D2RL::Items::ItemDetailRuneword) == 0 || details.runewordRecordId < 0) return UINT32_MAX;
+    return uint32_t(details.runewordRecordId);
+}
+
 // One shared-stash item as the sweep sees it.
 struct Seen {
     D2RL::ItemHandle handle   = 0;
@@ -71,6 +85,7 @@ struct Seen {
     uint32_t         page     = UINT32_MAX;
     bool             unique   = false;
     bool             set      = false;
+    uint32_t         runeword = UINT32_MAX;   // a completed runeword's Runes row
     bool             identified = true;   // an unidentified item never enters the collection (owner 2026-11-20)
 };
 
@@ -90,6 +105,7 @@ D2RL::Inventory::IterationAction __cdecl Collect(const D2RL::PluginContext*, con
     seen.set    = info->quality == D2RL::Items::Quality::Set;
     seen.identified = (info->stateFlags & D2RL::Items::ItemStateIdentified) != 0;
     if (info->qualityRecordId >= 0 && (seen.unique || seen.set)) seen.recordId = uint32_t(info->qualityRecordId);
+    if (!seen.unique && !seen.set) seen.runeword = RunewordOf(info->handle);
     sweep.items.push_back(seen);
     return D2RL::Inventory::IterationAction::Continue;
 }
@@ -150,6 +166,7 @@ struct CursorItem {
     uint32_t quality  = UINT32_MAX;
     bool     unique   = false;
     bool     set      = false;
+    uint32_t runeword = UINT32_MAX;
     bool     identified = true;
     bool     ok       = false;
 };
@@ -164,6 +181,7 @@ D2RL::Inventory::IterationAction __cdecl CollectCursor(const D2RL::PluginContext
     out.set    = info->quality == D2RL::Items::Quality::Set;
     out.identified = (info->stateFlags & D2RL::Items::ItemStateIdentified) != 0;
     if (info->qualityRecordId >= 0 && (out.unique || out.set)) out.recordId = uint32_t(info->qualityRecordId);
+    if (!out.unique && !out.set) out.runeword = RunewordOf(info->handle);
     out.ok = true;
     return D2RL::Inventory::IterationAction::Continue;
 }
@@ -439,6 +457,8 @@ void DepositPrepareOnGameThread(const D2RL::PluginContext*, void*) noexcept {
         category = Category::Uniques; identity = cursor.recordId;
     } else if (cursor.set && cursor.recordId != UINT32_MAX && library.SlotOf(Category::Sets, cursor.recordId) != UINT32_MAX) {
         category = Category::Sets; identity = cursor.recordId;
+    } else if (cursor.runeword != UINT32_MAX && library.SlotOf(Category::Runewords, cursor.runeword) != UINT32_MAX) {
+        category = Category::Runewords; identity = cursor.runeword;
     } else if (stashslots::Find(cursor.code) != nullptr) {
         // The game's own Gems / Materials / Runes tab takes it (the frame thread clicks it there).
         Log("Frame collection: a gem, rune or material goes to the game's own tab, not the collection; it stays in hand");
@@ -500,7 +520,8 @@ D2RL::Inventory::IterationAction __cdecl FindLanded(const D2RL::PluginContext*, 
     const int32_t record = info->qualityRecordId;
     const bool matches = (match.category == Category::Uniques   && info->quality == D2RL::Items::Quality::Unique && record >= 0 && uint32_t(record) == match.identity)
                       || (match.category == Category::Sets      && info->quality == D2RL::Items::Quality::Set    && record >= 0 && uint32_t(record) == match.identity)
-                      || (match.category == Category::Materials && info->code == match.identity);
+                      || (match.category == Category::Materials && info->code == match.identity)
+                      || (match.category == Category::Runewords && RunewordOf(info->handle) == match.identity);
     if (!matches) return D2RL::Inventory::IterationAction::Continue;
     if (info->x == match.x && info->y == match.y) match.exact = info->handle;
     else if (match.any == 0) match.any = info->handle;
@@ -593,7 +614,8 @@ D2RL::Inventory::IterationAction __cdecl FindSlotItem(const D2RL::PluginContext*
     const int32_t record = info->qualityRecordId;
     const bool matches = (match.category == Category::Uniques && info->quality == D2RL::Items::Quality::Unique && record >= 0 && uint32_t(record) == match.identity)
                       || (match.category == Category::Sets    && info->quality == D2RL::Items::Quality::Set    && record >= 0 && uint32_t(record) == match.identity)
-                      || (match.category == Category::Materials && info->code == match.identity);
+                      || (match.category == Category::Materials && info->code == match.identity)
+                      || (match.category == Category::Runewords && RunewordOf(info->handle) == match.identity);
     if (!matches) return D2RL::Inventory::IterationAction::Continue;
     const bool inBand = info->container == D2RL::Items::ItemContainer::SharedStash
                      && info->sharedStashPage >= match.first && info->sharedStashPage < match.beyond;
@@ -777,7 +799,7 @@ void SweepOnGameThread(const D2RL::PluginContext*, void*) noexcept {
     // What the collection's own tabs already hold, and what is still loose in
     // the player's own tabs.
     const Library& library = TabLibrary();
-    std::vector<uint32_t> heldUnique, heldSet, heldMaterial;
+    std::vector<uint32_t> heldUnique, heldSet, heldMaterial, heldRuneword;
     struct Loose {
         Seen     seen;
         Category category;
@@ -799,6 +821,9 @@ void SweepOnGameThread(const D2RL::PluginContext*, void*) noexcept {
         } else if (item.set && item.recordId != UINT32_MAX && library.SlotOf(Category::Sets, item.recordId) != UINT32_MAX) {
             if (ours) { heldSet.push_back(item.recordId); continue; }
             loose.push_back({item, Category::Sets, item.recordId, false});
+        } else if (item.runeword != UINT32_MAX && library.SlotOf(Category::Runewords, item.runeword) != UINT32_MAX) {
+            if (ours) { heldRuneword.push_back(item.runeword); continue; }
+            loose.push_back({item, Category::Runewords, item.runeword, false});
         } else if (stashslots::Find(item.code) != nullptr) {
             // A gem, rune or material belongs in the game's own Gems / Materials / Runes tab
             // (owner 2026-11-21): never collected, and one found in the hidden tabs goes back.
@@ -836,8 +861,9 @@ void SweepOnGameThread(const D2RL::PluginContext*, void*) noexcept {
     for (const Loose& item : loose) {
         // One copy per entry: the collection keeps the first one it was given.
         std::vector<uint32_t>& held = item.category == Category::Uniques ? heldUnique
-                                    : item.category == Category::Sets    ? heldSet
-                                                                         : heldMaterial;
+                                    : item.category == Category::Sets      ? heldSet
+                                    : item.category == Category::Runewords ? heldRuneword
+                                                                           : heldMaterial;
         if (std::find(held.begin(), held.end(), item.identity) != held.end()) continue;
         if (!MoveToBand(player, item.seen.handle, item.category)) {
             char line[192];
@@ -848,8 +874,8 @@ void SweepOnGameThread(const D2RL::PluginContext*, void*) noexcept {
         }
         held.push_back(item.identity);
         ++moved;
-        // A unique or set brings itself into view; a material does not.
-        if (item.category == Category::Uniques || item.category == Category::Sets)
+        // A unique, set or runeword brings itself into view; a material does not.
+        if (item.category != Category::Materials)
             TabShowEntry(item.category, item.identity);
     }
 
@@ -1041,6 +1067,8 @@ bool InCollectionBand(uint32_t sharedStashPage) {
     const uint32_t first = uint32_t(std::max(0, g_firstTab.load()));
     return sharedStashPage >= first && sharedStashPage < first + uint32_t(std::max(0, std::min(g_tabs.load(), kBandTabs)));
 }
+
+uint32_t RunewordRecordOf(uint64_t item) { return RunewordOf(D2RL::ItemHandle(item)); }
 
 std::string CarriedIconKey() {
     std::lock_guard lock(g_carriedLock);
