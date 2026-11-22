@@ -23,6 +23,7 @@
 #endif
 #include <windows.h>
 #include "pcvr_identity.h"
+#include "wrist_chat_native.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "summon_range.h"
 #endif
@@ -38,6 +39,8 @@
 #include "room_subscription.h"
 #include "../steamvr/interact_press.h"
 #include "../steamvr/sewer_interaction.h"
+#include "../steamvr/entry_facing.h"
+#include "bow_signatures.h"
 #include "../steamvr/dropped_item_labels.h"
 #include "../steamvr/loot_aim.h"
 #include "../steamvr/arm_pointing.h"
@@ -50,6 +53,7 @@
 #include "../steamvr/leather_menu.h"
 #include "../steamvr/head_shadow.h"
 #include "../steamvr/head_skip.h"
+#include "../steamvr/whirl_steer.h"   // Whirlwind aimed along the walk stick; walkdir::OnGround for the walk too
 #include <tlhelp32.h>
 #include <intrin.h>
 #include <xinput.h>
@@ -121,7 +125,8 @@ namespace gamestate { void Init(const D2RL::PluginContext* ctx); void Tick(); ui
 namespace gamestate {bool LeftShield();}
 #ifdef D2RVR_NATIVE_OPENXR
 #include "dual_wield.h"
-namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();}   // the two hands' weapons (held items collide)
+#include "weapon_reach.h"
+namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();uint32_t Flails();}   // the two hands' weapons (held items collide), their flails
 #endif
 namespace gamestate {bool OpaqueMenuOpen();}
 namespace gamestate {bool CinemaPlaying();void SetCinemaEnabled(bool on);void CinemaWorldDrawn(uint64_t now);void CinemaTick(uint64_t now);}
@@ -163,12 +168,20 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "target_lock.h"
 #include "bow.h"
 #include "loot_beam_scan.h"
+#include "../steamvr/client_attack_timing.h"
+
 #include "monster_immunity.h"
 #include "collection_scan.h"
 #include "collection_tab.h"
 #include "collection_tooltip_provider.h"
 #include "monster_position_signatures.h"
 #include "../steamvr/monster_position.h"
+
+#include "party_health_reports.h"
+#include "client_combat.h"
+#include "upper_body_wire.h"
+#include "upper_body_skin.h"
+
 #include "wall_cells.h"
 #include "prop_scan.h"
 #include "spell_impacts.h"
@@ -190,6 +203,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "panel_input.h"
 #include "native_belt.h"
 #include "monster_labels.h"
+#include "portal_placement.h"
 #endif
 #include "../steamvr/panel_input_mode.h"
 #include "pad_mirror_shared.h"
@@ -211,7 +225,6 @@ const PluginContext* g_ctx = nullptr;
 uintptr_t g_base = 0;
 HMODULE g_self = nullptr;
 
-
 #pragma optimize("", off)
 bool SafeRead(void* d, const void* s, size_t n) noexcept { __try { memcpy(d, s, n); return true; } __except (EXCEPTION_EXECUTE_HANDLER) { return false; } }
 bool SafeWriteMem(void* d, const void* s, size_t n) noexcept { __try { memcpy(d, s, n); return true; } __except (EXCEPTION_EXECUTE_HANDLER) { return false; } }
@@ -222,7 +235,6 @@ bool SafeWriteMem(void* d, const void* s, size_t n) noexcept { __try { memcpy(d,
 bool Matches(uint64_t rva, const uint8_t* sig, size_t n) {
     return g_ctx != nullptr && d2rsig::Check(rva, sig, (uint32_t)n);
 }
-
 
 void Log(const char* text) {
 #ifdef D2RVR_NATIVE_OPENXR
@@ -548,6 +560,7 @@ struct Settings {
     std::atomic<float> fistClose[8] = {100.0f, 100.0f, 100.0f, 65.0f, 100.0f, 100.0f, 100.0f, 100.0f};
     std::atomic<float> fistOpen[8] = {20.0f, 20.0f, 20.0f, 20.0f, 20.0f, 20.0f, 20.0f, 20.0f};
     std::atomic<bool>  fist{true};          // [hands] fist: a free hand closes with its controller's grip, relaxes when let go
+    std::atomic<bool>  flailChain{true};    // [hands] flail_chain: a flail's chain and ball swing with the hand (steamvr/flail_chain.h)
     std::atomic<float> staffOffset[3] = {0.0f, 0.0f, 0.0f};   // [hands] staff_x/y/z: cm, the staff past the right hand, its axes
     std::atomic<float> staffGrabCm{15.0f};  // [hands] staff_grab_cm: the left grip takes the staff only this near it
     std::atomic<float> leftStaffOffset[3] = {0.0f, 0.0f, 0.0f};
@@ -1076,7 +1089,6 @@ int SkyPaletteFor(const std::string& biome, bool always) {
     return kDefaultPalette;
 }
 
-
 // The game's own interface size ("Safe Screen Percent" in Saved Games\Diablo II
 // Resurrected\Settings.json, 50..100), as a fraction: the toolbar's size and
 // place follow it (hud.cpp). 1 when it cannot be read.
@@ -1330,9 +1342,11 @@ void LoadSettings() {
     billboards::ConfigureBoneArmorHidden(true); // both Off and Bones hide the local native orbit
     // Native Sorceress armor states carry authored icicles on both forearms.
     framevr::ConfigureFrozenArmorGraft(iceVisual==2);
-    billboards::ConfigureArmorVisuals(iceVisual,IniB(L"render",L"cyclone_armor_visual",true));
+    billboards::ConfigureArmorVisuals(iceVisual,framevr::settings::Normalize(framevr::settings::CycloneArmorVisual,IniF(L"render",L"cyclone_armor_visual",1))==1.f);
     aurafilter::Configure(IniB(L"render",L"player_aura_visual",true),IniB(L"render",L"summon_aura_visual",true),
-        IniB(L"render",L"player_shout_visual",true),IniB(L"render",L"summon_shout_visual",true));
+        IniB(L"render",L"player_shout_visual",true),IniB(L"render",L"summon_shout_visual",true),
+        framevr::settings::Normalize(framevr::settings::PsychicWardVisual,IniF(L"render",L"psychic_ward_mode",1))!=1.f,
+        int(framevr::settings::Normalize(framevr::settings::AssassinChargesVisual,IniF(L"render",L"assassin_charges_visual",1))));
     framevr::ConfigureBoneGraft(bonesVisual,IniF(L"render",L"bone_armor_graft_size",1.f),
         IniF(L"render",L"bone_armor_graft_out",.05f),IniF(L"render",L"bone_armor_graft_spread",40.f),IniF(L"render",L"bone_armor_graft_along",.5f),
         IniF(L"render",L"bone_armor_graft_width",.5f));
@@ -2049,6 +2063,7 @@ void LoadSettings() {
     g_set.staffHands.store(IniB(L"hands", L"follow_staff", true));
     g_set.staffFreeLeft.store(IniB(L"hands", L"staff_free_left", true));
     g_set.fist.store(IniB(L"hands", L"fist", true));
+    g_set.flailChain.store(IniB(L"hands", L"flail_chain", true));
 #if D2RVR_FIRST_PERSON
     for (int c = 0; c < 8; ++c) {
         wchar_t close[32], open[32];
@@ -2256,7 +2271,6 @@ float TargetPitch() {
 struct StickFrame { float camR[3], camF[3], scrR[3], scrU[3], mirX, mirY; float yawAtBuild; bool valid; };   // yawAtBuild: TargetYaw this view was built with
 SRWLOCK g_stickLock = SRWLOCK_INIT;
 StickFrame g_stickFrame{};
-
 
 // F12 goes round: off, first person, third person, off. Third person is the
 // same head-driven camera moved back ([third] distance), with the hero whole:
@@ -2767,7 +2781,6 @@ void Tick(bool want) {
     } else fflush(f);
 }
 }  // namespace flog
-
 
 // Alternate-frame stereo: the eye flips once a game frame, and the FlatVR addon
 // (same process) is told which, so it files each presented frame into its half
@@ -3471,6 +3484,7 @@ bool VrView(const d2rcam::WorldView& in, float out[16]) {
     }
     return ours;
 }
+void AlignAreaEntry(float cameraHeading);
 bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
     AcquireSRWLockExclusive(&g_lookLock);
     memcpy(g_lookAt, in.lookAt, sizeof g_lookAt);
@@ -3508,12 +3522,14 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
     const float heading0 = atan2f(-gameFwd.x, -gameFwd.z);
     const float down0 = asinf(std::clamp(-gameFwd.y, -1.0f, 1.0f));
     const float d2r = 3.14159265f / 180.0f;
+    AlignAreaEntry(heading0 / d2r);
     yaw = TargetYaw();                                   // + turns right
     const float heading = heading0 - yaw * d2r;
     const float down = std::clamp(down0 + TargetPitch() * d2r, -1.55f, 1.55f);   // + looks further down
     fwd = Facing(heading, down);
     ahead = Facing(heading, 0.0f);
     right = {cosf(heading), 0.0f, -sinf(heading)};
+    portalplacement::Publish(gamestate::LocalPlayer(),ahead.x,ahead.z,FullBody()&&!ThirdPerson()&&!gamestate::MenuOpen());
     const V3 up0 = d2rcam::m4::Cross(right, fwd);
     const float roll = TargetRoll() * d2r;               // + = the right ear down
     up = up0 * cosf(roll) + right * sinf(roll);
@@ -5224,6 +5240,29 @@ bool MotionAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& ca
     }
     return true;
 }
+// Whirlwind steered by the walk stick (whirl_steer.h): while the stick is pushed past its dead zone, a Whirlwind
+// cast from a button and each repeat of the held button go whirlsteer::Ahead cells where the same push would walk,
+// before the aimed monster and whatever the Aim options. At rest: false, and the cast aims as before. Nothing is
+// pressed here: the game's own commands carry the spot, and a whirl already under way keeps its own (the game
+// takes no new spot until it ends), so holding the button turns the chain from one whirl to the next. The T's
+// whirl takes its stick at the cast, in the transport (its landing, MotionAim above).
+bool WhirlSteerAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& cast) {
+    namespace ws=framevr::whirlsteer;
+    float sx=0,sy=0,gx=0,gy=0,x=0,y=0;
+    if(skill!=ws::Whirlwind||!g_spellAimReady.load()||!g_enabled.load()||gamestate::MenuOpen()||!framevr::WhirlStick(sx,sy))return false;
+    AcquireSRWLockShared(&g_stickLock);const StickFrame f=g_stickFrame;ReleaseSRWLockShared(&g_stickLock);
+    if(!f.valid||!ws::GridWay(sx,sy,{f.camR[0],f.camR[1],f.camR[2]},{f.camF[0],f.camF[1],f.camF[2]},gx,gy)||
+       !ws::Spot(playerX,playerY,gx,gy,ws::Ahead,x,y))return false;
+    cast.x=x;cast.y=y;cast.directed=cast.contactPoint=true;
+    g_note.by="walk stick";g_note.distance=std::hypot(x-playerX,y-playerY);
+    static ULONGLONG lastLog=0;
+    if(GetTickCount64()-lastLog>500) {
+        lastLog=GetTickCount64();
+        LogF("Frame whirlwind: steered by the walk stick - aimed %.1f cells where it points (stick %.2f, %.2f in the view; grid way %.2f, %.2f; hero at cell %.1f, %.1f)",
+             g_note.distance,sx,sy,gx,gy,playerX,playerY);
+    }
+    return true;
+}
 // Telemetry: "Frame aim cast:" - every cast the aim rules see, at most one line
 // per skill per 250 ms: the rule, the button, the target and where it came
 // from, a unit hand-off, and the point or heading sent to the game.
@@ -5254,10 +5293,10 @@ bool NativeSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast) {
         leapglide::g_cast.store(GetTickCount64());
         framevr::HeroCarried(kCarriedTakeOffMs);
     }
-    // Teleport on its shown landing or a thrown trap first; then the aim rules
-    // only with this kind of cast's Aim option On; Off, as before them - except
+    // Teleport on its shown landing, a thrown trap or Whirlwind along the pushed walk stick first; then the aim
+    // rules only with this kind of cast's Aim option On; Off, as before them - except
     // Guided Arrow and Charge, handed the aimed monster whatever the option (aimrules::AlwaysHomes).
-    bool directed=MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast);
+    bool directed=MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast)||WhirlSteerAim(c.skill,playerX,playerY,cast);
     if(!directed) {
         if(aimtargets::RulesOn(c))directed=NativeSpellAimDecide(playerX,playerY,cast);
         else if(c.skill>=0&&framevr::aimrules::AlwaysHomes(c.skill)&&HandOffUnit(c)){g_note.by=c.skill==107?"unit (Charge always goes to the aimed monster)":"unit (Guided Arrow always homes)";cast.directed=false;}
@@ -5315,6 +5354,85 @@ bool NativeSpellAimDecide(float playerX,float playerY,framevr::spellaim::Cast& c
     }
     return cast.directed;
 }
+// At most once after a level transition, before either eye uses its yaw.
+bool SewerInteractionLayoutReady();
+void AlignAreaEntry(float cameraHeading) {
+    static framevr::entryfacing::State entry;
+    if(RightOfPair()||!FullBody()||ThirdPerson())return;
+    const auto session=gamestate::LocalPlayer();
+    if(!session){entry.Observe(0,0,0);return;}
+    // Camera updates also happen outside an XR frame. Do not consume an
+    // arrival with a stale/unavailable pose, then miss it in the visible view.
+    float headHeading=0;
+    if(!framevr::Active()||!framevr::ViewHeadHeading(headHeading))return;
+    if(!SewerInteractionLayoutReady())return;
+    static bool geometryReady=false;
+    constexpr uint8_t levelSig[]={0x48,0x85,0xc9,0x75,0x03,0x33,0xc0,0xc3,0x48,0x8b,0x49,0x18,0xe9,0x9f,0x13,0x07,0x00};
+    if(!geometryReady){
+        geometryReady=d2rsig::Check(0x2efc10,levelSig,sizeof levelSig)&&
+            d2rsig::Check(bowvr::native::RoomPointRva,bowvr::native::RoomPointSig,sizeof bowvr::native::RoomPointSig)&&
+            d2rsig::Check(bowvr::native::MaskRva,bowvr::native::MaskSig,sizeof bowvr::native::MaskSig);
+        if(!geometryReady)return;
+    }
+    auto read=[](uintptr_t at,auto& value){return at>=0x10000&&at<=UINTPTR_MAX-sizeof value&&SafeRead(&value,reinterpret_cast<const void*>(at),sizeof value);};
+    uintptr_t player=0,path=0,room=0;
+    if(!combat::LocalPlayerUnit(player)||!read(player+0x38,path)||!read(path+0x20,room)||!room)return;
+    const auto levelOf=reinterpret_cast<int(*)(uintptr_t)>(d2rsig::Addr(0x2efc10));
+    const int level=levelOf(room); // Live destination room, not the delayed UI snapshot.
+    const int previousLevel=entry.level;
+    if(!entry.Observe(session,level,GetTickCount64()))return;
+    float px=0,py=0,tx=0,ty=0,best=20.f;
+    float portalDistance=1000.f;
+    uintptr_t tile=0;uint32_t warp=UINT32_MAX;
+    framevr::lootaim::Walk(player,read,[&](uintptr_t unit,const uint32_t* h){
+        uint32_t cell[2]{};
+        if(h[0]==2&&h[1]==59&&framevr::lootaim::ItemCell(unit,read,cell))
+            portalDistance=std::min(portalDistance,std::hypot(float(cell[0])-px,float(cell[1])-py));
+        if(h[0]!=5||!framevr::lootaim::ItemCell(unit,read,cell))return true;
+        const float d=std::hypot(float(cell[0])-px,float(cell[1])-py);
+        // Multiple tile units at one entrance are not competing entrances.
+        if(d<best){best=d;tile=unit;warp=h[1];tx=float(cell[0]);ty=float(cell[1]);}
+        return true;
+    },px,py);
+    float heading=0;
+    const bool townPortal=framevr::entryfacing::TownArrival(previousLevel,level);
+    if(townPortal){
+        framevr::entryfacing::TownTargets targets;
+        framevr::entryfacing::WalkTown(room,level,read,levelOf,[&](uintptr_t unit,const uint32_t* h){
+            uintptr_t npcPath=0;uint32_t xy[2]{};
+            if(h[0]==1&&read(unit+0x38,npcPath)&&read(npcPath,xy))
+                targets.Add(level,h[1],xy[0]/65536.f,xy[1]/65536.f);
+        });
+        if(!targets.Heading(level,px,py,heading)){
+            LogF("Frame town portal arrival: level=%d target NPC unavailable; keeping facing",level);
+            return;
+        }
+    }else{
+        if(!tile){
+            LogF("Frame area entry: from=%d level=%d no nearby entrance tile; keeping facing",previousLevel,level);
+            return;
+        }
+        const auto roomAt=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(bowvr::native::RoomPointRva));
+        const auto mask=reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(bowvr::native::MaskRva));
+        if(!framevr::entryfacing::NativeExitHeading(warp,heading)&&
+           !framevr::entryfacing::Direction(px,py,tx,ty,[&](int x,int y){
+            const auto r=roomAt(room,x,y);
+            return r&&levelOf(r)==level&&!mask(r,x,y,1,0x1);
+        },heading))return;
+    }
+    const float bodyYaw=g_headHeld.load()?g_heldYaw.load():g_mouseYaw.load()+g_turnYaw.load();
+    const float delta=framevr::entryfacing::NativeTurnDelta(cameraHeading,bodyYaw,
+        headHeading*57.2957795f,g_recenter.load(),heading);
+    g_turnYaw.fetch_add(delta);
+    if(g_headHeld.load())g_heldYaw.fetch_add(delta);
+    g_gen.fetch_add(1);g_meleeTurnEpoch.fetch_add(1);
+    if(townPortal){
+        LogF("Frame town arrival: from=%d level=%d player=%.3f,%.3f portalDistance=%.2f facing=%.1f turn=%.1f head=%.1f base=%.1f body=%.1f",previousLevel,level,px,py,portalDistance,heading,delta,headHeading*57.2957795f,cameraHeading,bodyYaw);
+        return;
+    }
+    LogF("Frame area entry: first destination view level=%d entrance=%p warp=%u player=%.3f,%.3f tile=%.0f,%.0f distance=%.2f facing=%.1f turn=%.1f",level,reinterpret_cast<void*>(tile),warp,px,py,tx,ty,best,heading,delta);
+}
+
 uintptr_t NearbySewerInteraction();
 namespace lootaimvr { uintptr_t Selected(); bool PickInReach(); bool IsItem(uintptr_t unit); }
 // 0x18DDE0 (controller manager, skill) is the controller's own target for a
@@ -5612,11 +5730,12 @@ bool ViewStickToGame(float* px, float* py) {
     const float mag = sqrtf(x*x + y*y);
     if (mag < 1e-4f) return false;
     if (g_set.stickExact.load()) {
-        // Stick in our view -> direction on the ground -> that direction on the game's screen.
+        // Stick in our view -> direction on the ground -> that direction on the game's screen. The ground
+        // step is walkdir::OnGround, which Whirlwind's steering takes too (WhirlSteerAim).
         AcquireSRWLockShared(&g_stickLock); const StickFrame f = g_stickFrame; ReleaseSRWLockShared(&g_stickLock);
         if (!f.valid) return false;
-        float w[3];
-        for (int i = 0; i < 3; ++i) w[i] = x * f.camR[i] + y * f.camF[i];
+        const auto ground = framevr::walkdir::OnGround(x, y, {f.camR[0], f.camR[1], f.camR[2]}, {f.camF[0], f.camF[1], f.camF[2]});
+        const float w[3] = {ground.x, ground.y, ground.z};
         float sx = w[0]*f.scrR[0] + w[1]*f.scrR[1] + w[2]*f.scrR[2];
         float sy = w[0]*f.scrU[0] + w[1]*f.scrU[1] + w[2]*f.scrU[2];
         const float sm = sqrtf(sx*sx + sy*sy);
@@ -7025,6 +7144,12 @@ void SequenceSkillPad(XINPUT_STATE* state,bool active) {
         state->Gamepad.bLeftTrigger>=128,state->dwPacketNumber,GetTickCount64());
     else g_skillPad.Reset();
     ReleaseSRWLockExclusive(&g_skillPadLock);
+#ifdef D2RVR_DEVELOPER
+    const auto now=GetTickCount64();
+    if(active&&framevr::clienttiming::diagnostic.Submit(state->Gamepad.wButtons,state->Gamepad.bLeftTrigger>=128,now))
+        LogF("Frame client timing: native pad after bank sequencing tick=%llu buttons=%04x alternate=%d",
+            (unsigned long long)now,state->Gamepad.wButtons,int(state->Gamepad.bLeftTrigger>=128));
+#endif
 }
 #endif
 template <int I> DWORD WINAPI XDetour(DWORD idx, XINPUT_STATE* s) {
@@ -8499,7 +8624,6 @@ void ApplyPools() {
     else if (!toldWaiting && GetTickCount64() - since > 120000) { toldWaiting = true; LogF("vrcam: %s (still waiting)", line); }
 }
 
-
 void GameCodeTick(bool iniChanged) {
     static int answered = -1;
     static uint32_t written = ~0u;
@@ -9513,6 +9637,7 @@ bool FreshHands(skel::Input* in) {
 
 #ifdef D2RVR_NATIVE_OPENXR
 void BowTick() {
+    clientcombat::Tick(gamestate::LocalPlayer(),GetTickCount64());
     framevr::SetBowWorldEpoch(g_meleeTurnEpoch.load());
     auto gate=framevr::BowGate();
     gate.active=gate.active&&g_enabled.load()&&g_inWorld.load()&&!ThirdPerson()&&!Overhead()&&g_eyeOk.load()&&!gamestate::MenuOpen();
@@ -9611,14 +9736,15 @@ void MeleeContactHand(int hand) {
     // Conservative category-sized collision capsules on the final posed
     // attachment (+Y is blade/shaft, -Y is hilt). Mesh-specific bounds remain
     // a refinement; no class-specific animation or targeting is involved.
-    float length=.65f,radius=.065f;
-    switch(pose.weaponType) {
-        case D2RVR_TYPE_UNARMED:length=.04f;radius=.08f;break;
-        case D2RVR_TYPE_DAGGER:case D2RVR_TYPE_CLAW:case D2RVR_TYPE_ORB:length=.28f;break;
-        case D2RVR_TYPE_WAND:length=.38f;break;
-        case D2RVR_TYPE_STAFF:length=1.2f;break;
-        case D2RVR_TYPE_SPEAR:case D2RVR_TYPE_POLEARM:length=1.5f;break;
-        default:if(gamestate::TwoHanded()&D2RVR_TWO_HANDS_ON)length=1.1f;break;
+    // A flail's capsule reaches its head, each hand's by the item in it (weapon_reach.h).
+    const auto capsule=framevr::reach::Contact(pose.weaponType,(gamestate::TwoHanded()&D2RVR_TWO_HANDS_ON)!=0,pose.flail);
+    float length=capsule.length,radius=capsule.radius;
+    {   // a hand's flail reaching its head, told when it is taken up and when it is put away
+        static std::atomic<int> told[2]={-1,-1};
+        const int flail=pose.flail?1:0,before=told[hand&1].exchange(flail);
+        if(before!=flail&&(flail||before==1))
+            LogF("Frame flail reach: the %s hand's %s strikes %.2f m out%s",hand?"off":"main",flail?"flail":"weapon",length,
+                 flail?" to its head (the chain held straight along the handle)":"");
     }
     // A shapeshift form's claw: the capsule the skeleton hook measured on the drawn paw,
     // at least 0.22 m long (a claw weapon is 0.28) and 25% thicker, floor 0.06 m: the bare
@@ -9705,6 +9831,24 @@ void ShieldGuardTick() {
     const bool handOk=sh&&sh->version==D2RVR_SHARED_VERSION&&sh->headValid&&(sh->handsValid&HandBit(1));
     combat::PublishGuard(gamestate::LocalPlayer(),eligible,posed,pose,handOk,framevr::HandSide(1)==1,claws);
 }
+#endif
+
+#ifdef D2RVR_NATIVE_OPENXR
+#include "../steamvr/desktop_mode.h"
+void PublishRemoteBodies(bool on){
+    upperbody::Remote remotes[upperbody::kCapacity];skel::RemoteUpperBody targets[upperbody::kCapacity];
+    const size_t count=on?upperbody::Remotes(remotes,upperbody::kCapacity):0;
+    for(size_t i=0;i<count;++i){
+        const auto&p=remotes[i].pose;auto&t=targets[i];t.unit=remotes[i].unit;
+        memcpy(t.worldPosition,p.worldPosition,sizeof t.worldPosition);t.classId=int(p.classId);
+        memcpy(t.hand,p.hand,sizeof t.hand);memcpy(t.rot,p.rot,sizeof t.rot);
+        t.handsValid=p.tracked;t.userHeadM=p.userHeadM;t.headPitch=p.headPitch;t.headRoll=p.headRoll;
+        t.yawInModel=p.yawInModel;t.worldYaw=p.worldYaw;t.resolved=p.resolved;
+    }
+    skel::SetRemoteUpperBodies(targets,count);
+    if(!on)upperbodyskin::Clear();
+}
+void DesktopTick();
 #endif
 
 void PushArms() {
@@ -10019,8 +10163,41 @@ void PushArms() {
         in.heldWorld = hc::DecideWorld(h);
         in.heldWorld.why |= blocks & hc::Untracked;
     }
+    {   // A flail's chain swings (steamvr/flail_chain.h; [hands] flail_chain): a flail in a hand, first person, the arms
+        // on the controllers. The game's own animation of the chain stays in every other view.
+        const bool setting = g_set.flailChain.load();
+        static int told = -1;
+        if (int(setting) != told) {
+            told = int(setting);
+            LogF("Frame flail chain: %s", setting ? "on - a held flail's chain and ball swing with the hand and hang from the handle ([hands] flail_chain=1)"
+                                                  : "off - the game's own animation moves a flail's chain ([hands] flail_chain=0)");
+        }
+        in.flailChain = setting && own && in.mode == 2 && !in.shapeForm && (gamestate::Flails() & 3u) != 0;
+    }
 #endif
     skel::Set(in);
+#ifdef D2RVR_NATIVE_OPENXR
+    upperbody::Pose pose{};
+    uint32_t unit=0;combat::LocalPlayerId(unit);
+    const int cls=skel::HeroClass();
+    bool tracked=own&&heroPlaced&&sh&&sh->headValid&&in.haveYaw&&cls>=0&&cls<8&&!in.shapeForm;
+    if(tracked){
+        pose.tracked=uint8_t(in.handsValid&3);pose.userHeadM=in.userHeadM;
+        memcpy(pose.hand,in.hand,sizeof pose.hand);memcpy(pose.rot,in.rot,sizeof pose.rot);
+        // Invalid/untracked controller quaternion must not suppress the other hand.
+        for(int h=0;h<2;++h)if(!(pose.tracked&(1u<<h))){memset(pose.hand[h],0,sizeof pose.hand[h]);memset(pose.rot[h],0,sizeof pose.rot[h]);pose.rot[h][3]=1;}
+        pose.headPitch=in.headPitch;pose.headRoll=in.headRoll;pose.yawInModel=in.yawInModel;
+        memcpy(pose.worldPosition,hero,sizeof hero);pose.classId=uint32_t(cls);pose.sampleMs=GetTickCount();
+        if(pose.tracked==3)skel::ReadLocalResolved(&pose.resolved,in.worldEpoch,cls);
+        float model[16];const auto at=g_heroMatrix.load();
+        if(at&&SafeRead(model,reinterpret_cast<void*>(at),sizeof model)){
+            const float x=sinf(in.yawInModel),z=cosf(in.yawInModel);
+            pose.worldYaw=atan2f(x*model[0]+z*model[8],x*model[2]+z*model[10]);
+        }else tracked=false;
+    }
+    upperbody::Tick(on,tracked?&pose:nullptr,unit);
+    PublishRemoteBodies(on);
+#endif
 }
 #ifdef D2RVR_NATIVE_OPENXR
 // Held items collide: a first touch that clanked, from the skeleton hook - a clank in both controllers, or in the one
@@ -10068,6 +10245,9 @@ std::atomic<bool> g_ceilBiome{false};   // the area's biome is on [ceiling] biom
 // its own), its walls' top as the installer measured it (0: not measured) and its own height_<biome> (0: not set)
 std::atomic<int> g_gameCeilKind{-1};
 std::atomic<float> g_wallsTopHere{0.0f}, g_ownHeightHere{0.0f};
+// The area's first entry in gameceiling::kClearances (-1: none), and the hero's level as last read (the state sample reads 0 while
+// stale: the last one read stands in, so the ceiling does not jump between the level's height and the area's)
+std::atomic<int> g_clearAreaHere{-1}, g_ceilLevel{0};
 // A file of the mod's data as text (at most 1 MiB), from its .mpq folder (PluginContext::modDirectory): "" none
 std::string ModDataText(const char* rel) {
     if (!g_ctx || !g_ctx->modDirectory) return std::string();
@@ -11091,6 +11271,7 @@ void SkyTick() {
         const int kind = world && IsGameCeilingBiome(biome) ? gameceiling::KindOf(biome) : -1;
         g_gameCeilKind.store(kind);
         g_ownHeightHere.store(world ? OwnCeilingHeight(biome) : 0.0f);
+        g_clearAreaHere.store(kind >= 0 ? gameceiling::ClearanceArea(biome) : -1);
         {
             ceilmeasure::Measures ms;
             const bool have = kind >= 0 && ceilmeasure::Parse(ModDataText(ceilmeasure::kFile), &ms);
@@ -11491,6 +11672,11 @@ void GameCeilingInputs(engineunits::CeilingIn* c) {
     c->heightFrom = own > 0.0f ? "the area's height_<biome>"
                     : fromWalls && walls > 0.0f ? "on the area's walls' top - the game's own pieces, [ceiling] height_from_walls"
                                                 : "no height of its own, its walls not measured";
+    // Over the area's tallest pieces where they stand far above its walls (Baal's and Mephisto's rooms: gameceiling::kClearances)
+    if (const int read = interactionstate::CurrentLevel(gamestate::LocalPlayer(), GetTickCount64())) g_ceilLevel.store(read);
+    const gameceiling::Clearance* clear = gameceiling::ClearanceAt(g_clearAreaHere.load(), g_ceilLevel.load());
+    const float raised = gameceiling::HeightOver(c->height, own, clear);
+    if (raised != c->height) { c->height = raised; c->heightFrom = clear->over; }
     c->height += CeilingLift(c->hero[1]);   // its top over the level's highest floor, not the lowest he has stood on
     c->reach = gameceiling::WallReach(c->height, g_set.ceilFloor.load());
 }
@@ -12118,9 +12304,6 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         SetBool(rt, "ArcaneSkyOn", false);
     }
     {   // camera and eye projection setup for depth fog and dynamic lighting
-
-
-
 
             const float scale = g_set.ceilScale.load();
             // The hero's place wrapped on a whole number of tiles: the world's own
@@ -13098,6 +13281,22 @@ DWORD WINAPI UpdateThread(void*) {
         }
         const ULONGLONG nowMs = GetTickCount64();
 #ifdef D2RVR_NATIVE_OPENXR
+
+        // Health has its own lifecycle, independent of VR pose publication.
+        // Keep this before any desktop-mode early continue when branches combine.
+        {uint32_t unit=0;combat::LocalPlayerId(unit);
+         partyhealthreports::Tick(gamestate::LocalPlayer()!=0,unit,gamestate::LocalPlayer());
+         targetlock::TickNetwork(gamestate::LocalPlayer(),unit);
+         lootscan::TickNetwork(gamestate::LocalPlayer(),unit);}
+        melee::TickNetwork();
+
+        if(pcvrdesktop::Enabled()){
+            if(nowMs>=nextState){nextState=nowMs+40;DesktopTick();}
+            continue; // no VR hotkeys, input injection, HUD movement or rendering setup
+        }
+
+#endif
+#ifdef D2RVR_NATIVE_OPENXR
         framevr::hookmetrics::Scope inputMeasured(framevr::hookmetrics::InputTick,15);
 #endif
         const bool focus = GameFocused();
@@ -13345,6 +13544,7 @@ DWORD WINAPI UpdateThread(void*) {
             panelinput::Install();
             nativebelt::Install();
             monsterlabels::Install();
+            portalplacement::Install();
             projectiles::Report();
             combat::Install();
             combat::Report();
@@ -13516,6 +13716,46 @@ static bool OtherVrPluginBeside(HMODULE self) {
 
 D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept;
 
+#ifdef D2RVR_NATIVE_OPENXR
+namespace {
+void DesktopTick(){
+    static uint64_t nextRead=0,nextHooks=0;
+    const auto now=GetTickCount64();
+    if(now>=nextRead){nextRead=now+200;gamestate::Tick();}
+    if(now>=nextHooks){
+        nextHooks=now+500;d2rsig::Resolve(g_ctx);
+                melee::InstallRemoteHost();combat::InstallFeedbackObserver();
+        // Camera observer stays disabled: it supplies native player position only.
+        if(!g_h.camera)g_h.camera=d2rcam::Install(g_ctx);
+        if(!g_h.skeleton)g_h.skeleton=d2rsig::Hook(RVA_COMPUTE_SELF_WORLD_POSE,kSigComputeSelfWorldPose,sizeof kSigComputeSelfWorldPose,skel::Detour(),skel::OrigSlot());
+        upperbodyskin::Init(g_ctx);
+    }
+    uint32_t unit=0;combat::LocalPlayerId(unit);
+    float pos[3]{};
+    const bool placed=d2rcam::LookAtNow(pos)&&std::isfinite(pos[0]+pos[1]+pos[2]);
+    const bool world=unit&&gamestate::LocalPlayer()&&d2rcam::InWorld()&&placed;
+    g_inWorld.store(world);
+    if(world)skel::SetHeroPos(pos[0],pos[1],pos[2]);
+    upperbody::Tick(world,nullptr,unit);
+    PublishRemoteBodies(world);
+}
+bool StartDesktop(const PluginContext*ctx){
+    Log("PCVR desktop: native camera/input; VR startup skipped; remote VR poses enabled");
+    // Deliberately before LoadSettings/LoadReShade: do not rewrite calibration,
+    // hide the HUD, install controller hooks, or initialize a headset runtime.
+    g_enabled.store(false);g_mouseLookOn.store(false);d2rcam::SetEnabled(false);
+    d2rsig::Resolve(ctx);
+    skel::SetGameBase(g_base);skel::TrackHero(true);skel::Set(skel::Input{});
+    gamestate::Init(ctx);
+    melee::InstallRemoteHost();combat::InstallFeedbackObserver();
+    upperbody::Init(ctx,&Log);upperbodyskin::Init(ctx);
+    HANDLE h=CreateThread(nullptr,0,UpdateThread,nullptr,0,&g_updateThreadId);
+    if(!h){Log("PCVR desktop: update thread failed");return false;}
+    CloseHandle(h);return true;
+}
+} // namespace
+#endif
+
 D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     if (ctx == nullptr) return true;
     g_ctx = ctx;
@@ -13542,6 +13782,15 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     g_iniPath[n] = 0;
     wcscat_s(g_iniPath, D2RPCVR_SETTINGS_FILE_W);
 #ifdef D2RVR_NATIVE_OPENXR
+
+    partyhealthreports::Init(ctx,&Log);
+    lootscan::InitNetwork(ctx);
+    melee::Init(ctx);
+    if(pcvrdesktop::Enabled())return StartDesktop(ctx);
+#endif
+#ifdef D2RVR_NATIVE_OPENXR
+
+    wristchatnative::Init(ctx,&ChatFlag,&ChatFlagFound);
     vrsettings::Poll(g_iniPath);
 #endif
     ReloadIfChanged();
@@ -13598,8 +13847,12 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     enemysight::Init(ctx);
     companionai::Init(ctx);
     if(!summonrange::Init(ctx)){D2RLoaderUnloadPlugin();g_standDown=true;return false;}
-    melee::Init(ctx);
+
+    melee::InstallTargetReader();combat::InstallFeedbackObserver();
     bowvr::Init(ctx);
+    clientcombat::Init(ctx);
+    upperbody::Init(ctx,&Log);
+    upperbodyskin::Init(ctx);
     wallcells::Init(ctx);
     propscan::Init();
     {   // loot beams: [loot] beams (master), rune_min (26 = Vex); the rarities are VR Settings (lootscan)
@@ -13617,8 +13870,19 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
 }
 
 D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
+    wristchatnative::Stop();
     if (g_standDown) return;   // nothing was started
 #ifdef D2RVR_NATIVE_OPENXR
+
+    upperbody::Shutdown();
+    skel::SetRemoteUpperBodies(nullptr,0);
+    upperbodyskin::Shutdown();
+
+    partyhealthreports::Stop();
+    targetlock::Stop();
+    melee::StopNetwork();
+    lootscan::Stop();
+
     enemysight::Shutdown();
     companionai::Shutdown();
     summonrange::Shutdown();

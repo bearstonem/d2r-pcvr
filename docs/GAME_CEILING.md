@@ -40,6 +40,21 @@ and instance placer, then lays it each frame with its top over the area's floor
 and its middle on the whole tile nearest the hero. Height: `height_<biome>`, else
 the measured walls' top (`height_from_walls`), else `height`.
 
+A few rooms have pieces far taller than their walls. On the walls' top, the ceiling there
+came down to a raised hand, monsters stood through it and Baal sat above it on his throne.
+Without a `height_<biome>`, those rooms' ceilings go over their tallest pieces instead
+(`gameceiling::kClearances`, measured from the game's presets on 2026-11-19):
+
+| Where | Ceiling | Its tallest pieces |
+| --- | --- | --- |
+| Worldstone Keep, every level | 21 | pillars 18.2, stairs 19.6 (walls 9.9) |
+| Throne of Destruction (level 131) | 36 | the throne's canopy 34.0, the arch 34.4 |
+| Worldstone Chamber (level 132) | 47 | the Worldstone 45.6 |
+| Durance of Hate level 3 (102) | 33 | pillars 23.8, drain 25.8, the great door 32.1 |
+
+The level comes from the game's state sample. While no level has been read, the Throne's
+area takes the higher of its two heights.
+
 The height is measured from the highest floor of the hero's level, not the
 floor he stands on (`steamvr/ceiling_top.h`). Every room the game builds there
 reports its border floors through the room-height hook (`steamvr/room_stitch.h`).

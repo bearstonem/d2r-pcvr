@@ -130,6 +130,21 @@ inline uint64_t SwingSince(uint64_t ownSinceMs,uint64_t triggerAt,uint64_t now) 
 inline bool TapHealBlocked(bool gatedStroke,int lifeBefore,int lifeAfter) {
     return gatedStroke&&lifeAfter>lifeBefore;
 }
+// Leech diagnostics (Frame leech, 2026-11-19): a player reported that a mana-steal
+// mace gives no mana in VR. What became of one local melee hit's life / mana steal
+// in the damage application (44CE80): heroSteal - the hero has life or mana steal
+// (stats 60 / 62) as the hit is applied; carried - its record had steal at entry;
+// onHitOff - the on-hit gate zeroed it there; reached - the game's leech (450C90)
+// ran on it; wouldMiss - the would-have-hit gate zeroed it there.
+enum class LeechFate:uint8_t {None,NotOnRecord,OnHitOff,NotReached,WouldMiss,LetThrough};
+inline LeechFate LeechOutcome(bool heroSteal,bool carried,bool onHitOff,bool reached,bool wouldMiss) {
+    if(!carried)return heroSteal?LeechFate::NotOnRecord:LeechFate::None;
+    if(onHitOff)return LeechFate::OnHitOff;
+    if(!reached)return LeechFate::NotReached;
+    return wouldMiss?LeechFate::WouldMiss:LeechFate::LetThrough;
+}
+// What a stat rose by across the leech call (256ths of a point); a fall is not leech.
+inline int StatGain(int before,int after) {return after>before?after-before:0;}
 struct TriggerStroke {float recovery=1;OnHit onHit=OnHit::Allowed;};
 // sinceFullSwingMs: since the latest full-cycle swing on any hand; sinceAnySwingMs: since the
 // latest landed swing on any hand. scale: [gameplay] swing_recovery_damage; the on-hit gate

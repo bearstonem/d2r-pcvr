@@ -21,7 +21,7 @@ int main(){
     Check(vrsettings::Read().values[IceArmorVisual]==1&&vrsettings::Read().values[BoneArmorVisual]==0,"legacy armor keys migrate without losing native ice");
     Check(before.values[PlayerAuraVisual]==1&&before.values[SummonAuraVisual]==1,"missing aura preferences retain visible effects");
     Check(before.values[PlayerShoutVisual]==1&&before.values[SummonShoutVisual]==1,"missing shout preferences retain visible effects");
-    for(auto key:{IceArmorVisual,CycloneArmorVisual,BoneArmorVisual,PlayerAuraVisual,SummonAuraVisual,PlayerShoutVisual,SummonShoutVisual}) {
+    for(auto key:{AssassinChargesVisual,IceArmorVisual,CycloneArmorVisual,BoneArmorVisual,PlayerAuraVisual,SummonAuraVisual,PlayerShoutVisual,SummonShoutVisual}) {
         for(int choice=0;choice<=int(Definitions[key].max);++choice) {
             Model visual;visual.Open(vrsettings::Read());visual.Set(key,float(choice));
             const auto request=visual.Click({Kind::Apply});
@@ -38,6 +38,16 @@ int main(){
         Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"a toggle saves through its own mask bit");
         Check(vrsettings::Read().values[HapticShortMelee]==enabled&&Int(path,L"haptics",L"short_melee")==enabled&&
             Int(path,L"custom",L"keep")==12345,"its on/off round trips and preserves unrelated keys");
+    }
+    Check(before.values[ControllerMenuSize]==100,"missing menu size preserves original size");
+    {
+        const auto current=vrsettings::Read();auto values=current.values;values[ControllerMenuSize]=150;
+        const Request request{current.values,values,Changed(current.values,values),current.sequence+1};
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save controller-menu size");
+        Check(vrsettings::Read().values[ControllerMenuSize]==150&&Int(path,L"interactions",L"controller_menu_size")==150,
+              "controller-menu size round trips through INI");
+        Check(Int(path,L"custom",L"keep")==12345&&Changed(current.values,vrsettings::Read().values)==(ChangeMask{1}<<ControllerMenuSize),
+              "controller-menu size preserves other preferences");
     }
     Check(before.values[MapTopDown]==0&&before.values[MapRotate]==0,"missing map preferences retain the existing view");
     Check(WritePrivateProfileStringW(L"interactions",L"map_top_down",L"1",name)&&
@@ -568,6 +578,13 @@ int main(){
         Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"shared summon preference saves");
         Check(vrsettings::Read().values[SummonRangeMultiplier]==multiplier&&Int(path,L"custom",L"keep")==12345,
               "shared fractional multiplier survives reload and preserves other settings");
+    }
+    Check(vrsettings::Read().values[PsychicWardVisual]==1,"new ward preference defaults to native visuals");
+    for(int choice:{0,1,2}) {
+        model.Open(vrsettings::Read());model.Set(PsychicWardVisual,float(choice));request=model.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<PsychicWardVisual),"ward preference is independent");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"ward saves through Apply");
+        Check(vrsettings::Read().values[PsychicWardVisual]==choice&&Int(path,L"render",L"psychic_ward_mode")==choice&&Int(path,L"custom",L"keep")==12345,"ward choice persists without changing unrelated keys");
     }
     model.Open(vrsettings::Read());model.Click({Kind::Change,Motion,-1});request=model.Click({Kind::Apply});
     Check(DeleteFileW(name)&&vrsettings::Submit(request)&&!vrsettings::Poll(name),"missing file fails safely");

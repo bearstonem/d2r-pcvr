@@ -8,14 +8,16 @@
 #include "frame_math.h"
 #include "respec_button.h"
 
-// The VR keyboard: letters for the game's text boxes - a new character's name
-// first - without taking the headset off. D2R shows no on-screen keyboard of
-// its own there (tested 2026-11-05: the name box does nothing under native
-// controller navigation in VR). Its own quad hinged under the menu, tilted
-// toward the player like a keyboard on a desk (Board): one picture of every
-// key, small letters or, with Shift, capitals; a lit copy cropped to the key
-// under the laser, which hits the board itself. Its letters go in through
-// SendInput tagged KeyboardKeyTag
+// The VR keyboard: letters for the game's text boxes - a new character's name,
+// and D2RLoader's multiplayer panel (its game name, password, description,
+// filter, address and port) - without taking the headset off. D2R shows no
+// on-screen keyboard of its own there (tested 2026-11-05: the name box does
+// nothing under native controller navigation in VR). Its own quad hinged under
+// the menu, tilted toward the player like a keyboard on a desk (Board): one
+// picture of every key, small letters or, with Shift, capitals; a lit copy
+// cropped to the key under the laser, which hits the board itself. Two layouts
+// (Layout): the name's letters, and the multiplayer panel's with a digit row,
+// . : and a space. Its letters go in through SendInput tagged KeyboardKeyTag
 // (panel_input_mode.h), so TypedKeys lets the keyboard layout in and the box
 // takes them like letters from a real keyboard.
 namespace framevr::keyboard {
@@ -47,20 +49,70 @@ public:
     uint32_t Epoch() const{return shownAt;}
 };
 
+// When D2RLoader's multiplayer panel is on screen (the main menu's TCP/IP
+// button opens D2RLoaderMultiplayerPanel). Each of its views has text boxes:
+// Host Game its name, password and description, Browse Games its filter,
+// Direct join its address and port, a passworded game its password. Neither
+// the loader's SDK nor the game says which box has the focus: the owner's
+// 2026-11-17 log has no new UI message while the Host Game boxes were clicked
+// (ShowHost 21:23:06 to OpenDirectJoin 21:24:04). So the keyboard shows while
+// the panel is open; the laser's click picks the box, and the keys go to it.
+// The game's UI messages say when: PanelManager opens and closes the panel by
+// name (D2RLoader closes it itself once a game is made or joined), a game
+// starting unloads every panel; the panel's own channel names the view picked.
+// Character creation over it (Create New in the list beside it) is the name
+// box's: no multiplayer keyboard there. epoch counts each time the panel comes
+// up anew or another view is picked, so Close lasts only until then.
+class MultiplayerPanel {
+    bool open=false,creation=false;uint32_t shownAt=0;
+public:
+    static constexpr std::string_view Panel="D2RLoaderMultiplayerPanel",Channel="D2RLoaderMultiplayerPanelMessage";
+    // A command on the panel's channel that brings a view or dialog up or takes one down (the
+    // loader's ShowHost, ShowBrowse, ShowGameInfo / Players / Plugins, OpenDirectJoin,
+    // CloseDirectJoin, CancelDirectJoin, RetryDirectJoin, CloseJoinPassword, JoinSelected,
+    // JoinDirect) - not a toggle, a stepper or a box's own text (FilterGames, LimitPasswords).
+    static bool NewView(std::string_view command) {
+        for(std::string_view start:{"Show","Open","Close","Cancel","Retry","Join"})
+            if(command.substr(0,start.size())==start)return true;
+        return false;
+    }
+    void Message(std::string_view target,std::string_view command,std::string_view text) {
+        const bool before=Shown();
+        if(target=="PanelManager") {
+            const bool opens=command=="OpenPanel"||command=="OpenExclusivePanel",closes=command=="ClosePanel"||command=="UnloadPanel";
+            if(text==Panel){if(opens)open=true;else if(closes)open=false;}
+            else if(text=="CharacterCreatePanel"){if(opens)creation=true;else if(closes)creation=false;}
+            else if(command=="UnloadAll"||command=="CloseAll")open=creation=false;
+        } else if(target=="FrontEndNavigation"&&(command=="ToGame"||command=="ToExit"))open=creation=false;
+        else if(target==Channel&&Shown()&&NewView(command))++shownAt;
+        if(Shown()&&!before)++shownAt;
+    }
+    bool Open() const{return open;}
+    bool Shown() const{return open&&!creation;}
+    uint32_t Epoch() const{return shownAt;}
+};
+// Which keyboard the boxes on screen want: the name box's over all, then the multiplayer panel's.
+enum class Want : uint8_t {None,Name,Text};
+inline Want Wanted(const NameBox& name,const MultiplayerPanel& multiplayer) {
+    return name.Shown()?Want::Name:multiplayer.Shown()?Want::Text:Want::None;
+}
+
 // What a key does. Char types its letter; Shift makes the next letter a
-// capital (once); Close hides the keyboard until the text box goes away.
+// capital (once), or a digit its symbol; Close hides the keyboard until the
+// text box comes up anew.
 // Text: the key's label typed whole ("000"); SelectAll: Ctrl+A in the box; Max: all of it
 // replaced by more gold than anyone holds - the game's gold box keeps it to what there is.
 enum class Action : uint8_t {Char,Backspace,Enter,Shift,Close,Text,SelectAll,Max};
 struct Key {
     float col,row,span;   // in key units from the keyboard's top left
     Action action;
-    char ch;              // Action::Char: the lower-case letter, '-' or '_'
+    char ch;              // Action::Char: the lower-case letter, digit, mark or space
     const wchar_t* label;
+    char shifted=0;       // Action::Char: what it types with Shift if not its capital ('1': '!')
 };
 // Character names take letters and one '-' or '_' (the game checks the rest),
 // so no digits and no space. Ten keys a row.
-inline constexpr Key Keys[]={
+inline constexpr Key NameKeys[]={
     {0,0,1,Action::Char,'q',L"Q"},{1,0,1,Action::Char,'w',L"W"},{2,0,1,Action::Char,'e',L"E"},
     {3,0,1,Action::Char,'r',L"R"},{4,0,1,Action::Char,'t',L"T"},{5,0,1,Action::Char,'y',L"Y"},
     {6,0,1,Action::Char,'u',L"U"},{7,0,1,Action::Char,'i',L"I"},{8,0,1,Action::Char,'o',L"O"},
@@ -76,11 +128,40 @@ inline constexpr Key Keys[]={
     {0,3,2,Action::Close,0,L"Close"},{2,3,1.5f,Action::Char,'-',L"-"},{3.5f,3,1.5f,Action::Char,'_',L"_"},
     {5,3,5,Action::Enter,0,L"Enter"},
 };
-constexpr int KeyCount=int(sizeof Keys/sizeof Keys[0]);
-constexpr float Columns=10,Rows=4;
+// The multiplayer panel's boxes: a game's name, password and description, the
+// list's filter, an address and port (192.168.1.20 and 4000, or 192.168.1.20:4000).
+// The name's rows under a digit row - Shift on a digit types its symbol as on a
+// US keyboard (the game's own layout picks the key that types it, SendKeyboard) -
+// and a last row with the marks an address and a name want, and a space.
+inline constexpr Key TextKeys[]={
+    {0,0,1,Action::Char,'1',L"1",'!'},{1,0,1,Action::Char,'2',L"2",'@'},{2,0,1,Action::Char,'3',L"3",'#'},
+    {3,0,1,Action::Char,'4',L"4",'$'},{4,0,1,Action::Char,'5',L"5",'%'},{5,0,1,Action::Char,'6',L"6",'^'},
+    {6,0,1,Action::Char,'7',L"7",'&'},{7,0,1,Action::Char,'8',L"8",'*'},{8,0,1,Action::Char,'9',L"9",'('},
+    {9,0,1,Action::Char,'0',L"0",')'},
+    {0,1,1,Action::Char,'q',L"Q"},{1,1,1,Action::Char,'w',L"W"},{2,1,1,Action::Char,'e',L"E"},
+    {3,1,1,Action::Char,'r',L"R"},{4,1,1,Action::Char,'t',L"T"},{5,1,1,Action::Char,'y',L"Y"},
+    {6,1,1,Action::Char,'u',L"U"},{7,1,1,Action::Char,'i',L"I"},{8,1,1,Action::Char,'o',L"O"},
+    {9,1,1,Action::Char,'p',L"P"},
+    {.5f,2,1,Action::Char,'a',L"A"},{1.5f,2,1,Action::Char,'s',L"S"},{2.5f,2,1,Action::Char,'d',L"D"},
+    {3.5f,2,1,Action::Char,'f',L"F"},{4.5f,2,1,Action::Char,'g',L"G"},{5.5f,2,1,Action::Char,'h',L"H"},
+    {6.5f,2,1,Action::Char,'j',L"J"},{7.5f,2,1,Action::Char,'k',L"K"},{8.5f,2,1,Action::Char,'l',L"L"},
+    {0,3,1.5f,Action::Shift,0,L"Shift"},
+    {1.5f,3,1,Action::Char,'z',L"Z"},{2.5f,3,1,Action::Char,'x',L"X"},{3.5f,3,1,Action::Char,'c',L"C"},
+    {4.5f,3,1,Action::Char,'v',L"V"},{5.5f,3,1,Action::Char,'b',L"B"},{6.5f,3,1,Action::Char,'n',L"N"},
+    {7.5f,3,1,Action::Char,'m',L"M"},
+    {8.5f,3,1.5f,Action::Backspace,0,L"Back"},
+    {0,4,1.5f,Action::Close,0,L"Close"},{1.5f,4,1,Action::Char,'.',L"."},{2.5f,4,1,Action::Char,':',L":"},
+    {3.5f,4,1,Action::Char,'-',L"-"},{4.5f,4,1,Action::Char,'_',L"_"},{5.5f,4,2.5f,Action::Char,' ',L"Space"},
+    {8,4,2,Action::Enter,0,L"Enter"},
+};
+// A layout: its keys and how many rows they take, Columns key units a row.
+struct Layout {const Key* keys;int count;int rows;};
+inline constexpr Layout Name{NameKeys,int(sizeof NameKeys/sizeof NameKeys[0]),4};
+inline constexpr Layout Text{TextKeys,int(sizeof TextKeys/sizeof TextKeys[0]),5};
+constexpr float Columns=10;
 // The gold pad (owner 2026-11-22): the game's box for an amount of gold (drop, deposit,
-// withdraw) - digits, Back, All, Max, Enter - in the middle five columns of the same board.
-inline constexpr Key DigitKeys[]={
+// withdraw) - digits, 000, Back, Select all, Max, Enter - in the middle five columns.
+inline constexpr Key GoldKeys[]={
     {2.5f,0,1,Action::Char,'7',L"7"},{3.5f,0,1,Action::Char,'8',L"8"},{4.5f,0,1,Action::Char,'9',L"9"},
     {5.5f,0,2,Action::Backspace,0,L"Back"},
     {2.5f,1,1,Action::Char,'4',L"4"},{3.5f,1,1,Action::Char,'5',L"5"},{4.5f,1,1,Action::Char,'6',L"6"},
@@ -90,22 +171,21 @@ inline constexpr Key DigitKeys[]={
     {2.5f,3,1,Action::Char,'0',L"0"},{3.5f,3,2,Action::Text,0,L"000"},
     {5.5f,3,2,Action::Enter,0,L"Enter"},
 };
-constexpr int DigitKeyCount=int(sizeof DigitKeys/sizeof DigitKeys[0]);
-enum class Layout : uint8_t {Letters,Digits};
-inline const Key* KeysOf(Layout l){return l==Layout::Digits?DigitKeys:Keys;}
-inline int KeyCountOf(Layout l){return l==Layout::Digits?DigitKeyCount:KeyCount;}
+inline constexpr Layout Gold{GoldKeys,int(sizeof GoldKeys/sizeof GoldKeys[0]),4};
 
 // The picture: KeyTexels a key unit, Pad texels of stone-free gap round each
 // key, so the lit copy's crop never shows a neighbour's edge.
 constexpr int KeyTexels=64,Pad=3;
-constexpr int TexelWidth=int(Columns)*KeyTexels,TexelHeight=int(Rows)*KeyTexels;
+constexpr int TexelWidth=int(Columns)*KeyTexels;
+constexpr int TexelHeight(const Layout& l){return l.rows*KeyTexels;}
 struct Rect {int x=0,y=0,w=0,h=0;};
-inline Rect KeyTexelRect(int i,Layout l=Layout::Letters) {
-    if(i<0||i>=KeyCountOf(l))return {};
-    const Key& k=KeysOf(l)[i];
+inline Rect KeyTexelRect(const Layout& l,int i) {
+    if(i<0||i>=l.count)return {};
+    const Key& k=l.keys[i];
     return {int(std::lround(k.col*KeyTexels))+Pad,int(std::lround(k.row*KeyTexels))+Pad,
             int(std::lround(k.span*KeyTexels))-2*Pad,KeyTexels-2*Pad};
 }
+
 
 // Where it sits: under the menu, out of the game's picture (owner 2026-11-06:
 // over the heroes it hid their names, and the picture's sides are cut at some
@@ -116,35 +196,62 @@ inline Rect KeyTexelRect(int i,Layout l=Layout::Letters) {
 // panel, and growing with the menu distance, so a key stays as easy to hit.
 constexpr float WidthOfWorkspace=.5f,GapOfWorkspace=.02f,TiltDegrees=30;
 struct Board {math::Vec position{};math::Quat orientation{0,0,0,1};float width=0,height=0;};
-inline Board Place(math::Vec surface,math::Quat facing,float width,float height) {
+// The gold pad in the menu's own plane just under the game's gold box (owner 2026-11-22: under the
+// whole menu it was out of sight - the stash's window is scaled up). topU / topV: the pad's top
+// middle on the surface (0-1 from its top left), read off the UI image (GoldBox*). The board is
+// twice the pad's width (the pad takes its middle five columns).
+constexpr float PadWidthOfSurface=.36f,PadLift=.012f;
+constexpr float GoldBoxCentreX=1120,GoldBoxBottom=745;   // in the 2244 x 2352 UI image (owner's shot 2026-11-22 23:53)
+inline Board PlaceGoldPad(math::Vec surface,math::Quat facing,float width,float height,float topU=.5f,float topV=.5f) {
+    if(!(width>0)||!(height>0))return {};
+    const float w=PadWidthOfSurface*width,h=w*float(Gold.rows)/Columns;
+    const math::Vec centre{(topU-.5f)*width,(.5f-topV)*height-h*.5f,PadLift};
+    return {surface+math::Rotate(facing,centre),facing,w,h};
+}
+inline Board Place(const Layout& l,math::Vec surface,math::Quat facing,float width,float height,float tiltDegrees=TiltDegrees) {
     if(!(width>0)||!(height>0))return {};
     const float workspace=std::max(width,height*16.f/9.f);
-    const float w=WidthOfWorkspace*workspace,h=w*Rows/Columns,t=TiltDegrees*3.14159265f/180;
+    const float w=WidthOfWorkspace*workspace,h=w*float(l.rows)/Columns,t=tiltDegrees*3.14159265f/180;
     const math::Vec up{0,std::cos(t),-std::sin(t)};   // the board's up: its top edge away from the player
     const math::Vec top{0,-height*.5f-GapOfWorkspace*workspace,0};
     const math::Quat tilt{-std::sin(t*.5f),0,0,std::cos(t*.5f)};   // about the panel's x axis
     return {surface+math::Rotate(facing,top-up*(h*.5f)),math::Multiply(facing,tilt),w,h};
 }
-// The gold pad in the menu's own plane, just under the game's gold box, which the game puts in
-// the middle of its picture (owner 2026-11-22: under the whole menu it was out of sight - the
-// stash's window is scaled up, so its bottom edge is far down). The board is twice the pad's
-// width (the pad takes its middle five columns): PadWidth of the surface's width.
-constexpr float PadWidthOfSurface=.36f,PadTopBelowCentre=.02f,PadLift=.012f;
-// topU / topV: where the pad's top middle goes on the surface (0-1 from its top left) - under
-// the game's gold box, read off the UI image (GoldBoxBottom).
-constexpr float GoldBoxCentreX=1120,GoldBoxBottom=745;   // in the 2244 x 2352 UI image (owner's shot 2026-11-22 23:53)
-inline Board PlaceGoldPad(math::Vec surface,math::Quat facing,float width,float height,float topU=.5f,float topV=.5f) {
+// Over the menu instead: the main menu's board in its 3D scene ([frontend]),
+// which stands low before the player and leans back to face the eyes - under
+// it the keys would be down by the knees (its lower edge a metre under the
+// eyes at the default size). Its lower edge Gap over the board's top edge,
+// turned up about that edge by `upright` radians (the board's lean back, so
+// it stands upright, facing the player at about eye height), a little smaller
+// than under a flat panel since the board is wide.
+constexpr float AboveWidthOfWorkspace=.4f;
+inline Board PlaceAbove(const Layout& l,math::Vec surface,math::Quat facing,float width,float height,float upright) {
     if(!(width>0)||!(height>0))return {};
-    const float w=PadWidthOfSurface*width,h=w*Rows/Columns;
-    const math::Vec centre{(topU-.5f)*width,(.5f-topV)*height-h*.5f,PadLift};
-    return {surface+math::Rotate(facing,centre),facing,w,h};
+    const float workspace=std::max(width,height*16.f/9.f);
+    const float w=AboveWidthOfWorkspace*workspace,h=w*float(l.rows)/Columns;
+    const math::Vec up{0,std::cos(upright),std::sin(upright)};   // the board's up: its top edge toward the player
+    const math::Vec bottom{0,height*.5f+GapOfWorkspace*workspace,0};
+    const math::Quat tilt{std::sin(upright*.5f),0,0,std::cos(upright*.5f)};   // about the panel's x axis
+    return {surface+math::Rotate(facing,bottom+up*(h*.5f)),math::Multiply(facing,tilt),w,h};
+}
+// The game's pointer while the multiplayer keyboard is up (parked): a click gives a
+// box the focus, and in the game's mouse layout a button the pointer then passes over
+// takes it (focusOnMouseOver; the game's loot filter turns it off on the Back button
+// beside its name box). On its way up to this keyboard the laser crosses the panel's
+// tabs and buttons, so the pointer stays where the laser last clicked. A pull on the
+// board moves it to the laser (jump) and the click goes the frame after; while a mouse
+// button is held it follows (a drag). Not parked, it follows the laser as anywhere.
+struct PointerMove { bool move,jump; };
+constexpr PointerMove ParkedPointer(bool parked,bool pullStarts,bool buttonHeld) {
+    if(!parked||buttonHeld)return {true,false};
+    return {pullStarts,pullStarts};
 }
 // The key at the laser's hit on the board (u, v from its top left, 0-1: the
 // board's own math::IntersectPanel), or -1: in the gap between two keys.
-inline int KeyAt(float u,float v,Layout l=Layout::Letters) {
-    const float col=u*Columns,row=v*Rows,pad=float(Pad)/KeyTexels;
-    for(int i=0;i<KeyCountOf(l);++i) {
-        const Key& k=KeysOf(l)[i];
+inline int KeyAt(const Layout& l,float u,float v) {
+    const float col=u*Columns,row=v*float(l.rows),pad=float(Pad)/KeyTexels;
+    for(int i=0;i<l.count;++i) {
+        const Key& k=l.keys[i];
         if(col>=k.col+pad&&col<k.col+k.span-pad&&row>=k.row+pad&&row<k.row+1-pad)return i;
     }
     return -1;
@@ -152,19 +259,42 @@ inline int KeyAt(float u,float v,Layout l=Layout::Letters) {
 // A key's lit copy on the board: its centre from the board's centre (x right,
 // y up, metres) and its size.
 struct Spot {float x=0,y=0,width=0,height=0;};
-inline Spot KeySpot(const Board& b,int i,Layout l=Layout::Letters) {
-    if(i<0||i>=KeyCountOf(l)||!(b.height>0))return {};
-    const Key& k=KeysOf(l)[i];
-    const float unit=b.height/Rows,pad=float(Pad)/KeyTexels*unit;
+inline Spot KeySpot(const Layout& l,const Board& b,int i) {
+    if(i<0||i>=l.count||!(b.height>0))return {};
+    const Key& k=l.keys[i];
+    const float unit=b.height/float(l.rows),pad=float(Pad)/KeyTexels*unit;
     return {(k.col+k.span*.5f)*unit-b.width*.5f,b.height*.5f-(k.row+.5f)*unit,k.span*unit-2*pad,unit-2*pad};
 }
-// What a key shows: a letter small, or a capital while Shift waits (Typist);
-// the other keys their name.
-inline std::wstring Label(int i,bool capitals,Layout l=Layout::Letters) {
-    if(i<0||i>=KeyCountOf(l))return {};
-    const Key& k=KeysOf(l)[i];
-    if(k.action!=Action::Char)return k.label;
-    return std::wstring(1,wchar_t(capitals&&k.ch>='a'&&k.ch<='z'?k.ch-'a'+'A':k.ch));
+// What a character key types: itself, or with Shift its capital or its symbol.
+inline wchar_t Typed(const Key& k,bool shift) {
+    if(!shift)return wchar_t(k.ch);
+    if(k.ch>='a'&&k.ch<='z')return wchar_t(k.ch-'a'+'A');
+    return wchar_t(k.shifted?k.shifted:k.ch);
+}
+// The wrist chat's keyboard (wrist_chat.h): the name layout, its '-' a space and its '_' the 123 / ABC switch;
+// with the symbols on, the letters type ChatSymbols in their order. Chat on any other layout is the layout's own.
+inline constexpr char ChatSymbols[]="1234567890@#$%&*()!?.,:/'+=";
+inline bool ChatOn(const Layout& l,bool chat){return chat&&l.keys==NameKeys;}
+inline char ChatCharacter(int i,bool symbols) {
+ if(i<0||i>=Name.count)return 0;
+ if(Name.keys[i].ch=='-')return ' ';
+ if(symbols&&Name.keys[i].ch>='a'&&Name.keys[i].ch<='z') {
+  int n=0;for(int j=0;j<i;++j)if(Name.keys[j].ch>='a'&&Name.keys[j].ch<='z')++n;
+  return n<int(sizeof(ChatSymbols)-1)?ChatSymbols[n]:'?';
+ }
+ return Name.keys[i].ch;
+}
+// What a key shows: what it types now - a letter small, or a capital (a digit
+// its symbol) while Shift waits (Typist); the other keys their name.
+inline std::wstring Label(const Layout& l,int i,bool capitals,bool chat=false,bool symbols=false) {
+    if(i<0||i>=l.count)return {};
+    const Key& k=l.keys[i];
+    if(k.action!=Action::Char||k.ch==' ')return k.label;
+    chat=ChatOn(l,chat);
+    if(chat&&k.ch=='-')return L"Space";
+    if(chat&&k.ch=='_')return symbols?L"ABC":L"123";
+    if(chat&&symbols)return std::wstring(1,wchar_t(ChatCharacter(i,true)));
+    return std::wstring(1,Typed(k,capitals));
 }
 
 // What a press sends: a character (ch), Backspace or Enter (key), or nothing
@@ -173,18 +303,22 @@ inline std::wstring Label(int i,bool capitals,Layout l=Layout::Letters) {
 enum class Send : uint8_t {None,Char,Backspace,Enter,Text};
 struct Output {Send send=Send::None;wchar_t ch=0;bool close=false;bool selectAll=false;std::wstring text;};
 class Typist {
-    bool shift=false;
+    bool shift=false,symbols=false;
 public:
     bool Shifted() const{return shift;}
-    void Reset(){shift=false;}
-    Output Press(int i,Layout l=Layout::Letters) {
+    bool Symbols() const{return symbols;}
+    void Reset(){shift=symbols=false;}
+    Output Press(const Layout& l,int i,bool chat=false) {
         Output out;
-        if(i<0||i>=KeyCountOf(l))return out;
-        const Key& k=KeysOf(l)[i];
+        if(i<0||i>=l.count)return out;
+        const Key& k=l.keys[i];
+        chat=ChatOn(l,chat);
+        if(chat&&k.ch=='_'){symbols=!symbols;shift=false;return out;}
         switch(k.action) {
             case Action::Char:
                 out.send=Send::Char;
-                out.ch=wchar_t(shift&&k.ch>='a'&&k.ch<='z'?k.ch-'a'+'A':k.ch);
+                if(chat){const char ch=ChatCharacter(i,symbols);out.ch=wchar_t(shift&&ch>='a'&&ch<='z'?ch-'a'+'A':ch);}
+                else out.ch=Typed(k,shift);
                 shift=false;break;
             case Action::Shift:shift=!shift;break;
             case Action::Backspace:out.send=Send::Backspace;break;
@@ -199,14 +333,14 @@ public:
 };
 
 // The picture: one stone plaque per key (Reset Skills & Stats' face), lit or
-// not, premultiplied RGBA, TexelWidth x TexelHeight. Labels (Label) are stamped
-// over each key on Windows (transport.cpp, GDI), as on that button.
+// not, premultiplied RGBA, TexelWidth x TexelHeight(l). Labels (Label) are
+// stamped over each key on Windows (transport.cpp, GDI), as on that button.
 // With capitals the Shift key is lit in both, so the waiting Shift shows.
-inline std::vector<uint8_t> PaintKeys(bool lit,bool capitals=false,Layout l=Layout::Letters) {
-    std::vector<uint8_t> px(size_t(TexelWidth)*TexelHeight*4,0);
-    for(int i=0;i<KeyCountOf(l);++i) {
-        const Rect r=KeyTexelRect(i,l);
-        const auto face=respecbutton::PaintFace(r.w,r.h,lit||(capitals&&KeysOf(l)[i].action==Action::Shift));
+inline std::vector<uint8_t> PaintKeys(const Layout& l,bool lit,bool capitals=false) {
+    std::vector<uint8_t> px(size_t(TexelWidth)*TexelHeight(l)*4,0);
+    for(int i=0;i<l.count;++i) {
+        const Rect r=KeyTexelRect(l,i);
+        const auto face=respecbutton::PaintFace(r.w,r.h,lit||(capitals&&l.keys[i].action==Action::Shift));
         for(int y=0;y<r.h;++y)
             std::copy_n(&face[size_t(y)*r.w*4],size_t(r.w)*4,&px[(size_t(r.y+y)*TexelWidth+r.x)*4]);
     }

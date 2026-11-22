@@ -80,6 +80,30 @@ int main(){
     Configure(false,false,true,true);Publish(buffs);
     assert(Hidden(read,base,9,1100,emitters[0],definitions[0])); // auras off
     assert(!Hidden(read,base,9,1100,emitters[1],definitions[1])); // shouts stay on
+    const char* ward="data/hd/vfx/particles/overlays/warlock/psychic_ward/psychic_ward_overlay.particles";
+    setAsset(3,ward);setAsset(1,ward);setAsset(2,ward);
+    auto wards=Build(read,base,9,1000,entity(2),tr+208,roster,2);
+    Configure(true,true,true,true,true);Publish(wards);
+    assert(Hidden(read,base,9,1100,emitters[3],definitions[3])); // local ward only
+    assert(!Hidden(read,base,9,1100,emitters[1],definitions[1])); // friendly ward stays
+    assert(!Hidden(read,base,9,1100,emitters[2],definitions[2])); // enemy ward stays
+    assert(!Hidden(read,base,9,1100,emitters[0],definitions[0])); // aura stays
+    setAsset(3,"DATA\\HD\\VFX\\PARTICLES\\OVERLAYS\\WARLOCK\\PSYCHIC_WARD\\PSYCHIC_WARD_ONHIT.PARTICLES");
+    Publish(Build(read,base,9,1000,entity(2),tr+208,roster,2));
+    assert(Hidden(read,base,9,1100,emitters[3],definitions[3]));
+    assert(!psychicward::Asset("data/hd/vfx/particles/overlays/common/psychic_hammer_curse/vfx_psychic_hammer_curse.particles"));
+    const char* charges="data/hd/vfx/particles/overlays/common/progressive_fire_2/vfx_progressive_fire_2.particles";
+    setAsset(3,charges);setAsset(1,charges);setAsset(2,charges);
+    Configure(true,true,true,true,false,2);Publish(Build(read,base,9,1000,entity(2),tr+208,roster,2));
+    assert(!Hidden(read,base,9,1100,emitters[3],definitions[3],false)); // Arms: unavailable counts keep original
+    assert(Hidden(read,base,9,1100,emitters[3],definitions[3],true));
+    assert(!Hidden(read,base,9,1100,emitters[1],definitions[1],true)); // friendly preserved
+    assert(!Hidden(read,base,9,1100,emitters[2],definitions[2],true)); // enemy preserved
+    Configure(true,true,true,true,false,0);Publish(Build(read,base,9,1000,entity(2),tr+208,roster,2));
+    assert(Hidden(read,base,9,1100,emitters[3],definitions[3],false)); // Off does not require counters
+    assert(!assassincharges::Asset("data/hd/vfx/particles/overlays/common/progressive_fire_2_attack/vfx_progressive_fire_2_attack.particles"));
+    assert(assassincharges::Asset("data/hd/vfx/particles/overlays/common/tigerstrike_3/vfx_assassin_tiger_strike_3.particles"));
+    assert(assassincharges::Asset("data/hd/vfx/particles/overlays/assassin/cobrastrike_1/vfx_assassin_cobrastrike_1.particles"));
     Configure(true,true);m.reads=0;assert(!Hidden(read,base,9,1100,emitters[0],definitions[0])&&m.reads==0);
     assert(Build(read,base,9,1000,entity(2),tr+208,nullptr,0).entries.empty());
     std::puts("Aura filter: fresh exact recipients, independent switches, enemy and curse preservation, session/expiry/reuse/ownership rejection, no writes passed");

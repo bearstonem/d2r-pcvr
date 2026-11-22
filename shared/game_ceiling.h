@@ -6,6 +6,7 @@
 // the player's game: steamvr/prepare_game_ceiling.py) - loaded by the game's own unit loader and laid over the hero every frame by the DLL
 // (vr/engine_units.cpp). The game draws it in its own frame: both eyes, its torches' and the hero's light on it, its fog over it, fire
 // and spells in their own order. The pure parts, for the DLL and the installer's tests; tested in steamvr/game_ceiling_test.cpp.
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstring>
@@ -237,6 +238,43 @@ inline bool Jumped(const float last[16], const float now[16], bool followsHero =
 constexpr float kHeightAlone = 18.0f;
 inline float HeightOf(float own, bool fromWalls, float wallsTop, float relief, float k) {
     return own > 0.0f ? own : fromWalls && wallsTop > 0.0f ? wallsTop + relief * k : kHeightAlone;
+}
+
+// Rooms whose own pieces stand far over their walls' top. On the walls' median the ceiling came down to a raised hand in the Worldstone
+// Keep (9.9), monsters stood through it, Baal sat on his throne above it, and Mephisto's room was the same (players, 2026-11-16: "Ceilings
+// way too low in Baal room and approaching zones"). Each such area's ceiling goes over its tallest pieces, as its presets place them (read
+// from Steam 3.4.95041's own files, 2026-11-19): the Worldstone Keep's pillars 18.2 and stairs 19.6; the Throne of Destruction's throne
+// canopy 34.0 and arch 34.4; the Worldstone itself 45.6; Mephisto's compound's pillars 23.8, drain 25.8 and great door 32.1. `level`:
+// the game's level number (levels.txt: 102 the Durance of Hate level 3, 131 the Throne of Destruction, 132 the Worldstone Chamber), 0
+// for the area's other levels and while the level is not known. A player's own height_<biome> still wins.
+struct Clearance { const char* biome; int level; float height; const char* over; };   // over: for the log
+constexpr Clearance kClearances[] = {
+    {"expansion_baallair", 0, 21.0f, "over the Worldstone Keep's pillars and stairs, its tallest pieces"},
+    {"expansion_baallair_throneroom", 131, 36.0f, "over Baal's throne and its arch, the room's tallest pieces"},
+    {"expansion_baallair_throneroom", 132, 47.0f, "over the Worldstone, the room's tallest piece"},
+    {"expansion_baallair_throneroom", 0, 47.0f, "over the Worldstone (the level not read yet: the higher of the two rooms)"},
+    {"act3_travincal", 102, 33.0f, "over Mephisto's pillars and great door, the level's tallest pieces"},
+};
+// The first of the area's entries in kClearances, or -1: none (looked up once per area; the level is read each frame)
+inline int ClearanceArea(const std::string& biome) {
+    for (int i = 0; i < (int)(sizeof kClearances / sizeof kClearances[0]); ++i) if (biome == kClearances[i].biome) return i;
+    return -1;
+}
+// The area's entry for this level: its own, else the area's level-0 one; nullptr when neither (another level of an area with only
+// one entry of its own keeps the walls' top)
+inline const Clearance* ClearanceAt(int area, int level) {
+    constexpr int n = (int)(sizeof kClearances / sizeof kClearances[0]);
+    if (area < 0 || area >= n) return nullptr;
+    const Clearance* any = nullptr;
+    for (int i = area; i < n && std::strcmp(kClearances[i].biome, kClearances[area].biome) == 0; ++i) {
+        if (level && kClearances[i].level == level) return &kClearances[i];
+        if (!kClearances[i].level && !any) any = &kClearances[i];
+    }
+    return any;
+}
+// HeightOf, then no lower than the area's clearance, unless the player set the area's own height
+inline float HeightOver(float height, float own, const Clearance* clear) {
+    return own > 0.0f || !clear ? height : std::max(height, clear->height);
 }
 
 // A unit's file (ours: written by the installer beside the models): `name` (d2r_vr_<name>), its model and its three maps (`maps` without

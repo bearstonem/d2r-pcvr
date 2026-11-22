@@ -3,6 +3,7 @@
 // assets required.
 // elemental-hands-render-test [preview.ppm [sprite cache folder]]
 #include "elemental_hands_renderer.h"
+#include "assassin_charges.h"
 #include "elemental_particles.h"
 #include "spell_sprites.h"
 #include <dxgi1_4.h>
@@ -59,6 +60,8 @@ struct Shot {
     int skill=-1;
     float time=1.3f,pulse=0,opacity=1,distance=.6f,background=0;
     bool typeless=false;
+    int charges=0,chargeSkill=0;
+    bool hideParticles=false;
 };
 class Fixture {
     ComPtr<ID3D12Device> device;
@@ -105,6 +108,16 @@ public:
             scene.hands[0]={{{0,-.04f,-shot.distance},math::Yaw(.4f)},shot.element,shot.opacity,frame>-8?shot.pulse:0,shot.skill};
             effects.Step(scene);
         }
+        if(shot.charges>0) {
+            elements::Input in;in.active=true;in.tracked[0]=true;in.context.session=7;
+            in.at=uint64_t(100000+shot.time*1000);in.hands[0].p={0,-.04f,-shot.distance};
+            interaction::Snapshot snap;snap.session=7;snap.at=snap.effectsAt=in.at;
+            snap.vitalsKnown=snap.actionKnown=true;snap.health=50;snap.actionMode=1;
+            snap.effects.known=snap.effects.chargesKnown=true;
+            snap.effects.Set(effects::ChargeStates[shot.chargeSkill]);snap.effects.charges[shot.chargeSkill]=uint8_t(shot.charges);
+            scene=assassincharges::Scene(in,snap,shot.opacity>0?2:0,{math::Vec{0,0,1},math::Vec{0,0,1}});
+        }
+        if(shot.hideParticles)for(unsigned i=0;i<scene.count;++i)scene.drawn[i].intensity=0;
         for(unsigned eye=0;eye<2;++eye) {
             heap.Type=D3D12_HEAP_TYPE_DEFAULT;
             Check(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&tex,D3D12_RESOURCE_STATE_RENDER_TARGET,nullptr,IID_PPV_ARGS(&targets[eye])),"target");
@@ -178,15 +191,45 @@ int main(int argc,char** argv) {try {
     struct Cleanup {std::filesystem::path folder;~Cleanup(){std::error_code ignored;std::filesystem::remove_all(folder,ignored);}} cleanup{synthetic};
     using elements::Element;
     const struct {Element element;int skill;bool warm;} looks[]={
-        {Element::Fire,36,true},{Element::Fire,47,true},{Element::Lightning,38,false},{Element::Cold,39,false},{Element::Cold,45,false}};
+        {Element::Fire,36,true},{Element::Fire,47,true},{Element::Lightning,38,false},{Element::Cold,39,false},{Element::Cold,45,false},{Element::Psychic,387,false},{Element::Wind,235,false}};
     for(auto format:{DXGI_FORMAT_R8G8B8A8_UNORM,DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,DXGI_FORMAT_B8G8R8A8_UNORM,DXGI_FORMAT_B8G8R8A8_UNORM_SRGB}) {
         Fixture procedural(format,synthetic/"missing");
         Require(!procedural.Sprites(),"without a sprite cache hands keep the procedural aura");
         for(auto element:{Element::Fire,Element::Cold,Element::Lightning})Verify(procedural,{element},element==Element::Fire,1.7f);
         Fixture textured(format,synthetic);
         Require(textured.Sprites(),"the sprite cache loads");
-        for(const auto& look:looks)Verify(textured,{look.element,look.skill},look.warm,2.1f);
+        for(const auto& look:looks)if(look.element!=Element::Psychic&&look.element!=Element::Wind)Verify(textured,{look.element,look.skill},look.warm,2.1f);
         for(auto* fixture:{&procedural,&textured}) {
+            for(int skill=0;skill<6;++skill) {
+                Shot charge;charge.charges=1;charge.chargeSkill=skill;
+                const auto one=fixture->Render(charge);charge.charges=3;
+                const auto three=fixture->Render(charge);charge.time+=.3f;
+                const auto moved=fixture->Render(charge);charge.opacity=0;
+                const auto off=fixture->Render(charge);
+                for(unsigned eye=0;eye<2;++eye) {
+                    Require(one[eye].count>10&&three[eye].energy>one[eye].energy*1.4,"charge count changes visible orb count");
+                    Require(moved[eye].rgb!=three[eye].rgb,"charges orbit the arm");
+                    Require(off[eye].energy==0,"charge Off leaves eye unchanged");
+                }
+                Require(one[0].x>one[1].x+10,"charge orbs have correct stereo disparity");
+            }
+
+            for(auto mist:{Element::Psychic,Element::Wind}) {
+            const int skill=mist==Element::Psychic?387:235;
+            const auto ward=fixture->Render({mist,skill,1.3f});
+            const auto later=fixture->Render({mist,skill,2.1f});
+            for(unsigned eye=0;eye<2;++eye) {
+                Require(ward[eye].count>30&&ward[eye].count<W*H/5,"purple mist visible and bounded");
+                Require(mist==Element::Psychic?(ward[eye].blue>ward[eye].red*1.1&&ward[eye].red>ward[eye].blue*.35):(ward[eye].red>ward[eye].blue*.8&&ward[eye].blue>ward[eye].red*.8),"purple/white mist palette");
+                Require(ward[eye].rgb!=later[eye].rgb,"purple mist moves around hands");
+            }
+            Require(ward[0].x>ward[1].x+10,"ward has correct stereo disparity");
+            const auto off=fixture->Render({mist,skill,1.3f,0,0});
+            Require(off[0].energy==0&&off[1].energy==0,"ward Off leaves eye image untouched");
+            Shot blocked;blocked.element=mist;blocked.skill=skill;blocked.hideParticles=true;
+            const auto occluded=fixture->Render(blocked);
+            Require(occluded[0].energy==0&&occluded[1].energy==0,"hidden mist particles stay hidden with and without sprites");
+            }
             const auto hidden=fixture->Render({Element::Fire,36,1.3f,0,0});
             Require(hidden[0].energy==0&&hidden[1].energy==0,"hidden scene leaves eye image untouched");
         }

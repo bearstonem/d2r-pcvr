@@ -217,6 +217,26 @@ int main() {
         assert(HeightOf(0.0f, true, 10.4f, kRelief, 0.5f) == 10.4f + 3.0f);   // the cave rock: 6 model units at half a tile's scale
         assert(HeightOf(0.0f, true, 0.0f, 0.0f, 1.0f) == kHeightAlone && HeightOf(0.0f, false, 14.9f, 0.0f, 1.0f) == kHeightAlone);
         assert(kHeightAlone == 18.0f && HeightOf(-3.0f, false, 0.0f, 0.0f, 1.0f) == kHeightAlone);
+        // over the tallest pieces where they stand far above the walls: the Worldstone Keep on any level; the Throne of Destruction
+        // and the Worldstone Chamber each their own, the higher while the level is not read; Mephisto's level only, not the Durance's
+        // others; never under the walls' height, and a player's own height_<biome> wins
+        {
+            const int keep = ClearanceArea("expansion_baallair"), throne = ClearanceArea("expansion_baallair_throneroom");
+            const int durance = ClearanceArea("act3_travincal");
+            assert(keep >= 0 && throne >= 0 && durance >= 0 && ClearanceArea("act1_caves") < 0 && ClearanceArea("") < 0);
+            assert(ClearanceAt(keep, 0)->height == 21.0f && ClearanceAt(keep, 130)->height == 21.0f);
+            assert(ClearanceAt(throne, 131)->height == 36.0f && ClearanceAt(throne, 132)->height == 47.0f);
+            assert(ClearanceAt(throne, 0)->height == 47.0f && ClearanceAt(throne, 130)->height == 47.0f);
+            assert(ClearanceAt(durance, 102)->height == 33.0f && !ClearanceAt(durance, 101) && !ClearanceAt(durance, 0));
+            assert(!ClearanceAt(-1, 131) && !ClearanceAt(1000, 0));
+            // each over the pieces measured in its presets: pillars and stairs 19.6, the throne's arch 34.4, the Worldstone 45.6,
+            // Mephisto's great door 32.1
+            assert(ClearanceAt(keep, 0)->height > 19.6f && ClearanceAt(throne, 131)->height > 34.4f);
+            assert(ClearanceAt(throne, 132)->height > 45.6f && ClearanceAt(durance, 102)->height > 32.1f);
+            assert(HeightOver(9.9f, 0.0f, ClearanceAt(keep, 0)) == 21.0f && HeightOver(25.0f, 0.0f, ClearanceAt(keep, 0)) == 25.0f);
+            assert(HeightOver(9.9f, 12.0f, ClearanceAt(throne, 131)) == 9.9f && HeightOver(12.6f, 0.0f, ClearanceAt(durance, 101)) == 12.6f);
+            for (const Clearance& c : kClearances) assert(KindOf(c.biome) >= 0 && c.height > 0.0f && c.over && *c.over);
+        }
         // a room's floor: the first layer of solid stone among its terrain's, nothing loose or wet; none - ""
         assert(FloorMaps({"t/act3_docktown_base_dirt_ALB.texture", "t/act3_temple_stone01_ALB.texture"}) == "t/act3_temple_stone01");
         assert(FloorMaps({"t/expansion_wildtemple_puddle01_ALB.texture", "t/expansion_wildtemple_caverock_ALB.texture"}) == "t/expansion_wildtemple_caverock");

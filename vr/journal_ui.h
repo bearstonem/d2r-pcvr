@@ -12,9 +12,14 @@ bool StashButtonsShown(); // VR previous/next stash tabs, stash_buttons.h
 bool StatsButtonShown();  // the tabbed menu alone (not a cube or world panel): its Advanced Stats button, stats_button.h
 bool RespecButtonShown(); // the tabbed menu's Character page alone: Reset Skills & Stats, respec_button.h
 uint32_t PanelChanges();  // counts every panel opened or closed (leather::Back)
-bool KeyboardShown();     // character creation with a hero picked: the name box, so the VR keyboard (vr_keyboard.h)
+bool KeyboardShown();     // a text box on screen, so the VR keyboard (vr_keyboard.h): character creation with a hero
+                          // picked (the name box), or D2RLoader's multiplayer panel open (KeyboardText)
+bool KeyboardText();      // that keyboard is the multiplayer panel's (digits, . : and a space), not the name's
+uint32_t KeyboardEpoch(); // changes each time a box comes up anew (a closed keyboard comes back)
+void MultiplayerField(int x,int y);
+int MultiplayerFocus(); // -1 none, -2 older loader
+uint32_t MultiplayerFocusEpoch();
 bool GoldBoxShown();      // the game's box for an amount of gold (drop / deposit / withdraw): the gold pad
-uint32_t KeyboardEpoch(); // changes each time the name box comes up anew (a closed keyboard comes back)
 bool CloseLeatherMenu();  // queue: close the tabbed menu if only it and its pages are open, the cursor empty
 bool StowLeatherMenu();   // queue: the held menu put away over the left shoulder (any page or dialog; not with an item on the cursor)
 bool NpcChoicesOnly();
@@ -35,6 +40,9 @@ bool NativeToolbarHidden();
 // Menu map lease is maintained by the game's UI thread. Each XR pair must
 // capture a new native map before its texture can be submitted in either eye.
 void MenuMapCapture(bool active);
+void ChatFrame(bool active,bool composing=false,bool shown=false,uint64_t session=0);
+bool ChatHistoryReady(uint64_t session);
+uint64_t ChatTexture(uint32_t& width,uint32_t& height);
 void MapFrame();
 // full (optional): the texture is the game's full map's box (Map view = Full map); gameZoom: the
 // game zoom it was drawn at (0: the game's own).

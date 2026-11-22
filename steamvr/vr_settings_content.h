@@ -299,8 +299,8 @@ inline constexpr ContentSection SectionTable[]={
     {View::Body,"Play space"},{View::Body,"Potion belt"},
     {View::Hands,"Hands and buttons"},
     {View::Vibration,"Strength"},
-    {View::Wrist,"Life and mana"},{View::Wrist,"Map"},
-    {View::Menus,"Game menus"},
+    {View::Wrist,"Life and mana"},{View::Wrist,"Map"},{View::Wrist,"Allies"},
+    {View::Menus,"Game menus"},{View::Menus,"Controller menus"},
     {View::Labels,"Names and bars"},{View::Labels,"Loot beams"},
     {View::Outlines,"Monster outline"},
     {View::Warnings,"Low life"},{View::Warnings,"Low mana"},
@@ -346,6 +346,10 @@ inline constexpr Option VitalsLocationOptions[]={
     {3,"Off","Not shown on your hand."},
 };
 // map_top_down 0-3 (MapViewTopDown, MapViewFull): the corner minimap or the game's full map.
+inline constexpr Option AllyHealthOptions[]={
+    {0,"Off","Hide ally health bars."},{1,"Wrist","Names and live health beside the wrist map."},
+    {2,"Overhead","Names and live health above located allies."},{3,"Both","Show wrist and overhead bars."},
+};
 inline constexpr Option MapViewOptions[]={
     {0,"Isometric","The game's own slanted minimap, with NPC and exit names."},
     {1,"Top-down","The minimap laid flat like a floor plan. NPC and exit names are hidden."},
@@ -445,9 +449,11 @@ inline constexpr const char* DegreesPerSecond="\xc2\xb0/s";
 // ---- rows, page by page, section by section (layout::RowsOf keeps this order) ----
 
 inline constexpr Option AuraVisualOptions[]={{0,"Off","Hide recognized aura visuals on this recipient; protection stays active."},{1,"On","Show the original aura visuals."}};
+inline constexpr Option AssassinChargeOptions[]={{0,"Off","Hide your charge-up orbit effects; charges stay active."},{1,"Default","Show the original charge-up effects."},{2,"Orbs","Small coloured orbs circle both forearms, showing native charge counts."}};
+inline constexpr Option PsychicWardOptions[]={{0,"Off","Hide your Psychic Ward visuals; protection stays active."},{1,"Original","Show the original Psychic Ward effect."},{2,"Purple mist","Soft purple wisps circle your hands while the ward is active, fading near your face."}};
 inline constexpr Option ShoutVisualOptions[]={{0,"Off","Hide recognized shout buff visuals on this recipient; bonuses stay active."},{1,"On","Show the original shout buff visuals."}};
 inline constexpr Option IceArmorOptions[]={{0,"Off","Hide your native ice armor and icicles; protection remains active."},{1,"Original","Show the original ice armor effect."},{2,"Icicles","Show the forearm icicles instead of your original effect."}};
-inline constexpr Option CycloneArmorOptions[]={{0,"Off","Hide your original Cyclone Armor visual; absorption remains active."},{1,"Original","Show the original Cyclone Armor visual."}};
+inline constexpr Option CycloneArmorOptions[]={{0,"Off","Hide your original Cyclone Armor visual; absorption remains active."},{1,"Original","Show the original Cyclone Armor visual."},{2,"White mist","Soft white wisps circle your forearms, fading near your face."}};
 inline constexpr Option BoneArmorOptions[]={{0,"Off","Hide your native Bone Armor orbit and the forearm bones."},{1,"Bones","Show forearm bones instead of your native orbit."}};
 inline constexpr Override Overrides[]={
     // Combat: Melee
@@ -702,6 +708,9 @@ inline constexpr Override Overrides[]={
     {.id="hud.tooltip_timing",.page=View::Menus,.section="Game menus",.kind=RowKind::Choice,.label="Item details delay",
      .help="How soon an item's details pop up when you point the laser at it in a menu.",
      FRAMEVR_OPTIONS(TooltipOptions)},
+    {.id="interactions.controller_menu_size",.page=View::Menus,.section="Controller menus",.kind=RowKind::Slider,.label="Controller menu size",
+     .help="Size of both stick-click menus, including their buttons and map tab. 100% keeps the original size. Apply, then open either hand menu to see the change.",
+     .format={.unit="%"}},
     // Labels: Names and bars
     {.id="hud.labels_size",.page=View::Labels,.section="Names and bars",.kind=RowKind::Slider,.label="Loot name size",
      .help="Size of item names on the ground; 45% is the game's size. Hold the right stick down to show every nearby name.",
@@ -716,6 +725,11 @@ inline constexpr Override Overrides[]={
     {.id="hud.monster_names",.page=View::Labels,.section="Names and bars",.kind=RowKind::Choice,.label="Monster names",
      .help="Which monsters show their name and health when they are your target. NPC, mercenary, player and item names always show.",
      FRAMEVR_OPTIONS(MonsterNamesOptions)},
+    // Ally health bars (#519): on Labels > Names and bars beside the monsters' - the Wrist page holds at most 8 rows
+    // and is full with the map settings (2026-11-17 dev build).
+    {.id="interactions.ally_health_bars",.page=View::Labels,.section="Names and bars",.kind=RowKind::Choice,.label="Ally health bars",
+     .help="Party and owned mercenary health. Stale data is hidden. Wrist follows the map gesture; overhead needs a current position.",
+     FRAMEVR_OPTIONS(AllyHealthOptions)},
     // Labels: Loot beams
     // Loot beams (vr/loot_beam_scan.cpp): one row - its brightness slider, then a Filter button
     // opening a card of four switches (owner 2026-10-31: "one line item that says loot beams and
@@ -851,10 +865,12 @@ inline constexpr Override Overrides[]={
      .format={.unit="%"}},
     // Graphics > Effects. Unknown recipients and enemy auras remain visible.
     {.id="render.ice_armor_visual",.page=View::Effects,.section="Armor",.label="Ice Armor",.help="Choose your armor visuals. Protection stays active in every mode.",FRAMEVR_OPTIONS(IceArmorOptions)},
-    {.id="render.cyclone_armor_visual",.page=View::Effects,.section="Armor",.label="Cyclone Armor",.help="Hide or show your original wind effect. Damage absorption is unchanged.",FRAMEVR_OPTIONS(CycloneArmorOptions)},
+    {.id="render.cyclone_armor_visual",.page=View::Effects,.section="Armor",.label="Cyclone Armor",.help="Show original wind, replace it with white mist around your forearms, or hide it. Damage absorption is unchanged.",FRAMEVR_OPTIONS(CycloneArmorOptions)},
+    {.id="render.psychic_ward_mode",.page=View::Effects,.section="Armor",.label="Psychic Ward",.help="Show the original ward, replace it with purple mist around both hands, or hide it. Protection is unchanged. Other units keep their effects.",FRAMEVR_OPTIONS(PsychicWardOptions)},
     {.id="render.bone_armor_visual",.page=View::Effects,.section="Armor",.label="Bone Armor",.help="Hide or show your forearm bones. Damage absorption is unchanged.",FRAMEVR_OPTIONS(BoneArmorOptions)},
+    {.id="render.assassin_charges_visual",.page=View::Effects,.section="Armor",.label="Assassin charges",.help="Tiger, Cobra, Fire, Thunder, Ice and Phoenix charges. Orbs shows native 1/2/3 counts. Unknown counts keep original visuals.",FRAMEVR_OPTIONS(AssassinChargeOptions)},
     {.id="render.player_aura_visual",.page=View::Effects,.section="Auras",.kind=RowKind::Choice,.label="Your auras",.help="Show or hide recognized persistent aura visuals on your character. Enemy auras, curses and unknown effects remain visible; gameplay is unchanged.",FRAMEVR_OPTIONS(AuraVisualOptions)},
-    {.id="render.summon_aura_visual",.page=View::Effects,.section="Auras",.kind=RowKind::Choice,.label="Friendly auras",.help="Aura visuals on your summons and mercenary. Enemy and unknown recipients remain visible; gameplay is unchanged.",FRAMEVR_OPTIONS(AuraVisualOptions)},
+    {.id="render.summon_aura_visual",.page=View::Effects,.section="Auras",.kind=RowKind::Toggle,.label="Friendly auras",.help="Aura visuals on your summons and mercenary. Enemy and unknown recipients remain visible; gameplay is unchanged.",.beside=true,.besideLabel="Friendly"},
     {.id="render.player_shout_visual",.page=View::Effects,.section="Shouts",.kind=RowKind::Choice,.label="Your shout buffs",.help="Shout, Battle Orders and Battle Command visuals on you. Independent of auras. Bonuses stay active; enemy and unknown effects stay visible.",FRAMEVR_OPTIONS(ShoutVisualOptions)},
     {.id="render.summon_shout_visual",.page=View::Effects,.section="Shouts",.kind=RowKind::Choice,.label="Friendly shout buffs",.help="Shout, Battle Orders and Battle Command visuals on your summons and mercenary. Independent of auras; bonuses stay active.",FRAMEVR_OPTIONS(ShoutVisualOptions)},
     // Settings with an ini key but no row: set by Calibrate body, legacy, the

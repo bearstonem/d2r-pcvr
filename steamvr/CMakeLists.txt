@@ -104,13 +104,44 @@ target_sources(d2rl-pcvr PRIVATE potion_models.cpp)
 target_sources(d2rl-pcvr PRIVATE dropped_bottles.cpp limb_physics.cpp ${ROOT}/vr/wall_cells.cpp ${ROOT}/vr/prop_scan.cpp)
 target_link_libraries(d2rl-pcvr PRIVATE box3d)
 target_sources(d2rl-pcvr PRIVATE elemental_hands_renderer.cpp)
-target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/settings_menu.cpp ${CMAKE_CURRENT_SOURCE_DIR}/vr_settings_ui.cpp ${ROOT}/vr/native_ui.cpp ${CMAKE_CURRENT_SOURCE_DIR}/interaction_ui.cpp ${ROOT}/vr/interactionstate.cpp ${ROOT}/vr/bow.cpp ${ROOT}/vr/projectiles.cpp ${ROOT}/vr/combat.cpp ${ROOT}/vr/melee.cpp ${CMAKE_CURRENT_SOURCE_DIR}/transport.cpp ${CMAKE_CURRENT_SOURCE_DIR}/floating_map_frame.cpp ${CMAKE_CURRENT_SOURCE_DIR}/foveation.cpp ${CMAKE_CURRENT_SOURCE_DIR}/effects_layer.cpp ${CMAKE_CURRENT_SOURCE_DIR}/logging.cpp ${CMAKE_CURRENT_SOURCE_DIR}/profile.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/settings_menu.cpp ${CMAKE_CURRENT_SOURCE_DIR}/vr_settings_ui.cpp ${ROOT}/vr/native_ui.cpp ${CMAKE_CURRENT_SOURCE_DIR}/interaction_ui.cpp ${ROOT}/vr/interactionstate.cpp ${ROOT}/vr/bow.cpp ${ROOT}/vr/projectiles.cpp ${ROOT}/vr/combat.cpp ${ROOT}/vr/melee.cpp ${ROOT}/vr/melee_dispatch.cpp ${CMAKE_CURRENT_SOURCE_DIR}/transport.cpp ${CMAKE_CURRENT_SOURCE_DIR}/floating_map_frame.cpp ${CMAKE_CURRENT_SOURCE_DIR}/foveation.cpp ${CMAKE_CURRENT_SOURCE_DIR}/effects_layer.cpp ${CMAKE_CURRENT_SOURCE_DIR}/logging.cpp ${CMAKE_CURRENT_SOURCE_DIR}/profile.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/native_belt.cpp ${ROOT}/vr/quick_items.cpp ${ROOT}/vr/melee_weapon.cpp)
-target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/monster_labels.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/monster_labels.cpp ${ROOT}/vr/portal_placement.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/breakables.cpp ${ROOT}/vr/offline_difficulty.cpp ${ROOT}/vr/enemy_sight.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/spell_impacts.cpp)   # spells break containers and push props (spell_impacts.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/respec.cpp)   # Reset Skills & Stats (respec_button.h)
+
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_lock.cpp ${ROOT}/vr/summon_range.cpp)
+
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/client_combat.cpp
+  ${ROOT}/vr/upper_body_wire.cpp
+  ${ROOT}/vr/upper_body_skin.cpp)
+add_executable(client-combat-test client_combat_test.cpp ${ROOT}/vr/client_combat.cpp)
+target_include_directories(client-combat-test PRIVATE ${D2RL_SDK}/include)
+target_link_libraries(client-combat-test PRIVATE framevr-runtime)
+add_executable(native-client-input-test native_client_input_test.cpp)
+add_executable(client-swing-feedback-test client_swing_feedback_test.cpp)
+if(MSVC)
+ target_compile_options(client-swing-feedback-test PRIVATE /UNDEBUG)
+else()
+ target_compile_options(client-swing-feedback-test PRIVATE -UNDEBUG)
+endif()
+add_test(NAME client-swing-feedback-test COMMAND client-swing-feedback-test)
+add_executable(upper-body-pose-test upper_body_pose_test.cpp)
+target_compile_options(upper-body-pose-test PRIVATE -UNDEBUG)
+add_test(NAME upper-body-pose-test COMMAND upper-body-pose-test)
+add_executable(upper-body-render-test upper_body_render_test.cpp)
+target_compile_options(upper-body-render-test PRIVATE -UNDEBUG)
+add_test(NAME upper-body-render-test COMMAND upper-body-render-test)
+add_executable(upper-body-skin-test upper_body_skin_test.cpp ${ROOT}/vr/upper_body_skin.cpp)
+target_include_directories(upper-body-skin-test PRIVATE ${D2RL_SDK}/include ${ROOT}/cleanroom/sigscan)
+target_compile_options(upper-body-skin-test PRIVATE -UNDEBUG)
+add_test(NAME upper-body-skin-test COMMAND upper-body-skin-test)
+add_executable(upper-body-wire-test upper_body_wire_test.cpp ${ROOT}/vr/upper_body_wire.cpp)
+target_include_directories(upper-body-wire-test PRIVATE ${D2RL_SDK}/include)
+target_compile_options(upper-body-wire-test PRIVATE -UNDEBUG)
+add_test(NAME upper-body-wire-test COMMAND upper-body-wire-test)
+
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/loot_beam_scan.cpp)   # loot beams: the items on the floor that get one
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/monster_immunity.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/collection_scan.cpp ${ROOT}/vr/collection_tab.cpp ${ROOT}/vr/collection_store.cpp ${ROOT}/vr/collection_tooltip_provider.cpp)   # collection tabs: the catalog scan, the catalog, affinity and the tooltip provider (collection_model.h)
@@ -238,6 +269,10 @@ add_executable(collection-tooltip-test collection_tooltip_test.cpp collection_to
 add_executable(stats-button-test stats_button_test.cpp)
 add_executable(menu-drop-test menu_drop_test.cpp)
 add_executable(respec-button-test respec_button_test.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/wrist_chat_native.cpp wrist_chat_ui.cpp)
+add_executable(wrist-chat-test wrist_chat_test.cpp)
+target_compile_options(wrist-chat-test PRIVATE -UNDEBUG)
+add_test(NAME wrist-chat-test COMMAND wrist-chat-test)
 add_executable(vr-keyboard-test vr_keyboard_test.cpp)
 add_executable(blood-screen-test blood_screen_test.cpp)
 add_executable(arcane-decay-test arcane_decay_test.cpp)
@@ -296,10 +331,17 @@ add_executable(weapon-heft-test weapon_heft_test.cpp)   # Weapon heft (#443): we
 add_executable(hit-reactions-test hit_reactions_test.cpp)   # Hit reactions: a stroke's force, ranks, each monster's waits, the record's flags
 add_executable(held-collision-test held_collision_test.cpp)   # Held items collide: closest points, the push, its cap and ease, the split, the clank, exclusions
 add_executable(held-world-test held_world_test.cpp)   # Held items meet the world: the hands' frame, wall cells and the floor, slides, corners, the cap, no trap, cost
+add_executable(weapon-reach-test weapon_reach_test.cpp)   # Melee contact by weapon kind; a flail reaches its head, each hand by its own item
+add_executable(flail-chain-test flail_chain_test.cpp)   # A flail's chain swings: its bones by name, hanging and swinging, fresh starts, snap turns, the floor
 add_executable(walk-direction-test walk_direction_test.cpp)   # Walk direction: the stick turned to where the left controller points
+add_executable(whirl-steer-test whirl_steer_test.cpp)   # Whirlwind aimed along the walk stick: its dead zone, the way as walked, the T's spot
 add_executable(room-scale-test room_scale_test.cpp)   # room-scale: a turn pivots at the head
 add_executable(room-steps-test room_steps_test.cpp)   # Room follows you: the neck, the dead zone, pauses, walls, the origin follow
 add_executable(sewer-interaction-test sewer_interaction_test.cpp)
+add_executable(portal-placement-test portal_placement_test.cpp)
+add_test(NAME portal-placement-test COMMAND portal-placement-test)
+add_executable(entry-facing-test entry_facing_test.cpp)
+add_test(NAME entry-facing-test COMMAND entry-facing-test)
 add_executable(notice-card-test notice_card_test.cpp)
 add_executable(melee-weapon-test melee_weapon_test.cpp)
 add_executable(breakables-test breakables_test.cpp)
@@ -308,6 +350,21 @@ target_link_libraries(breakables-test PRIVATE framevr-runtime)
 target_include_directories(melee-weapon-test PRIVATE ${ROOT}/cleanroom/sigscan ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(melee-weapon-test PRIVATE framevr-runtime)
 add_executable(attack-speed-test attack_speed_test.cpp)
+add_executable(melee-dispatch-wire-test melee_dispatch_wire_test.cpp)
+if(MSVC)
+  target_compile_options(melee-dispatch-wire-test PRIVATE /UNDEBUG)
+else()
+  target_compile_options(melee-dispatch-wire-test PRIVATE -UNDEBUG)
+endif()
+add_test(NAME melee-dispatch-wire-test COMMAND melee-dispatch-wire-test)
+add_executable(melee-dispatch-test melee_dispatch_test.cpp ${ROOT}/vr/melee_dispatch.cpp)
+target_include_directories(melee-dispatch-test PRIVATE ${ROOT}/deps/D2RLoader-PluginSDK/include)
+if(MSVC)
+  target_compile_options(melee-dispatch-test PRIVATE /UNDEBUG)
+else()
+  target_compile_options(melee-dispatch-test PRIVATE -UNDEBUG)
+endif()
+add_test(NAME melee-dispatch-test COMMAND melee-dispatch-test)
 add_executable(world-coordinates-test world_coordinates_test.cpp)
 add_executable(bow-flight-test bow_flight_test.cpp)
 add_executable(bow-laser-test bow_laser_test.cpp)
@@ -331,6 +388,8 @@ add_executable(map-zoom-test map_zoom_test.cpp)
 add_executable(floating-map-test floating_map_test.cpp)   # Floating map: pull, grab, point, two-hand size, put away, never pulled
 add_executable(grab-hint-test grab_hint_test.cpp)   # Floating map grab hint: when it shows, the loop, the border strips, the pictures, the layer budget
 add_executable(navigation-info-test navigation_info_test.cpp)
+add_executable(area-banner-test area_banner_test.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/area_banner.cpp)
 add_executable(dropped-item-labels-test dropped_item_labels_test.cpp)
 add_executable(stick-gestures-test stick_gestures_test.cpp)
 add_executable(show-items-command-test show_items_command_test.cpp ${ROOT}/vr/gamecmd.cpp)
@@ -478,6 +537,11 @@ target_include_directories(local-player-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_link_libraries(local-player-test PRIVATE framevr-runtime)
 target_link_libraries(window-focus-test PRIVATE user32)
 enable_testing()
+add_executable(desktop-mode-test desktop_mode_test.cpp)
+target_compile_options(desktop-mode-test PRIVATE -UNDEBUG)
+add_test(NAME desktop-mode-vr COMMAND desktop-mode-test)
+add_test(NAME desktop-mode-flat COMMAND desktop-mode-test desktop)
+add_test(NAME desktop-runtime-wiring COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/desktop_mode_test.py")
 add_executable(pool-guard-test pool_guard_test.cpp ${ROOT}/cleanroom/pools/pools.cpp)
 target_link_libraries(pool-guard-test PRIVATE framevr-runtime)
 foreach(pool_case IN ITEMS grow off enough foreign free-slot free-call layout broken prev-flag missing waiting)
@@ -515,12 +579,13 @@ add_test(NAME cinema-screen-test COMMAND cinema-screen-test "${ROOT}/steamvr/tra
 set_tests_properties(cinema-screen-test PROPERTIES TIMEOUT 30)
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
-foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test draw-sampler-test game-patch-plan-test cull-volume-test
+
+foreach(test_target IN ITEMS client-combat-test native-client-input-test memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test draw-sampler-test game-patch-plan-test cull-volume-test
     spell-impacts-test
     gameplay-test weapon-skills-test quick-cast-test hand-controls-test hand-role-test hand-swap-mirror-test hand-text-test elemental-hands-test elemental-particles-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test head-skip-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test prop-heft-test limb-rig-test aged-cache-test ecs-storage-test look-at-test limb-physics-test limb-worker-test leather-menu-test stash-buttons-test stats-button-test menu-drop-test arcane-decay-test respec-button-test vr-keyboard-test
-    combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test guard-strain-test heartbeat-test haptic-impact-test haptic-heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test logging-test log-rotation-test melee-contact-test bow-bash-test weapon-heft-test hit-reactions-test held-collision-test held-world-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-warlock-test motions-assassin-test motions-paladin-test motions-druid-test bone-graft-test
-    interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test floating-map-test grab-hint-test navigation-info-test companions-test summon-commander-test active-effects-test skill-cooldowns-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test sheet-walk-test room-stitch-test ceiling-top-test loot-beams-test
+    combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test guard-strain-test heartbeat-test haptic-impact-test haptic-heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test whirl-steer-test logging-test log-rotation-test melee-contact-test bow-bash-test weapon-heft-test hit-reactions-test held-collision-test held-world-test weapon-reach-test flail-chain-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-warlock-test motions-assassin-test motions-paladin-test motions-druid-test bone-graft-test
+    interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test floating-map-test grab-hint-test navigation-info-test area-banner-test companions-test summon-commander-test active-effects-test skill-cooldowns-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test sheet-walk-test room-stitch-test ceiling-top-test loot-beams-test
     vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test loot-aim-test telegraph-test aim-reach-test aim-rules-test teleport-arc-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test light-radius-test world-sound-test frame-generation-test late-wait-test turn-capture-test panel-atlas-test atlas-dirty-test far-objects-test drawdist-runtime-test render-distance-status-test collection-model-test collection-panel-test collection-view-test collection-pointer-test collection-ui-image-test collection-tooltip-test)
   # These fixtures use assert for their checks, including in Release builds.
   if(MSVC)
@@ -629,3 +694,63 @@ add_test(NAME aura-filter-test COMMAND aura-filter-test)
 add_executable(effect-visibility-test effect_visibility_test.cpp)
 target_compile_options(effect-visibility-test PRIVATE -UNDEBUG)
 add_test(NAME effect-visibility-test COMMAND effect-visibility-test)
+
+add_executable(party-roster-test party_roster_test.cpp)
+target_compile_options(party-roster-test PRIVATE -UNDEBUG)
+add_test(NAME party-roster-test COMMAND party-roster-test)
+
+add_executable(ally-health-art-test ally_health_art_test.cpp)
+target_link_libraries(ally-health-art-test PRIVATE gdi32 user32)
+add_executable(ally-native-test ally_native_test.cpp)
+add_executable(party-health-test party_health_test.cpp)
+add_executable(party-health-wire-test party_health_wire_test.cpp ${ROOT}/vr/party_health_reports.cpp)
+target_include_directories(party-health-wire-test PRIVATE ${D2RL_SDK}/include)
+target_link_libraries(party-health-wire-test PRIVATE framevr-runtime)
+add_executable(ally-health-state-test ally_health_state_test.cpp ${ROOT}/vr/ally_health_state.cpp)
+target_include_directories(ally-health-state-test PRIVATE ${D2RL_SDK}/include ${ROOT}/cleanroom/sigscan ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(ally-health-state-test PRIVATE framevr-runtime)
+foreach(ALLY_TEST ally-health-art-test ally-native-test party-health-test party-health-wire-test ally-health-state-test)
+  target_compile_options(${ALLY_TEST} PRIVATE -UNDEBUG)
+  add_test(NAME ${ALLY_TEST} COMMAND ${ALLY_TEST})
+endforeach()
+
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/party_health_reports.cpp ${ROOT}/vr/ally_health_state.cpp)
+
+add_test(NAME combined-feature-wiring-test COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/combined_feature_wiring_test.py")
+
+# Host-assisted joining-client target acquisition; separate from pose/health wire.
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_reports.cpp)
+add_executable(server-target-scan-test server_target_scan_test.cpp)
+target_link_libraries(server-target-scan-test PRIVATE framevr-runtime)
+add_executable(target-reports-test target_reports_test.cpp ${ROOT}/vr/target_reports.cpp)
+target_include_directories(target-reports-test PRIVATE ${D2RL_SDK}/include)
+target_link_libraries(target-reports-test PRIVATE framevr-runtime)
+foreach(TARGET_TEST server-target-scan-test target-reports-test)
+  target_compile_options(${TARGET_TEST} PRIVATE -UNDEBUG)
+  add_test(NAME ${TARGET_TEST} COMMAND ${TARGET_TEST})
+endforeach()
+add_test(NAME remote-swing-scope-test COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/remote_swing_scope_test.py" "${CMAKE_CXX_COMPILER}" "${CMAKE_BINARY_DIR}/remote-scope-fixture")
+add_test(NAME client-swing-dispatch-wiring-test COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/client_swing_dispatch_wiring_test.py")
+add_test(NAME client-target-wiring-test COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/client_target_wiring_test.py")
+
+add_executable(client-hit-feedback-test client_hit_feedback_test.cpp)
+target_link_libraries(client-hit-feedback-test PRIVATE framevr-runtime)
+target_compile_options(client-hit-feedback-test PRIVATE -UNDEBUG)
+add_test(NAME client-hit-feedback-test COMMAND client-hit-feedback-test)
+
+# Read-only host-assisted loot beams and bounded client attack timing diagnostics.
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/loot_reports.cpp)
+add_executable(server-loot-scan-test server_loot_scan_test.cpp)
+add_executable(loot-reports-test loot_reports_test.cpp ${ROOT}/vr/loot_reports.cpp)
+target_include_directories(loot-reports-test PRIVATE ${D2RL_SDK}/include)
+add_executable(client-attack-timing-test client_attack_timing_test.cpp)
+foreach(CLIENT_TEST server-loot-scan-test loot-reports-test client-attack-timing-test)
+  target_link_libraries(${CLIENT_TEST} PRIVATE framevr-runtime)
+  target_compile_options(${CLIENT_TEST} PRIVATE -UNDEBUG)
+  add_test(NAME ${CLIENT_TEST} COMMAND ${CLIENT_TEST})
+endforeach()
+add_test(NAME loot-network-wiring-test COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/loot_network_wiring_test.py")
+add_executable(multiplayer-fields-test multiplayer_fields_test.cpp)
+target_include_directories(multiplayer-fields-test PRIVATE ${D2RL_SDK}/include)
+target_compile_options(multiplayer-fields-test PRIVATE -UNDEBUG)
+add_test(NAME multiplayer-fields-test COMMAND multiplayer-fields-test)

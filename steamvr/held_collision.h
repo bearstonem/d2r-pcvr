@@ -95,7 +95,9 @@ inline bool OneHandWeapon(uint32_t type) {
 }
 inline bool BowType(uint32_t type) {return type==D2RVR_TYPE_BOW||type==D2RVR_TYPE_CROSSBOW;}
 inline bool ShaftType(uint32_t type) {return type==D2RVR_TYPE_STAFF||type==D2RVR_TYPE_SPEAR||type==D2RVR_TYPE_POLEARM;}
-// The blade's length from the grip: the melee capsule's (vr/vrcam.cpp MeleeContactHand).
+// The blade's length from the grip: the melee capsule's (vr/vrcam.cpp MeleeContactHand). A flail keeps a mace's here,
+// though its melee contact reaches the head (weapon_reach.h): its chain gives way, so only the handle and the chain's
+// first links hold a shield or the other weapon off.
 inline float BladeLength(uint32_t type) {
     switch(type) {
         case D2RVR_TYPE_DAGGER:case D2RVR_TYPE_CLAW:case D2RVR_TYPE_ORB:return .28f;

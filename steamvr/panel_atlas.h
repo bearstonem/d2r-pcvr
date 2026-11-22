@@ -50,13 +50,21 @@ constexpr Region Respec(int i){return {Stats.x+StatsSize+Gap,Leather.y+i*(Respec
 // Under the leather: the VR keyboard (vr_keyboard.h), every key plain, then
 // every key lit beside it; the lit quad crops the one key under the laser.
 // Under those the same with capitals, while Shift waits (its key lit).
-constexpr Region Keyboard{0,Leather.y+Leather.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight};
-constexpr Region KeyboardLit{Keyboard.x+Keyboard.w+Gap,Keyboard.y,keyboard::TexelWidth,keyboard::TexelHeight};
-constexpr Region KeyboardCaps{0,Keyboard.y+Keyboard.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight};
-constexpr Region KeyboardCapsLit{KeyboardLit.x,KeyboardCaps.y,keyboard::TexelWidth,keyboard::TexelHeight};
-// Under those the gold pad (keyboard::DigitKeys), plain and lit.
-constexpr Region Digits{0,KeyboardCaps.y+KeyboardCaps.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight};
-constexpr Region DigitsLit{KeyboardLit.x,Digits.y,keyboard::TexelWidth,keyboard::TexelHeight};
+constexpr Region Keyboard{0,Leather.y+Leather.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Name)};
+constexpr Region KeyboardLit{Keyboard.x+Keyboard.w+Gap,Keyboard.y,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Name)};
+constexpr Region KeyboardCaps{0,Keyboard.y+Keyboard.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Name)};
+constexpr Region KeyboardCapsLit{KeyboardLit.x,KeyboardCaps.y,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Name)};
+// Under those the multiplayer panel's keyboard (keyboard::Text, a digit row more), the same four.
+constexpr Region TextKeyboard{0,KeyboardCaps.y+KeyboardCaps.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Text)};
+constexpr Region TextKeyboardLit{KeyboardLit.x,TextKeyboard.y,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Text)};
+constexpr Region TextKeyboardCaps{0,TextKeyboard.y+TextKeyboard.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Text)};
+constexpr Region TextKeyboardCapsLit{KeyboardLit.x,TextKeyboardCaps.y,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Text)};
+// A keyboard's picture: the name's or the multiplayer panel's, small letters or capitals, plain or lit.
+constexpr Region KeyboardPicture(bool text,bool capitals,bool lit) {
+    return text?(capitals?(lit?TextKeyboardCapsLit:TextKeyboardCaps):(lit?TextKeyboardLit:TextKeyboard)):
+                (capitals?(lit?KeyboardCapsLit:KeyboardCaps):(lit?KeyboardLit:Keyboard));
+}
+// Under the chat keyboard: the gold pad (keyboard::Gold), plain and lit - placed after ChatKeyboard below.
 // Stash navigation plaques (stash_buttons.h): right of the lit keyboard, from where the respec
 // faces' column ends down (that column is wider than the gap the keyboard leaves beside it).
 // One region per face: the two tab buttons and the Collection button, plain then lit.
@@ -65,6 +73,12 @@ constexpr int StashRegions=stashbuttons::ButtonCount*2;
 // The active-tab mark (stash_tab_highlight.h): a bronze frame and a blue diamond,
 // under the plaques in their column.
 constexpr Region TabHighlight{Stash(0).x,Stash(StashRegions-1).y+stashbuttons::Height+Gap,tabhighlight::Width,tabhighlight::Height};
+// Under the keyboards and the stash plaques: the wrist chat's keyboard (wrist_chat.h; the name layout), its six pictures
+// small, capitals and symbols, each plain then lit.
+constexpr int ChatKeyboardY=(TextKeyboardCaps.y+TextKeyboardCaps.h>Stash(3).y+Stash(3).h?TextKeyboardCaps.y+TextKeyboardCaps.h:Stash(3).y+Stash(3).h)+Gap;
+constexpr Region ChatKeyboard(int picture){return {(picture%2)*(keyboard::TexelWidth+Gap),ChatKeyboardY+(picture/2)*(keyboard::TexelHeight(keyboard::Name)+Gap),keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Name)};}
+constexpr Region Digits{0,ChatKeyboard(5).y+ChatKeyboard(5).h+Gap,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Gold)};
+constexpr Region DigitsLit{KeyboardLit.x,Digits.y,keyboard::TexelWidth,keyboard::TexelHeight(keyboard::Gold)};
 constexpr int StaticWidth=1536,StaticHeight=[]{
     int h=Digits.y+Digits.h;
     const int stash=Stash(StashRegions-1).y+Stash(StashRegions-1).h+Gap;
@@ -89,10 +103,11 @@ constexpr Region Strain{Blood.x+Blood.w+Gap,Blood.y,strain::Size,strain::Size};
 constexpr Region Notice{Strain.x+Strain.w+Gap,Blood.y,notice::Width,notice::Height};
 constexpr Region BowLaser{Notice.x+Notice.w+Gap,Blood.y,bowlaser::AtlasWidth,bowlaser::AtlasHeight};
 constexpr Region ArcaneDecay{Strain.x,Strain.y+Strain.h+Gap,arcane::Size,arcane::Size};
+constexpr Region Chat{0,Blood.y+Blood.h+Gap,768,512};
 // The Collection panel (collection_draw.h): its own 1280 x 1024 canvas in the
 // shared atlas, under the strain light's column so no region the frame already
 // uses moves. The stash's own page, opened from the stash panel.
-constexpr Region Collection{0,ArcaneDecay.y+ArcaneDecay.h+Gap,settings::Width,settings::Height};
+constexpr Region Collection{0,(Chat.y+Chat.h>ArcaneDecay.y+ArcaneDecay.h?Chat.y+Chat.h:ArcaneDecay.y+ArcaneDecay.h)+Gap,settings::Width,settings::Height};
 constexpr int SharedWidth=2048,SharedHeight=Collection.y+Collection.h+Gap;
 
 constexpr bool Inside(Region r,int width,int height){return r.x>=0&&r.y>=0&&r.w>0&&r.h>0&&r.x+r.w<=width&&r.y+r.h<=height;}

@@ -3,6 +3,12 @@
 #include <windows.h>
 #include <D2RLPlugin/api.h>
 #include "melee.h"
+#include "loot_reports.h"
+#include "client_combat.h"
+#include "combat.h"
+#include "../steamvr/server_loot_scan.h"
+#include <D2RLPlugin/reimplementation_exports.h>
+namespace gamestate {uint64_t LocalPlayer();}
 #include "settings_menu.h"
 #include "../steamvr/memory.h"
 #include "../steamvr/logging.h"
@@ -21,6 +27,7 @@ std::atomic<bool> enabled{false},posted{false};
 std::atomic<uint64_t> nextScan{0},postedAt{0};
 std::mutex shownMutex;
 Shown shown;
+D2RL::Reimplementations::GetLevelIdFromUnitFn levelId=nullptr;
 
 template<class T>bool Read(uintptr_t address,T& out) {
     return address>0x10000&&address<=UINTPTR_MAX-sizeof out&&
@@ -49,6 +56,15 @@ int RuneOf(uint32_t classId) {
     return 0;
 }
 
+bool ScanPlayer(uint32_t playerId,const beams::Wanted& want,Shown& out) {
+    out={};uintptr_t game=0,player=0;
+    if(!levelId||!melee::ReadOnlyPlayer(playerId,game,player))return false;
+    KnowRunes(game);
+    const int count=framevr::serverloot::Scan(game,player,playerId,want,out.items,
+        [](uintptr_t p,void* v,size_t n){return framevr::ReadMemory(v,reinterpret_cast<void*>(p),n);},
+        [](uintptr_t p){return levelId(reinterpret_cast<const void*>(p));},&RuneOf);
+    if(count<0)return false;out.count=size_t(count);out.at=GetTickCount64();return true;
+}
 void __cdecl Scan(const D2RL::PluginContext*,void*) noexcept {
     posted.store(false);
     const uint64_t now=GetTickCount64();
@@ -103,6 +119,26 @@ void __cdecl Scan(const D2RL::PluginContext*,void*) noexcept {
 }
 }
 
+void InitNetwork(const D2RL::PluginContext* ctx) {
+    context=ctx;
+    if(!ctx||ctx->QueryService(&tables)!=D2RL::ServiceQueryResult::Success||
+       !D2RL::HasDataTableServiceField(tables,D2RL::DataTableServiceRequiredSize))tables=nullptr;
+    const auto core=GetModuleHandleW(L"D2RCore.dll");
+    levelId=core?reinterpret_cast<D2RL::Reimplementations::GetLevelIdFromUnitFn>(
+        GetProcAddress(core,MAKEINTRESOURCEA(D2RL::Reimplementations::GetLevelIdFromUnitInfo.ordinal))):nullptr;
+    lootreports::Init(ctx,&ScanPlayer);
+}
+void TickNetwork(uint64_t session,uint32_t unit) {
+    const auto values=vrsettings::Read().values;
+    auto want=wanted;
+    want.rare=values[framevr::settings::LootBeamRare]>.5f;
+    want.set=values[framevr::settings::LootBeamSet]>.5f;
+    want.unique=values[framevr::settings::LootBeamUnique]>.5f;
+    want.runes=values[framevr::settings::LootBeamRunes]>.5f&&want.highRune<=beams::LastRune;
+    want.highRune=std::clamp(want.highRune,beams::FirstRune,beams::LastRune);
+    lootreports::Tick(session,unit,enabled.load()&&clientcombat::NativeOnly(session),want);
+}
+void Stop(){enabled=false;lootreports::Stop();std::lock_guard lock(shownMutex);shown={};}
 void Init(const D2RL::PluginContext* ctx,bool on,const beams::Wanted& want) {
     context=ctx;wanted=want;
     if(!ctx||ctx->QueryService(&threads)!=D2RL::ServiceQueryResult::Success)threads=nullptr;
@@ -115,13 +151,21 @@ void Init(const D2RL::PluginContext* ctx,bool on,const beams::Wanted& want) {
     framevr::logging::Write(line);
 }
 void Tick(uint64_t now) {
-    if(!enabled.load()||now<nextScan.load())return;
+    if(!enabled.load()||clientcombat::NativeOnly(gamestate::LocalPlayer())||now<nextScan.load())return;
     // One scan in flight; one the game never ran (a menu, a level load) is let go after 2 s.
     if(posted.load()&&now-postedAt.load()<2000)return;
     nextScan.store(now+250);postedAt.store(now);posted.store(true);
     if(threads->runOnGameThread(context,&Scan,nullptr)!=D2RL::Threads::Result::Success)posted.store(false);
 }
 Shown Latest(uint64_t now,uint64_t maxAgeMs) {
+    const auto session=gamestate::LocalPlayer();
+    if(clientcombat::NativeOnly(session)){
+        uint32_t unit=0;combat::LocalPlayerId(unit);
+        auto result=lootreports::Get(session,unit,now);
+        if(!enabled.load()||!result.at||now<result.at||now-result.at>maxAgeMs)return {};
+        result.strength=beams::Strength(vrsettings::Read().values[framevr::settings::LootBeamBrightness]);
+        return result;
+    }
     std::lock_guard lock(shownMutex);
     if(!shown.at||now<shown.at||now-shown.at>maxAgeMs)return {};
     return shown;

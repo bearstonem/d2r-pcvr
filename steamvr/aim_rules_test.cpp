@@ -45,7 +45,11 @@ int main() {
     Check(!OtherOutlined(false,true,0,Left)&&!OtherOutlined(false,false,1,Left),"Monster outline Off: nothing is outlined");
     Check(Of(107,false)==Use::Attack&&Of(143,false)==Use::Attack&&Of(275,false)==Use::Attack&&Of(151,false)==Use::Attack,"the melee attacks: Charge, Leap Attack, Dragon Flight, Whirlwind");
     Check(EyesOutlined(false,true)&&EyesOutlined(true,false)&&!EyesOutlined(true,true),"On, the eyes' monster is not outlined while a hand points");
-    Check(Stable(373)&&Stable(402)&&!Stable(372)&&!Stable(403)&&Of(395,true)==Use::Native&&Of(388,false)==Use::Native,"the Warlock keeps upstream's aim: no rule, even for his missiles");
+    Check(Stable(373)&&Stable(402)&&!Stable(372)&&!Stable(403)&&Of(388,false)==Use::Native&&Of(398,true)==Use::Native&&Of(394,true)==Use::Native,
+          "the Warlock keeps upstream's aim: no rule for Echoing Strike, Flame Wave or Ring of Fire, even marked as aimed");
+    for(int id=373;id<=402;++id)Check(Stable(id)==(id!=395),"of his skills only Miasma Bolt takes the rules");
+    Check(Of(395,true)==Use::Heading&&Of(395,true)==Of(36,true)&&TakesTarget(Of(395,true))&&!Placed(Of(395,true))&&!WantsUnit(395)&&!AlwaysHomes(395),
+          "Miasma Bolt, a hand spell like Fire Bolt (a player, 2026-11: it left beside his body), takes Fire Bolt's rule: a heading to the aimed monster");
     {
         const Switches off{},spells{true,false,0},bows{false,true,0},point{false,false,1},monster{false,false,2};
         for(const Use use:{Use::Native,Use::Heading,Use::Ground,Use::Curse,Use::Attack,Use::Spot,Use::CorpseAtTarget})

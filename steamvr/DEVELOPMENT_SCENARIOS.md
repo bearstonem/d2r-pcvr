@@ -86,7 +86,10 @@ Open either hand's wheel and choose **DEV**. Its tabs are grouped by purpose:
   and the runes Vex, Gul, Ohm, Lo and Sur: drop them to see each beam, or none;
   see GAMEPLAY.md, Loot beams) and an **Item-fired bows** kit (Witherstring, Raven
   Claw and Demon Machine, whose basic attacks fire magic or exploding arrows and
-  bolts, with arrows and bolts; #432) (all on this page as Equipment is full).
+  bolts, with arrows and bolts; #432) and a **Flails + steal** kit (The
+  General's Tan Do Li Ga, a unique flail with 5% mana steal; Bloodrise, a unique
+  mace with 5% life steal; a normal Flail and a Scourge) (all on this page as
+  Equipment is full).
 - **Equipment:** starter primary/alternate gear, class unique primary/alternate
   gear, crossbow + bolts, bow + arrows, a small shield, **Render debug draws**,
   **By turns own picture**, **By turns filter**, **By turns ghosts**, a **Throwing kit** and a **Potion kit** (four Super
@@ -94,8 +97,8 @@ Open either hand's wheel and choose **DEV**. Its tabs are grouped by purpose:
   items in the inventory: put them in the belt to toss at the mercenary).
 - **Act I - II:** towns, combat areas and inspection destinations.
 - **Act III:** Kurast regions, sewer entrances, jungle areas and bosses.
-- **Act IV - V:** later-act combat areas and filming locations, and the
-  Frozen Tundra crash repro (below).
+- **Act IV - V:** later-act combat areas and filming locations, the
+  Frozen Tundra crash repro (below) and the Worldstone Keep.
 
 Preparation applies exact values to the current class. Skill ranks are capped
 at 20 and at `character level - required level + 1`; locked skills are explicitly
@@ -142,6 +145,24 @@ missile: a Javelin, a Pilum, a Glaive, Throwing Knives and Throwing Axes
 right trigger on Attack, Throw or nothing; the kit leaves bindings alone. A
 Barbarian can equip the knives in one hand and the axes in the other to test
 Double Throw.
+
+## Testing the 2026-11-19 player reports
+
+Each fix in that batch (#591-#595) has a DEV shortcut. Start with a disposable
+offline character at **Level 90** (HERO), so every skill and item is usable, and
+read the frame log afterwards for the lines named in each PR.
+
+| Fix | DEV shortcut | What to check |
+| --- | --- | --- |
+| #591 ceilings | ACT IV-V > **Worldstone Keep**, **Throne of Destruction**, **Worldstone Chamber**; ACT III > **Mephisto's chamber** | In VR first person (F4), reach up: the ceiling is well over your hand, the pillars, Baal's throne and the Worldstone. `vrcam: game ceiling - ... (over ...)` names what it clears. |
+| #592 Warlock | A Warlock: HERO > **Level 90** | Put Miasma Bolt on a trigger. It leaves the palm and flies along the hand, up and down with Keep spell shots level Off. `Frame hand spells: skill 395 (class 7) casts from the hand ...` |
+| #593 leech | HERO > **Flails + steal** | Equip Tan Do Li Ga, spend some mana, then hit a monster with slow strokes and then fast ones. The `Frame leech:` line says where the steal went. Bloodrise does the same for life. |
+| #594 flails | A Barbarian: HERO > **Flails + steal**, Level 90 | Tan Do Li Ga and the Flail in both hands (dual wield), then the Scourge. Hit with the ball, watch the chain hang and swing, lower it to the floor. `Frame flail reach:`, `Frame flail chain:` |
+| #595 Whirlwind | A Barbarian at Level 90; ACT IV-V > **Bloody Foothills** or ACT I-II > **Blood Moor** for packs | Whirlwind on a trigger: hold it and push the walk stick, and each whirl heads where it points. Also the T pose with the stick pushed. `Frame whirlwind: steered by the walk stick ...` |
+
+Travel lands at each level's own arrival point and changes no quest. Use HERO >
+**Heal** between tests, and HERO > **Unlock Quests & Waypoints** if a level's
+monsters or doors depend on quest progress.
 
 ## Shield debug draws
 

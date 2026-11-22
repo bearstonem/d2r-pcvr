@@ -1,7 +1,7 @@
 # Hand-origin projectile spells
 
 Experimental support for Fire Bolt, Fireball, Ice Bolt, Ice Blast, Lightning, Charged Bolt and
-Chain Lightning on the Sorceress, Bone Spear on the Necromancer, and Holy Bolt on the Paladin, using the existing per-hand skill wheels. Assign either hand's
+Chain Lightning on the Sorceress, Bone Spear on the Necromancer, Holy Bolt on the Paladin, and Miasma Bolt on the Warlock, using the existing per-hand skill wheels. Assign either hand's
 trigger or face-button shortcut. Hold it to repeat; both hands can cast their
 own assigned projectile at the same time, with separate aim and cast timing.
 Walking and turning remain available during these casts.
@@ -22,7 +22,7 @@ are canceled so the visible spear starts at the casting hand.
 
 In **VR Settings > Gameplay > Targeting**, **Keep spell shots level** defaults to **Off** when
 no preference is saved. Keep it **Off** for full up/down aiming of
-Fire Bolt, Fireball, Ice Bolt, Ice Blast, Bone Spear and Holy Bolt. The change applies to new casts from
+Fire Bolt, Fireball, Ice Bolt, Ice Blast, Bone Spear, Holy Bolt and Miasma Bolt. The change applies to new casts from
 both hands without restarting; projectiles already in flight keep their original
 direction. Charged Bolt retains its native planar wandering in either mode.
 The saved preference is `[gameplay] planar_spell_aim=1` (or `0` for free aim).
@@ -32,7 +32,7 @@ The saved preference is `[gameplay] planar_spell_aim=1` (or `0` for free aim).
 In **VR Settings > Gameplay > Targeting**, choose **Spell aim assist**: **Off**,
 **Light** or **Strong** (the default for missing preferences), then press **Apply**. The saved setting
 is `[gameplay] projectile_aim_assist=0`, `1`, or `2`, respectively. This applies
-to the supported Sorceress hand spells, Necromancer Bone Spear and Paladin Holy Bolt, independently for each
+to the supported Sorceress hand spells, Necromancer Bone Spear, Paladin Holy Bolt and Warlock Miasma Bolt, independently for each
 hand. Bow, javelin and native fallback skills retain their existing aiming.
 
 Light permits up to four degrees of launch correction; Strong permits twelve.
@@ -54,7 +54,7 @@ also permits a small vertical correction. Charged Bolt uses the target's ground
 footprint and adjusts the volley's heading, preserving native spread and
 wandering, with launch-only assistance even on Strong.
 
-For Fire Bolt, Fireball, Ice Bolt, Ice Blast, Bone Spear and Holy Bolt, **Strong adds gentle homing**
+For Fire Bolt, Fireball, Ice Bolt, Ice Blast, Bone Spear, Holy Bolt and Miasma Bolt, **Strong adds gentle homing**
 toward the one enemy selected at launch, including a directly aimed target.
 Steering is limited to 60 degrees/second, 45 degrees total, and 1.5 seconds.
 Planar shots stay horizontal; free-aim shots can also bend vertically. The
@@ -83,7 +83,7 @@ on the game thread. Each hand supplies its own skill in a scoped selection;
 the original selection is restored before returning. No controller cast button
 or native casting animation is sent for these supported spells. Each hand
 uses the character's ordinary casting frames, including Faster Cast Rate:
-14 base frames for Sorceress and 16 for Necromancer/Paladin, excluding the terminal frame. Two
+14 base frames for Sorceress and 16 for Necromancer/Paladin/Warlock, excluding the terminal frame. Two
 hands intentionally permit twice the single-hand throughput, at the combined
 native mana cost. There is no unlimited or free casting mode.
 
@@ -127,6 +127,18 @@ Its leaps from monster to monster are the game's, made on its hits after the cas
 as Fire Bolt does, from the hand along its aim. Both are checked against the game's own skill rows
 first (Lightning a single straight missile, Chain Lightning server function 26 with its missile);
 a row that differs casts natively, from the hero.
+
+The Warlock's Miasma Bolt (a player, 2026-11: it came out "from the right beside the player body instead
+of out of the player hand") is a straight hand spell too. Cast natively, its visual started at the game's
+own animated release point beside the body and its path ran from the hero's middle, so it neither left
+the hand nor followed it. The game's row has Fire Bolt's shape (no start function, server function 0,
+one missile, `miasmabolt`), and only that exact row, on a Warlock, casts from the hand; anything else
+casts natively as before. Its miasma cloud appears where the bolt hits or ends, from the game's own hit
+function at the physical contact. Its repeat rate uses the Necromancer's 16 frames, matching the
+Warlock's published cast-rate breakpoints (9/18/30/48/75/125%); that and the bolt's emitter height
+(the straight bolts' four units) await headset confirmation. It also takes Fire Bolt's aim rules,
+which the Warlock's other skills still skip. `Frame hand spells: skill 395 (class 7) casts from the
+hand` in the log confirms the row was accepted.
 
 Menus, wheels, equipment/assignment changes, tracking loss, world transitions
 and released buttons cancel pending requests. A hand's latest pose replaces
