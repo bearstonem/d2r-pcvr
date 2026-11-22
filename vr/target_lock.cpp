@@ -6,6 +6,10 @@
 #include <cstdio>
 #include <mutex>
 #include "melee.h"
+#include "target_reports.h"
+#include "client_combat.h"
+#include "combat.h"
+namespace gamestate {uint64_t LocalPlayer();}
 #include "projectiles.h"
 #include "../steamvr/logging.h"
 #include "d2rcam.h"
@@ -18,6 +22,8 @@ const PluginContext* context=nullptr;
 const ThreadService* threads=nullptr;
 std::mutex mutex;
 Snapshot latest;
+std::atomic<bool> networkWanted{false};
+bool SamplePlayer(uint32_t player,targetlock::Snapshot& out){return melee::PlayerTargets(player,out);}
 std::atomic<bool> scheduled{false};
 std::atomic<uint64_t> askedAt{0};
 // How often the monsters are read (owner, 2026-11-09: "speed up the game's target acquisition"): every game
@@ -79,9 +85,13 @@ void __cdecl Refresh(const PluginContext*,void*) noexcept {
 }
 void Init(const PluginContext* ctx) {
     context=ctx;
+    targetreports::Init(ctx, &SamplePlayer);
+    combat::SetHitObserver(&targetreports::NoteMeleeHit);
     if(ctx&&ctx->QueryService(&threads)!=ServiceQueryResult::Success)threads=nullptr;
 }
 void Pump(bool wanted) {
+    networkWanted=wanted;
+    if(clientcombat::NativeOnly(gamestate::LocalPlayer()))return;
     if(!wanted){near_=false;std::lock_guard lock(mutex);latest={};return;}
     const uint64_t now=GetTickCount64();
     // A request still pending after a second will not come back: leaving a game
@@ -94,5 +104,16 @@ void Pump(bool wanted) {
     askedAt=now;
     if(threads->runOnGameThread(context,&Refresh,nullptr)!=Threads::Result::Success)scheduled=false;
 }
-Snapshot Get(){std::lock_guard lock(mutex);return latest;}
+void TickNetwork(uint64_t session,uint32_t unit){
+    targetreports::Tick(session,unit,clientcombat::NativeOnly(session));
+}
+void Stop(){combat::SetHitObserver(nullptr);targetreports::Stop();networkWanted=false;std::lock_guard lock(mutex);latest={};}
+Snapshot Get(){
+    const auto session=gamestate::LocalPlayer();
+    if(clientcombat::NativeOnly(session)){
+        uint32_t unit=0;combat::LocalPlayerId(unit);
+        return networkWanted.load()?targetreports::Get(session,unit,GetTickCount64()):Snapshot{};
+    }
+    std::lock_guard lock(mutex);return latest;
+}
 }

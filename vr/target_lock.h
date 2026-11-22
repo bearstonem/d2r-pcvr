@@ -15,4 +15,6 @@ struct Snapshot {
 void Init(const D2RL::PluginContext* ctx);
 void Pump(bool wanted); // vrcam's update thread: schedules a refresh every 100 ms while wanted
 Snapshot Get();
+void TickNetwork(uint64_t session,uint32_t unit);
+void Stop();
 }
