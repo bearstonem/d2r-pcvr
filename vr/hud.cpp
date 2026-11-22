@@ -67,6 +67,7 @@
 #include "../steamvr/resource_descriptions.h"
 #include "../steamvr/active_keys.h"
 #include "../steamvr/native_hud.h"
+#include "../steamvr/area_banner.h"
 #include "../steamvr/render_resolution.h"
 
 #include "game_hud_shared.h"
@@ -219,6 +220,8 @@ bool IsLayerClear(device* dev, resource_view rtv, const float c[4]) {
     const resource_desc d = dev->get_resource_desc(r);
     if (d.type != resource_type::texture_2d || d.texture.format != format::r16g16b16a16_float || d.texture.width < 640) return false;
     g_layer.store(r.handle);
+    framevr::areabanner::canvasWidth.store(d.texture.width,std::memory_order_relaxed);
+    framevr::areabanner::canvasHeight.store(d.texture.height,std::memory_order_relaxed);
     return true;
 }
 

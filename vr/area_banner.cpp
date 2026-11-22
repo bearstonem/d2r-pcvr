@@ -1,5 +1,5 @@
 // Keep D2R's LevelNamePanel, TextBoxWidget, localization and fade animation.
-// Only its terror subtitle's SetText call receives an extra native level.
+// Place it within the headset view and append the native terror level.
 #include <windows.h>
 #include <intrin.h>
 #include "area_banner.h"
@@ -29,6 +29,23 @@ void Update(void* panel) {
         if(!told||now-told>=5000){told=now;framevr::logging::Write(
             "Frame area banner: skipped incomplete native panel (NameText/DesecratedText missing)");}
         return;
+    }
+    // The native HD canvas occupies the top 16:9 band of the eye texture.
+    // A desktop y anchor therefore puts this announcement near the headset's
+    // upper edge. Express its baseline in full-eye height instead.
+    static void* lastPanel=nullptr;static float nativeY=.4f;
+    float anchor[2]{};
+    auto* anchorAddress=static_cast<uint8_t*>(panel)+0x48;
+    if(framevr::ReadMemory(anchor,anchorAddress,sizeof anchor)) {
+        if(lastPanel!=panel){lastPanel=panel;nativeY=anchor[1];}
+        const bool vr=hud::NativeToolbarHidden();
+        const float y=vr?framevr::areabanner::ViewAnchor(
+            framevr::areabanner::canvasWidth.load(std::memory_order_relaxed),
+            framevr::areabanner::canvasHeight.load(std::memory_order_relaxed),nativeY):nativeY;
+        if(anchor[1]!=y&&framevr::WriteMemory(anchorAddress+sizeof(float),&y,sizeof y)) {
+            char line[160];std::snprintf(line,sizeof line,"Frame area banner: %s anchor %.3f -> %.3f",
+                vr?"headset":"desktop",anchor[1],y);framevr::logging::Write(line);
+        }
     }
     call(panel);
 }
