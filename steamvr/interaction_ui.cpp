@@ -683,11 +683,15 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
     }
     // A grabbed bottle has its own tile. Native refill must not recolor it to
     // the next belt item; only confirmed consumption makes this preview empty.
-    if(o.bottleItem.handle) {
-        const auto kind=PotionType(o.bottleItem.code);
-        fill({810,520,866,554},RGB(160,135,83));
-        fill({790,554,886,693},o.bottleEmpty?RGB(45,47,47):colours[unsigned(kind)]);
-        text(o.bottleEmpty?"Used":PotionName(kind),{768,703,896,768});
+    const bool perHand=o.bottles[0].column>=0||o.bottles[1].column>=0;
+    for(int h=0;h<2;++h) {
+        const auto item=perHand?o.bottles[h].item:(h==o.bottleHand?o.bottleItem:Item{});
+        if(!item.handle)continue;
+        const auto kind=PotionType(item.code);const LONG x=128*h;
+        const bool empty=perHand?o.bottles[h].empty:o.bottleEmpty;
+        fill({810+x,520,866+x,554},RGB(160,135,83));
+        fill({790+x,554,886+x,693},empty?RGB(45,47,47):colours[unsigned(kind)]);
+        text(empty?"Used":PotionName(kind),{768+x,703,896+x,768});
     }
     auto wristArt=WristArt();
     if(!wristArt.empty()) {

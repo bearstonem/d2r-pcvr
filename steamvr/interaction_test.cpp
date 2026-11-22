@@ -20,6 +20,67 @@ struct Sim {
     Output Step(int count=1){while(count--){in.time+=.02;in.at=1000000+uint64_t(in.time*1000);in.snapshot.at=in.at;out=e.Step(in);}return out;}
 };
 int main(){
+    auto twoBottles=[](Sim& s,bool together=false) {
+        auto& b=s.in.snapshot.belt[3];b.known=true;b.count=1;b.revision=2;
+        b.items[0]={99,1,Code('m','p','1')};
+        s.in.hand[0].p=s.out.belt[0].p;s.in.hand[1].p=s.out.belt[3].p;
+        s.in.grip[0]=1;
+        if(together)s.in.grip[1]=1;
+        s.Step(12);
+        s.in.grip[1]=1;s.Step(12);
+        Check(s.out.Holding(0)&&s.out.Holding(1)&&s.out.BottleMask()==3,"one independently owned bottle per hand");
+        Check(s.out.bottles[0].item.handle==42&&s.out.bottles[1].item.handle==99,"distinct exact potion identities");
+    };
+    {
+        Sim s;s.in.clickToDrink=true;twoBottles(s);
+        const auto scene=framevr::potions::MakeScene(s.in,s.out);
+        Check(scene.count==2,"both bottles rendered, both reserved belt models hidden");
+        s.in.bottleTrigger[0]=s.in.bottleTrigger[1]=1;s.Step();
+        const auto first=s.out.request;
+        Check(first.action==Action::Potion&&first.item.handle==42,"first simultaneous click dispatched");
+        s.in.bottleTrigger[0]=s.in.bottleTrigger[1]=0;s.Step(3);
+        Check(s.out.request.action==Action::None,"second click waits for native reply");
+        s.in.reply={first.sequence,s.in.session,Result::Applied};s.Step();
+        const auto second=s.out.request;
+        Check(second.action==Action::Potion&&second.item.handle==99&&second.sequence!=first.sequence,"second click survives release while queued");
+        Check(s.out.bottles[0].empty&&!s.out.bottles[1].empty,"reply empties only matching hand");
+        s.in.reply={second.sequence,s.in.session,Result::Applied};s.Step();
+        Check(s.out.bottles[0].empty&&s.out.bottles[1].empty,"both drinks confirmed separately");
+        Check(s.Step(10).request.action==Action::None,"neither drink repeats");
+        s.in.floorKnown=true;s.in.floor=0;s.in.grip[0]=s.in.grip[1]=0;s.Step();
+        Check(s.out.discards[0].active&&s.out.discards[1].active,"both empty bottles can be released together");
+    }
+    {
+        Sim s;s.in.spellGrips=true;twoBottles(s,true);
+        s.in.grip[0]=0;s.Step();
+        Check(!s.out.Holding(0)&&s.out.Holding(1),"releasing one grip keeps other bottle held with spell grips enabled");
+        s.in.cancel=true;s.Step();Check(!s.out.Holding(0)&&!s.out.Holding(1),"cancel releases both hands");
+    }
+    {
+        Sim s;twoBottles(s);
+        for(int h=0;h<2;++h) {
+            s.in.hand[h].q=math::Multiply({0,0,-.70710678f,.70710678f},{.70710678f,0,0,.70710678f});
+            s.in.hand[h].p={-.115f,1.6f,-.08f};
+        }
+        Request first;
+        for(int i=0;i<20;++i){s.Step();if(s.out.request.action==Action::Potion)first=s.out.request;}
+        Check(first.item.handle==42,"two simultaneous mouth dwells start one native request");
+        s.in.hand[0].p=s.out.belt[0].p;s.in.hand[1].p=s.out.belt[3].p;
+        s.in.reply={first.sequence,s.in.session,Result::Applied};s.Step();
+        Check(s.out.request.item.handle==99,"completed second sip survives lowering hand while first confirms");
+    }
+    {
+        Sim s;s.in.clickToDrink=true;twoBottles(s);
+        s.in.bottleTrigger[0]=s.in.bottleTrigger[1]=1;s.Step();const auto first=s.out.request;
+        s.in.snapshot.belt[3].items[0]={100,2,Code('m','p','1')};++s.in.snapshot.belt[3].revision;
+        s.in.reply={first.sequence,s.in.session,Result::Applied};s.Step();
+        Check(!s.out.Holding(1)&&s.out.request.action==Action::None,"queued second drink cannot consume a replacement item");
+    }
+    {
+        Sim s;s.in.hand[0].p=s.in.hand[1].p=s.out.belt[0].p;
+        s.in.grip[0]=s.in.grip[1]=1;s.Step();
+        Check(s.out.Holding(0)!=s.out.Holding(1),"one native item cannot be reserved by both hands");
+    }
     // The player's own speed: steady running is measured, jumps and gaps reset it.
     {
         Carry c;double time=0;Vec at{100,2,50};

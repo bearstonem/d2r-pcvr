@@ -3658,7 +3658,7 @@ std::array<bottles::Collider,bottles::Colliders> HeldColliders() {
     // A hand without a weapon capsule (empty, or the off hand without dual
     // wielding or a shield) still pushes, as a fist at the controller.
     for(int h=0;h<2&&motionControls.load();++h) {
-        if(weapons[size_t(h)].active||!in.tracked[h]||out.bottleHand==h)continue;
+        if(weapons[size_t(h)].active||!in.tracked[h]||out.Holding(h))continue;
         const auto p=in.stage.World(in.hand[h].p);
         const auto forward=math::Rotate(in.stage.base,math::Rotate(in.hand[h].q,{0,0,-1}));
         weapons[size_t(h)]={true,p-forward*.03f,p+forward*.08f,.045f,propheft::StrikingMass(0),propheft::PushStrength(0)};
@@ -3705,11 +3705,10 @@ void StepDroppedBottles() {
     const bool world=in.floorKnown&&in.stage.known&&upm>=1&&upm<=12;
     const float floor=world?in.stage.anchor.y+(in.floor-in.stage.origin.y):0;
     // Walls ready before the bottle leaves the hand.
-    if(bottlesOn&&world&&out.bottleEmpty&&out.bottleHand>=0)
-        wallcells::Want({in.session,in.stage.World(in.hand[out.bottleHand].p),floor,upm},in.at);
-    if(bottlesOn&&out.discard.active&&world) {
+    for(int h=0;h<2;++h)if(bottlesOn&&world&&out.Holding(h)&&out.bottles[h].empty)
+        wallcells::Want({in.session,in.stage.World(in.hand[h].p),floor,upm},in.at);
+    for(const auto& d:out.discards)if(bottlesOn&&d.active&&world) {
         if(!droppedBottles)droppedBottles=std::make_unique<bottles::World>();
-        const auto& d=out.discard;
         const bottles::Release release{in.session,in.time,d.p,d.v,d.w,d.q,d.floor,upm,bottles::Radius(potionModels.Radius(d.code)),d.code};
         const bool dropped=droppedBottles->Ready()&&droppedBottles->Drop(release);
         char line[200];
@@ -4301,8 +4300,8 @@ void Input() {
         // and the right (roles 0 and 1 either way, while the wrist HUD follows the roles).
         const int R=UiRole(0,handrole::System::WristHud),L=UiRole(1,handrole::System::WristHud);
         floatmap::InputFrame f{motionInput.time,GetTickCount64(),gamestate::LocalPlayer(),gameplay,
-            interactionOutput.owner[R]==interaction::Owner::Combat&&interactionOutput.bottleHand!=R&&!motionOutput.bowDrawing,
-            interactionOutput.owner[L]==interaction::Owner::Combat&&interactionOutput.bottleHand!=L&&!motionOutput.bowDrawing,
+            interactionOutput.owner[R]==interaction::Owner::Combat&&!interactionOutput.Holding(R)&&!motionOutput.bowDrawing,
+            interactionOutput.owner[L]==interaction::Owner::Combat&&!interactionOutput.Holding(L)&&!motionOutput.bowDrawing,
             interactionOutput.nearBelt>=0||interactionOutput.nearHolster>=0,
             motionInput.head.p,motionInput.head.q,motionHeadTracked,
             {motionInput.hand[R].p,motionInput.hand[L].p},{motionInput.tracked[R],motionInput.tracked[L]},motionInput.hand[R].q,
@@ -4607,7 +4606,7 @@ void Input() {
         in.head=interactionInput.head.p;in.headRotation=interactionInput.head.q;
         for(int h=0;h<2;++h) {
             in.hand[h]=interactionInput.hand[h].p;in.tracked[h]=interactionInput.tracked[h];
-            in.busy[h]=interactionOutput.bottleHand==h||handInput.trigger[h]>.3f||(h==0&&motionOutput.bowDrawing);
+            in.busy[h]=interactionOutput.Holding(h)||handInput.trigger[h]>.3f||(h==0&&motionOutput.bowDrawing);
         }
         bloodOutput=bloodScreen.Step(in);
         for(int h=0;h<2;++h)if(bloodOutput.stroke[h]) {
@@ -5416,7 +5415,7 @@ void Input() {
         in.time=now;in.held=glyphPressed&&skills::Hand(handOutput.slot)==hand;
         in.tracked=hand>=0&&handAimTracked[hand]&&motionHeadTracked;
         in.allowed=hand>=0&&motionControls.load()&&gameplayChain&&motionInput.active&&quickFresh&&!panelMode&&!spatialMode&&!settingsOwned&&
-            !interactionOutput.wheel&&!interactionOutput.settings&&interactionOutput.bottleHand!=hand&&
+            !interactionOutput.wheel&&!interactionOutput.settings&&!interactionOutput.Holding(hand)&&
             interactionOutput.owner[hand]==interaction::Owner::Combat&&!bloodOutput.block[hand]&&!(glyphStroke.Drawing()&&!in.held&&down);
         if(hand>=0){const auto& tip=handAim[hand].p;in.x=tip.x;in.y=tip.y;in.z=tip.z;}
         const auto right=math::Rotate(interactionInput.head.q,{1,0,0});in.rightX=right.x;in.rightZ=right.z;
@@ -5812,7 +5811,7 @@ void Input() {
     panelinput::WorldInput(motionInput.active&&motionInput.tracked[0]&&motionInput.tracked[1]&&motionInput.aimTracked);
     if(!motionInput.active||motionOutput.block||!motionOutput.rayValid)handOutput.interact=false;
     if(motionInput.quickCast&&(motionOutput.block||!motionOutput.rayValid))handControls.Close();
-    const uint32_t hidden=interactionOutput.stowed?3u:(journalMode||leatherMode)?1u<<UiRole(leather::Hand,handrole::System::LeatherMenu):interactionOutput.bottleHand>=0?1u<<interactionOutput.bottleHand:0;
+    const uint32_t hidden=interactionOutput.stowed?3u:(journalMode||leatherMode)?1u<<UiRole(leather::Hand,handrole::System::LeatherMenu):interactionOutput.BottleMask();
     skel::SetInteractionHidden(hidden);
     potionScene=potions::MakeScene(interactionInput,interactionOutput);
     if(potionFlight.id&&potionFlight.shown)potions::AddThrown(potionScene,potionFlight.pose,potionFlight.code);   // #292
@@ -5843,7 +5842,7 @@ void Input() {
     elementalInput.head=interactionInput.head;
     for(int h=0;h<2;++h) {
         elementalInput.hands[h]=interactionInput.hand[h];elementalInput.tracked[h]=interactionInput.tracked[h];
-        elementalInput.occupied[h]=interactionOutput.bottleHand==h||interactionOutput.owner[h]!=interaction::Owner::Combat;
+        elementalInput.occupied[h]=interactionOutput.Holding(h)||interactionOutput.owner[h]!=interaction::Owner::Combat;
         elementalInput.casting[h]=handOutput.spells[h]>=0?handOutput.spells[h]:handOutput.slot>=0&&handOutput.hand==h?handOutput.slot:-1;
         elementalInput.activation[h]=handOutput.activation[h];
     }
@@ -5929,7 +5928,8 @@ void Input() {
             interactionPrefetchSession=interactionInput.session;interactionPrefetchRevision=interactionInput.snapshot.revision;
         }
         const uint64_t key=(interaction::icons::Revision()*0x9e3779b97f4a7c15ull)^(uint64_t(interactionOutput.editor)<<60)^(uint64_t(interactionOutput.editSlot+1)<<56)^(uint64_t(interactionOutput.editPage)<<48)^(uint64_t(interactionInput.snapshot.revision)<<32)^(uint64_t(interactionOutput.utility)<<24)^(
-            uint64_t(interactionOutput.hover+1)<<16)^(uint64_t(motion.Selection()+1)<<8)^(uint64_t(interactionOutput.result)<<4)^uint64_t(interactionOutput.stowed)^(uint64_t(interactionOutput.map)<<1)^(uint64_t(interactionOutput.nearHolster+1)<<26)^(uint64_t(interactionOutput.bottle+1)<<28)^(uint64_t(interactionOutput.bottleEmpty)<<2)^(uint64_t(snapshotFresh)<<3);
+            uint64_t(interactionOutput.hover+1)<<16)^(uint64_t(motion.Selection()+1)<<8)^(uint64_t(interactionOutput.result)<<4)^uint64_t(interactionOutput.stowed)^(uint64_t(interactionOutput.map)<<1)^(uint64_t(interactionOutput.nearHolster+1)<<26)^(uint64_t(interactionOutput.bottle+1)<<28)^(uint64_t(interactionOutput.bottleEmpty)<<2)^(uint64_t(snapshotFresh)<<3)^(uint64_t(interactionOutput.BottleMask())<<20)^
+            (uint64_t(interactionOutput.bottles[1].column+1)<<22)^(uint64_t(interactionOutput.bottles[1].empty)<<19);
         const auto now=GetTickCount64();
         const bool visible=leatherHudVitals||motionInput.active||interactionOutput.wheel||interactionOutput.wrist||interactionOutput.vitals||interactionOutput.critical||interactionOutput.bottle>=0||
             interactionOutput.nearBelt>=0||interactionOutput.nearHolster>=0||math::Rotate(Q(head.orientation),{0,0,-1}).y<-.60f;
@@ -7623,7 +7623,7 @@ void EndPair() {
     const uint32_t capacity=std::min(uint32_t(layers.size()),layerLimit);
     const bool padQuads=composition::NeedsQuadPadding(wineOpenXR,layer,pointerChain);
     const uint32_t contentLimit=padQuads&&capacity>1?capacity-1:capacity;
-    XrCompositionLayerQuad palette{XR_TYPE_COMPOSITION_LAYER_QUAD},bottle{XR_TYPE_COMPOSITION_LAYER_QUAD},chosen{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    XrCompositionLayerQuad palette{XR_TYPE_COMPOSITION_LAYER_QUAD},bottle[2]{{XR_TYPE_COMPOSITION_LAYER_QUAD},{XR_TYPE_COMPOSITION_LAYER_QUAD}},chosen{XR_TYPE_COMPOSITION_LAYER_QUAD};
     std::array<XrCompositionLayerQuad,2> arrow{{{XR_TYPE_COMPOSITION_LAYER_QUAD},{XR_TYPE_COMPOSITION_LAYER_QUAD}}};
     XrCompositionLayerQuad bowLaser{XR_TYPE_COMPOSITION_LAYER_QUAD},bowLaserEnd{XR_TYPE_COMPOSITION_LAYER_QUAD};
     XrCompositionLayerQuad nock{XR_TYPE_COMPOSITION_LAYER_QUAD},activeSkill{XR_TYPE_COMPOSITION_LAYER_QUAD},leftActiveSkill{XR_TYPE_COMPOSITION_LAYER_QUAD};
@@ -7661,10 +7661,10 @@ void EndPair() {
     XrCompositionLayerQuad navigationInfo{XR_TYPE_COMPOSITION_LAYER_QUAD};
     XrCompositionLayerQuad companionRow{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(interactionVisible) {
-        if(!potionModels.Ready()&&interactionOutput.bottle>=0&&interactionOutput.bottleHand>=0) {
-            auto pose=motionInput.hand[interactionOutput.bottleHand];pose.q=potions::HeldRotation(pose.q);
+        for(int h=0;h<2;++h)if(!potionModels.Ready()&&interactionOutput.Holding(h)) {
+            auto pose=motionInput.hand[h];pose.q=potions::HeldRotation(pose.q);
             pose.p=pose.p+math::Rotate(pose.q,{0,.055f,0});
-            motionQuad(bottle,XrPose(pose),.075f,.15f,{{768,512},{128,256}},interactionChain);
+            motionQuad(bottle[h],XrPose(pose),.075f,.15f,{{768+128*h,512},{128,256}},interactionChain);
         }
         const bool lookingDown=math::Rotate(Q(head.orientation),{0,0,-1}).y<-.60f;
         if(lookingDown||interactionOutput.nearBelt>=0)for(int i=0;i<4;++i) {

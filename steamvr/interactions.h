@@ -629,11 +629,16 @@ struct Output {
     Result result=Result::None;
     Item bottleItem{};
     bool bottleEmpty=false,beltReady=false;
+    struct HeldBottle {int column=-1;Item item{};bool empty=false;};
+    std::array<HeldBottle,2> bottles{};
+    bool Holding(int hand) const {return hand>=0&&hand<2&&bottles[hand].column>=0;}
+    uint32_t BottleMask() const {return (Holding(0)?1u:0u)|(Holding(1)?2u:0u);}
     bool flying=false; Pose flight{}; Item flightItem{}; int flightColumn=-1; // thrown bottle, model pose
     // An emptied bottle let go of, this step only: its model pose and the
     // hand's motion in world metres (Stage::World), and the floor under the
     // player. It falls into the world as a physics body, drawn only.
     struct Discard {bool active=false;Vec p{},v{},w{};Quat q{0,0,0,1};float floor=0;uint32_t code=0;} discard{};
+    std::array<Discard,2> discards{};
     // A bottle thrown this step, for the physics world (Input::physicsThrows):
     // the same release as a discard, named by id. flightId is the physics
     // throw the flying bottle follows, 0 on the arc.
@@ -676,19 +681,18 @@ class Engine {
     int devPage=0;
     Config config{};
     uint64_t session=0,epoch=0,sequence=0;
-    double lastTime=0,drinkStart=0,pendingAt=0,resultAt=0,criticalUntil=0,criticalAgain=0;
+    double lastTime=0,pendingAt=0,resultAt=0,criticalUntil=0,criticalAgain=0;
     bool primed=false,triggerWas=false,gripWas[2]{},wheelLatch=false,utility=false,map=false,rearm=true,stowed=false;
     bool bottleTriggerWas[2]{};
     bool glyphs=false;   // the GLYPHS page
     bool motions=false;  // the MOTIONS page
     int glyphEdit=-1;    // the shape the skill picker chooses for, -1 none
     int glyphHand=0;     // the hand whose set the GLYPHS page shows (right = 0): the wheel's own when opened
-    bool spent=false,consumed=false;
     Owner owner[2]{Owner::Combat,Owner::Combat};
-    int bottle=-1,bottleHand=-1,holster=-1,holsterHand=-1,pendingHand=0;
+    int holster=-1,holsterHand=-1,pendingHand=0;
     Pose body{};
     Vec holsterGrab{};
-    Request held{},pending{};
+    Request pending{};
     Result result=Result::None;
     int editor=0,editSlot=-1,editPage=0,editBank=-1,choiceCount=0,lastWheelHand=-1;
     Skill previousBinding{};
@@ -778,14 +782,29 @@ class Engine {
                    uint64_t id=0;double arc=0;} flight; // id: the physics throw it follows (0 = the arc); arc: the arc's landing time
     uint64_t tossSerial=0;
     struct Motion {double at=0;Vec v{},w{};};
-    std::array<Motion,32> motion{};unsigned motionNext=0;
-    Vec bottleWas{};Quat bottleTurnWas{0,0,0,1};bool bottleTracked=false;
-    void Drop() {bottle=bottleHand=holster=holsterHand=-1;drinkStart=0;spent=consumed=false;held={};owner[0]=owner[1]=Owner::Combat;
-        bottleTracked=false;motion={};motionNext=0;}
+    struct Bottle {
+        int column=-1;Request held{};bool spent=false,consumed=false,drinkQueued=false;
+        double drinkStart=0;
+        std::array<Motion,32> motion{};unsigned motionNext=0;
+        Vec bottleWas{};Quat bottleTurnWas{0,0,0,1};bool bottleTracked=false;
+    } bottles[2];
+    bool Holding(int hand) const {return bottles[hand].column>=0;}
+    bool AnyBottle() const {return Holding(0)||Holding(1);}
+    bool Reserved(Item item) const {
+        return (Holding(0)&&bottles[0].held.item==item)||(Holding(1)&&bottles[1].held.item==item)||
+            (flight.active&&flight.item==item);
+    }
+    void Grab(int hand,int column,const Belt& b,uint64_t now) {
+        auto& bottle=bottles[hand];bottle={};bottle.column=column;
+        bottle.held={Action::Potion,0,session,now,column,b.Next(),b.revision};
+        owner[hand]=Owner::Bottle;
+    }
+    void DropBottle(int hand) {bottles[hand]={};owner[hand]=Owner::Combat;}
+    void Drop() {DropBottle(0);DropBottle(1);holster=holsterHand=-1;}
     // Fastest recent sample, capped in magnitude, keeping its direction.
-    bool PeakVelocity(double now,Vec& out,float minimum=ThrowMinSpeed) const {
+    bool PeakVelocity(const Bottle& bottle,double now,Vec& out,float minimum=ThrowMinSpeed) const {
         float best=0;
-        for(const auto& m:motion) {
+        for(const auto& m:bottle.motion) {
             if(!m.at||now-m.at>ThrowWindow||m.at>now)continue;
             const float s=std::sqrt(math::Dot(m.v,m.v));
             if(s>best){best=s;out=m.v;}
@@ -795,9 +814,9 @@ class Engine {
         return true;
     }
     // Mean hand turn over the release window, capped.
-    Vec ReleaseSpin(double now) const {
+    Vec ReleaseSpin(const Bottle& bottle,double now) const {
         Vec sum{};int n=0;
-        for(const auto& m:motion)if(m.at&&now-m.at<=ThrowWindow&&m.at<=now){sum=sum+m.w;++n;}
+        for(const auto& m:bottle.motion)if(m.at&&now-m.at<=ThrowWindow&&m.at<=now){sum=sum+m.w;++n;}
         if(!n)return {};
         sum=sum*(1.f/n);
         const float s=std::sqrt(math::Dot(sum,sum));
@@ -805,20 +824,21 @@ class Engine {
     }
     // Let go of an emptied bottle: it leaves the hand into the world with the
     // hand's motion, slow or fast. Nothing native follows; it is drawn only.
-    void Discard(const Input& in,Output& out) const {
-        if(!consumed||!in.floorKnown||!in.stage.known)return;
+    void Discard(const Bottle& bottle,int bottleHand,const Input& in,Output& out) const {
+        if(!bottle.consumed||!in.floorKnown||!in.stage.known)return;
         const auto& hand=in.hand[bottleHand];const auto& stage=in.stage;
-        Vec v{};PeakVelocity(in.time,v,0);
+        Vec v{};PeakVelocity(bottle,in.time,v,0);
         out.discard={true,stage.World(potions::Center(hand.p,hand.q)),math::Rotate(stage.base,v)+in.carry,
-            math::Rotate(stage.base,ReleaseSpin(in.time)),math::Multiply(stage.base,potions::HeldRotation(hand.q)),
-            stage.anchor.y+(in.floor-stage.origin.y),held.item.code};
+            math::Rotate(stage.base,ReleaseSpin(bottle,in.time)),math::Multiply(stage.base,potions::HeldRotation(hand.q)),
+            stage.anchor.y+(in.floor-stage.origin.y),bottle.held.item.code};
+        out.discards[bottleHand]=out.discard;
     }
     // Grip released with recent deliberate motion, away from the belt: launch.
     // A slow or still release keeps the original behaviour (back to the belt).
-    bool Throw(const Input& in,bool fresh,Vec slot,Output& out) {
+    bool Throw(const Bottle& bottle,int bottleHand,const Input& in,bool fresh,Vec slot,Output& out) {
         Vec throwVelocity{};
-        if(spent||!in.floorKnown||!in.stage.known||!fresh||!SameBelt(in.snapshot,held)||!Throwable(PotionType(held.item.code))||
-           !PeakVelocity(in.time,throwVelocity))return false;
+        if(flight.active||bottle.spent||!in.floorKnown||!in.stage.known||!fresh||!SameBelt(in.snapshot,bottle.held)||!Throwable(PotionType(bottle.held.item.code))||
+           !PeakVelocity(bottle,in.time,throwVelocity))return false;
         const auto& hand=in.hand[bottleHand];
         const Vec p=potions::Center(hand.p,hand.q);
         if(math::Dot(p-slot,p-slot)<ThrowClearOfBelt*ThrowClearOfBelt)return false;
@@ -829,11 +849,11 @@ class Engine {
         const double land=LandingTime(worldP,worldV,stage.anchor.y+(in.floor-stage.origin.y));
         if(land<=0)return false;
         flight={true,in.time,in.time+land,worldP,worldV,math::Multiply(stage.base,potions::HeldRotation(hand.q)),
-            bottle,bottleHand,held.item,held.revision,stage};
+            bottle.column,bottleHand,bottle.held.item,bottle.held.revision,stage};
         if(in.physicsThrows) {
             flight.id=++tossSerial;flight.arc=flight.land;flight.land=in.time+ThrowMaxFlight;
-            out.toss={true,flight.id,worldP,worldV,math::Rotate(stage.base,ReleaseSpin(in.time)),flight.q,
-                stage.anchor.y+(in.floor-stage.origin.y),held.item.code};
+            out.toss={true,flight.id,worldP,worldV,math::Rotate(stage.base,ReleaseSpin(bottle,in.time)),flight.q,
+                stage.anchor.y+(in.floor-stage.origin.y),bottle.held.item.code};
         }
         return true;
     }
@@ -856,7 +876,7 @@ public:
         out.wrist=in.active&&in.session&&in.tracked[wristHand]&&std::isfinite(in.time)&&WristPresented(in.Wrist(),in.head);
         const bool palmAllowed=in.active&&in.tracked[wristHand]&&(vitals::Palm(in.vitalsLocation)||vitals::Palm(in.navigationLocation))&&
             !in.wheel&&!in.cancel&&!in.leftCasting&&in.leftTrigger<.2f&&in.grip[wristHand]<.6f&&
-            !in.reservedLeft&&bottleHand!=wristHand&&holsterHand!=wristHand&&Fresh(in.snapshot,in.session,in.at);
+            !in.reservedLeft&&!Holding(wristHand)&&holsterHand!=wristHand&&Fresh(in.snapshot,in.session,in.at);
         const bool palm=palmReveal.Step(in.session,in.epoch,in.time,palmAllowed,
             PalmPresented(in.Wrist(),in.head),PalmPresented(in.Wrist(),in.head,true));
         out.palm=palm&&vitals::Palm(in.vitalsLocation);
@@ -868,7 +888,25 @@ public:
                                       in.bottleTrigger[1]>(bottleTriggerWas[1]?.2f:.55f)};
         // Both grips cast spells: a grip grabs (a bottle, a holster, a shoulder) only alone.
         if(in.spellGrips)soloGrips.Step(in.time,in.grip);else soloGrips.Reset();
-        const bool grips[2]={in.spellGrips?soloGrips.solo[0]:in.grip[0]>.6f,in.spellGrips?soloGrips.solo[1]:in.grip[1]>.6f};
+        // Once either hand owns a bottle, the second grip belongs to potion handling, not a two-grip spell.
+        auto beltReach=[&](int h) {
+            Item item{};float reach=.11f;
+            const auto torso=UprightBody(in.head,body.q);
+            const float waist=config.seated?.43f:config.waistBelowEyes;
+            if(!Fresh(in.snapshot,in.session,in.at)||!in.tracked[h]||(h==1&&in.reservedLeft))return item;
+            for(int i=0;i<4;++i) {
+                const auto& b=in.snapshot.belt[i];
+                const Vec p=torso.p+math::Rotate(torso.q,{(i-1.5f)*.095f,-waist+.08f,-config.beltForward});
+                const float d=potions::GrabDistance(in.hand[h].p,p,torso.q);
+                if(b.known&&b.count&&b.Next().handle&&d<reach){reach=d;item=b.Next();}
+            }
+            return item;
+        };
+        // Two distinct bottles within reach take precedence over a grip spell.
+        const auto rightBottle=beltReach(0),leftBottle=beltReach(1);
+        const bool potionGrips=AnyBottle()||(rightBottle.handle&&leftBottle.handle&&rightBottle!=leftBottle);
+        const bool grips[2]={in.spellGrips&&!potionGrips?soloGrips.solo[0]:in.grip[0]>.6f,
+                            in.spellGrips&&!potionGrips?soloGrips.solo[1]:in.grip[1]>.6f};
         const uint64_t now=in.at;
         const bool fresh=Fresh(in.snapshot,in.session,now);
         const double dt=in.time-lastTime;
@@ -905,7 +943,10 @@ public:
                 result=in.reply.result;resultAt=in.time;out.feedback=(result==Result::Applied||result==Result::Dispatched||result==Result::DebugUpdated||result==Result::TurnsUpdated||result==Result::SharpUpdated||result==Result::FillUpdated||result==Result::RimsUpdated||result==Result::SkyRimsUpdated||result==Result::BodiesUpdated)?2:3;
                 out.feedbackHand=pendingHand;
                 if(result==Result::Applied&&pending.action==Action::Equip)stowed=false;
-                if(result==Result::Applied&&pending.action==Action::Potion&&pending.item==held.item)consumed=true;
+                if(pending.action==Action::Potion)for(auto& bottle:bottles)
+                    if(bottle.column>=0&&pending.item==bottle.held.item) {
+                        bottle.consumed=result==Result::Applied;
+                    }
                 if(result==Result::Applied&&pending.action==Action::BindItem&&editor==3){editor=0;rearm=true;}
                 if(result==Result::Applied&&pending.action==Action::BindSkill&&editor){editor=in.wheelHand>=0?0:1;editSlot=-1;}
                 if(result==Result::Applied&&pending.action==Action::BindGlyphDraw&&editor){editor=in.wheelHand>=0?0:1;editSlot=-1;}
@@ -936,12 +977,12 @@ public:
         out.beltReady=true;
         for(int i=0;i<2;++i)out.holster[i]={body.p+math::Rotate(body.q,{(i==0?1:-1)*config.hipWidth,-waist,-.06f}),body.q};
         auto distance=[](Vec a,Vec b){return std::sqrt(math::Dot(a-b,a-b));};
-        const bool wheel=in.wheel&&!wheelLatch&&bottle<0&&holster<0;
+        const bool wheel=in.wheel&&!wheelLatch&&!AnyBottle()&&holster<0;
         const int dominant=config.dominant==1?1:0;
         shoulder::Input reach;reach.time=in.time;reach.session=in.session;reach.epoch=in.epoch;reach.dominant=dominant;
         reach.active=in.active;reach.tracked=in.tracked[dominant];reach.head=in.head.p;reach.hand=in.hand[dominant].p;reach.heading=body.q;
         reach.grip=in.spellGrips?(grips[dominant]?1.f:0.f):in.grip[dominant];
-        reach.allowed=!wheel&&!in.quickCast&&!in.cancel&&!rearm&&bottle<0&&holster<0&&pending.action==Action::None&&
+        reach.allowed=!wheel&&!in.quickCast&&!in.cancel&&!rearm&&!AnyBottle()&&holster<0&&pending.action==Action::None&&
             fresh&&in.snapshot.equipmentKnown&&(in.snapshot.activeSet==1||in.snapshot.activeSet==2);
         const auto shoulder=shoulderSwap.Step(reach);out.block=out.block||shoulder.block;
         if(shoulder.swap&&request(Action::Equip,3-int(in.snapshot.activeSet))){
@@ -954,7 +995,7 @@ public:
         sheet.active=in.active&&in.leatherReach&&dominant==0;sheet.tracked=in.tracked[leather::Hand];
         sheet.head=in.head.p;sheet.hand=in.hand[leather::Hand].p;sheet.heading=body.q;sheet.grip=in.spellGrips?(grips[leather::Hand]?1.f:0.f):in.grip[leather::Hand];
         sheet.right=in.RightHand(leather::Hand);
-        sheet.allowed=!wheel&&!in.quickCast&&!in.cancel&&!rearm&&bottle<0&&holster<0&&pending.action==Action::None;
+        sheet.allowed=!wheel&&!in.quickCast&&!in.cancel&&!rearm&&!AnyBottle()&&holster<0&&pending.action==Action::None;
         const auto reached=leatherReach.Step(sheet);out.block=out.block||reached.block;
         if(reached.open){out.inventory=true;out.feedback=1;out.feedbackHand=leather::Hand;}
         if(wheel) {
@@ -1100,31 +1141,31 @@ public:
             if(!editor&&!map&&utility&&!rearm&&!flight.active&&edges[pointerHand]&&in.hover>=4&&in.hover<8) {
                 const auto& b=in.snapshot.belt[in.hover-4];
                 if(fresh&&b.known&&b.count&&b.Next().handle) {
-                    bottle=in.hover-4;bottleHand=pointerHand;held={Action::Potion,0,session,now,bottle,b.Next(),b.revision};
+                    Grab(pointerHand,in.hover-4,b,now);
                     owner[pointerHand]=Owner::Bottle;wheelLatch=true;out.wheel=false;out.feedback=1;out.feedbackHand=pointerHand;
                 }
             }
-        } else {quickPressed=false;if(bottle<0&&holster<0)owner[0]=owner[1]=Owner::Combat;}
-        if(!wheel&&!in.quickCast&&!rearm&&bottle<0&&holster<0&&!flight.active&&pending.action==Action::None&&fresh) {
+        } else {quickPressed=false;if(!AnyBottle()&&holster<0)owner[0]=owner[1]=Owner::Combat;}
+        if(!wheel&&!in.quickCast&&!rearm&&holster<0&&fresh) {
             float nearestHand=.11f;
             for(int h=0;h<2;++h) {
-                if(h==1&&in.reservedLeft)continue;
+                if(Holding(h)||(h==1&&in.reservedLeft))continue;
                 int nearest=-1;float reach=.11f;
                 for(int i=0;i<4;++i) {
                     const auto& b=in.snapshot.belt[i];
                     const float d=potions::GrabDistance(in.hand[h].p,out.belt[i].p,out.belt[i].q);
-                    if(b.known&&b.count&&b.Next().handle&&d<reach){nearest=i;reach=d;}
+                    if(b.known&&b.count&&b.Next().handle&&!Reserved(b.Next())&&d<reach){nearest=i;reach=d;}
                 }
                 if(nearest>=0) {
                     if(reach<nearestHand){out.nearBelt=nearest;nearestHand=reach;}
                     const auto& b=in.snapshot.belt[nearest];
                     if(edges[h]) {
-                        bottle=nearest;bottleHand=h;held={Action::Potion,0,session,now,nearest,b.Next(),b.revision};
+                        Grab(h,nearest,b,now);
                         out.nearBelt=nearest;
-                        owner[h]=Owner::Bottle;out.feedback=1;out.feedbackHand=h;break;
+                        owner[h]=Owner::Bottle;out.feedback=1;out.feedbackHand=h;
                     }
                 }
-                if(bottle>=0)break;
+                if(AnyBottle()||flight.active||pending.action!=Action::None)continue;
                 for(int i=0;i<2&&config.holsters;++i)if(distance(in.hand[h].p,out.holster[i].p)<.115f) {
                     out.nearHolster=i;
                     if(edges[h]&&in.snapshot.equipmentKnown) {
@@ -1144,31 +1185,41 @@ public:
                 request(Action::Equip,holster+1);Drop();rearm=true;
             }
         }
-        if(bottle>=0) {
+        for(int bottleHand=0;bottleHand<2;++bottleHand)if(Holding(bottleHand)) {
+            auto& bottle=bottles[bottleHand];
             out.block=true;
-            held.at=now;
+            bottle.held.at=now;
             // Prefer the runtime's own controller velocity; fall back to the
             // pose difference when the runtime does not report one.
             const Vec handNow=in.hand[bottleHand].p;const Quat turnNow=in.hand[bottleHand].q;
-            if(in.velocityKnown[bottleHand]||bottleTracked) {
-                const Vec v=in.velocityKnown[bottleHand]?in.handVelocity[bottleHand]:(handNow-bottleWas)*(1/float(dt));
-                const Vec w=bottleTracked?Spin(bottleTurnWas,turnNow,float(dt)):Vec{};
-                if(math::Dot(v,v)<=ThrowGlitchSpeed*ThrowGlitchSpeed){motion[motionNext]={in.time,v,w};motionNext=(motionNext+1)%motion.size();}
+            if(in.velocityKnown[bottleHand]||bottle.bottleTracked) {
+                const Vec v=in.velocityKnown[bottleHand]?in.handVelocity[bottleHand]:(handNow-bottle.bottleWas)*(1/float(dt));
+                const Vec w=bottle.bottleTracked?Spin(bottle.bottleTurnWas,turnNow,float(dt)):Vec{};
+                if(math::Dot(v,v)<=ThrowGlitchSpeed*ThrowGlitchSpeed){bottle.motion[bottle.motionNext]={in.time,v,w};bottle.motionNext=(bottle.motionNext+1)%bottle.motion.size();}
             }
-            bottleWas=handNow;bottleTurnWas=turnNow;bottleTracked=true;
-            if(!grips[bottleHand]&&Throw(in,fresh,out.belt[bottle].p,out)) {Drop();rearm=true;out.feedback=1;out.feedbackHand=flight.hand;}
-            else if(!grips[bottleHand]||(!spent&&(!fresh||!SameBelt(in.snapshot,held)))) {if(!grips[bottleHand])Discard(in,out);Drop();rearm=true;}
+            bottle.bottleWas=handNow;bottle.bottleTurnWas=turnNow;bottle.bottleTracked=true;
+            if(!grips[bottleHand]&&Throw(bottle,bottleHand,in,fresh,out.belt[bottle.column].p,out)) {DropBottle(bottleHand);if(!AnyBottle())rearm=true;out.feedback=1;out.feedbackHand=flight.hand;}
+            else if(!grips[bottleHand]||(!bottle.spent&&(!fresh||!SameBelt(in.snapshot,bottle.held)))) {if(!grips[bottleHand])Discard(bottle,bottleHand,in,out);DropBottle(bottleHand);if(!AnyBottle())rearm=true;}
             else {
-                out.bottle=bottle;out.bottleHand=bottleHand;out.bottleItem=held.item;out.bottleEmpty=consumed;owner[bottleHand]=Owner::Bottle;
+                out.bottles[bottleHand]={bottle.column,bottle.held.item,bottle.consumed};owner[bottleHand]=Owner::Bottle;
                 const bool clickToDrinkRequested=in.clickToDrink&&bottleClicks[bottleHand]&&!edges[bottleHand];
-                if(!spent&&clickToDrinkRequested) {
-                    if(request(Action::Potion,bottle,held.item,held.revision)){spent=true;pendingHand=bottleHand;}
-                    drinkStart=0;
-                } else if(!spent&&potions::AtMouth(in.hand[bottleHand].p,in.hand[bottleHand].q,in.head.p,in.head.q,drinkStart!=0)) {
-                    if(!drinkStart)drinkStart=in.time;
-                    if(in.time-drinkStart>=.25&&request(Action::Potion,bottle,held.item,held.revision)){spent=true;pendingHand=bottleHand;}
-                } else drinkStart=0;
+                if(!bottle.spent&&(clickToDrinkRequested||bottle.drinkQueued)) {
+                    bottle.drinkQueued=true;
+                    if(request(Action::Potion,bottle.column,bottle.held.item,bottle.held.revision)){bottle.spent=true;bottle.drinkQueued=false;pendingHand=bottleHand;}
+                    bottle.drinkStart=0;
+                } else if(!bottle.spent&&potions::AtMouth(in.hand[bottleHand].p,in.hand[bottleHand].q,in.head.p,in.head.q,bottle.drinkStart!=0)) {
+                    if(!bottle.drinkStart)bottle.drinkStart=in.time;
+                    if(in.time-bottle.drinkStart>=.25) {
+                        bottle.drinkQueued=true;
+                        if(request(Action::Potion,bottle.column,bottle.held.item,bottle.held.revision)){bottle.spent=true;bottle.drinkQueued=false;pendingHand=bottleHand;}
+                    }
+                } else bottle.drinkStart=0;
             }
+        }
+        // Legacy single-bottle UI fields describe the first occupied hand; gameplay and models use both.
+        for(int h=0;h<2;++h)if(out.Holding(h)) {
+            out.bottle=out.bottles[h].column;out.bottleHand=h;
+            out.bottleItem=out.bottles[h].item;out.bottleEmpty=out.bottles[h].empty;break;
         }
         if(flight.active) {
             if(in.stage.known)flight.stage=in.stage; // follow walking/turning for drawing only
