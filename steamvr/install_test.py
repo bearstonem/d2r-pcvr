@@ -190,6 +190,9 @@ class InstallationTests(unittest.TestCase):
                 health_layout = mod_identity.MODINFO.parent / install.enemy_health_layout.RELATIVE_PATH
                 self.assertEqual((game / health_layout).read_bytes(), install.enemy_health_layout.payload())
                 self.assertIn(str(health_layout), journal['installed'])
+                area_layout = mod_identity.MODINFO.parent / install.area_banner_layout.RELATIVE_PATH
+                self.assertEqual((game / area_layout).read_bytes(), install.area_banner_layout.payload())
+                self.assertIn(str(area_layout), journal['installed'])
                 for name in sewers:
                     self.assertIn(str(mod_identity.MOD_DIR / name), journal['installed'])
                 self.assertEqual((game / 'd2rloader/runtime/d3dcompiler_47.dll').read_bytes(), compiler.read_bytes())

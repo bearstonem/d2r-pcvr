@@ -9,6 +9,7 @@
 #include <map>
 #include <string>
 #include "native_ui.h"
+#include "area_banner.h"
 #include "native_ui_signatures.h"
 #include "sigscan.h"
 #include "memory.h"
@@ -257,8 +258,10 @@ void Init(const D2RL::PluginContext* c){
     getLevelId=core?reinterpret_cast<D2RL::Reimplementations::GetLevelIdFromUnitFn>(
         GetProcAddress(core,MAKEINTRESOURCEA(D2RL::Reimplementations::GetLevelIdFromUnitInfo.ordinal))):nullptr;
     if(!getLevelId)framevr::logging::Write("Frame navigation: loader level accessor unavailable");
+    areabanner::Install();
 }
 void Capture(framevr::interaction::Snapshot& s) {
+    areabanner::Install();
     int reason=1;uintptr_t player=0;uint32_t id=0,clientId=0;
     struct Trace {
         framevr::interaction::Snapshot& s;int& reason;uintptr_t& player;uint32_t& id;uint32_t& clientId;
