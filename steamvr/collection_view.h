@@ -292,11 +292,17 @@ inline std::vector<SetInfo> SetsInBand(const Library& library, int band) {
 // melee runeword, belongs under All weapons too): its accepts are the kind's types above and
 // below it. own is the tile's own item type: a made runeword counts on the tiles whose own type
 // its stored copy is (an Honor in a sword counts on Swords, not on Wands).
+// A sub-tile (a weapon type, a class's shields) keeps only the runewords made for that kind of
+// item (owner 2026-11-22: Honor, made in any melee weapon, showed under Daggers, Katars ...):
+// none of their types is a broad one (any weapon, any melee weapon, any shield ...), and one of
+// them is the tile's (only). Insight's melee card (polearms or staves) is under both.
 struct RunewordTile {
     const char* name;
     const char* own;
     const char* accepts;
+    const char* only = nullptr;
 };
+inline constexpr const char* BroadTypes = "weap mele miss blde sppl blun rod shld armo";
 inline constexpr RunewordTile RunewordKinds[panel::KindCount] = {
     {"All weapons", "weap", "weap mele miss blde sppl blun rod swor axe knif pole spea hamm club scep mace h2h wand staf bow xbow orb jave"},
     {"Melee", "mele", "mele weap blde sppl blun rod swor axe knif pole spea hamm club scep mace h2h wand staf"},
@@ -306,15 +312,16 @@ inline constexpr RunewordTile RunewordKinds[panel::KindCount] = {
     {"Shields", "shld", "shld armo shie ashd pala head grim"},
 };
 inline constexpr RunewordTile MeleeTypes[panel::GroupCount] = {
-    {"Swords", "swor", "swor blde mele weap"},     {"Axes", "axe", "axe mele weap"},
-    {"Daggers", "knif", "knif blde mele weap"},    {"Polearms", "pole", "pole sppl mele weap"},
-    {"Spears", "spea", "spea sppl mele weap"},     {"Hammers", "hamm", "hamm blun mele weap"},
-    {"Clubs", "club", "club blun mele weap"},      {"Scepters", "scep", "scep rod blun mele weap"},
-    {"Maces", "mace", "mace blun mele weap"},      {"Katars", "h2h", "h2h mele weap"},
-    {"Wands", "wand", "wand rod blun mele weap"},  {"Staves", "staf", "staf rod blun mele weap"},
+    {"Swords", "swor", "swor blde mele weap", "swor"},       {"Axes", "axe", "axe mele weap", "axe"},
+    {"Daggers", "knif", "knif blde mele weap", "knif"},      {"Polearms", "pole", "pole sppl mele weap", "pole"},
+    {"Spears", "spea", "spea sppl mele weap", "spea aspe"},  {"Hammers", "hamm", "hamm blun mele weap", "hamm"},
+    {"Clubs", "club", "club blun mele weap", "club"},        {"Scepters", "scep", "scep rod blun mele weap", "scep"},
+    {"Maces", "mace", "mace blun mele weap", "mace"},        {"Katars", "h2h", "h2h mele weap", "h2h h2h2"},
+    {"Wands", "wand", "wand rod blun mele weap", "wand"},    {"Staves", "staf", "staf rod blun mele weap", "staf"},
 };
 inline constexpr RunewordTile ShieldTypes[] = {
-    {"Paladin", "ashd", "ashd pala shld armo"}, {"Necromancer", "head", "head shld armo"}, {"Warlock", "grim", "grim shld armo"},
+    {"Paladin", "ashd", "ashd pala shld armo", "ashd pala"}, {"Necromancer", "head", "head shld armo", "head"},
+    {"Warlock", "grim", "grim shld armo", "grim"},
 };
 // The sub-tiles under a top-row tile: the melee weapon types under All weapons and
 // Melee, the class shields under Shields; none under the rest.
@@ -355,6 +362,21 @@ inline bool RunewordFits(std::string_view accepts, std::string_view types) {
 inline bool RunewordInTile(const Library& library, uint32_t slot, const RunewordTile& tile, bool byMade) {
     const Entry* entry = library.At(Category::Runewords, slot);
     if (entry == nullptr) return false;
+    if (tile.only != nullptr) {   // a sub-tile: runewords made for its kind of item alone
+        bool mine = false;
+        size_t at = 0;
+        const std::string_view types = entry->base;
+        while (at < types.size()) {
+            const size_t end = std::min(types.find(' ', at), types.size());
+            const std::string_view type = types.substr(at, end - at);
+            if (!type.empty()) {
+                if (RunewordFits(BroadTypes, type)) return false;
+                mine = mine || RunewordFits(tile.only, type);
+            }
+            at = end + 1;
+        }
+        return mine;
+    }
     if (byMade && library.IsFound(Category::Runewords, slot))
         if (const Library::Made* made = library.MadeAt(Category::Runewords, slot)) return RunewordFits(tile.own, made->types);
     return RunewordFits(tile.accepts, entry->base);

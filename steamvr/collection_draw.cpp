@@ -142,6 +142,38 @@ const std::vector<uint8_t>& Ghost(const std::string& key, const IconPixels& icon
     return out;
 }
 
+// A Rainbow Facet's jewel in its element's colour (owner 2026-11-22: the eight looked the same):
+// fire red, cold blue, poison green, lightning white - read off its stat lines. 0 for any other item.
+uint32_t FacetColour(const Entry& entry) {
+    if (entry.category != Category::Uniques || entry.name.rfind("Rainbow Facet", 0) != 0) return 0;
+    std::string text = entry.stats;
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    if (text.find("fire damage") != std::string::npos) return 0xFF4A3A;
+    if (text.find("cold damage") != std::string::npos) return 0x5A8CFF;
+    if (text.find("poison damage") != std::string::npos) return 0x4CE05A;
+    if (text.find("lightning damage") != std::string::npos) return 0xFFFFFF;
+    return 0;
+}
+// The icon times a colour (its own white and greys take the colour); dim for a missing one.
+const std::vector<uint8_t>& Tinted(const std::string& key, const IconPixels& icon, uint32_t rgb, bool dim) {
+    thread_local std::unordered_map<std::string, std::vector<uint8_t>> cache;
+    auto& out = cache[key + "/" + std::to_string(rgb) + (dim ? "/d" : "")];
+    if (out.size() != size_t(icon.width) * size_t(icon.height) * 4) {
+        out.resize(size_t(icon.width) * size_t(icon.height) * 4);
+        const float r = float(rgb >> 16 & 255) / 255.f, g = float(rgb >> 8 & 255) / 255.f, b = float(rgb & 255) / 255.f;
+        const float k = dim ? 0.45f : 1.0f;
+        for (size_t i = 0; i < out.size(); i += 4) {
+            const float l = 0.299f * icon.rgba[i] + 0.587f * icon.rgba[i + 1] + 0.114f * icon.rgba[i + 2];
+            const float lift = std::min(255.f, l * 1.25f);   // the jewel is grey: a little brighter so the colour reads
+            out[i]     = uint8_t(std::min(255.f, lift * r * k));
+            out[i + 1] = uint8_t(std::min(255.f, lift * g * k));
+            out[i + 2] = uint8_t(std::min(255.f, lift * b * k));
+            out[i + 3] = uint8_t(icon.rgba[i + 3] * (dim ? 0.8f : 1.0f));
+        }
+    }
+    return out;
+}
+
 // An item-type tile's silhouette: the icon's shape in one flat grey (on / off).
 const std::vector<uint8_t>& Silhouette(const std::string& key, const IconPixels& icon, uint32_t rgb) {
     thread_local std::unordered_map<std::string, std::vector<uint8_t>> cache;
@@ -244,8 +276,10 @@ void DrawCard(Painter& p, const panel::Rect& at, const Entry& entry, Category ca
     const IconPixels* pixels = icons && !key.empty() ? icons(key) : nullptr;
     if (pixels != nullptr && pixels->rgba != nullptr) {
         const RectF fit = FitImage(area, pixels->width, pixels->height);
-        if (found) p.Image(fit, pixels->rgba, pixels->width, pixels->height);
-        else       p.Image(fit, Ghost(key, *pixels).data(), pixels->width, pixels->height);
+        if (const uint32_t facet = FacetColour(entry))
+            p.Image(fit, Tinted(key, *pixels, facet, !found).data(), pixels->width, pixels->height);
+        else if (found) p.Image(fit, pixels->rgba, pixels->width, pixels->height);
+        else            p.Image(fit, Ghost(key, *pixels).data(), pixels->width, pixels->height);
     } else if (!entry.extra.empty()) {
         // a runeword is no item until it is made: its runes stand for the picture, and under them
         // what it can be made in, in grey (owner 2026-11-22)
