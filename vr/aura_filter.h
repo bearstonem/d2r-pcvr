@@ -1,6 +1,8 @@
 #pragma once
 #include "aura_recipient.h"
 #include "aura_assets.h"
+#include "psychic_ward_assets.h"
+#include "assassin_charge_assets.h"
 #include "portal_billboard.h"
 #include <algorithm>
 #include <atomic>
@@ -9,13 +11,13 @@
 
 namespace aurafilter {
 using aurarecipient::Unit;using aurarecipient::Friendly;using aurarecipient::Kind;
-struct Entry {uint64_t emitter=0,definition=0,component=0,effects=0;uint32_t entity=0;Unit unit{};Kind kind=Kind::Unknown;bool shout=false;};
+struct Entry {uint64_t emitter=0,definition=0,component=0,effects=0;uint32_t entity=0;Unit unit{};Kind kind=Kind::Unknown;bool shout=false,ward=false,charge=false;};
 struct Snapshot {uint64_t session=0,at=0,registry=0,transforms=0,units=0;std::vector<Entry> entries;};
-struct State {std::mutex mutex;std::atomic<unsigned> hidden{0};Snapshot snapshot;};
+struct State {std::mutex mutex;std::atomic<unsigned> hidden{0};std::atomic<int> chargeMode{1};Snapshot snapshot;};
 inline State& Shared(){static State state;return state;}
 inline bool Wanted(){return Shared().hidden.load()!=0;}
-inline void Configure(bool playerVisible,bool summonVisible,bool playerShouts=true,bool summonShouts=true){
-    auto& s=Shared();s.hidden=(playerVisible?0u:1u)|(summonVisible?0u:2u)|(playerShouts?0u:4u)|(summonShouts?0u:8u);
+inline void Configure(bool playerVisible,bool summonVisible,bool playerShouts=true,bool summonShouts=true,bool hideWard=false,int chargeMode=1){
+    auto& s=Shared();s.hidden=(playerVisible?0u:1u)|(summonVisible?0u:2u)|(playerShouts?0u:4u)|(summonShouts?0u:8u)|(hideWard?16u:0u)|(chargeMode==1?0u:32u);s.chargeMode=chargeMode;
     std::lock_guard lock(s.mutex);s.snapshot={};
 }
 template<class Read>uint64_t Client(Read read,uint64_t base,const Friendly& actor){
@@ -71,7 +73,7 @@ template<class Read>Snapshot Build(Read read,uint64_t base,uint64_t session,uint
         uint64_t component=0,emitter=0,header[10]{};uint32_t entity=0;char path[160]{};
         if(!read(&component,s.payload+i*48ull,8)||!component||!read(&emitter,component+16,8)||!emitter||
            !read(header,emitter,sizeof header)||header[0]!=base+0x1da1118||header[6]!=component||
-           !billboards::portal::DefinitionPath(read,header[8],base,path)||(!aurarecipient::AuraAsset(path)&&!aurarecipient::ShoutAsset(path))||
+           !billboards::portal::DefinitionPath(read,header[8],base,path)||(!aurarecipient::AuraAsset(path)&&!aurarecipient::ShoutAsset(path)&&!psychicward::Asset(path)&&!assassincharges::Asset(path))||
            !read(&entity,s.packed+i*4ull,4)||aurarecipient::Component(read,s.address,entity,48)!=s.payload+i*48ull)continue;
         Unit unit{};
         if(!aurarecipient::Resolve(read,result.registry,result.transforms,result.units,entity,unit))continue;
@@ -80,12 +82,12 @@ template<class Read>Snapshot Build(Read read,uint64_t base,uint64_t session,uint
         const auto actor=std::find_if(roster,roster+count,[&](const Friendly& a){return a.type==unit.type&&a.cls==unit.cls&&a.id==unit.id;});
         if(actor==roster+count||Client(read,base,*actor)!=unit.address)continue;
         if(result.entries.size()>=1024)return {}; // incomplete state never suppresses anything
-        result.entries.push_back({emitter,header[8],component,s.address,entity,unit,kind,aurarecipient::ShoutAsset(path)});
+        result.entries.push_back({emitter,header[8],component,s.address,entity,unit,kind,aurarecipient::ShoutAsset(path),psychicward::Asset(path),assassincharges::Asset(path)});
     }
     return result;
 }
 inline void Publish(Snapshot next){auto& s=Shared();std::lock_guard lock(s.mutex);s.snapshot=std::move(next);}
-template<class Read>bool Hidden(Read read,uint64_t base,uint64_t session,uint64_t now,uint64_t emitter,uint64_t definition){
+template<class Read>bool Hidden(Read read,uint64_t base,uint64_t session,uint64_t now,uint64_t emitter,uint64_t definition,bool chargesReady=false){
     auto& s=Shared();if(!Wanted()||!session)return false;
     Entry entry;uint64_t registry=0,transforms=0,units=0;
     {
@@ -96,7 +98,8 @@ template<class Read>bool Hidden(Read read,uint64_t base,uint64_t session,uint64_
         registry=snap.registry;transforms=snap.transforms;units=snap.units;
     }
     const auto recipientBit=entry.kind==Kind::Player?1u:entry.kind==Kind::Summon?2u:0u;
-    const auto bit=recipientBit<<(entry.shout?2:0);
+    if(entry.charge&&s.chargeMode.load()==2&&!chargesReady)return false;
+    const auto bit=entry.charge?(entry.kind==Kind::Player?32u:0u):entry.ward?(entry.kind==Kind::Player?16u:0u):recipientBit<<(entry.shout?2:0);
     if(!(s.hidden.load()&bit))return false;
     uint64_t back=0;Unit current{};
     const auto effect=aurarecipient::Component(read,entry.effects,entry.entity,48);

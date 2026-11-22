@@ -152,10 +152,12 @@ static const GoldenRow Golden[]={
     {"torch.spell_hands_pct",View::Environment,1,content::RowKind::Slider,"Spell hand light",0,1},   // a Sorceress's (2026-11-06)
     {"light.radius_boost_pct",View::Environment,1,content::RowKind::Slider,"Light Radius boost",0,0},   // #440
     {"render.ice_armor_visual",View::Effects,0,content::RowKind::Choice,"Ice Armor",3,0},
-    {"render.cyclone_armor_visual",View::Effects,0,content::RowKind::Choice,"Cyclone Armor",2,0},
+    {"render.cyclone_armor_visual",View::Effects,0,content::RowKind::Choice,"Cyclone Armor",3,0},
+    {"render.psychic_ward_mode",View::Effects,0,content::RowKind::Choice,"Psychic Ward",3,0},
     {"render.bone_armor_visual",View::Effects,0,content::RowKind::Choice,"Bone Armor",2,0},
+    {"render.assassin_charges_visual",View::Effects,0,content::RowKind::Choice,"Assassin charges",3,0},
     {"render.player_aura_visual",View::Effects,1,content::RowKind::Choice,"Your auras",2,0},
-    {"render.summon_aura_visual",View::Effects,1,content::RowKind::Choice,"Friendly auras",2,0},
+    {"render.summon_aura_visual",View::Effects,1,content::RowKind::Toggle,"Friendly auras",0,0},
     {"render.player_shout_visual",View::Effects,2,content::RowKind::Choice,"Your shout buffs",2,0},
     {"render.summon_shout_visual",View::Effects,2,content::RowKind::Choice,"Friendly shout buffs",2,0},
 };
@@ -262,7 +264,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==126,"126 settings on the menu, each one row");   // + Enemy activation distance (#576)   // + seven Effects rows (#582)   // + Map grab hint (grab_hint.h)   // + Floating map background   // + Props have weight (2026-11-12)   // + Weapons hit walls (2026-11-12)   // + Sticks stay right-handed (2026-11-11)   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
+        Check(tables.rowCount==128,"128 settings including Psychic Ward and Assassin charges");   // + Enemy activation distance (#576)   // + seven Effects rows (#582)   // + Map grab hint (grab_hint.h)   // + Floating map background   // + Props have weight (2026-11-12)   // + Weapons hit walls (2026-11-12)   // + Sticks stay right-handed (2026-11-11)   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};

@@ -1177,7 +1177,7 @@ int main(int argc,char** argv){
             Check(RowEnabled(defaults,key)&&Normalize(key,0)==0&&defaults[key]==1,"aura controls default visible and allow explicit Off");
         }
         int rows=0;for(const auto& row:content::Menu().rows)if(row.page==View::Effects)++rows;
-        Check(rows==7,"Effects contains three armor, two aura and two shout controls");
+        Check(rows==9,"Effects contains four protection, charges, two aura and two shout controls");
     }
     PrintReport();
     std::puts("VR settings draft, persistence requests, conflicts, row rules and input-gating tests passed");

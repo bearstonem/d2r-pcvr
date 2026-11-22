@@ -133,6 +133,8 @@
 #include "d2r_vr_state.h"
 #include "foveation.h"
 #include "effects_layer.h"
+#include "armor_mist.h"
+#include "assassin_charges.h"
 #include "gaze.h"
 #include "gaze_aim.h"
 #include "d2rcam.h"
@@ -1099,6 +1101,7 @@ unsigned bodyPushes=0,bodyMost=0,bodyStrikes=0,bodySlips=0;
 std::atomic<ULONGLONG> bodyStrikeAt[2]{};   // a weapon's contact the game counted as a hit (MeleeImpact)
 elements::Renderer elementalRenderer;
 elements::State elementalState;
+elements::Scene psychicWardScene,cycloneMistScene,assassinChargeScene;elements::Effects psychicWardEffects,cycloneMistEffects;
 elements::Scene elementalScene;
 elements::Effects elementalEffects;   // the hands' particles, stepped once a frame into elementalScene.drawn
 // Each spell hand's element (elements::Element), opacity and when (ms; 0 none), for its light on the world
@@ -1429,7 +1432,7 @@ void ClearInput() {
     interactions.Reset();interactionOutput={};interactionstate::Cancel();skel::SetInteractionHidden(0);
     potionScene={};if(droppedBottles)droppedBottles->Reset();
     bodyStepper.Reset();bodyNow={};   // posted to its worker; the hook eases the bodies' last answers out
-    elementalState.Reset();elementalScene={};elementalEffects.Reset();
+    elementalState.Reset();elementalScene={};elementalEffects.Reset();psychicWardScene={};psychicWardEffects.Reset();cycloneMistScene={};cycloneMistEffects.Reset();assassinChargeScene={};
     journalPlacement.LoseTracking();
     meleePoses.Clear();offhandPoses.Clear();CancelShieldCast();
     bowNeedsWorld=bowHasShot=leftNeedsWorld=leftHasShot=false;
@@ -5908,6 +5911,22 @@ void Input() {
     }
     // The hands' particles (elemental_particles.h): once a frame, the torch's flame with them.
     elementalEffects.Step(elementalScene);
+    std::array<math::Vec,2> wardArm{math::Vec{0,0,1},math::Vec{0,0,1}},wardWrist{};
+    for(int h=0;h<2;++h) {
+        float wrist[3],elbow[3],palm[3];
+        if(skel::ForearmOnController(PhysicalHand(h),wrist,elbow,palm)) {
+            wardArm[h]={elbow[0]-wrist[0],elbow[1]-wrist[1],elbow[2]-wrist[2]};
+            wardWrist[h]={wrist[0],wrist[1],wrist[2]};
+        }
+    }
+    psychicWardScene=armormist::Scene(elementalInput,interactionInput.snapshot,hudSettings.values[settings::PsychicWardVisual]==2.f,wardArm,206,elements::Element::Psychic,387,wardWrist,.10f);
+    psychicWardEffects.Step(psychicWardScene);
+    armormist::Occlude(psychicWardScene,elementalInput,wardArm,wardWrist);
+    cycloneMistScene=armormist::Scene(elementalInput,interactionInput.snapshot,hudSettings.values[settings::CycloneArmorVisual]==2.f,wardArm,151,elements::Element::Wind,235,wardWrist);
+    cycloneMistEffects.Step(cycloneMistScene);
+    armormist::Occlude(cycloneMistScene,elementalInput,wardArm,wardWrist);
+    assassinChargeScene=assassincharges::Scene(elementalInput,interactionInput.snapshot,int(hudSettings.values[settings::AssassinChargesVisual]),
+        wardArm,wardWrist);
     {   // and their light, a torch's own aside
         const auto now=GetTickCount64();const bool current=elements::Current(elementalScene,gamestate::LocalPlayer(),now);
         for(int h=0;h<2;++h) {
@@ -6793,6 +6812,18 @@ bool TurnEye(int i) {
        elements::Current(elementalScene,gamestate::LocalPlayer(),GetTickCount64()))
         elementalRenderer.Render(e.commands.Get(),image,unsigned(i),{V(now.pose.position),Q(now.pose.orientation)},
             {now.fov.angleLeft,now.fov.angleRight,now.fov.angleDown,now.fov.angleUp},elementalScene);
+    if(!panelMode&&!spatialMode&&!settingsModel.open&&interactionInput.active&&
+       elements::Current(psychicWardScene,gamestate::LocalPlayer(),GetTickCount64()))
+        elementalRenderer.Render(e.commands.Get(),image,unsigned(i),{V(now.pose.position),Q(now.pose.orientation)},
+            {now.fov.angleLeft,now.fov.angleRight,now.fov.angleDown,now.fov.angleUp},psychicWardScene);
+    if(!panelMode&&!spatialMode&&!settingsModel.open&&interactionInput.active&&
+       elements::Current(cycloneMistScene,gamestate::LocalPlayer(),GetTickCount64()))
+        elementalRenderer.Render(e.commands.Get(),image,unsigned(i),{V(now.pose.position),Q(now.pose.orientation)},
+            {now.fov.angleLeft,now.fov.angleRight,now.fov.angleDown,now.fov.angleUp},cycloneMistScene);
+    if(!panelMode&&!spatialMode&&!settingsModel.open&&interactionInput.active&&
+       elements::Current(assassinChargeScene,gamestate::LocalPlayer(),GetTickCount64()))
+        elementalRenderer.Render(e.commands.Get(),image,unsigned(i),{V(now.pose.position),Q(now.pose.orientation)},
+            {now.fov.angleLeft,now.fov.angleRight,now.fov.angleDown,now.fov.angleUp},assassinChargeScene);
     if(!Hr(e.commands->Close(),"close turn list")||!turned){failed=true;return false;}
     ID3D12CommandList* lists[]={e.commands.Get()};queue->ExecuteCommandLists(1,lists);
     if(!Hr(queue->Signal(fence.Get(),++fenceValue),"signal turn fence")){failed=true;return false;}
@@ -7026,6 +7057,24 @@ bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
         const auto& v=views[eye];
         elementalRenderer.Render(e.commands.Get(),dest,eye,{V(v.pose.position),Q(v.pose.orientation)},
             {v.fov.angleLeft,v.fov.angleRight,v.fov.angleDown,v.fov.angleUp},elementalScene);
+    }
+    if(!panelMode&&!spatialMode&&!settingsModel.open&&interactionInput.active&&
+       elements::Current(psychicWardScene,gamestate::LocalPlayer(),GetTickCount64())) {
+        const auto& v=views[eye];
+        elementalRenderer.Render(e.commands.Get(),dest,eye,{V(v.pose.position),Q(v.pose.orientation)},
+            {v.fov.angleLeft,v.fov.angleRight,v.fov.angleDown,v.fov.angleUp},psychicWardScene);
+    }
+    if(!panelMode&&!spatialMode&&!settingsModel.open&&interactionInput.active&&
+       elements::Current(cycloneMistScene,gamestate::LocalPlayer(),GetTickCount64())) {
+        const auto& v=views[eye];
+        elementalRenderer.Render(e.commands.Get(),dest,eye,{V(v.pose.position),Q(v.pose.orientation)},
+            {v.fov.angleLeft,v.fov.angleRight,v.fov.angleDown,v.fov.angleUp},cycloneMistScene);
+    }
+    if(!panelMode&&!spatialMode&&!settingsModel.open&&interactionInput.active&&
+       elements::Current(assassinChargeScene,gamestate::LocalPlayer(),GetTickCount64())) {
+        const auto& v=views[eye];
+        elementalRenderer.Render(e.commands.Get(),dest,eye,{V(v.pose.position),Q(v.pose.orientation)},
+            {v.fov.angleLeft,v.fov.angleRight,v.fov.angleDown,v.fov.angleUp},assassinChargeScene);
     }
     if(gpu){
         e.commands->EndQuery(gpuProfile.heap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,eye*5+4);
@@ -8624,7 +8673,7 @@ void SetBowWorldEpoch(uint32_t epoch) {
     std::lock_guard lock(mutex);
     if(bowWorldEpoch==epoch)return;
     bowWorldEpoch=epoch;bowNeedsWorld=bowHasShot=leftNeedsWorld=leftHasShot=false;CancelShieldCast();
-    elementalState.Reset();elementalScene={};elementalEffects.Reset();
+    elementalState.Reset();elementalScene={};elementalEffects.Reset();psychicWardScene={};psychicWardEffects.Reset();cycloneMistScene={};cycloneMistEffects.Reset();assassinChargeScene={};
     if(motionInput.weapon==gameplay::Weapon::Bow||motionInput.weapon==gameplay::Weapon::Javelin){motion.Cancel();motionOutput={};}
 }
 uint64_t BowRenderTime(){return bowRenderTime.load();}
@@ -8837,7 +8886,7 @@ void Shutdown(bool preserveResolution) {
     // when ordinary frame submission uses queue ordering without a CPU wait.
     if(fence&&!WaitGpu())failed=true;
     if(uiEye.chain&&pDestroySwapchain)pDestroySwapchain(uiEye.chain);uiEye={};journalMode=spatialMode=workspacePlaced=leatherMode=false;leatherShown=false;uiworld::ShowWorldBehindMenu(false);hud::UiFrame(false,false,0);uiSupported=false;uiBlit={};potionModels.Reset();potionScene={};
-    elementalRenderer.Reset();elementalState.Reset();elementalScene={};elementalEffects.Reset();
+    elementalRenderer.Reset();elementalState.Reset();elementalScene={};elementalEffects.Reset();psychicWardScene={};psychicWardEffects.Reset();cycloneMistScene={};cycloneMistEffects.Reset();assassinChargeScene={};
     if(mapEye.chain&&pDestroySwapchain)pDestroySwapchain(mapEye.chain);mapEye={};mapSupported=false;mapBlit={};gamestate::MenuMap(false);hud::MenuMapCapture(false);
     settingsModel.Close();settingsOpen=false;settingsInputGate.Suspend();settingsPainted={};settingsAtlasPending=settingsImageReady=false;
     settingsPaintRequest=0;settingsRequested={};

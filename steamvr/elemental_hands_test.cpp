@@ -1,5 +1,7 @@
 #include "elemental_hands.h"
 #include "spell_sprites.h"
+#include "armor_mist.h"
+#include "assassin_charges.h"
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -46,6 +48,88 @@ struct Sim {
     }
 };
 int main() {
+    {
+        Input in;in.head.p={0,0,0};in.tracked[0]=true;
+        in.hands[0].p={0,-.1f,-.5f};in.hands[0].q={0,0,0,1};
+        const std::array<math::Vec,2> arms{math::Vec{0,.3f,0},math::Vec{}};
+        Scene mist;mist.count=4;
+        mist.drawn[0].kind=PsychicMist;mist.drawn[0].p={0,0,-1};
+        mist.drawn[1].kind=WhiteMist;mist.drawn[1].p={0,0,-1};
+        mist.drawn[2].kind=PsychicMist;mist.drawn[2].p={0,0,-.4f};
+        mist.drawn[3].kind=Glow;mist.drawn[3].p={0,0,-1};
+        armormist::Occlude(mist,in,arms,{});
+        Check(mist.drawn[0].intensity==0&&mist.drawn[1].intensity==0,"both mist colours hide behind a forearm");
+        Check(mist.drawn[2].intensity==1&&mist.drawn[3].intensity==1,"near mist and unrelated effects stay visible");
+        in.tracked[0]=false;mist.drawn[0].intensity=1;
+        armormist::Occlude(mist,in,arms,{});
+        Check(mist.drawn[0].intensity==1,"lost tracking never creates an invisible arm occluder");
+    }
+    Check(armocclusion::Hidden({0,0,0},{0,0,-1},{0,-.1f,-.5f},{0,.2f,-.5f}),"forearm hides a charge behind it");
+    Check(!armocclusion::Hidden({0,0,0},{0,0,-.4f},{0,-.1f,-.5f},{0,.2f,-.5f}),"charge in front of arm remains visible");
+    Check(!armocclusion::Hidden({0,0,0},{.2f,0,-1},{0,-.1f,-.5f},{0,.2f,-.5f}),"charge beside arm remains visible");
+    {
+        Sim s;s.snapshot.effects.known=true;s.snapshot.effectsAt=s.in.at;
+        for(unsigned group=0;group<6;++group)for(int n=1;n<=3;++n) {
+            s.snapshot.effects={};s.snapshot.effects.known=true;s.snapshot.effects.Set(effects::ChargeStates[group]);
+            effects::CaptureCharges(s.snapshot.effects,[&](int stat,int& value){value=stat==effects::ChargeStats[group]?n:0;return true;});
+            Check(s.snapshot.effects.chargesKnown,"native charge counter validated");
+            const std::array<math::Vec,2> axes{math::Vec{0,0,1},math::Vec{0,0,1}};
+            auto scene=assassincharges::Scene(s.in,s.snapshot,2,axes);
+            Check(scene.count==unsigned(n*2)&&scene.chargeOnly,"every skill draws exact 1/2/3 charges on both arms");
+            Check(!assassincharges::Scene(s.in,s.snapshot,0,axes).Visible()&&!assassincharges::Scene(s.in,s.snapshot,1,axes).Visible(),"Off and Original draw no custom charges");
+            s.in.hands[0].p=s.in.head.p;
+            Check(assassincharges::Scene(s.in,s.snapshot,2,axes).count==unsigned(n),"near-face charges fade one arm only");
+            s.in.hands[0].p={.2f,0,-.5f};
+        }
+        for(int bad:{-1,4,999}) {
+            effects::CaptureCharges(s.snapshot.effects,[&](int,int& value){value=bad;return true;});
+            Check(!s.snapshot.effects.chargesKnown,"invalid charge counts fail open");
+        }
+        s.snapshot.effects={};s.snapshot.effects.known=true;
+        for(int state:effects::ChargeStates)s.snapshot.effects.Set(state);
+        effects::CaptureCharges(s.snapshot.effects,[](int,int& value){value=3;return true;});
+        auto stacked=assassincharges::Scene(s.in,s.snapshot,2,{math::Vec{0,0,1},math::Vec{0,0,1}});
+        Check(stacked.count==36,"all six charged skills coexist without losing orbs");
+        s.snapshot.effectsAt=s.in.at-1001;
+        Check(!assassincharges::Scene(s.in,s.snapshot,2,{}).Visible(),"stale counts disappear");
+    }
+
+    {
+        Sim s;s.snapshot.effects.known=true;s.snapshot.effects.Set(206);s.snapshot.effectsAt=s.in.at;
+        s.snapshot.skillClass=6; // native state, never a class or selected spell check
+        auto ward=armormist::Scene(s.in,s.snapshot,true);
+        const std::array<math::Vec,2> axis{math::Vec{0,0,1},math::Vec{0,0,1}};
+        const std::array<math::Vec,2> wrist{math::Vec{.035f,0,-.02f},math::Vec{-.035f,0,-.02f}};
+        auto placed=armormist::Scene(s.in,s.snapshot,true,axis,206,Element::Psychic,387,wrist,.10f);
+        for(int h=0;h<2;++h) {
+            const auto expected=s.in.hands[h].p+math::Rotate(s.in.hands[h].q,wrist[h]+axis[h]*.10f);
+            const auto delta=placed.hands[h].pose.p-expected;
+            Check(math::Dot(delta,delta)<1e-10f,"mist follows the drawn wrist toward elbow, including controller offset");
+        }
+        Check(ward.hands[0].element==Element::Psychic&&ward.hands[1].opacity==1,"ward surrounds both tracked hands");
+        Check(!armormist::Scene(s.in,s.snapshot,false).Visible(),"Off has no replacement");
+        s.in.hands[0].p=s.in.head.p;
+        ward=armormist::Scene(s.in,s.snapshot,true);
+        Check(ward.hands[0].opacity==0&&ward.hands[1].opacity==1,"near-face hand fades independently");
+        s.in.tracked[1]=false;Check(!armormist::Scene(s.in,s.snapshot,true).Visible(),"tracking loss hides mist");
+        s.in.tracked[1]=true;s.snapshot.effectsAt=s.in.at-1001;
+        Check(!armormist::Scene(s.in,s.snapshot,true).Visible(),"stale ward state never renews protection visuals");
+        s.snapshot.effectsAt=s.in.at;s.snapshot.effects={};
+        Check(!armormist::Scene(s.in,s.snapshot,true).Visible(),"ward removal hides mist immediately");
+        s.snapshot.effects.known=true;s.snapshot.effects.Set(206);s.snapshot.health=0;
+        Check(!armormist::Scene(s.in,s.snapshot,true).Visible(),"death clears mist");
+    }
+
+    {
+        Sim s;s.snapshot.effects.known=true;s.snapshot.effects.Set(151);s.snapshot.effectsAt=s.in.at;
+        auto wind=armormist::Scene(s.in,s.snapshot,true,{},151,Element::Wind,235);
+        Check(wind.hands[0].element==Element::Wind&&wind.hands[1].opacity==1,"Cyclone state shows white mist on both arms");
+        Check(!armormist::Scene(s.in,s.snapshot,true).Visible(),"Cyclone never selects Psychic Ward mist");
+        s.snapshot.effects.Set(206);
+        Check(armormist::Scene(s.in,s.snapshot,true).Visible()&&armormist::Scene(s.in,s.snapshot,true,{},151,Element::Wind,235).Visible(),"both armors can coexist");
+        s.snapshot.effects={};s.snapshot.effects.known=true;s.snapshot.effects.Set(14);
+        Check(!armormist::Scene(s.in,s.snapshot,true,{},151,Element::Wind,235).Visible(),"Bone Armor never selects Cyclone mist");
+    }
     for(int id:{36,41,46,47,51,52,56,62})Check(Classify(id)==Element::Fire,"active fire mapping");
     for(int id:{39,40,44,45,50,55,59,60,64})Check(Classify(id)==Element::Cold,"active cold mapping");
     for(int id:{38,42,48,49,53,57})Check(Classify(id)==Element::Lightning,"active lightning mapping");

@@ -62,12 +62,26 @@ inline constexpr Definition Definitions[]={
 };
 constexpr unsigned MaxStates=512;
 struct Status {
-    bool known=false;
+    bool known=false,chargesKnown=false;
+    std::array<uint8_t,6> charges{};
     std::array<uint32_t,MaxStates/32> bits{};
     bool operator==(const Status&) const=default;
     bool Has(int state)const{return known&&state>0&&state<int(MaxStates)&&(bits[state/32]&(1u<<(state%32)));}
     void Set(int state){if(state>0&&state<int(MaxStates))bits[state/32]|=1u<<(state%32);}
 };
+// Native progressive counter stats, corresponding to Tiger, Cobra, Fire,
+// Thunder, Ice and Phoenix. These are counters, not guessed cast timers.
+inline constexpr int ChargeStates[]={122,123,125,127,126,124};
+inline constexpr int ChargeStats[]={318,319,321,323,322,320};
+template<class Read>void CaptureCharges(Status& s,Read read) {
+    s.charges={};s.chargesKnown=false;if(!s.known)return;
+    std::array<uint8_t,6> counts{};
+    for(unsigned i=0;i<counts.size();++i) {
+        int n=0;if(!read(ChargeStats[i],n)||n<0||n>3||s.Has(ChargeStates[i])!=(n>0))return;
+        counts[i]=uint8_t(n);
+    }
+    s.charges=counts;s.chargesKnown=true;
+}
 // The caller verifies a live local player, table bank and native accessor.
 // Out-of-bank states are absent; failed reads discard the whole sample.
 template<class Check>Status Capture(unsigned stateCount,Check check) {

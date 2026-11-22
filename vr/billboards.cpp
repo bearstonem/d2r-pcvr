@@ -19,6 +19,7 @@
 #include "armor_visuals.h"
 #include "aura_filter.h"
 #include "effect_visibility.h"
+#include "active_effects.h"
 #include <cstdio>
 #endif
 
@@ -316,7 +317,7 @@ void CenterPosition(void* output,const void* input,uint32_t mask,const void* wor
             if(match.id!=id){
                 portal::Instance instance{};match={id,false};
                 match.hidden=portal::Resolve(ReadAt,c,i,gameBase,instance)&&
-                    aurafilter::Hidden(ReadAt,gameBase,session,now,instance.address,instance.definition);
+                    aurafilter::Hidden(ReadAt,gameBase,session,now,instance.address,instance.definition,effectstate::ChargesReady(session));
             }
             if(match.hidden){points[i].y-=bone_armor::HiddenDepth;auraHidden=true;}
         }
@@ -470,7 +471,7 @@ void EffectRenderEnabled(void* output,const void* args){
     const auto changed=visibility::Filter(ReadAt,[](uint64_t p,const void* value,size_t bytes){
         return framevr::WriteMemory(reinterpret_cast<void*>(p),value,bytes);
     },reinterpret_cast<uint64_t>(output),reinterpret_cast<uint64_t>(args),gameBase,[&](const portal::Instance& instance){
-        if(buffs&&aurafilter::Hidden(ReadAt,gameBase,session,now,instance.address,instance.definition))return true;
+        if(buffs&&aurafilter::Hidden(ReadAt,gameBase,session,now,instance.address,instance.definition,effectstate::ChargesReady(session)))return true;
         if(haveHero){
             char path[160]{};portal::Vec origin{};
             return portal::DefinitionPath(ReadAt,instance.definition,gameBase,path)&&armorvisuals::CycloneAsset(path)&&

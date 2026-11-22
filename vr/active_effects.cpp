@@ -2,6 +2,7 @@
 #include <D2RLPlugin/api.h>
 #include "active_effects.h"
 #include "melee.h"
+#include "combat.h"
 #include "memory.h"
 #include "sigscan.h"
 #include "logging.h"
@@ -23,7 +24,8 @@ template<class T>bool Read(uintptr_t p,T& out){return p>=0x10000&&p<=UINTPTR_MAX
 std::atomic<uint64_t> holySession{0},holyAt{0};
 // Whether the last known sample had an aura, for the aura icon's release.
 std::atomic<uint64_t> auraSession{0},auraSampledAt{0};
-std::atomic<bool> auraOn{false};
+std::atomic<bool> auraOn{false},chargesKnown{false};
+std::atomic<uint64_t> chargeSession{0},chargeAt{0};
 }
 void Init(const D2RL::PluginContext* c){context=c;c->QueryService(&tables);}
 framevr::effects::Status Sample(uint64_t session) {
@@ -36,12 +38,14 @@ framevr::effects::Status Sample(uint64_t session) {
         if(tables->getTable(context,D2RL::DataTables::Bank(bank),D2RL::DataTables::TableId::States,&view)==D2RL::DataTables::Result::Success&&view.rows&&view.rowSize==0x44) {
             auto check=reinterpret_cast<int(*)(uintptr_t,int)>(d2rsig::Addr(CheckStateRva));
             result=framevr::effects::Capture(view.rowCount,[&](int state){return check(player,state)?1:0;});
+            framevr::effects::CaptureCharges(result,[&](int stat,int& value){return combat::UnitStat(player,stat,value);});
         }
     }
+    chargesKnown=result.chargesKnown;chargeSession=session;chargeAt=result.known?GetTickCount64():0;
     holyAt=result.Has(framevr::effects::HolyShieldState)?GetTickCount64():0;holySession=session;
     auraOn=framevr::effects::AnyAura(result);auraSampledAt=result.known?GetTickCount64():0;auraSession=session;
     static framevr::effects::Status before;static uint64_t lastSession=0;
-    if(result!=before||lastSession!=session) {
+    if(result.known!=before.known||result.bits!=before.bits||lastSession!=session) {
         char line[768];int n=std::snprintf(line,sizeof line,"Frame active effects: %s",result.known?"states":"unavailable");
         for(const auto& d:framevr::effects::Definitions)if(result.Has(d.state)&&n<int(sizeof line)-12)
             n+=std::snprintf(line+n,sizeof line-size_t(n)," %d",d.state);
@@ -59,5 +63,9 @@ int AuraState(uint64_t session) {
     const uint64_t at=auraSampledAt.load(),now=GetTickCount64();
     if(!session||auraSession.load()!=session||!at||now<at||now-at>1000)return -1;
     return auraOn.load()?1:0;
+}
+bool ChargesReady(uint64_t session) {
+    const auto at=chargeAt.load(),now=GetTickCount64();
+    return session&&chargeSession.load()==session&&chargesKnown.load()&&at&&now>=at&&now-at<=1000;
 }
 }

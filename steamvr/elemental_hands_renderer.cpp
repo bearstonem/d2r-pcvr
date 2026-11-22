@@ -43,7 +43,9 @@ Pixel VS(uint vertex:SV_VertexID,uint particle:SV_InstanceID) {
     float angle=hash(seed+8)*6.2831853;
     float3 p;
     Pixel o;o.uv=corner;o.life=1;
-    if(options.y>2.5) {
+    if(options.y>5.5) {
+        p=translation.xyz;p.xy+=corner*translation.w;
+    } else if(options.y>2.5) {
         float arc=floor(particle/8),segment=particle%8,tick=floor(options.x*12);
         float3 a=rotate(arcPoint(arc,segment,tick))+translation.xyz;
         float3 b=rotate(arcPoint(arc,segment+1,tick))+translation.xyz;
@@ -81,10 +83,25 @@ Pixel VS(uint vertex:SV_VertexID,uint particle:SV_InstanceID) {
     o.position=mul(float4(p,1),projection);
     return o;
 }
+float3 chargeColor(float k) {
+    // Tiger: warm orange; Cobra: blue-green; fire: red-orange;
+    // thunder: blue-white; ice: blue; Phoenix: pale white (not rainbow orbs).
+    if(k<.5)return float3(1,.40,.06);
+    if(k<1.5)return float3(.10,1,.48);
+    if(k<2.5)return float3(1,.18,.025);
+    if(k<3.5)return float3(.65,.78,1);
+    if(k<4.5)return float3(.16,.48,1);
+    return float3(.9,.94,1);
+}
 float3 srgb(float3 c){return lerp(12.92*c,1.055*pow(max(c,0),1/2.4)-.055,step(.0031308,c));}
 float4 PS(Pixel i):SV_Target {
     float shape;float3 color;
-    if(options.y<1.5||options.y>4.5) {
+    if(options.y>5.5) {
+        float2 uv=i.uv;
+        if(options.y>6.5)uv.x+=.18*sin(uv.y*5+options.x*2);
+        shape=pow(saturate(1-dot(uv,uv)),3);
+        color=options.y>7.5?float3(.85,.88,.92):options.y>6.5?float3(.55,.12,.85):chargeColor(options.w);
+    } else if(options.y<1.5||options.y>4.5) {
         float width=1-(i.uv.y*.5+.5)*.65;
         float2 uv=float2(i.uv.x/width,i.uv.y);
         shape=pow(saturate(1-dot(uv,uv)),2);
@@ -97,6 +114,7 @@ float4 PS(Pixel i):SV_Target {
         color=lerp(float3(.18,.3,1),float3(.7,.85,1),shape);
     }
     float alpha=shape*i.life*options.z*(.24+.30*options.w);
+    if(options.y>5.5)alpha=shape*options.z;
     if(up.w>.5)color=srgb(color);
     return float4(color,alpha);
 }
@@ -139,7 +157,7 @@ SamplerState tiled:register(s0);
 SamplerState edge:register(s1);
 static const float Tau=6.2831853;
 // The kinds (elemental_hands.h Kind).
-static const uint Flame=0,Ember=1,Glow=2,Smoke=3,Arc=4,Bolt=5,Spark=6,Mist=7,Flake=8,Chunk=9,Orb=10,Flare=11,Core=12,Plasma=13;
+static const uint Flame=0,Ember=1,Glow=2,Smoke=3,Arc=4,Bolt=5,Spark=6,Mist=7,Flake=8,Chunk=9,Orb=10,Flare=11,Core=12,Plasma=13,PsychicMist=14,WhiteMist=15,ChargeOrb=16;
 float3 rotate(float4 q,float3 p){return p+2*cross(q.xyz,cross(q.xyz,p)+q.w*p);}
 struct Pixel {float4 position:SV_Position;float2 uv:TEXCOORD0;nointerpolation uint index:TEXCOORD1;};
 Pixel VS(uint vertex:SV_VertexID,uint instance:SV_InstanceID) {
@@ -166,6 +184,16 @@ Pixel VS(uint vertex:SV_VertexID,uint instance:SV_InstanceID) {
     const float3 p=centre+right*c.x*halfWidth+up*c.y*halfHeight;
     o.position=mul(float4(p,1),projection);
     return o;
+}
+float3 chargeColor(float k) {
+    // Tiger: warm orange; Cobra: blue-green; fire: red-orange;
+    // thunder: blue-white; ice: blue; Phoenix: pale white (not rainbow orbs).
+    if(k<.5)return float3(1,.40,.06);
+    if(k<1.5)return float3(.10,1,.48);
+    if(k<2.5)return float3(1,.18,.025);
+    if(k<3.5)return float3(.65,.78,1);
+    if(k<4.5)return float3(.16,.48,1);
+    return float3(.9,.94,1);
 }
 float3 srgb(float3 c){return lerp(12.92*c,1.055*pow(max(c,0),1/2.4)-.055,step(.0031308,c));}
 float2 spin(float2 uv,float angle){const float s=sin(angle),c=cos(angle);uv-=.5;return float2(c*uv.x-s*uv.y,s*uv.x+c*uv.y)+.5;}
@@ -202,6 +230,14 @@ float4 PS(Pixel i):SV_Target {
     } else if(q.kind==Arc||q.kind==Bolt) {   // the arcs lie across their frames: turned along the axis
         v=(q.kind==Arc?arcs.Sample(edge,cell(uv.yx,q.frame,4,2)):bolts.Sample(edge,cell(uv,q.frame,4,2)))*q.intensity*fade;
         color=ramp(1,v);alpha=saturate(v*1.2);
+    } else if(q.kind==ChargeOrb) {
+        float2 d=(uv-.5)*2;v=pow(saturate(1-dot(d,d)),3);
+        color=chargeColor(q.frame);alpha=v*q.intensity;
+    } else if(q.kind==PsychicMist||q.kind==WhiteMist) {
+        float2 at=uv;at.x+=.07*sin(uv.y*9+t*2+q.seed);
+        v=wisp.Sample(edge,cell(at,q.frame,2,2));
+        float2 soft=(at-.5)*2;v*=pow(saturate(1-dot(soft,soft)),2)*(.7+.3*sin(t*2+q.seed+uv.y*8));
+        alpha=saturate(v*q.intensity*fade*.30);color=q.kind==WhiteMist?float3(.85,.88,.92):float3(.55,.12,.85);
     } else if(q.kind==Mist) {
         v=wisp.Sample(edge,cell(uv,q.frame,2,2));
         alpha=saturate(v*q.intensity*fade*.40);
@@ -312,7 +348,7 @@ void UploadSprites(ID3D12Device* device,ID3D12CommandQueue* queue,const std::vec
 }
 // The particles' upload ring: each Render takes the next of RingSlots, so a pass still on the GPU (the
 // other eye's, a frame or two before) is never written over.
-constexpr unsigned RingSlots=16;
+constexpr unsigned RingSlots=48; // elemental hands + two armor mists + charges, both eyes in flight
 constexpr size_t SlotBytes=MaxDrawn*sizeof(Particle);
 struct Renderer::Impl {
     ComPtr<ID3D12Device> device;
@@ -470,9 +506,23 @@ bool Renderer::Render(ID3D12GraphicsCommandList* list,ID3D12Resource* target,uns
     const auto inverse=math::Conjugate(view.q);
     const auto up=math::Rotate(inverse,{0,1,0});
     bool drawn=false;
+    if(scene.chargeOnly||scene.hands[0].element==Element::Psychic||scene.hands[1].element==Element::Psychic||
+       scene.hands[0].element==Element::Wind||scene.hands[1].element==Element::Wind) {
+        for(unsigned n=0;n<std::min(scene.count,MaxDrawn);++n) {
+            const auto& orb=scene.drawn[n];float c[32]{};
+            math::Projection(fov.left,fov.right,fov.down,fov.up,.02f,c);
+            const auto v=math::Rotate(inverse,orb.p-view.p);c[19]=1;
+            c[20]=v.x;c[21]=v.y;c[22]=v.z;c[23]=orb.size;
+            c[24]=scene.time;c[25]=orb.kind==WhiteMist?8:orb.kind==PsychicMist?7:6;
+            const float fade=scene.chargeOnly?1.f:std::sin(std::clamp(orb.life,0.f,1.f)*3.14159265f);
+            c[26]=std::clamp(orb.intensity*fade,0.f,1.f);c[27]=float(orb.frame);c[31]=p.encode?1:0;
+            list->SetGraphicsRoot32BitConstants(0,32,c,0);list->DrawInstanced(6,1,0,0);drawn=true;
+        }
+        return drawn;
+    }
     for(unsigned h=0;h<2;++h) {
         const auto& hand=scene.hands[h];
-        if(hand.element==Element::None||unsigned(hand.element)>unsigned(Element::Lightning)||!interaction::Valid(hand.pose)||
+        if(hand.element==Element::None||unsigned(hand.element)>unsigned(Element::Wind)||!interaction::Valid(hand.pose)||
            !std::isfinite(hand.opacity+hand.pulse)||hand.opacity<=0)continue;
         float constants[32]{};math::Projection(fov.left,fov.right,fov.down,fov.up,.02f,constants);
         const auto rotation=math::Multiply(inverse,hand.pose.q);
