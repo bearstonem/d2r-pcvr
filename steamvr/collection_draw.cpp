@@ -276,10 +276,48 @@ bool BaseLine(const std::string& line) {
     return false;
 }
 
+// A stat line with its roll ranges ("(5-10)", "(1.5 per Level)") in their own colour, as the
+// game's Chronicle shows them (owner 2026-11-22): the line centred in the box, each piece placed
+// at the width of the text before it.
+constexpr uint32_t RangeColor = 0x7CDDCC;   // provisional: the profile's FontColorLightTeal
+void RichLine(Painter& p, const std::string& text, float size, const RectF& box, uint32_t rgb) {
+    struct Piece { size_t at, length; bool range; };
+    std::vector<Piece> pieces;
+    size_t from = 0;
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] != '(') continue;
+        const size_t close = text.find(')', i);
+        if (close == std::string::npos) break;
+        const std::string inner = text.substr(i + 1, close - i - 1);
+        const bool range = inner.find_first_of("0123456789") != std::string::npos &&
+                           (inner.find('-', 1) != std::string::npos || inner.find(" to ") != std::string::npos ||
+                            inner.find("per Level") != std::string::npos);
+        if (!range) continue;
+        if (i > from) pieces.push_back({from, i - from, false});
+        pieces.push_back({i, close + 1 - i, true});
+        from = close + 1;
+        i = close;
+    }
+    if (pieces.empty()) { p.TextRgb(text, Plain, size, box, rgb, Align::Center); return; }
+    if (from < text.size()) pieces.push_back({from, text.size() - from, false});
+    // widths measured with a marker after them, so a trailing space counts
+    const auto width = [&](std::string_view s) {
+        return p.Measure(std::string(s) + "|", Plain, 4096.f, false, 0, size).width - p.Measure("|", Plain, 4096.f, false, 0, size).width;
+    };
+    const float total = width(text);
+    const float left = box.x + (box.w - total) * 0.5f;
+    for (const Piece& piece : pieces) {
+        const float x = left + width(std::string_view(text).substr(0, piece.at));
+        p.TextRgb(text.substr(piece.at, piece.length), Plain, size, {x, box.y, box.w * 2, box.h}, piece.range ? RangeColor : rgb,
+                  Align::Leading);
+    }
+}
+
 void DrawTooltip(Painter& p, const panel::Rect& card, const tooltip::Tooltip& tip, Category category, const std::string& base) {
     if (tip.Empty()) return;
-    // 10% larger than the first cut, box and text alike (owner 2026-11-22)
-    constexpr float K = 1.1f;
+    // 10% and then 20% larger than the first cut, box and text alike (owner 2026-11-22: the game's
+    // own tooltips are much bigger)
+    constexpr float K = 1.1f * 1.2f;
     struct Line { std::string text; uint32_t rgb; float size; };
     std::vector<Line> lines;
     lines.push_back({tip.title, NameColor(category), 16.f * K});
@@ -306,8 +344,8 @@ void DrawTooltip(Painter& p, const panel::Rect& card, const tooltip::Tooltip& ti
     p.FillRgb(R(tx, ty, tx + tw, ty + th), 0x000000, 215.f / 255.f);
     for (size_t i = 0; i < lines.size(); ++i) {
         const float size = FitSize(p, lines[i].text, Plain, lines[i].size, 9.f * K, Md(tw - 12 * K));
-        p.TextRgb(lines[i].text, Plain, Md(size), R(tx + 4 * K, ty + 7 * K + float(i) * step, tx + tw - 4 * K, ty + 7 * K + float(i + 1) * step),
-                  lines[i].rgb, Align::Center);
+        RichLine(p, lines[i].text, Md(size), R(tx + 4 * K, ty + 7 * K + float(i) * step, tx + tw - 4 * K, ty + 7 * K + float(i + 1) * step),
+                 lines[i].rgb);
     }
 }
 
@@ -457,7 +495,11 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
         };
         list(layout.sortBox, "Sort", panel::SortName(view.sort),
              view.open == panel::Drop::Sort || pointed(panel::HitKind::SortBox, 0));
-        list(layout.showBox, "Show", panel::ShowName(view.show),
+        // Runewords are made, not found (owner 2026-11-22): the Show list reads All / Missing / Made.
+        const auto showName = [&](panel::Show show) {
+            return view.category == Category::Runewords && show == panel::Show::Found ? "Made" : panel::ShowName(show);
+        };
+        list(layout.showBox, "Show", showName(view.show),
              view.open == panel::Drop::Show || pointed(panel::HitKind::ShowBox, 0));
         // An open list: its options above its box, the chosen one in gold.
         const auto options = [&](const panel::Rect* rects, int count, int chosen, panel::HitKind kind, auto name) {
@@ -475,7 +517,7 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
                     [](int i) { return panel::SortName(static_cast<panel::Sort>(i)); });
         if (view.open == panel::Drop::Show)
             options(layout.showOptions, int(panel::Show::Count), int(view.show), panel::HitKind::Show,
-                    [](int i) { return panel::ShowName(static_cast<panel::Show>(i)); });
+                    [&](int i) { return showName(static_cast<panel::Show>(i)); });
     }
 
     // The pointed card's tooltip (not with an item in hand: the item is what is looked at then).
