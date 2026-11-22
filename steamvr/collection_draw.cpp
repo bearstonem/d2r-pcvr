@@ -347,19 +347,26 @@ void DrawTooltip(Painter& p, const panel::Rect& card, const tooltip::Tooltip& ti
         for (const std::string& line : tip.ranges) lines.push_back({line, Grey, 12.f * K});
     }
     if (!tip.subtitle.empty()) lines.push_back({tip.subtitle, Grey, 12.f * K});
-    constexpr float tw = 250.f * K, step = 21.f * K;
-    const float th = 14.f * K + step * float(lines.size());
-    // beside the card, in mock-up pixels; to its left when the right would leave the page
+    // Under the card, else over it - never on it (owner 2026-11-22: the tooltip hid the item);
+    // where neither side holds it whole, it is drawn smaller on the roomier side. In mock-up
+    // pixels, between the page's top and the tab plaques (ContentBottom).
     const float cx0 = card.x / panel::Scale + panel::MockLeft, cy0 = card.y / panel::Scale + panel::MockTop;
-    const float cw  = card.width / panel::Scale;
-    float tx = cx0 + cw + 8, ty = cy0 + 20;
-    if (tx + tw > panel::MockRight - 10) tx = cx0 - tw - 8;
-    tx = std::max(panel::MockLeft + 10, tx);
-    ty = std::max(panel::MockTop + 10, std::min(ty, panel::ContentBottom - 10 - th));   // above the tab plaques
+    const float cw  = card.width / panel::Scale, cy1 = cy0 + card.height / panel::Scale;
+    const float top = panel::MockTop + 10, bottom = panel::ContentBottom - 10;
+    const float below = bottom - (cy1 + 4), above = (cy0 - 4) - top;
+    float s = 1.0f;   // the shrink, when it must
+    const float full = 14.f * K + 21.f * K * float(lines.size());
+    const bool  under = full <= below || (full > above && below >= above);
+    const float room  = under ? below : above;
+    if (full > room) s = std::max(0.4f, room / full);
+    const float tw = 250.f * K * s, step = 21.f * K * s, th = full * s;
+    float tx = cx0 + cw / 2 - tw / 2;
+    tx = std::max(panel::MockLeft + 10, std::min(tx, panel::MockRight - 10 - tw));
+    const float ty = under ? cy1 + 4 : cy0 - 4 - th;
     p.FillRgb(R(tx, ty, tx + tw, ty + th), 0x000000, 215.f / 255.f);
     for (size_t i = 0; i < lines.size(); ++i) {
-        const float size = FitSize(p, lines[i].text, Plain, lines[i].size, 9.f * K, Md(tw - 12 * K));
-        RichLine(p, lines[i].text, Md(size), R(tx + 4 * K, ty + 7 * K + float(i) * step, tx + tw - 4 * K, ty + 7 * K + float(i + 1) * step),
+        const float size = FitSize(p, lines[i].text, Plain, lines[i].size * s, 9.f * K * s, Md(tw - 12 * K * s));
+        RichLine(p, lines[i].text, Md(size), R(tx + 4 * K * s, ty + 7 * K * s + float(i) * step, tx + tw - 4 * K * s, ty + 7 * K * s + float(i + 1) * step),
                  lines[i].rgb);
     }
 }

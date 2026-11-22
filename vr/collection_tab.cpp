@@ -210,6 +210,14 @@ void TabShowEntry(Category category, uint32_t recordId) {
     // hides it lets go first, so the entry is always brought into view.
     auto visible = VisibleSlots(g_library, g_view);
     auto it      = std::find(visible.begin(), visible.end(), slot);
+    if (it == visible.end() && category == Category::Sets) {   // a set of another level range: its range
+        if (const Entry* entry = g_library.At(category, slot))
+            for (const SetInfo& set : AllSets(g_library))
+                if (set.name == entry->extra) { g_view.band = BandOfLevel(set.level); break; }
+        g_view.group = panel::NoGroup;
+        visible      = VisibleSlots(g_library, g_view);
+        it           = std::find(visible.begin(), visible.end(), slot);
+    }
     if (it == visible.end() && (g_view.group != panel::NoGroup || g_view.kind != panel::NoGroup)) {
         g_view.group = panel::NoGroup;
         // a runeword: the tiles turn to what it is (owner 2026-11-22)

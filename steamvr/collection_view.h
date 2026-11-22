@@ -343,7 +343,7 @@ inline std::vector<uint32_t> VisibleSlots(const Library& library, const ViewStat
     const uint32_t        count = library.Size(view.category);
     slots.reserve(count);
     const RunewordTile* runewordTile = view.category == Category::Runewords ? RunewordOpenTile(view.kind, view.group) : nullptr;
-    // Sets: a picked tile keeps only its set's pieces.
+    // Sets: the band's sets; a picked tile only its set's pieces.
     const bool          sets = view.category == Category::Sets;
     std::vector<SetInfo> band;
     if (sets) band = SetsInBand(library, view.band);
@@ -354,7 +354,12 @@ inline std::vector<uint32_t> VisibleSlots(const Library& library, const ViewStat
         if (view.show == panel::Show::Found && !found) continue;
         if (sets) {
             const Entry* entry = library.At(view.category, slot);
-            if (picked && (entry == nullptr || entry->extra != band[size_t(view.group)].name)) continue;
+            // the level range's sets, or the picked one of them (owner 2026-11-22: the range
+            // buttons left the grid as it was)
+            if (entry == nullptr) continue;
+            if (picked ? entry->extra != band[size_t(view.group)].name
+                       : std::none_of(band.begin(), band.end(), [&](const SetInfo& set) { return set.name == entry->extra; }))
+                continue;
         } else if (view.category == Category::Runewords) {
             if (runewordTile != nullptr && !RunewordInTile(library, slot, *runewordTile, view.show == panel::Show::Found)) continue;
         } else if (view.group != panel::NoGroup) {
