@@ -73,7 +73,7 @@ not stored.
 ## Where the items live
 
 The collection's tabs are a range at the end of the shared stash, added by
-D2RLoader's `[d2rcore.stash] add_shared_tabs`. The installer sets it (24 tabs) to
+D2RLoader's `[d2rcore.stash] add_shared_tabs`. The installer sets it (40 tabs) to
 match the mod's `[collection] tabs`. The collection's tabs come after the vanilla
 ones: `[collection] first_tab` (default 5) is the first the collection owns.
 
@@ -93,7 +93,7 @@ their own.
 | --- | --- |
 | `affinity` | 1 = sort items dropped in the shared stash into the collection's tabs; 0 = off (default) |
 | `first_tab` | the first shared stash tab the collection owns (the vanilla tabs come before it; default 5) |
-| `tabs` | how many shared stash tabs the collection owns (default 24) |
+| `tabs` | how many shared stash tabs the collection owns (default 40) |
 
 `first_tab` and `tabs` must match `[d2rcore.stash] add_shared_tabs` in the mod's own
 `d2rloader/config/d2rloader.toml`; the installer keeps them in step.

@@ -117,7 +117,7 @@ namespace gamestate { bool StashButtonsShown(); }   // the stash panel is up (st
 #include "collection_store.h"
 namespace gamestate { bool ToggleMenus(); }
 namespace gamestate { uint32_t MenuEpoch(); }
-namespace gamestate { void Init(const D2RL::PluginContext* ctx); void Tick(); uint32_t WeaponClass(); uint32_t WeaponSet(); uint32_t WeaponType(); uint32_t HandsHeld(); uint32_t TwoHanded(); uint32_t WeaponHand(); uint32_t HandsKey(); bool MenuOpen(); int ObjectLight(uint32_t txt, uint32_t mode, float rgb[3]); uint64_t LocalPlayer(); void SetViewMode(uint32_t mode); bool AutoMapOpen(); bool SetAutoMap(bool open); bool ProbeUiAction(const char* spec); void PollPlate(); bool PlateRect(int32_t out[4]); }
+namespace gamestate { void Init(const D2RL::PluginContext* ctx); void Tick(); uint32_t WeaponClass(); uint32_t WeaponSet(); uint32_t WeaponType(); uint32_t HandsHeld(); uint32_t TwoHanded(); uint32_t WeaponHand(); uint32_t HandsKey(); bool MenuOpen(); int ObjectLight(uint32_t txt, uint32_t mode, float rgb[3]); uint64_t LocalPlayer(); void SetViewMode(uint32_t mode); bool AutoMapOpen(); bool SetAutoMap(bool open); void PollPlate(); bool PlateRect(int32_t out[4]); }
 namespace gamestate {bool LeftShield();}
 #ifdef D2RVR_NATIVE_OPENXR
 #include "dual_wield.h"
@@ -1714,17 +1714,6 @@ void LoadSettings() {
         g_set.stashDistance.store(std::clamp(IniF(L"interactions", L"stash_distance", 0.25f), -0.5f, 1.5f));
         g_set.stashWorld.store(IniB(L"interactions", L"stash_world", false));
         g_set.collectionInUi.store(IniB(L"collection", L"in_ui", true));   // the page drawn into the game's UI image (variant B)
-        {   // [collection] probe_ui_action=Target:Command[:Text] - sent to the game once each time it changes (a test)
-            wchar_t probe[160]{};
-            GetPrivateProfileStringW(L"collection", L"probe_ui_action", L"", probe, 160, g_iniPath);
-            static std::wstring lastProbe;
-            if (probe[0] && lastProbe != probe) {
-                char spec[160]{};
-                WideCharToMultiByte(CP_UTF8, 0, probe, -1, spec, int(sizeof spec), nullptr, nullptr);
-                gamestate::ProbeUiAction(spec);
-            }
-            lastProbe = probe;
-        }
         g_set.campfireMenuTop.store(std::clamp(IniF(L"campfire", L"menu_top", 0.78f), 0.0f, 0.98f));
         {   // [frontend]
             const bool front = IniB(L"frontend", L"scene", true);   // the menu in 3D: on by default (2026-11-17)
@@ -13604,7 +13593,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     framevr::collection::tooltip::InitProvider(ctx);   // collection tabs: the pointed entry's game item text
     framevr::collection::InitStore(ctx, IniB(L"collection", L"affinity", false),
                                    int(IniF(L"collection", L"first_tab", 5.0f)),
-                                   int(IniF(L"collection", L"tabs", 24.0f)));   // collection tabs: affinity
+                                   int(IniF(L"collection", L"tabs", 40.0f)));   // collection tabs: affinity
 #ifdef D2RVR_NATIVE_OPENXR
     enemysight::Init(ctx);
     companionai::Init(ctx);

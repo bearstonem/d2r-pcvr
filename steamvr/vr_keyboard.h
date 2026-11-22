@@ -84,7 +84,7 @@ inline constexpr Key DigitKeys[]={
     {2.5f,0,1,Action::Char,'7',L"7"},{3.5f,0,1,Action::Char,'8',L"8"},{4.5f,0,1,Action::Char,'9',L"9"},
     {5.5f,0,2,Action::Backspace,0,L"Back"},
     {2.5f,1,1,Action::Char,'4',L"4"},{3.5f,1,1,Action::Char,'5',L"5"},{4.5f,1,1,Action::Char,'6',L"6"},
-    {5.5f,1,2,Action::SelectAll,0,L"All"},
+    {5.5f,1,2,Action::SelectAll,0,L"Select all"},
     {2.5f,2,1,Action::Char,'1',L"1"},{3.5f,2,1,Action::Char,'2',L"2"},{4.5f,2,1,Action::Char,'3',L"3"},
     {5.5f,2,2,Action::Max,0,L"Max"},
     {2.5f,3,1,Action::Char,'0',L"0"},{3.5f,3,2,Action::Text,0,L"000"},

@@ -118,22 +118,6 @@ int ClassSkillsOf(D2RL::ItemHandle item) {
 // A Hellfire Torch's base code: its cards go by class.
 constexpr uint32_t kTorchCode = uint32_t('c') | (uint32_t('m') << 8) | (uint32_t('2') << 16) | (uint32_t(' ') << 24);
 
-// Why an item read as no runeword: the service, the call's result and what it gave.
-std::string RunewordDiag(D2RL::ItemHandle item) {
-    char text[200];
-    if (g_items == nullptr) return "no item service";
-    if (!D2RL::HasItemServiceField(g_items, D2RL::ItemServiceDetailsFieldEnd) || g_items->getItemDetails == nullptr) {
-        std::snprintf(text, sizeof(text), "no getItemDetails (service v%u, %u bytes, wants %u)", unsigned(g_items->serviceVersion),
-                      unsigned(g_items->serviceSize), unsigned(D2RL::ItemServiceDetailsFieldEnd));
-        return text;
-    }
-    D2RL::Items::ItemDetails details {};
-    details.structSize = D2RL::Items::ItemDetailsSize;
-    const auto result = g_items->getItemDetails(g_ctx, item, &details, nullptr, 0);
-    std::snprintf(text, sizeof(text), "getItemDetails result %d flags 0x%x runeword row %d name id %u stats %u", int(result),
-                  unsigned(details.flags), int(details.runewordRecordId), unsigned(details.runewordNameId), unsigned(details.statCount));
-    return text;
-}
 
 // One shared-stash item as the sweep sees it.
 struct Seen {
@@ -227,7 +211,7 @@ struct CursorItem {
     uint32_t runeword = UINT32_MAX;
     bool     identified = true;
     bool     ok       = false;
-    uint32_t prefix   = 0;   // prefixIds[0]: a runeword's name string id
+
 };
 
 D2RL::Inventory::IterationAction __cdecl CollectCursor(const D2RL::PluginContext*, const D2RL::Items::ItemInfo* info, void* userData) noexcept {
@@ -241,7 +225,7 @@ D2RL::Inventory::IterationAction __cdecl CollectCursor(const D2RL::PluginContext
     out.identified = (info->stateFlags & D2RL::Items::ItemStateIdentified) != 0;
     if (info->qualityRecordId >= 0 && (out.unique || out.set)) out.recordId = uint32_t(info->qualityRecordId);
     out.runeword = RunewordOfItem(*info);
-    out.prefix = info->prefixIds[0];
+
     out.ok = true;
     return D2RL::Inventory::IterationAction::Continue;
 }
@@ -579,10 +563,9 @@ void DepositPrepareOnGameThread(const D2RL::PluginContext*, void*) noexcept {
     } else if (library.SlotOfCode(Category::Materials, cursor.code) != UINT32_MAX) {
         category = Category::Materials; identity = cursor.code; byCode = true;
     } else {
-        char line[320];
-        std::snprintf(line, sizeof(line), "Frame collection: the cursor item is not a catalog collectible; it stays in hand (code %.4s quality %u prefix %u runeword %d; %s)",
-                      reinterpret_cast<const char*>(&cursor.code), unsigned(cursor.quality), unsigned(cursor.prefix), int(cursor.runeword),
-                      RunewordDiag(cursor.handle).c_str());
+        char line[160];
+        std::snprintf(line, sizeof(line), "Frame collection: the cursor item is not a catalog collectible; it stays in hand (code %.4s)",
+                      reinterpret_cast<const char*>(&cursor.code));
         Log(line);
         SetPhase(Phase::Idle);
         return;

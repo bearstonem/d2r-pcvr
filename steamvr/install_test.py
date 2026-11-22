@@ -200,7 +200,7 @@ class InstallationTests(unittest.TestCase):
                 # The panel's catalog sits beside the plugin; the loader is set to add
                 # the shared stash tabs the collection stores in.
                 self.assertEqual((mod_plugins / 'collection.tsv').read_bytes(), catalog_line)
-                self.assertIn('add_shared_tabs = 24', (game / 'd2rloader/config/d2rloader.toml').read_text())
+                self.assertIn('add_shared_tabs = 40', (game / 'd2rloader/config/d2rloader.toml').read_text())
                 journal = json.loads((snapshot / 'manifest.json').read_text())
                 health_layout = mod_identity.MODINFO.parent / install.enemy_health_layout.RELATIVE_PATH
                 self.assertEqual((game / health_layout).read_bytes(), install.enemy_health_layout.payload())
@@ -287,7 +287,7 @@ class InstallationTests(unittest.TestCase):
                 self.assertEqual((ofxr_dir / 'ofxr_bridge.ini').read_bytes(), b'[ofxr]\r\nbackend=nvidia\r\n')
                 loader_toml = (game / 'd2rloader/config/d2rloader.toml').read_text()
                 self.assertIn('default_mod = "D2R-VR"', loader_toml)   # the loader's own settings stay
-                self.assertIn('add_shared_tabs = 24', loader_toml)     # the collection's shared tabs are added
+                self.assertIn('add_shared_tabs = 40', loader_toml)     # the collection's shared tabs are added
                 self.assertEqual((mod_plugins / 'd2rl-pcvr.dll').read_bytes(), b'updated fixture plugin')
                 for name, data in sewers.items():
                     self.assertEqual((mod / name).read_bytes(), data)

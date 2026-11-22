@@ -341,9 +341,9 @@ def default_saves(game):
 LOADER_CONFIG = Path('d2rloader/config/d2rloader.toml')
 
 # The collection stores found items in extra shared stash tabs. The loader's
-# add_shared_tabs and the mod's [collection] tabs (d2r_pcvr.ini, default 24) must
+# add_shared_tabs and the mod's [collection] tabs (d2r_pcvr.ini, default 40) must
 # agree, so the installer keeps them in step. See vr/collection_store.h.
-COLLECTION_SHARED_TABS = 24
+COLLECTION_SHARED_TABS = 40
 
 
 def ensure_shared_tabs(text, tabs):
