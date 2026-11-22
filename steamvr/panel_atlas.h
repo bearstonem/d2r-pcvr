@@ -53,6 +53,9 @@ constexpr Region Keyboard{0,Leather.y+Leather.h+Gap,keyboard::TexelWidth,keyboar
 constexpr Region KeyboardLit{Keyboard.x+Keyboard.w+Gap,Keyboard.y,keyboard::TexelWidth,keyboard::TexelHeight};
 constexpr Region KeyboardCaps{0,Keyboard.y+Keyboard.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight};
 constexpr Region KeyboardCapsLit{KeyboardLit.x,KeyboardCaps.y,keyboard::TexelWidth,keyboard::TexelHeight};
+// Under those the gold pad (keyboard::DigitKeys), plain and lit.
+constexpr Region Digits{0,KeyboardCaps.y+KeyboardCaps.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight};
+constexpr Region DigitsLit{KeyboardLit.x,Digits.y,keyboard::TexelWidth,keyboard::TexelHeight};
 // Stash navigation plaques (stash_buttons.h): right of the lit keyboard, from where the respec
 // faces' column ends down (that column is wider than the gap the keyboard leaves beside it).
 // One region per face: the two tab buttons and the Collection button, plain then lit.
@@ -62,7 +65,7 @@ constexpr int StashRegions=stashbuttons::ButtonCount*2;
 // under the plaques in their column.
 constexpr Region TabHighlight{Stash(0).x,Stash(StashRegions-1).y+stashbuttons::Height+Gap,tabhighlight::Width,tabhighlight::Height};
 constexpr int StaticWidth=1536,StaticHeight=[]{
-    int h=KeyboardCaps.y+KeyboardCaps.h;
+    int h=Digits.y+Digits.h;
     const int stash=Stash(StashRegions-1).y+Stash(StashRegions-1).h+Gap;
     if(stash>h)h=stash;
     const int mark=TabHighlight.y+TabHighlight.h+Gap;

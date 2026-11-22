@@ -1338,6 +1338,7 @@ int keyboardLit=-1;
 uint32_t keyboardClosedEpoch=0;
 statsbutton::Press keyboardPress;
 keyboard::Typist keyboardTypist;
+keyboard::Layout keyboardLayout=keyboard::Layout::Letters;   // letters for the name box, digits for the game's gold box
 leather::Holder leatherHolder;
 leather::Back leatherBack;   // Right B the game leaves unanswered closes the leather's menu
 leather::Art leatherArt=leather::PlaceholderArt();
@@ -2397,19 +2398,21 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
     // capitals (vr_keyboard.h).
     const bool keyboardPainted=[&]{
         bool ok=true;
-        for(int picture=0;picture<4&&ok;++picture) {
-            const bool lit=picture&1,capitals=picture>=2;
-            auto board=keyboard::PaintKeys(lit,capitals);
-            for(int i=0;i<keyboard::KeyCount&&ok;++i) {
-                const auto r=keyboard::KeyTexelRect(i);
+        // pictures 0-3: letters, plain / lit, small / capitals; 4-5: the gold pad, plain / lit
+        for(int picture=0;picture<6&&ok;++picture) {
+            const bool lit=picture&1,capitals=picture==2||picture==3;
+            const auto layout=picture>=4?keyboard::Layout::Digits:keyboard::Layout::Letters;
+            auto board=keyboard::PaintKeys(lit,capitals,layout);
+            for(int i=0;i<keyboard::KeyCountOf(layout)&&ok;++i) {
+                const auto r=keyboard::KeyTexelRect(i,layout);
                 std::vector<uint8_t> face(size_t(r.w)*r.h*4);
                 for(int y=0;y<r.h;++y)std::memcpy(&face[size_t(y)*r.w*4],&board[(size_t(r.y+y)*keyboard::TexelWidth+r.x)*4],size_t(r.w)*4);
-                const auto text=RespecLabel(keyboard::Label(i,capitals).c_str(),r.w,r.h);
+                const auto text=RespecLabel(keyboard::Label(i,capitals,layout).c_str(),r.w,r.h);
                 if(text.empty()){ok=false;break;}
-                respecbutton::Stamp(face,text,r.w,r.h,lit||(capitals&&keyboard::Keys[i].action==keyboard::Action::Shift));
+                respecbutton::Stamp(face,text,r.w,r.h,lit||(capitals&&keyboard::KeysOf(layout)[i].action==keyboard::Action::Shift));
                 for(int y=0;y<r.h;++y)std::memcpy(&board[(size_t(r.y+y)*keyboard::TexelWidth+r.x)*4],&face[size_t(y)*r.w*4],size_t(r.w)*4);
             }
-            ok=ok&&put(board,capitals?(lit?KeyboardCapsLit:KeyboardCaps):(lit?KeyboardLit:Keyboard));
+            ok=ok&&put(board,picture>=4?(lit?DigitsLit:Digits):capitals?(lit?KeyboardCapsLit:KeyboardCaps):(lit?KeyboardLit:Keyboard));
         }
         return ok;
     }();
@@ -2655,6 +2658,30 @@ XrPosef UiSurfacePose() {
 // scan code (the game reads keys by scan code, SendShift), Shift round it when the layout wants
 // it, all tagged KeyboardKeyTag - typing, so TypedKeys lets the game's keyboard layout in and
 // the name box takes the letter.
+bool SendKeyboard(const keyboard::Output& out);
+// The gold pad's All (and Max before its digits): Ctrl+A in the game's box.
+bool SendSelectAll() {
+    const HKL layout=GetKeyboardLayout(gameWindow?GetWindowThreadProcessId(gameWindow,nullptr):0);
+    const WORD ctrl=WORD(MapVirtualKeyExW(VK_LCONTROL,MAPVK_VK_TO_VSC,layout)),a=WORD(MapVirtualKeyExW('A',MAPVK_VK_TO_VSC,layout));
+    if(!ctrl||!a)return false;
+    INPUT in[4]{};
+    const WORD codes[4]={ctrl,a,a,ctrl};const bool ups[4]={false,false,true,true};
+    for(int i=0;i<4;++i){in[i].type=INPUT_KEYBOARD;in[i].ki.wScan=codes[i];
+        in[i].ki.dwFlags=KEYEVENTF_SCANCODE|(ups[i]?KEYEVENTF_KEYUP:0);in[i].ki.dwExtraInfo=panels::KeyboardKeyTag;}
+    return SendInput(4,in,sizeof(INPUT))==4;
+}
+// A press as the game should get it: Ctrl+A first when asked, then the key, or each
+// character of a Text key's text.
+bool SendTyped(const keyboard::Output& out) {
+    bool ok=true;
+    if(out.selectAll)ok=SendSelectAll();
+    if(out.send==keyboard::Send::Text) {
+        for(const wchar_t ch:out.text){keyboard::Output one;one.send=keyboard::Send::Char;one.ch=ch;ok=SendKeyboard(one)&&ok;}
+        return ok;
+    }
+    if(out.send!=keyboard::Send::None)ok=SendKeyboard(out)&&ok;
+    return ok;
+}
 bool SendKeyboard(const keyboard::Output& out) {
     const HKL layout=GetKeyboardLayout(gameWindow?GetWindowThreadProcessId(gameWindow,nullptr):0);
     WORD vk=0;bool shift=false;
@@ -2723,11 +2750,15 @@ void MenuPointer(const menus::Pad& controls) {
     if(!campfirePointer.load()||!gamestate::KeyboardShown())campfireKeyboardOpen=false;
     else if(pressed&&!triggerWasDown&&pointerHit&&hit.u>.36f&&hit.u<.64f){campfireKeyboardOpen=true;keyboardClosed=false;}
     const bool keyboardWas=keyboardShown;
-    keyboardShown=keyboardArtReady&&uiActive&&!journalMode&&!leatherMode&&gamestate::KeyboardShown()&&!keyboardClosed&&
-        (!campfirePointer.load()||campfireKeyboardOpen);
+    // The gold pad (owner 2026-11-22): while the game's box for an amount of gold is up.
+    const bool goldPad=keyboardArtReady&&uiActive&&!journalMode&&gamestate::GoldBoxShown();
+    keyboardLayout=goldPad?keyboard::Layout::Digits:keyboard::Layout::Letters;
+    keyboardShown=goldPad||(keyboardArtReady&&uiActive&&!journalMode&&!leatherMode&&gamestate::KeyboardShown()&&!keyboardClosed&&
+        (!campfirePointer.load()||campfireKeyboardOpen));
     if(keyboardShown!=keyboardWas) {
         keyboardTypist.Reset();keyboardPress.Reset();
-        Say(keyboardShown?"Frame panels: VR keyboard shown (the name box is up)":"Frame panels: VR keyboard hidden");
+        Say(keyboardShown?(goldPad?"Frame panels: gold pad shown (the game's gold box is up)":"Frame panels: VR keyboard shown (the name box is up)")
+                         :"Frame panels: VR keyboard hidden");
     }
     bool onKeyboard=false;keyboardLit=-1;
     if(keyboardShown&&aimTracked&&!(mouseDown||rightMouseDown)) {
@@ -2736,7 +2767,7 @@ void MenuPointer(const menus::Pad& controls) {
         math::PanelHit on{};
         if(math::IntersectPanel(ray,direction,board.position,board.orientation,board.width,board.height,on)&&(!pointerHit||on.distance<hit.distance)) {
             onKeyboard=keyboardPointer=true;pointerHit=false;   // the menu's laser hit is not this one
-            keyboardLit=keyboard::KeyAt(on.u,on.v);
+            keyboardLit=keyboard::KeyAt(on.u,on.v,keyboardLayout);
             beamLength=on.distance;
             const auto mid=ray+direction*(beamLength*.5f);
             const auto rot=math::BeamOrientation(direction,V(head.position)-mid);
@@ -2844,13 +2875,13 @@ void MenuPointer(const menus::Pad& controls) {
     }
     // A pull on a VR keyboard key (the board under the menu, above).
     if(keyboardPress.Step(onKeyboard&&uiActive,pressed,GetTickCount64())&&keyboardLit>=0) {
-        const auto typed=keyboardTypist.Press(keyboardLit);
+        const auto typed=keyboardTypist.Press(keyboardLit,keyboardLayout);
         if(typed.close) {
             keyboardClosed=true;keyboardClosedEpoch=keyboardEpoch;
             Say("Frame panels: VR keyboard closed until the name box comes up anew");
-        } else if(typed.send!=keyboard::Send::None) {
+        } else if(typed.send!=keyboard::Send::None||typed.selectAll) {
             if(!focused)Say("Frame panels: VR keyboard key not sent - the game window is not focused");
-            else if(!SendKeyboard(typed))Say("Frame panels: VR keyboard key could not be sent (not on this keyboard layout, or SendInput refused)");
+            else if(!SendTyped(typed))Say("Frame panels: VR keyboard key could not be sent (not on this keyboard layout, or SendInput refused)");
             else {
                 static bool told=false;
                 if(!told){told=true;Say("Frame panels: VR keyboard typing into the game");}
@@ -9381,13 +9412,15 @@ void EndPair() {
         const auto size=spatialMode?UiSurfaceSize():FlatPanel().size;
         const auto at=spatialMode?UiSurfacePose():menuPose;
         const auto board=keyboard::Place(V(at.position),Q(at.orientation),size.width,size.height);
-        const bool capitals=keyboardTypist.Shifted();
+        const bool digits=keyboardLayout==keyboard::Layout::Digits;
+        const bool capitals=!digits&&keyboardTypist.Shifted();
         const XrPosef boardPose{{board.orientation.x,board.orientation.y,board.orientation.z,board.orientation.w},{board.position.x,board.position.y,board.position.z}};
-        motionQuad(keyboardQuad,boardPose,board.width,board.height,Rect(capitals?panelatlas::KeyboardCaps:panelatlas::Keyboard),staticChain);
+        motionQuad(keyboardQuad,boardPose,board.width,board.height,
+            Rect(digits?panelatlas::Digits:capitals?panelatlas::KeyboardCaps:panelatlas::Keyboard),staticChain);
         keyboardQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;   // premultiplied (SetupStatic)
         if(keyboardLit>=0&&keyboardQuad.subImage.swapchain) {
-            const auto key=keyboard::KeySpot(board,keyboardLit);const auto r=keyboard::KeyTexelRect(keyboardLit);
-            const auto lit=capitals?panelatlas::KeyboardCapsLit:panelatlas::KeyboardLit;
+            const auto key=keyboard::KeySpot(board,keyboardLit,keyboardLayout);const auto r=keyboard::KeyTexelRect(keyboardLit,keyboardLayout);
+            const auto lit=digits?panelatlas::DigitsLit:capitals?panelatlas::KeyboardCapsLit:panelatlas::KeyboardLit;
             motionQuad(keyboardLitQuad,XrPose({board.position+math::Rotate(board.orientation,{key.x,key.y,.002f}),board.orientation}),key.width,key.height,
                 {{lit.x+r.x,lit.y+r.y},{r.w,r.h}},staticChain);
             keyboardLitQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;

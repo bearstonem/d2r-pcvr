@@ -13,6 +13,7 @@ bool StatsButtonShown();  // the tabbed menu alone (not a cube or world panel): 
 bool RespecButtonShown(); // the tabbed menu's Character page alone: Reset Skills & Stats, respec_button.h
 uint32_t PanelChanges();  // counts every panel opened or closed (leather::Back)
 bool KeyboardShown();     // character creation with a hero picked: the name box, so the VR keyboard (vr_keyboard.h)
+bool GoldBoxShown();      // the game's box for an amount of gold (drop / deposit / withdraw): the gold pad
 uint32_t KeyboardEpoch(); // changes each time the name box comes up anew (a closed keyboard comes back)
 bool CloseLeatherMenu();  // queue: close the tabbed menu if only it and its pages are open, the cursor empty
 bool StowLeatherMenu();   // queue: the held menu put away over the left shoulder (any page or dialog; not with an item on the cursor)

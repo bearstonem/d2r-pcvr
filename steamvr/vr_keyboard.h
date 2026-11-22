@@ -49,7 +49,9 @@ public:
 
 // What a key does. Char types its letter; Shift makes the next letter a
 // capital (once); Close hides the keyboard until the text box goes away.
-enum class Action : uint8_t {Char,Backspace,Enter,Shift,Close};
+// Text: the key's label typed whole ("000"); SelectAll: Ctrl+A in the box; Max: all of it
+// replaced by more gold than anyone holds - the game's gold box keeps it to what there is.
+enum class Action : uint8_t {Char,Backspace,Enter,Shift,Close,Text,SelectAll,Max};
 struct Key {
     float col,row,span;   // in key units from the keyboard's top left
     Action action;
@@ -76,15 +78,31 @@ inline constexpr Key Keys[]={
 };
 constexpr int KeyCount=int(sizeof Keys/sizeof Keys[0]);
 constexpr float Columns=10,Rows=4;
+// The gold pad (owner 2026-11-22): the game's box for an amount of gold (drop, deposit,
+// withdraw) - digits, Back, All, Max, Enter - in the middle five columns of the same board.
+inline constexpr Key DigitKeys[]={
+    {2.5f,0,1,Action::Char,'7',L"7"},{3.5f,0,1,Action::Char,'8',L"8"},{4.5f,0,1,Action::Char,'9',L"9"},
+    {5.5f,0,2,Action::Backspace,0,L"Back"},
+    {2.5f,1,1,Action::Char,'4',L"4"},{3.5f,1,1,Action::Char,'5',L"5"},{4.5f,1,1,Action::Char,'6',L"6"},
+    {5.5f,1,2,Action::SelectAll,0,L"All"},
+    {2.5f,2,1,Action::Char,'1',L"1"},{3.5f,2,1,Action::Char,'2',L"2"},{4.5f,2,1,Action::Char,'3',L"3"},
+    {5.5f,2,2,Action::Max,0,L"Max"},
+    {2.5f,3,1,Action::Char,'0',L"0"},{3.5f,3,2,Action::Text,0,L"000"},
+    {5.5f,3,2,Action::Enter,0,L"Enter"},
+};
+constexpr int DigitKeyCount=int(sizeof DigitKeys/sizeof DigitKeys[0]);
+enum class Layout : uint8_t {Letters,Digits};
+inline const Key* KeysOf(Layout l){return l==Layout::Digits?DigitKeys:Keys;}
+inline int KeyCountOf(Layout l){return l==Layout::Digits?DigitKeyCount:KeyCount;}
 
 // The picture: KeyTexels a key unit, Pad texels of stone-free gap round each
 // key, so the lit copy's crop never shows a neighbour's edge.
 constexpr int KeyTexels=64,Pad=3;
 constexpr int TexelWidth=int(Columns)*KeyTexels,TexelHeight=int(Rows)*KeyTexels;
 struct Rect {int x=0,y=0,w=0,h=0;};
-inline Rect KeyTexelRect(int i) {
-    if(i<0||i>=KeyCount)return {};
-    const Key& k=Keys[i];
+inline Rect KeyTexelRect(int i,Layout l=Layout::Letters) {
+    if(i<0||i>=KeyCountOf(l))return {};
+    const Key& k=KeysOf(l)[i];
     return {int(std::lround(k.col*KeyTexels))+Pad,int(std::lround(k.row*KeyTexels))+Pad,
             int(std::lround(k.span*KeyTexels))-2*Pad,KeyTexels-2*Pad};
 }
@@ -109,10 +127,10 @@ inline Board Place(math::Vec surface,math::Quat facing,float width,float height)
 }
 // The key at the laser's hit on the board (u, v from its top left, 0-1: the
 // board's own math::IntersectPanel), or -1: in the gap between two keys.
-inline int KeyAt(float u,float v) {
+inline int KeyAt(float u,float v,Layout l=Layout::Letters) {
     const float col=u*Columns,row=v*Rows,pad=float(Pad)/KeyTexels;
-    for(int i=0;i<KeyCount;++i) {
-        const Key& k=Keys[i];
+    for(int i=0;i<KeyCountOf(l);++i) {
+        const Key& k=KeysOf(l)[i];
         if(col>=k.col+pad&&col<k.col+k.span-pad&&row>=k.row+pad&&row<k.row+1-pad)return i;
     }
     return -1;
@@ -120,34 +138,35 @@ inline int KeyAt(float u,float v) {
 // A key's lit copy on the board: its centre from the board's centre (x right,
 // y up, metres) and its size.
 struct Spot {float x=0,y=0,width=0,height=0;};
-inline Spot KeySpot(const Board& b,int i) {
-    if(i<0||i>=KeyCount||!(b.height>0))return {};
-    const Key& k=Keys[i];
+inline Spot KeySpot(const Board& b,int i,Layout l=Layout::Letters) {
+    if(i<0||i>=KeyCountOf(l)||!(b.height>0))return {};
+    const Key& k=KeysOf(l)[i];
     const float unit=b.height/Rows,pad=float(Pad)/KeyTexels*unit;
     return {(k.col+k.span*.5f)*unit-b.width*.5f,b.height*.5f-(k.row+.5f)*unit,k.span*unit-2*pad,unit-2*pad};
 }
 // What a key shows: a letter small, or a capital while Shift waits (Typist);
 // the other keys their name.
-inline std::wstring Label(int i,bool capitals) {
-    if(i<0||i>=KeyCount)return {};
-    const Key& k=Keys[i];
+inline std::wstring Label(int i,bool capitals,Layout l=Layout::Letters) {
+    if(i<0||i>=KeyCountOf(l))return {};
+    const Key& k=KeysOf(l)[i];
     if(k.action!=Action::Char)return k.label;
     return std::wstring(1,wchar_t(capitals&&k.ch>='a'&&k.ch<='z'?k.ch-'a'+'A':k.ch));
 }
 
 // What a press sends: a character (ch), Backspace or Enter (key), or nothing
 // (Shift, Close). close: hide the keyboard.
-enum class Send : uint8_t {None,Char,Backspace,Enter};
-struct Output {Send send=Send::None;wchar_t ch=0;bool close=false;};
+// selectAll goes first (Ctrl+A), then the send; Text types text whole.
+enum class Send : uint8_t {None,Char,Backspace,Enter,Text};
+struct Output {Send send=Send::None;wchar_t ch=0;bool close=false;bool selectAll=false;std::wstring text;};
 class Typist {
     bool shift=false;
 public:
     bool Shifted() const{return shift;}
     void Reset(){shift=false;}
-    Output Press(int i) {
+    Output Press(int i,Layout l=Layout::Letters) {
         Output out;
-        if(i<0||i>=KeyCount)return out;
-        const Key& k=Keys[i];
+        if(i<0||i>=KeyCountOf(l))return out;
+        const Key& k=KeysOf(l)[i];
         switch(k.action) {
             case Action::Char:
                 out.send=Send::Char;
@@ -157,6 +176,9 @@ public:
             case Action::Backspace:out.send=Send::Backspace;break;
             case Action::Enter:out.send=Send::Enter;shift=false;break;
             case Action::Close:out.close=true;shift=false;break;
+            case Action::Text:out.send=Send::Text;out.text=k.label;break;
+            case Action::SelectAll:out.selectAll=true;break;
+            case Action::Max:out.selectAll=true;out.send=Send::Text;out.text=L"99999999";break;
         }
         return out;
     }
@@ -166,11 +188,11 @@ public:
 // not, premultiplied RGBA, TexelWidth x TexelHeight. Labels (Label) are stamped
 // over each key on Windows (transport.cpp, GDI), as on that button.
 // With capitals the Shift key is lit in both, so the waiting Shift shows.
-inline std::vector<uint8_t> PaintKeys(bool lit,bool capitals=false) {
+inline std::vector<uint8_t> PaintKeys(bool lit,bool capitals=false,Layout l=Layout::Letters) {
     std::vector<uint8_t> px(size_t(TexelWidth)*TexelHeight*4,0);
-    for(int i=0;i<KeyCount;++i) {
-        const Rect r=KeyTexelRect(i);
-        const auto face=respecbutton::PaintFace(r.w,r.h,lit||(capitals&&Keys[i].action==Action::Shift));
+    for(int i=0;i<KeyCountOf(l);++i) {
+        const Rect r=KeyTexelRect(i,l);
+        const auto face=respecbutton::PaintFace(r.w,r.h,lit||(capitals&&KeysOf(l)[i].action==Action::Shift));
         for(int y=0;y<r.h;++y)
             std::copy_n(&face[size_t(y)*r.w*4],size_t(r.w)*4,&px[(size_t(r.y+y)*TexelWidth+r.x)*4]);
     }

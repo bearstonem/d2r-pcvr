@@ -343,6 +343,7 @@ std::atomic<bool> g_respecButton{false};  // its Character page alone: Reset Ski
 // shows; the epoch changes each time it comes up anew. The box is read on the UI message thread.
 framevr::keyboard::NameBox g_nameBox;
 std::atomic<bool> g_keyboard{false};
+std::atomic<bool> g_goldBox{false};   // the game's box for an amount of gold (DropGoldModal and its kin): the gold pad
 // The main menu (owner 2026-11-14): what Right B may close over it. The cog's panel is D2RLoader's own
 // (D2RLoaderSettingsPanel) - Escape does not close it, the game asked whether to quit instead; it gets a
 // ClosePanel. Anything else not of the menu itself (a dialog, the game's options, character creation) gets
@@ -1085,6 +1086,11 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         g_autoMap.store(g_panels.count("AutoMap") ? 1 : 0);
         framevr::fullmap::g_panel.store(g_panels.count("AutoMap") != 0);
         g_noticePanel.store(g_panels.count("NotificationPanel") != 0);
+        {
+            const bool gold = std::any_of(g_panels.begin(), g_panels.end(),
+                [](const auto& name) { return name.find("Gold") != std::string::npos; });
+            if (g_goldBox.exchange(gold) != gold) Log(gold ? "gamestate: a gold box is up (the gold pad shows)" : "gamestate: the gold box is gone");
+        }
         g_upperBandMenu.store(std::any_of(g_panels.begin(),g_panels.end(),
             [](const auto& name){return framevr::panels::UpperBand(name);}));
         g_opaqueMenu.store(std::any_of(g_panels.begin(),g_panels.end(),
@@ -1366,6 +1372,7 @@ bool RespecButtonShown(){return false;}   // the reset engine is in the native O
 #endif
 uint32_t PanelChanges(){return g_panelChanges.load();}
 bool KeyboardShown(){return g_keyboard.load();}
+bool GoldBoxShown(){return g_goldBox.load();}
 bool FrontSettingsOpen(){return g_frontSettings.load();}
 bool FrontOverlayOpen(){return g_frontOver.load();}
 uint32_t KeyboardEpoch(){return g_keyboardEpoch.load();}

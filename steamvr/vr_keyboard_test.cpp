@@ -135,5 +135,23 @@ int main(){
         box.Message("CharacterCreate","Select","Amazon");box.Message("PanelManager","UnloadAll","");
         Check(!box.Shown(),"every panel unloaded (a game starting): gone");
     }
+    {   // the gold pad: digits, 000, Back, All, Max, Enter in the middle five columns
+        using keyboard::Layout;
+        const auto at=[](float col,float row){return keyboard::KeyAt((col+.5f)/keyboard::Columns,(row+.5f)/keyboard::Rows,Layout::Digits);};
+        keyboard::Typist t;
+        Check(at(0,0)<0&&at(9,3)<0,"the pad leaves the board's sides empty");
+        const auto seven=t.Press(at(2.5f,0),Layout::Digits);
+        Check(seven.send==keyboard::Send::Char&&seven.ch==L'7',"7 types 7");
+        const auto thousands=t.Press(at(4.f,3),Layout::Digits);
+        Check(thousands.send==keyboard::Send::Text&&thousands.text==L"000","000 types three zeros");
+        const auto all=t.Press(at(6.f,1),Layout::Digits);
+        Check(all.selectAll&&all.send==keyboard::Send::None,"All selects the box's text");
+        const auto max=t.Press(at(6.f,2),Layout::Digits);
+        Check(max.selectAll&&max.send==keyboard::Send::Text&&!max.text.empty(),"Max replaces it with more than there is");
+        Check(t.Press(at(6.f,0),Layout::Digits).send==keyboard::Send::Backspace&&t.Press(at(6.f,3),Layout::Digits).send==keyboard::Send::Enter,
+              "Back and Enter");
+        for(int i=0;i<keyboard::DigitKeyCount;++i){const auto r=keyboard::KeyTexelRect(i,Layout::Digits);
+            Check(r.x>=0&&r.y>=0&&r.x+r.w<=keyboard::TexelWidth&&r.y+r.h<=keyboard::TexelHeight,"a pad key inside the picture");}
+    }
     std::puts("VR keyboard layout, laser hits, typing and picture passed");
 }
