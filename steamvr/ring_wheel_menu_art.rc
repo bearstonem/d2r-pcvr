@@ -1,0 +1,10 @@
+// Ring skill menu's three sub-menu pictures (Glyphs, Gestures, Quick cast; steamvr/ring_wheel_menu_art.h), its tree sheet and glyph sheet,
+// embedded in the plugin as upstream embeds its own pictures (interaction_assets.rc), so no loose file is needed. Original art, not
+// game-derived.
+D2RVR_RING_MENU_GLYPHS RCDATA "assets/ring-wheel/ring-menu-glyphs.png"
+D2RVR_RING_MENU_GESTURES RCDATA "assets/ring-wheel/ring-menu-gestures.png"
+D2RVR_RING_MENU_QUICK_CAST RCDATA "assets/ring-wheel/ring-menu-quick-cast.png"
+// Ring skill menu tree icons (steamvr/ring_wheel_tree_art.h): the 24 painted tree squares on one sheet (tools/ring_tree_sheet.py).
+D2RVR_RING_TREE_SHEET RCDATA "assets/ring-wheel/ring-tree-sheet.png"
+// Ring skill menu glyph icons (steamvr/ring_wheel_glyph_art.h): the 12 painted glyph and sigil squares on one sheet (tools/ring_glyph_sheet.py).
+D2RVR_RING_GLYPH_SHEET RCDATA "assets/ring-wheel/ring-glyph-sheet.png"

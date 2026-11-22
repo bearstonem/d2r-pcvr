@@ -6,6 +6,7 @@
 #include "grab_hint.h"
 #include "guard_strain.h"
 #include "notice_card.h"
+#include "quick_radial_size.h"
 #include "stash_buttons.h"
 #include "vr_keyboard.h"
 #include "vr_settings_draw.h"
@@ -74,6 +75,10 @@ constexpr Region Strain{Blood.x+Blood.w+Gap,Blood.y,strain::Size,strain::Size};
 constexpr Region Notice{Strain.x+Strain.w+Gap,Blood.y,notice::Width,notice::Height};
 constexpr Region BowLaser{Notice.x+Notice.w+Gap,Blood.y,bowlaser::AtlasWidth,bowlaser::AtlasHeight};
 constexpr Region ArcaneDecay{Strain.x,Strain.y+Strain.h+Gap,arcane::Size,arcane::Size};
+// Quick cast's two pictures (quick_radial_size.h; painted by vr/quick_radial_paint.cpp): A right of arcane decay and under the bow
+// laser, B under arcane decay.
+constexpr Region QuickRingA{ArcaneDecay.x+ArcaneDecay.w+Gap,BowLaser.y+BowLaser.h+Gap,quickradialsize::AW,quickradialsize::AH};
+constexpr Region QuickRingB{ArcaneDecay.x,ArcaneDecay.y+ArcaneDecay.h+Gap,quickradialsize::BW,quickradialsize::BH};
 constexpr int SharedWidth=2048,SharedHeight=Blood.y+Blood.h;
 
 constexpr bool Inside(Region r,int width,int height){return r.x>=0&&r.y>=0&&r.w>0&&r.h>0&&r.x+r.w<=width&&r.y+r.h<=height;}
