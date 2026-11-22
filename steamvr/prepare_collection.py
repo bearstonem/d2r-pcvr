@@ -164,6 +164,20 @@ def read_strings(game, casclib=None):
         return {}, {}, {}
 
 
+def read_rune_name_ids(game, casclib=None):
+    """{string key: string id} of item-runes.json: a completed runeword keeps its name's id on
+    the item (ItemInfo::prefixIds[0]), the one way to know it when getItemDetails says nothing."""
+    import json
+    try:
+        from game_assets import open_assets
+        data = open_assets(game, casclib).read('data/local/lng/strings/item-runes.json')
+        rows = json.loads((data[3:] if data.startswith(b'\xef\xbb\xbf') else data).decode('utf-8'))
+        return {row['Key']: int(row['id']) for row in rows if 'Key' in row and 'id' in row}
+    except Exception as error:
+        print('collection: no runeword name ids (%s)' % error)
+        return {}
+
+
 def build(read, strings=None, skill_names=None, names=None):
     """The catalog: per category, entries in a stable order.
 
@@ -243,6 +257,7 @@ def build(read, strings=None, skill_names=None, names=None):
         entries.append({
             'code': '',
             'recordId': position,
+            'nameKey': cell(row, 'Name'),   # its string key; prepare() adds the string's id (nameId)
             'name': names.get(cell(row, 'Name')) or cell(row, '*Rune Name'),
             'level': max([rune_level.get(cell(row, 'Rune%d' % n), 0) for n in range(1, 7)] or [0]),
             'type': cell(row, 'itype1'),
@@ -284,20 +299,22 @@ def write_catalog(catalog, out_dir):
 
     Columns: category, code, recordId, name, level, type, extra (a set's name,
     or a runeword's rune count), base (the base item's name: Shako, Cap, ...),
-    stats (the tooltip's stat lines with their ranges, joined by '|').
+    stats (the tooltip's stat lines with their ranges, joined by '|'), nameId (a runeword's
+    name string id, which the game keeps on the item as prefixIds[0]; 0 for the rest).
     The slot is the entry's line number inside its category, so the order here
     is the order the panel draws.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     lines = ['# collection %d' % VERSION,
-             '# category\tcode\trecordId\tname\tlevel\ttype\textra\tbase\tstats']
+             '# category\tcode\trecordId\tname\tlevel\ttype\textra\tbase\tstats\tnameId']
     for category in CATEGORIES:
         for entry in catalog[category]:
             extra = entry.get('setName', '') or (' '.join(entry.get('runes', [])) if entry.get('runes') else '')
             stat_text = '|'.join(line.replace('|', '/').replace('\t', ' ') for line in entry.get('stats', []))
             lines.append('\t'.join((category, entry['code'].strip(), str(entry['recordId']), entry['name'],
-                                    str(entry['level']), entry['type'], extra, entry.get('base', ''), stat_text)))
+                                    str(entry['level']), entry['type'], extra, entry.get('base', ''), stat_text,
+                                    str(entry.get('nameId', 0)))))
     (out_dir / 'collection.tsv').write_text('\n'.join(lines) + '\n', encoding='utf-8')
     return out_dir / 'collection.tsv'
 
@@ -309,6 +326,9 @@ def prepare(game, out_dir, casclib=None):
 
     strings, skill_names, names = read_strings(game, casclib)
     catalog = build(read, strings, skill_names, names)
+    name_ids = read_rune_name_ids(game, casclib)
+    for entry in catalog['runewords']:
+        entry['nameId'] = name_ids.get(entry.get('nameKey', ''), 0)
     write_catalog(catalog, out_dir)
 
     summary = {category: len(catalog[category]) for category in CATEGORIES}

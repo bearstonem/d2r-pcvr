@@ -117,6 +117,7 @@
 #include "stash_plaque_art.h"
 #include "stash_slots.h"
 #include "stash_stick_art.h"
+#include "stash_tab_hover_art.h"
 #include "../vr/collection_tab.h"
 #include "../vr/collection_store.h"
 #include "../vr/collection_tooltip_provider.h"
@@ -3141,10 +3142,7 @@ void MenuPointer(const menus::Pad& controls) {
     // The campfire: the board owns the game's pointer only while the laser is on it - owned, a
     // pointer event no menu takes never reaches the scene, and the heroes could not be picked.
     if(active&&(!campfirePointer.load()||pointerHit))panelinput::OwnPointer();
-    // On the Collection tab of the stash bar the game's cursor follows too, so the game draws
-    // its own hover frame on the tab (owner 2026-11-22: no frame before the click); the click
-    // stays the mod's (gamePointer below leaves it out).
-    if(active&&pointerHit&&(!onButton||onCollectionTab)&&!dropOwns&&!handClicking) {
+    if(active&&pointerHit&&!onButton&&!dropOwns&&!handClicking) {
         RECT client{};
         if(GetClientRect(gameWindow,&client)) {
             math::Vec native{hit.u,hit.v,0};
@@ -8303,6 +8301,44 @@ void CopyStickArt(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,uint32_t 
     std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
     list->ResourceBarrier(1,&b);
 }
+// The Collection tab hovered: the game's hover frame on it (stash_tab_hover_art.h). The game never
+// sees that tab hovered - its laser is the mod's - and letting its cursor there drew the tab's
+// pressed art instead (owner 2026-11-22), so the frame is laid in here.
+void CopyTabHoverArt(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,uint32_t w,uint32_t h,const int32_t crop[4]) {
+    if(!collectionTabLit||collection::TabWanted()||!gamestate::StashButtonsShown()||!ShotSized(w,h,crop))return;
+    using namespace stashtabhover;
+    static Microsoft::WRL::ComPtr<ID3D12Resource> upload;static D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp{};static bool tried=false;
+    if(!tried) {
+        tried=true;
+        D3D12_RESOURCE_DESC td{};td.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;td.Width=UINT64(Width);td.Height=UINT(Height);
+        td.DepthOrArraySize=td.MipLevels=1;td.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;td.SampleDesc.Count=1;
+        UINT rows=0;UINT64 rowBytes=0,total=0;
+        device->GetCopyableFootprints(&td,0,1,0,&fp,&rows,&rowBytes,&total);
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
+        D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=total;bd.Height=bd.DepthOrArraySize=bd.MipLevels=1;
+        bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        uint8_t* mapped=nullptr;const D3D12_RANGE none{0,0};
+        if(SUCCEEDED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&upload)))&&
+           SUCCEEDED(upload->Map(0,&none,reinterpret_cast<void**>(&mapped)))&&mapped) {
+            const std::vector<uint8_t> art(Tab,Tab+sizeof Tab);
+            const auto half=collection::uiimage::Convert(art,Width,Width,Height,Width,Height);
+            for(int y=0;y<Height;++y)std::memcpy(mapped+fp.Offset+size_t(y)*fp.Footprint.RowPitch,
+                                                reinterpret_cast<const uint8_t*>(half.data())+size_t(y)*Width*8,size_t(Width)*8);
+            upload->Unmap(0,nullptr);
+        } else upload.Reset();
+    }
+    if(!upload)return;
+    const int cx=crop[2]>0?crop[0]:0,cy=crop[3]>0?crop[1]:0;
+    D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.pResource=dest;
+    b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b.Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;b.Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+    list->ResourceBarrier(1,&b);
+    D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=dest;to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;to.SubresourceIndex=0;
+    D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=upload.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;from.PlacedFootprint=fp;
+    list->CopyTextureRegion(&to,UINT(cx+X),UINT(cy+Y),0,&from,nullptr);
+    std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
+    list->ResourceBarrier(1,&b);
+}
 // "Page N / 5" over the game's "Page N / 29" while the shared tab shows one of the player's five
 // pages (owner 2026-11-21: no one may see the 29 - the collection's own pages are not theirs).
 void CopyCounterArt(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,uint32_t w,uint32_t h,const int32_t crop[4]) {
@@ -8455,6 +8491,7 @@ bool CopyUi(reshade::api::command_queue* rq) {
         CopyCounterArt(e.commands.Get(),dest,w,h,crop);
         CopyPlaqueArt(e.commands.Get(),dest,w,h,crop);
         CopyStickArt(e.commands.Get(),dest,w,h,crop);
+        CopyTabHoverArt(e.commands.Get(),dest,w,h,crop);
         RecordStashReads(e.commands.Get(),src,w,h,crop);
     }
     // While such an item is in the hand at the stash, each finished picture is kept, so the

@@ -18,6 +18,7 @@
 
 namespace D2RL {
 struct PluginContext;
+namespace Items { struct ItemInfo; }
 }
 
 namespace framevr::collection {
@@ -74,7 +75,7 @@ void StoreReport();
 bool InCollectionBand(uint32_t sharedStashPage);
 // A completed runeword's Runes row (the catalog's runeword record id), or UINT32_MAX.
 // Game or UI thread only (an item iteration callback).
-uint32_t RunewordRecordOf(uint64_t item);
+uint32_t RunewordRecordOf(const D2RL::Items::ItemInfo& item);
 
 // What the player holds on the game's cursor, for the page to draw under the laser:
 // its icon cache key ("u248", "t12", "i..."; empty when the hand is empty or the item

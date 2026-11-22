@@ -77,6 +77,32 @@ uint32_t RunewordOf(D2RL::ItemHandle item) {
     return uint32_t(details.runewordRecordId);
 }
 
+// The same from the item's own record: getItemDetails first, else the name string id a completed
+// runeword keeps in prefixIds[0] (a Normal or Superior item has no affix there), matched to the
+// catalog's nameId (2026-11-22: getItemDetails gave no runeword for the owner's Insight).
+uint32_t RunewordOfItem(const D2RL::Items::ItemInfo& info) {
+    if (info.quality != D2RL::Items::Quality::Normal && info.quality != D2RL::Items::Quality::Superior) return UINT32_MAX;
+    if (const uint32_t record = RunewordOf(info.handle); record != UINT32_MAX) return record;
+    return info.prefixIds[0] != 0 ? TabLibrary().RecordOfName(Category::Runewords, info.prefixIds[0]) : UINT32_MAX;
+}
+
+// Why an item read as no runeword: the service, the call's result and what it gave.
+std::string RunewordDiag(D2RL::ItemHandle item) {
+    char text[200];
+    if (g_items == nullptr) return "no item service";
+    if (!D2RL::HasItemServiceField(g_items, D2RL::ItemServiceDetailsFieldEnd) || g_items->getItemDetails == nullptr) {
+        std::snprintf(text, sizeof(text), "no getItemDetails (service v%u, %u bytes, wants %u)", unsigned(g_items->serviceVersion),
+                      unsigned(g_items->serviceSize), unsigned(D2RL::ItemServiceDetailsFieldEnd));
+        return text;
+    }
+    D2RL::Items::ItemDetails details {};
+    details.structSize = D2RL::Items::ItemDetailsSize;
+    const auto result = g_items->getItemDetails(g_ctx, item, &details, nullptr, 0);
+    std::snprintf(text, sizeof(text), "getItemDetails result %d flags 0x%x runeword row %d name id %u stats %u", int(result),
+                  unsigned(details.flags), int(details.runewordRecordId), unsigned(details.runewordNameId), unsigned(details.statCount));
+    return text;
+}
+
 // One shared-stash item as the sweep sees it.
 struct Seen {
     D2RL::ItemHandle handle   = 0;
@@ -105,7 +131,7 @@ D2RL::Inventory::IterationAction __cdecl Collect(const D2RL::PluginContext*, con
     seen.set    = info->quality == D2RL::Items::Quality::Set;
     seen.identified = (info->stateFlags & D2RL::Items::ItemStateIdentified) != 0;
     if (info->qualityRecordId >= 0 && (seen.unique || seen.set)) seen.recordId = uint32_t(info->qualityRecordId);
-    if (!seen.unique && !seen.set) seen.runeword = RunewordOf(info->handle);
+    seen.runeword = RunewordOfItem(*info);
     sweep.items.push_back(seen);
     return D2RL::Inventory::IterationAction::Continue;
 }
@@ -169,6 +195,7 @@ struct CursorItem {
     uint32_t runeword = UINT32_MAX;
     bool     identified = true;
     bool     ok       = false;
+    uint32_t prefix   = 0;   // prefixIds[0]: a runeword's name string id
 };
 
 D2RL::Inventory::IterationAction __cdecl CollectCursor(const D2RL::PluginContext*, const D2RL::Items::ItemInfo* info, void* userData) noexcept {
@@ -181,7 +208,8 @@ D2RL::Inventory::IterationAction __cdecl CollectCursor(const D2RL::PluginContext
     out.set    = info->quality == D2RL::Items::Quality::Set;
     out.identified = (info->stateFlags & D2RL::Items::ItemStateIdentified) != 0;
     if (info->qualityRecordId >= 0 && (out.unique || out.set)) out.recordId = uint32_t(info->qualityRecordId);
-    if (!out.unique && !out.set) out.runeword = RunewordOf(info->handle);
+    out.runeword = RunewordOfItem(*info);
+    out.prefix = info->prefixIds[0];
     out.ok = true;
     return D2RL::Inventory::IterationAction::Continue;
 }
@@ -467,7 +495,11 @@ void DepositPrepareOnGameThread(const D2RL::PluginContext*, void*) noexcept {
     } else if (library.SlotOfCode(Category::Materials, cursor.code) != UINT32_MAX) {
         category = Category::Materials; identity = cursor.code; byCode = true;
     } else {
-        Log("Frame collection: the cursor item is not a catalog collectible; it stays in hand");
+        char line[320];
+        std::snprintf(line, sizeof(line), "Frame collection: the cursor item is not a catalog collectible; it stays in hand (code %.4s quality %u prefix %u runeword %d; %s)",
+                      reinterpret_cast<const char*>(&cursor.code), unsigned(cursor.quality), unsigned(cursor.prefix), int(cursor.runeword),
+                      RunewordDiag(cursor.handle).c_str());
+        Log(line);
         SetPhase(Phase::Idle);
         return;
     }
@@ -521,7 +553,7 @@ D2RL::Inventory::IterationAction __cdecl FindLanded(const D2RL::PluginContext*, 
     const bool matches = (match.category == Category::Uniques   && info->quality == D2RL::Items::Quality::Unique && record >= 0 && uint32_t(record) == match.identity)
                       || (match.category == Category::Sets      && info->quality == D2RL::Items::Quality::Set    && record >= 0 && uint32_t(record) == match.identity)
                       || (match.category == Category::Materials && info->code == match.identity)
-                      || (match.category == Category::Runewords && RunewordOf(info->handle) == match.identity);
+                      || (match.category == Category::Runewords && RunewordOfItem(*info) == match.identity);
     if (!matches) return D2RL::Inventory::IterationAction::Continue;
     if (info->x == match.x && info->y == match.y) match.exact = info->handle;
     else if (match.any == 0) match.any = info->handle;
@@ -615,7 +647,7 @@ D2RL::Inventory::IterationAction __cdecl FindSlotItem(const D2RL::PluginContext*
     const bool matches = (match.category == Category::Uniques && info->quality == D2RL::Items::Quality::Unique && record >= 0 && uint32_t(record) == match.identity)
                       || (match.category == Category::Sets    && info->quality == D2RL::Items::Quality::Set    && record >= 0 && uint32_t(record) == match.identity)
                       || (match.category == Category::Materials && info->code == match.identity)
-                      || (match.category == Category::Runewords && RunewordOf(info->handle) == match.identity);
+                      || (match.category == Category::Runewords && RunewordOfItem(*info) == match.identity);
     if (!matches) return D2RL::Inventory::IterationAction::Continue;
     const bool inBand = info->container == D2RL::Items::ItemContainer::SharedStash
                      && info->sharedStashPage >= match.first && info->sharedStashPage < match.beyond;
@@ -1068,7 +1100,7 @@ bool InCollectionBand(uint32_t sharedStashPage) {
     return sharedStashPage >= first && sharedStashPage < first + uint32_t(std::max(0, std::min(g_tabs.load(), kBandTabs)));
 }
 
-uint32_t RunewordRecordOf(uint64_t item) { return RunewordOf(D2RL::ItemHandle(item)); }
+uint32_t RunewordRecordOf(const D2RL::Items::ItemInfo& item) { return RunewordOfItem(item); }
 
 std::string CarriedIconKey() {
     std::lock_guard lock(g_carriedLock);

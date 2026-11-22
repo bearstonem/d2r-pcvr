@@ -24,6 +24,7 @@ struct Entry {
     std::string extra;          // a set's name, or a runeword's runes
     std::string base;           // the base item's name (Shako, Cap, ...); empty in an older catalog
     std::string stats;          // the tooltip's stat lines with their ranges, '|' between them (from the game's tables)
+    uint32_t    nameId   = 0;   // a runeword's name string id (the item's prefixIds[0]); 0 otherwise or in an older catalog
 };
 
 // Quest items the game's unique table also lists (Amulet of the Viper, the Horadric
@@ -72,6 +73,12 @@ public:
     // The slot of the entry with this base item code (materials are base items,
     // so they carry no record id), or UINT32_MAX.
     uint32_t SlotOfCode(Category category, uint32_t code) const;
+    // A runeword's record id by its name string id (what the item keeps), or UINT32_MAX.
+    uint32_t RecordOfName(Category category, uint32_t nameId) const {
+        for (uint32_t slot = 0; nameId != 0 && slot < Size(category); ++slot)
+            if (const Entry* entry = At(category, slot); entry != nullptr && entry->nameId == nameId) return entry->recordId;
+        return UINT32_MAX;
+    }
 
     // Four ASCII bytes packed the way Items::MakeItemCode does (first byte low),
     // shorter text padded with spaces.
@@ -429,10 +436,10 @@ inline uint32_t Library::CodeOf(std::string_view text) {
 
 inline bool Library::LoadLine(std::string_view line) {
     if (line.empty() || line[0] == '#') return true;   // a comment, not a data line
-    std::string_view field[9];
+    std::string_view field[10];
     int              count = 0;
     std::size_t      at    = 0;
-    while (count < 9) {
+    while (count < 10) {
         const std::size_t tab = line.find('\t', at);
         field[count++] = line.substr(at, tab == std::string_view::npos ? std::string_view::npos : tab - at);
         if (tab == std::string_view::npos) break;
@@ -445,7 +452,8 @@ inline bool Library::LoadLine(std::string_view line) {
     entries_.push_back({category, CodeOf(field[1]), detail::ParseU32(field[2]), detail::ParseU32(field[4]),
                         std::string(field[3]), std::string(field[5]), count > 6 ? std::string(field[6]) : std::string(),
                         count > 7 ? std::string(field[7]) : std::string(),
-                        count > 8 ? std::string(field[8]) : std::string()});
+                        count > 8 ? std::string(field[8]) : std::string(),
+                        count > 9 ? detail::ParseU32(field[9]) : 0u});
     return true;
 }
 
