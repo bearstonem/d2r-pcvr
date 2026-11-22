@@ -79,7 +79,10 @@ D2RL::Inventory::IterationAction __cdecl CountItem(const D2RL::PluginContext*, c
     if (item->quality == D2RL::Items::Quality::Normal || item->quality == D2RL::Items::Quality::Superior) {
         if (const uint32_t runeword = RunewordRecordOf(*item); runeword != UINT32_MAX) {
             ++tally.runewordCandidates;
-            if (stored) TabMarkFound(Category::Runewords, runeword);
+            if (stored) {
+                TabSetMade(Category::Runewords, runeword, item->code, ItemTypeChain(item->code));
+                TabMarkFound(Category::Runewords, runeword);
+            }
             tooltip::RememberHandle(Category::Runewords, runeword, item->handle);
             return D2RL::Inventory::IterationAction::Continue;
         }

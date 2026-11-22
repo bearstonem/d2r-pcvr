@@ -266,6 +266,8 @@ bool MoveToInventory(const D2RL::PlayerHandle player, const D2RL::ItemHandle ite
 // the tables D2RLoader extracts beside the game (<game>\d2rloader\data\compiler\<version>).
 std::map<uint32_t, std::pair<int, int>> g_sizes;
 std::set<uint32_t> g_quest;   // quest items (the tables' "quest" column): never the collection's
+std::map<uint32_t, std::string> g_baseType;                          // base code -> its item type ("crs" -> "swor")
+std::map<std::string, std::pair<std::string, std::string>> g_equiv;   // item type -> Equiv1, Equiv2 (itemtypes.txt)
 bool g_sizesRead = false;
 
 uint32_t CodeKey(const std::string& code) {
@@ -303,7 +305,8 @@ void ReadSizes() {
             for (size_t i = 0; i < header.size(); ++i) if (header[i] == wanted) return int(i);
             return -1;
         };
-        const int code = column("code"), width = column("invwidth"), height = column("invheight"), quest = column("quest");
+        const int code = column("code"), width = column("invwidth"), height = column("invheight"), quest = column("quest"),
+                  type = column("type");
         if (code < 0 || width < 0 || height < 0) continue;
         while (std::getline(file, line)) {
             std::vector<std::string> row;
@@ -312,8 +315,29 @@ void ReadSizes() {
             if (int(row.size()) <= std::max({code, width, height}) || row[size_t(code)].empty()) continue;
             if (quest >= 0 && quest < int(row.size()) && std::atoi(row[size_t(quest)].c_str()) > 0)
                 g_quest.insert(CodeKey(row[size_t(code)]));
+            if (type >= 0 && type < int(row.size()) && !row[size_t(type)].empty())
+                g_baseType[CodeKey(row[size_t(code)])] = row[size_t(type)];
             const int w = std::atoi(row[size_t(width)].c_str()), h = std::atoi(row[size_t(height)].c_str());
             if (w >= 1 && w <= 4 && h >= 1 && h <= 4) g_sizes[CodeKey(row[size_t(code)])] = {w, h};
+        }
+    }
+    {   // the item type tree: what a sword is above "swor"
+        std::ifstream file(excel / L"itemtypes.txt");
+        std::string line;
+        std::vector<std::string> header;
+        if (std::getline(file, line)) { std::stringstream cells(line); std::string cell; while (std::getline(cells, cell, '\t')) header.push_back(cell); }
+        int code = -1, equiv1 = -1, equiv2 = -1;
+        for (size_t i = 0; i < header.size(); ++i) {
+            if (header[i] == "Code") code = int(i);
+            if (header[i] == "Equiv1") equiv1 = int(i);
+            if (header[i] == "Equiv2") equiv2 = int(i);
+        }
+        while (code >= 0 && equiv1 >= 0 && std::getline(file, line)) {
+            std::vector<std::string> row;
+            std::stringstream cells(line); std::string cell;
+            while (std::getline(cells, cell, '\t')) row.push_back(cell);
+            const auto at = [&](int i) { return i >= 0 && i < int(row.size()) ? row[size_t(i)] : std::string(); };
+            if (!at(code).empty()) g_equiv[at(code)] = {at(equiv1), at(equiv2)};
         }
     }
     char line[96];
@@ -327,6 +351,22 @@ std::pair<int, int> SizeOf(uint32_t code) {
     return found != g_sizes.end() ? found->second : std::pair<int, int> {2, 4};
 }
 bool IsQuest(uint32_t code) { ReadSizes(); return g_quest.count(code) != 0; }
+// A base item's type and every type above it, space separated ("swor blde mele weap").
+std::string TypeChain(uint32_t code) {
+    ReadSizes();
+    const auto base = g_baseType.find(code);
+    if (base == g_baseType.end()) return {};
+    std::vector<std::string> chain {base->second};
+    for (size_t i = 0; i < chain.size() && chain.size() < 24; ++i) {
+        const auto up = g_equiv.find(chain[i]);
+        if (up == g_equiv.end()) continue;
+        for (const std::string& parent : {up->second.first, up->second.second})
+            if (!parent.empty() && std::find(chain.begin(), chain.end(), parent) == chain.end()) chain.push_back(parent);
+    }
+    std::string text;
+    for (const std::string& type : chain) text += (text.empty() ? "" : " ") + type;
+    return text;
+}
 
 constexpr int kInventoryWidth = 10, kInventoryHeight = 4;
 
@@ -448,6 +488,7 @@ InventoryClick        g_click;
 Category              g_handCategory = Category::Uniques;
 uint32_t              g_handIdentity = 0;
 bool                  g_handByCode   = false;
+uint32_t              g_handCode     = 0;   // the hand's item base code (a runeword's picture)
 
 void SetPhase(Phase phase) { g_phaseAt.store(GetTickCount64()); g_phase.store(int(phase)); }
 
@@ -516,7 +557,7 @@ void DepositPrepareOnGameThread(const D2RL::PluginContext*, void*) noexcept {
             {
                 std::lock_guard lock(g_clickLock);
                 g_click = InventoryClick {x, y, w, h};
-                g_handCategory = category; g_handIdentity = identity; g_handByCode = byCode;
+                g_handCategory = category; g_handIdentity = identity; g_handByCode = byCode; g_handCode = cursor.code;
             }
             char line[192];
             std::snprintf(line, sizeof(line), "Frame collection: storing the hand's %s item (id %u) through inventory cell %d,%d (%d x %d)",
@@ -530,7 +571,7 @@ void DepositPrepareOnGameThread(const D2RL::PluginContext*, void*) noexcept {
         {
             std::lock_guard lock(g_clickLock);
             g_click = InventoryClick {x, y, w, h};
-            g_handCategory = category; g_handIdentity = identity; g_handByCode = byCode;
+            g_handCategory = category; g_handIdentity = identity; g_handByCode = byCode; g_handCode = cursor.code;
         }
         SetPhase(Phase::DepositClick);
         return;
@@ -561,10 +602,10 @@ D2RL::Inventory::IterationAction __cdecl FindLanded(const D2RL::PluginContext*, 
 }
 
 void DepositStoreOnGameThread(const D2RL::PluginContext*, void*) noexcept {
-    InventoryClick click; Category category; uint32_t identity; bool byCode;
+    InventoryClick click; Category category; uint32_t identity; bool byCode; uint32_t handCode;
     {
         std::lock_guard lock(g_clickLock);
-        click = g_click; category = g_handCategory; identity = g_handIdentity; byCode = g_handByCode;
+        click = g_click; category = g_handCategory; identity = g_handIdentity; byCode = g_handByCode; handCode = g_handCode;
     }
     D2RL::PlayerHandle player {};
     if (g_ctx == nullptr || g_inventory == nullptr || g_inventory->getLocalPlayer(g_ctx, &player) != D2RL::Inventory::Result::Success) {
@@ -596,7 +637,11 @@ void DepositStoreOnGameThread(const D2RL::PluginContext*, void*) noexcept {
                       CategoryName(category), unsigned(identity));
     } else {
         if (byCode) TabMarkFoundCode(category, identity);
-        else { TabMarkFound(category, identity); TabShowEntry(category, identity); }
+        else {
+            if (category == Category::Runewords) TabSetMade(category, identity, handCode, TypeChain(handCode));
+            TabMarkFound(category, identity);
+            TabShowEntry(category, identity);
+        }
         std::snprintf(line, sizeof(line), "Frame collection: stored the hand's %s item (id %u) in its slot",
                       CategoryName(category), unsigned(identity));
     }
@@ -906,6 +951,7 @@ void SweepOnGameThread(const D2RL::PluginContext*, void*) noexcept {
         }
         held.push_back(item.identity);
         ++moved;
+        if (item.category == Category::Runewords) TabSetMade(item.category, item.identity, item.seen.code, TypeChain(item.seen.code));
         // A unique, set or runeword brings itself into view; a material does not.
         if (item.category != Category::Materials)
             TabShowEntry(item.category, item.identity);
@@ -1101,6 +1147,7 @@ bool InCollectionBand(uint32_t sharedStashPage) {
 }
 
 uint32_t RunewordRecordOf(const D2RL::Items::ItemInfo& item) { return RunewordOfItem(item); }
+std::string ItemTypeChain(uint32_t code) { return TypeChain(code); }
 
 std::string CarriedIconKey() {
     std::lock_guard lock(g_carriedLock);

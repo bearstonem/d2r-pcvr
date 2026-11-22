@@ -189,7 +189,7 @@ uint32_t NameColor(Category category) { return category == Category::Sets ? SetN
 
 // ---- one card (the mock-up's card loop) ----
 void DrawCard(Painter& p, const panel::Rect& at, const Entry& entry, Category category, bool found, bool pointed,
-              const IconLookup& icons, bool plate) {
+              const IconLookup& icons, bool plate, const Library::Made* made = nullptr) {
     // back to mock-up pixels: everything below is the mock-up's own arithmetic
     const float x0 = at.x / panel::Scale + panel::MockLeft, y0 = at.y / panel::Scale + panel::MockTop;
     const float x1 = x0 + at.width / panel::Scale, y1 = y0 + at.height / panel::Scale;
@@ -215,7 +215,10 @@ void DrawCard(Painter& p, const panel::Rect& at, const Entry& entry, Category ca
     }
     // the picture, scaled to the card
     const RectF area = R(x0 + 12, py1 + 8, x1 - 12, y1 - 8);
-    const std::string key    = panel::IconKey(category, entry.recordId, entry.code);
+    // a made runeword shows its stored copy: the base item it was made in (owner 2026-11-22)
+    const std::string key    = category == Category::Runewords && found && made != nullptr
+                                 ? panel::IconKey(Category::Materials, 0, made->code)
+                                 : panel::IconKey(category, entry.recordId, entry.code);
     const IconPixels* pixels = icons && !key.empty() ? icons(key) : nullptr;
     if (pixels != nullptr && pixels->rgba != nullptr) {
         const RectF fit = FitImage(area, pixels->width, pixels->height);
@@ -411,7 +414,8 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
             continue;
         }
         DrawCard(p, layout.slots[slot], *entry, view.category, SlotFound(library, view, visible, slot),
-                 pointed(panel::HitKind::Slot, slot), icons, view.size != panel::Size::Large);
+                 pointed(panel::HitKind::Slot, slot), icons, view.size != panel::Size::Large,
+                 SlotMade(library, view, visible, slot));
     }
 
     // The scroll bar: the dark track, a stone arrow at each end, the lit stone thumb.
@@ -505,24 +509,26 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
     // Runewords: what they are made in on top, the kinds of the chosen one in the two rows
     // under it (empty recesses when it has none); each tile its name and found / all.
     else if (view.category == Category::Runewords) {
-        const auto tileAt = [&](const panel::Rect& rect, const RunewordTile& tile, bool on, bool lit) {
+        const auto tileAt = [&](const panel::Rect& rect, const RunewordTile& tile, bool on, bool lit, bool counted) {
             const RectF r = Box(rect);
             Button(p, r, on);
             if (lit) p.OutlineRgb(r, GoldHi, Md(1.5f));
             const float x0 = r.x / panel::Scale + PX0, y0 = r.y / panel::Scale + PY0;
             const float tw = r.w / panel::Scale, th = r.h / panel::Scale;
-            const GroupShare share = RunewordShare(library, tile.accepts);
-            const std::string count = std::to_string(share.found) + "/" + std::to_string(share.total);
-            const float countW = p.Measure(count, Plain, 4096.f, false, 0, Md(11.f)).width / panel::Scale;
-            const float nameW  = tw - countW - 15.f;
+            // All weapons and Melee hold nearly everything: no count there (owner 2026-11-22)
+            const GroupShare share = counted ? RunewordShare(library, tile) : GroupShare {};
+            const std::string count = counted ? std::to_string(share.found) + "/" + std::to_string(share.total) : std::string();
+            const float countW = counted ? p.Measure(count, Plain, 4096.f, false, 0, Md(11.f)).width / panel::Scale : 0.f;
+            const float nameW  = counted ? tw - countW - 15.f : tw - 8.f;
             const float size   = FitSize(p, tile.name, Plain, 13.f, 8.f, Md(nameW));
             const bool  done   = share.total && share.found == share.total;
-            p.TextRgb(tile.name, Plain, Md(size), R(x0 + 4, y0, x0 + 4 + nameW, y0 + th), on ? OnText : Txt, Align::Leading);
-            p.TextRgb(count, Plain, Md(11.f), R(x0 + tw - countW - 5, y0, x0 + tw - 3, y0 + th),
+            p.TextRgb(tile.name, Plain, Md(size), R(x0 + 4, y0, x0 + 4 + nameW, y0 + th), on ? OnText : Txt,
+                      counted ? Align::Leading : Align::Center);
+            if (counted) p.TextRgb(count, Plain, Md(11.f), R(x0 + tw - countW - 5, y0, x0 + tw - 3, y0 + th),
                       done ? Unique : on ? OnText : 0x9A9A94, Align::Leading);
         };
         for (int kind = 0; kind < panel::KindCount; ++kind)
-            tileAt(layout.kinds[kind], RunewordKinds[kind], view.kind == kind, pointed(panel::HitKind::Kind, kind));
+            tileAt(layout.kinds[kind], RunewordKinds[kind], view.kind == kind, pointed(panel::HitKind::Kind, kind), kind > 1);
         const int subs = RunewordSubCount(view.kind);
         for (int sub = 0; sub < panel::GroupCount; ++sub) {
             if (sub >= subs) {
@@ -531,7 +537,7 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
                 p.OutlineRgb(r, 0x060606, Md(2.f));
                 continue;
             }
-            tileAt(layout.groups[sub], *RunewordSub(view.kind, sub), view.group == sub, pointed(panel::HitKind::Group, sub));
+            tileAt(layout.groups[sub], *RunewordSub(view.kind, sub), view.group == sub, pointed(panel::HitKind::Group, sub), true);
         }
     }
     // The item types: the silhouette (36 px, a ring or an amulet 22 - they are small items)

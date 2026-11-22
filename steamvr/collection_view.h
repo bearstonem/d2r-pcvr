@@ -84,7 +84,27 @@ public:
     // shorter text padded with spaces.
     static uint32_t CodeOf(std::string_view text);
 
+    // The copy stored for a found entry: its base item code and its item type with every
+    // type above it ("swor blde mele weap") - a runeword's picture and which tiles it counts in.
+    struct Made {
+        uint32_t    code = 0;
+        std::string types;
+    };
+    void SetMade(Category category, uint32_t recordId, uint32_t code, std::string types) {
+        const uint32_t slot = SlotOf(category, recordId);
+        if (slot == UINT32_MAX || code == 0) return;
+        if (made_.size() != entries_.size()) made_.resize(entries_.size());
+        made_[start_[static_cast<std::size_t>(category)] + slot] = {code, std::move(types)};
+    }
+    // Null when unknown (nothing stored, or an older store that did not say).
+    const Made* MadeAt(Category category, uint32_t slot) const {
+        if (!finished_ || slot >= Size(category)) return nullptr;
+        const std::size_t index = start_[static_cast<std::size_t>(category)] + slot;
+        return index < made_.size() && made_[index].code != 0 ? &made_[index] : nullptr;
+    }
+
 private:
+    std::vector<Made>    made_;
     std::vector<Entry>   entries_;
     std::vector<uint8_t> found_;
     uint32_t             start_[CategoryCount + 1] {};
@@ -222,24 +242,33 @@ inline std::vector<SetInfo> SetsInBand(const Library& library, int band) {
 // stands for: its accepts are its own item type and every type above it in the
 // game's itemtypes.txt (a sword is a blde, a mele and a weap), and a runeword fits
 // when one of its own types (Entry::base) is among them.
+// A top-row tile keeps what can be made in ANY item of its kind (owner 2026-11-22: Honor, a
+// melee runeword, belongs under All weapons too): its accepts are the kind's types above and
+// below it. own is the tile's own item type: a made runeword counts on the tiles whose own type
+// its stored copy is (an Honor in a sword counts on Swords, not on Wands).
 struct RunewordTile {
     const char* name;
+    const char* own;
     const char* accepts;
 };
 inline constexpr RunewordTile RunewordKinds[panel::KindCount] = {
-    {"All weapons", "weap"},      {"Melee", "mele weap"},  {"Missile", "miss weap"},
-    {"Body armor", "tors armo"},  {"Helms", "helm armo"},  {"Shields", "shld armo"},
+    {"All weapons", "weap", "weap mele miss blde sppl blun rod swor axe knif pole spea hamm club scep mace h2h wand staf bow xbow orb jave"},
+    {"Melee", "mele", "mele weap blde sppl blun rod swor axe knif pole spea hamm club scep mace h2h wand staf"},
+    {"Missile", "miss", "miss weap bow xbow"},
+    {"Body armor", "tors", "tors armo"},
+    {"Helms", "helm", "helm armo pelt phlm circ"},
+    {"Shields", "shld", "shld armo shie ashd pala head grim"},
 };
 inline constexpr RunewordTile MeleeTypes[panel::GroupCount] = {
-    {"Swords", "swor blde mele weap"},     {"Axes", "axe mele weap"},
-    {"Daggers", "knif blde mele weap"},    {"Polearms", "pole sppl mele weap"},
-    {"Spears", "spea sppl mele weap"},     {"Hammers", "hamm blun mele weap"},
-    {"Clubs", "club blun mele weap"},      {"Scepters", "scep rod blun mele weap"},
-    {"Maces", "mace blun mele weap"},      {"Katars", "h2h mele weap"},
-    {"Wands", "wand rod blun mele weap"},  {"Staves", "staf rod blun mele weap"},
+    {"Swords", "swor", "swor blde mele weap"},     {"Axes", "axe", "axe mele weap"},
+    {"Daggers", "knif", "knif blde mele weap"},    {"Polearms", "pole", "pole sppl mele weap"},
+    {"Spears", "spea", "spea sppl mele weap"},     {"Hammers", "hamm", "hamm blun mele weap"},
+    {"Clubs", "club", "club blun mele weap"},      {"Scepters", "scep", "scep rod blun mele weap"},
+    {"Maces", "mace", "mace blun mele weap"},      {"Katars", "h2h", "h2h mele weap"},
+    {"Wands", "wand", "wand rod blun mele weap"},  {"Staves", "staf", "staf rod blun mele weap"},
 };
 inline constexpr RunewordTile ShieldTypes[] = {
-    {"Paladin", "ashd pala shld armo"}, {"Necromancer", "head shld armo"}, {"Warlock", "grim shld armo"},
+    {"Paladin", "ashd", "ashd pala shld armo"}, {"Necromancer", "head", "head shld armo"}, {"Warlock", "grim", "grim shld armo"},
 };
 // The sub-tiles under a top-row tile: the melee weapon types under All weapons and
 // Melee, the class shields under Shields; none under the rest.
@@ -250,11 +279,11 @@ inline const RunewordTile* RunewordSub(int kind, int sub) {
     if (sub < 0 || sub >= RunewordSubCount(kind)) return nullptr;
     return kind == 5 ? &ShieldTypes[sub] : &MeleeTypes[sub];
 }
-// What the open tiles accept: the sub-tile's, else the top-row tile's; null for no filter.
-inline const char* RunewordAccepts(int kind, int sub) {
+// The open tile: the sub-tile, else the top-row tile; null for no filter.
+inline const RunewordTile* RunewordOpenTile(int kind, int sub) {
     if (kind < 0 || kind >= panel::KindCount) return nullptr;
-    if (const RunewordTile* tile = RunewordSub(kind, sub)) return tile->accepts;
-    return RunewordKinds[kind].accepts;
+    if (const RunewordTile* tile = RunewordSub(kind, sub)) return tile;
+    return &RunewordKinds[kind];
 }
 inline bool RunewordFits(std::string_view accepts, std::string_view types) {
     const auto has = [&](std::string_view type) {
@@ -275,12 +304,36 @@ inline bool RunewordFits(std::string_view accepts, std::string_view types) {
     return false;
 }
 
+// Whether a runeword slot belongs on a tile: by what it can be made in, or - made ones on the
+// Made filter - by what its stored copy is (an older store that said nothing: by the former).
+inline bool RunewordInTile(const Library& library, uint32_t slot, const RunewordTile& tile, bool byMade) {
+    const Entry* entry = library.At(Category::Runewords, slot);
+    if (entry == nullptr) return false;
+    if (byMade && library.IsFound(Category::Runewords, slot))
+        if (const Library::Made* made = library.MadeAt(Category::Runewords, slot)) return RunewordFits(tile.own, made->types);
+    return RunewordFits(tile.accepts, entry->base);
+}
+
+// The top-row tile that shows a runeword just stored (owner 2026-11-22: put away while a
+// tile without it is on, the tiles turn to it): the narrowest kind its copy is, else the
+// narrowest it can be made in; NoGroup when none.
+inline int RunewordKindFor(const Library& library, uint32_t slot) {
+    constexpr int order[panel::KindCount] = {3, 4, 5, 2, 1, 0};
+    const Library::Made* made = library.MadeAt(Category::Runewords, slot);
+    for (int kind : order)
+        if (made != nullptr && RunewordFits(RunewordKinds[kind].own, made->types)) return kind;
+    for (int kind : order)
+        if (RunewordInTile(library, slot, RunewordKinds[kind], false)) return kind;
+    return panel::NoGroup;
+}
+
 // The catalog slots the filter keeps, in order: the page's slots are positions
 // in this list, not catalog slots. Built once per paint.
 inline std::vector<uint32_t> VisibleSlots(const Library& library, const ViewState& view) {
     std::vector<uint32_t> slots;
     const uint32_t        count = library.Size(view.category);
     slots.reserve(count);
+    const RunewordTile* runewordTile = view.category == Category::Runewords ? RunewordOpenTile(view.kind, view.group) : nullptr;
     // Sets: a picked tile keeps only its set's pieces.
     const bool          sets = view.category == Category::Sets;
     std::vector<SetInfo> band;
@@ -294,9 +347,7 @@ inline std::vector<uint32_t> VisibleSlots(const Library& library, const ViewStat
             const Entry* entry = library.At(view.category, slot);
             if (picked && (entry == nullptr || entry->extra != band[size_t(view.group)].name)) continue;
         } else if (view.category == Category::Runewords) {
-            const char* accepts = RunewordAccepts(view.kind, view.group);
-            const Entry* entry  = library.At(view.category, slot);
-            if (accepts != nullptr && (entry == nullptr || !RunewordFits(accepts, entry->base))) continue;
+            if (runewordTile != nullptr && !RunewordInTile(library, slot, *runewordTile, view.show == panel::Show::Found)) continue;
         } else if (view.group != panel::NoGroup) {
             const Entry* entry = library.At(view.category, slot);
             if (entry == nullptr || panel::GroupOfType(entry->type) != view.group) continue;
@@ -334,15 +385,21 @@ inline GroupShare ShareOf(const Library& library, Category category, int group) 
 }
 
 // A runeword tile's share: the runewords that fit it, and how many of them are found.
-inline GroupShare RunewordShare(const Library& library, std::string_view accepts) {
+// total: those that can be made in it; found: those made in it (RunewordInTile by the copy).
+inline GroupShare RunewordShare(const Library& library, const RunewordTile& tile) {
     GroupShare share;
     for (uint32_t slot = 0; slot < library.Size(Category::Runewords); ++slot) {
-        const Entry* entry = library.At(Category::Runewords, slot);
-        if (entry == nullptr || !RunewordFits(accepts, entry->base)) continue;
-        ++share.total;
-        if (library.IsFound(Category::Runewords, slot)) ++share.found;
+        if (RunewordInTile(library, slot, tile, false)) ++share.total;
+        if (library.IsFound(Category::Runewords, slot) && RunewordInTile(library, slot, tile, true)) ++share.found;
     }
     return share;
+}
+// The stored copy of the entry a panel slot shows, or null.
+inline const Library::Made* SlotMade(const Library& library, const ViewState& view, const std::vector<uint32_t>& visible, int slot) {
+    const int slots = panel::SlotsFor(view.size);
+    if (slot < 0 || slot >= slots) return nullptr;
+    const size_t at = size_t(view.page) * size_t(slots) + size_t(slot);
+    return at < visible.size() && library.IsFound(view.category, visible[at]) ? library.MadeAt(view.category, visible[at]) : nullptr;
 }
 
 // The entry a panel slot shows, or null when the page has fewer entries.
@@ -514,7 +571,10 @@ inline uint32_t Library::MarkFoundCode(Category category, uint32_t code) {
     return UINT32_MAX;
 }
 
-inline void Library::ClearFound() { std::fill(found_.begin(), found_.end(), uint8_t(0)); }
+inline void Library::ClearFound() {
+    std::fill(found_.begin(), found_.end(), uint8_t(0));
+    made_.clear();
+}
 
 inline uint32_t Library::MarkMissing(Category category, uint32_t recordId) {
     if (!finished_) return UINT32_MAX;

@@ -210,10 +210,17 @@ void TabShowEntry(Category category, uint32_t recordId) {
     // hides it lets go first, so the entry is always brought into view.
     auto visible = VisibleSlots(g_library, g_view);
     auto it      = std::find(visible.begin(), visible.end(), slot);
-    if (it == visible.end() && g_view.group != panel::NoGroup) {
+    if (it == visible.end() && (g_view.group != panel::NoGroup || g_view.kind != panel::NoGroup)) {
         g_view.group = panel::NoGroup;
+        // a runeword: the tiles turn to what it is (owner 2026-11-22)
+        g_view.kind  = category == Category::Runewords ? RunewordKindFor(g_library, slot) : panel::NoGroup;
         visible      = VisibleSlots(g_library, g_view);
         it           = std::find(visible.begin(), visible.end(), slot);
+    }
+    if (it == visible.end() && g_view.show != panel::Show::All) {   // the Missing filter hides it
+        g_view.show = panel::Show::All;
+        visible     = VisibleSlots(g_library, g_view);
+        it          = std::find(visible.begin(), visible.end(), slot);
     }
     if (it != visible.end()) g_view.page = int(it - visible.begin()) / panel::SlotsFor(g_view.size);
     g_view.Clamp(g_library);
@@ -236,6 +243,11 @@ void TabToggleGroup(int group) {
     // Runewords: a sub-tile only under a top-row tile that has it
     if (g_view.category == Category::Runewords && group >= RunewordSubCount(g_view.kind)) return;
     g_view.ToggleGroup(g_library, group);
+}
+
+void TabSetMade(Category category, uint32_t recordId, uint32_t code, const std::string& types) {
+    std::lock_guard lock(g_lock);
+    if (g_loaded) g_library.SetMade(category, recordId, code, types);
 }
 
 void TabToggleKind(int kind) {

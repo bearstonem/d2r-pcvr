@@ -76,6 +76,8 @@ bool InCollectionBand(uint32_t sharedStashPage);
 // A completed runeword's Runes row (the catalog's runeword record id), or UINT32_MAX.
 // Game or UI thread only (an item iteration callback).
 uint32_t RunewordRecordOf(const D2RL::Items::ItemInfo& item);
+// A base item's type and every type above it ("swor blde mele weap"), from the game's tables.
+std::string ItemTypeChain(uint32_t code);
 
 // What the player holds on the game's cursor, for the page to draw under the laser:
 // its icon cache key ("u248", "t12", "i..."; empty when the hand is empty or the item
