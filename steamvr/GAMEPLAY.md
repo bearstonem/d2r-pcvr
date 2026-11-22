@@ -1581,7 +1581,11 @@ and trigger/button melee were:
     other contact applies none. The game's
     own roll sites are checked at start (`Frame on-hit gate:`); a part not
     found stays native. `[debug] melee_trace=1` adds `onhit=1/0` to each
-    traced contact.
+    traced contact. `Frame leech:` (every build, while you hit with life or
+    mana steal) counts your melee hits with steal: those this gate or the
+    would-have-hit gate switched off, those the game's own leech ran on and the
+    mana and life it gave, any it never reached, and swings whose hit carried
+    no steal although the hero has it.
   - **Would-have-hit gate:** a contact's effects other than its damage also
     need the swing's native roll to have hit (below, *Would-have-hit gate*),
     so a full-cycle stroke at 60% attack rating chance carries them about 60%
@@ -1838,6 +1842,36 @@ included yet.
 - Drawing the string, a held trigger, a menu or the wheel ends the bash lane;
   a stroke sampled just before drawing is dropped.
 
+### Flails
+
+A flail strikes with its head (a player with two flails, 2026-11-19: the hits
+came from the shaft). The game files flails under maces, and a mace's 65 cm
+contact capsule ended partway up the chain. A flail's capsule is 90 cm
+(`weapon_reach.h`, `FlailLength`): past the ball's centre as the game's model
+has it in a Barbarian's hand (0.76-0.91 m for a player whose eyes are 1.5-1.8 m
+up), and mostly to its far side with the capsule's 6.5 cm half width. Each hand reaches by the item in
+that hand, so two flails, a flail and a sword, or a flail and a shield each get
+their own reach with nothing to set (Melee reach grows every monster for every
+weapon). The flails are the five items the game gives a flail's model: Flail,
+Knout, Scourge, Khalim's Flail and Khalim's Will. The capsule stays straight
+along the handle: the head flies out that way in a swing, which is when it hits.
+Weapons collide (below) keeps a mace's 65 cm for a flail: its chain gives way.
+Log: `Frame flail reach:` as a hand takes a flail up or puts it away.
+
+**The chain swings** (`[hands] flail_chain`, 1 by default; looks only). The
+game's flail models carry a chain of bones from the top of the handle to the
+ball, which the game moves with each class's own animation of it; with the arm
+on a controller that pose stayed fixed in the hand whichever way it turned. In
+first person the chain now hangs from the handle under the ball's weight and
+swings with the hand: a rope of the chain's joints and the ball, stepped in the
+world and laid back on the item's own bones (`flail_chain.h`; `vr/skeletons.cpp`
+PoseFlailChain), as the bow's string is. Only the player's own held flail is
+moved. A snap turn carries the chain along as it hangs; a teleport, a load or a
+pause of over 0.1 s starts it again from the game's pose; the ball rests on the
+floor. `0` leaves the game's own animation. Log: `Frame flail chain:` the setting,
+the rig once it is laid (1 chain of 18 links for a Flail, 3 of 14 for Khalim's),
+and a ten-second line of poses, steps, fresh starts and the ball's fastest.
+
 ### Weapons collide
 
 **VR Settings > Gameplay > Combat > Weapons collide** (`[gameplay]
@@ -1853,7 +1887,7 @@ applies it.
 
 - **Shapes.** A weapon is a capsule from its grip along its attachment's +Y, the
   melee contact's lengths (28 cm daggers, claws and orbs, 38 cm wands, 65 cm the
-  rest) and a 3 cm radius (a blade's half width; the melee capsule is padded for
+  rest, a flail's handle too) and a 3 cm radius (a blade's half width; the melee capsule is padded for
   reach, this one is not). The shield is the box of its rendered mesh, the same
   bounds the physical guard measures, held in its attach bone's frame so later
   poses carry it; its half thickness is kept between 1 and 4 cm. Until the mesh has
@@ -3227,8 +3261,10 @@ there.
   sides then up past the head, fast (arms only, so seated too); Leap Attack, the same swing from both
   arms pulled well back (30 cm behind the eyes), at the monster that way; Find Item, the right hand
   held out at the corpse a moment, then snatched back to the shoulder; Whirlwind, both arms held
-  straight out to the sides (a T) a moment, whirling 10 cells ahead: once for a T, the arms let down
-  before the next; Find Potion, Find Item's snatch by the left hand; Grim Ward, the right hand held out at the
+  straight out to the sides (a T) a moment, whirling 10 cells ahead, or 10 cells where the walk stick
+  points if it is pushed as the T casts: once for a T, the arms let down before the next (a whirl
+  cannot turn once begun; held, Whirlwind's button chains whirls, each toward the stick as it starts
+  and each at its own mana: `whirl_steer.h`); Find Potion, Find Item's snatch by the left hand; Grim Ward, the right hand held out at the
   corpse a moment, then driven straight down; Taunt, both hands held out in front a moment, then pulled in
   to the chest, at the highlighted monster.
 - Necromancer: Bone Armor, both fists crossed on the chest, held; Raise Skeleton, both arms swept up

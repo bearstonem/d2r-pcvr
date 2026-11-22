@@ -2,8 +2,10 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <string>
 #include "d2r_vr_build.h"
+#include "upper_body_pose.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "../steamvr/crossbow_pose.h"
 #include "../steamvr/held_collision.h"
@@ -134,6 +136,9 @@ struct Input {
     // pose and folds the world's pushes into heldPush.
     framevr::held::Reach heldWorld{};
     float heldPush[2][3] = {};
+    // A flail's chain swings (steamvr/flail_chain.h; [hands] flail_chain): a flail in a hand, first person with the
+    // arms on the controllers, the setting on. Off, the game's own animation moves the chain.
+    bool flailChain = false;
 #endif
 };
 
@@ -158,6 +163,23 @@ std::string WeaponEntityDiag();
 #endif
 
 void Set(const Input& in);
+// Fresh remote hero snapshot. worldPosition is in game renderer units;
+// ECS entity ids are deliberately not exposed as game unit ids.
+struct RemoteUpperBody {
+    upperbody::Resolved resolved{};
+    uint64_t unit = 0;
+    float worldPosition[3] = {};
+    int classId = -1;
+    float hand[2][3] = {};       // head-relative metres, x right/y up/z back
+    float rot[2][4] = {};        // x,y,z,w
+    uint32_t handsValid = 0;
+    float userHeadM = 1.7f, headPitch = 0, headRoll = 0, yawInModel = 0, worldYaw = 0;
+};
+void SetRemoteUpperBodies(const RemoteUpperBody* snapshots, size_t count);
+#ifdef D2RVR_NATIVE_OPENXR
+bool ReadLocalResolved(upperbody::Resolved* out, uint32_t worldEpoch, int classId);
+#endif
+
 #ifdef D2RVR_NATIVE_OPENXR
 // Copied from the render/input thread; skeleton workers never call OpenXR or
 // take the transport mutex. Invalid/stale input restores native animation.
@@ -236,6 +258,7 @@ struct MeleeWeaponPose {
     float length=0,radius=0; // game world units: a shapeshift form's claw, sized from the drawn paw (0 = by weapon type)
     float tipHead[3]{}; // metres from eye in head frame (x right, y up, z back)
     float dirHead[3]{}; // shaft direction in head frame
+    bool flail=false;   // a flail: its contact reaches the head on its chain (steamvr/weapon_reach.h)
 };
 bool MeleeWeapon(MeleeWeaponPose& out,int hand=0);
 bool ShieldWeapon(MeleeWeaponPose& out);

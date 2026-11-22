@@ -11,6 +11,7 @@
 #include <cstring>
 #include <mutex>
 #include "combat.h"
+#include "../steamvr/client_hit_feedback.h"
 #include "../steamvr/shield_debug.h"
 #include "combat_rules.h"
 #include "sigscan.h"
@@ -109,6 +110,10 @@ constexpr uint64_t ApplyDamageRva=0x44ce80,LifeWriteReturn=0x44d098,LifeWriteAt=
 constexpr uint8_t ApplyDamageSig[]={0x40,0x55,0x53,0x56,0x57,0x41,0x56,0x41,0x57,0x48,0x8d,0xac,0x24,0xe8,0xfe,0xff,0xff};
 constexpr uint8_t LifeWriteSig[]={0x41,0x8d,0x51,0x06,0xe8,0x78,0xac,0xea,0xff,0x8b,0x9f,0x24,0x01,0x00,0x00};
 using ApplyDamageFn=uint64_t(*)(uintptr_t,uintptr_t,uintptr_t,int,uintptr_t);
+using ClientHitFn=void(*)(uint32_t,uint32_t);
+std::atomic<ClientHitFn> clientHitObserver{nullptr};
+std::atomic<bool> fullDamageRules{false};
+thread_local framevr::clienthit::LifeLoss* observedLife=nullptr;
 ApplyDamageFn originalApplyDamage=nullptr;bool applyDamageIn=false;std::atomic<bool> damageScaleReady{false};
 // This game thread is inside a physical swing's native attack on this monster
 // (melee.cpp), and inside its damage application with this record.
@@ -211,6 +216,17 @@ std::atomic<unsigned> gatedMeleeDamage{0},gatedMeleeAttack{0},gatedLeech{0},gate
 struct TapScope {uintptr_t striker=0,struck=0;bool gated=false;};
 thread_local TapScope tapScope;
 std::atomic<unsigned> gatedTap{0},passedTap{0};
+// Leech diagnostics (combat_rules.h LeechOutcome; Report: "Frame leech:", every build).
+// A player found a mana-steal mace gave no mana in VR, and no counter showed whether the
+// gates, the game's leech or something else took it. ApplyDamage opens a probe for the
+// local player's melee record that carries steal; DamageEffects says whether 450C90 ran
+// on it and what the hero's mana and life rose by inside it (256ths of a point). A hit
+// whose record carried none while the hero has steal is counted too (NotOnRecord).
+struct LeechProbe {bool open=false,reached=false,wouldMiss=false;int mana=0,life=0;};
+thread_local LeechProbe leechProbe;
+std::atomic<unsigned> leechCarried{0},leechNotOnRecord{0},leechOnHitOff{0},leechNotReached{0},leechWouldMiss{0},leechLetThrough{0},leechNoGain{0};
+std::atomic<int64_t> leechMana{0},leechLife{0};
+std::atomic<int> lastStealLife{0},lastStealMana{0},lastStealPhysical{0};
 bool hitReactions=false;   // ApplyDamage clears a quiet contact's reaction flags (Install)
 // Unleashed would-have-hit gate (Cal, 2026-10-22; combat_rules.h WouldHit). Every
 // forced contact - a monster's melee hit or missile on the local player
@@ -740,8 +756,9 @@ void ClearRecordDots(uintptr_t record) {
     if(cleared)++dotCleared;
 }
 uint64_t DamageEffects(uintptr_t game,uintptr_t attacker,uintptr_t defender,uintptr_t record) {
+    bool wouldMiss=false;
     if(record) {
-        const bool wouldMiss=MissGated(attacker,defender);
+        wouldMiss=MissGated(attacker,defender);
         if(wouldMiss) {
             // Leech/drain, stun, chill, freeze and absorb heal: only a landed hit's.
             static constexpr int Fields[]={0x118,0x11c,0x120,0x124,0x128,0x12c,0x130};
@@ -755,7 +772,16 @@ uint64_t DamageEffects(uintptr_t game,uintptr_t attacker,uintptr_t defender,uint
         // The on-hit gate is melee's: a spell inside a trigger hit's window keeps its poison.
         if(!DamageOverTime(wouldMiss,damageFlag==0&&OnHitOff(attacker,defender)))ClearRecordDots(record);
     }
-    return originalEffects(game,attacker,defender,record);
+    // Leech diagnostics: the game's leech runs on the probed record; the hero's mana and
+    // life just before and after it say what it actually gave (nothing else runs in between).
+    if(!leechProbe.open||leechProbe.reached)return originalEffects(game,attacker,defender,record);
+    leechProbe.reached=true;leechProbe.wouldMiss=wouldMiss;
+    if(int32_t physical=0;Read(record+0x18,physical))lastStealPhysical=physical;
+    const auto stat=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva));
+    const int mana=stat(attacker,8,0),life=stat(attacker,6,0);
+    const uint64_t result=originalEffects(game,attacker,defender,record);
+    leechProbe.mana=StatGain(mana,stat(attacker,8,0));leechProbe.life=StatGain(life,stat(attacker,6,0));
+    return result;
 }
 uint64_t MonsterOnHit(uintptr_t game,uintptr_t monster) {
     // The attacking monster's mods' on-hit functions (MonUMod), on its landed hit only.
@@ -777,7 +803,18 @@ uint64_t MissileThorns(uintptr_t game,uintptr_t attacker,uintptr_t defender,uint
     if(MissGated(attacker,defender)){++missThorns;return 0;}
     return originalMissileThorns(game,attacker,defender,record);
 }
+void SetStatObserved(uintptr_t unit,int stat,int value,int layer,uintptr_t caller){
+ auto*const scope=observedLife;
+ const bool watch=scope&&scope->target==unit&&stat==6&&layer==0&&caller==d2rsig::Addr(LifeWriteReturn);
+ const auto get=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva));
+ const int before=watch?get(unit,6,0):0;
+ originalSetStat(unit,stat,value,layer);
+ if(watch)scope->Write(unit,stat,layer,true,before,get(unit,6,0));
+}
 void SetStat(uintptr_t unit,int stat,int value,int layer) {
+    if(!fullDamageRules.load()){
+        SetStatObserved(unit,stat,value,layer,reinterpret_cast<uintptr_t>(_ReturnAddress()));return;
+    }
     // Life Tap's heal inside a player's struck events (Trigger): refused on a gated stroke.
     if(stat==6&&layer==0&&tapScope.striker&&unit==tapScope.striker) {
         const int before=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva))(unit,6,0);
@@ -898,7 +935,7 @@ void SetStat(uintptr_t unit,int stat,int value,int layer) {
             }
         }
     }
-    originalSetStat(unit,stat,value,layer);
+    SetStatObserved(unit,stat,value,layer,reinterpret_cast<uintptr_t>(_ReturnAddress()));
 }
 uint64_t HitChance(uintptr_t game,uintptr_t attacker,uintptr_t defender,int chance,int roll) {
     // Only the hit check of the physical swing running on this thread.
@@ -919,12 +956,30 @@ uint64_t HitChance(uintptr_t game,uintptr_t attacker,uintptr_t defender,int chan
 uint64_t ApplyDamage(uintptr_t game,uintptr_t attacker,uintptr_t defender,int flag,uintptr_t damage) {
     const auto savedDefender=damageDefender;damageDefender=defender;
     struct Restore {uintptr_t v;~Restore(){damageDefender=v;}} restoreDefender{savedDefender};
+    // Leech diagnostics: the local player's melee record on a monster, and the life or mana
+    // steal it carries (+0x120 / +0x124, read before any gate); without any, on a physical
+    // swing's own monster (not an aura or spell landing meanwhile), whether the hero has
+    // steal (stats 60 / 62) right now. Only with the leech hook in, which reports whether
+    // the game's leech ran. A nested application keeps its own probe.
+    const LeechProbe outerProbe=leechProbe;leechProbe={};
+    int32_t steal[2]{};uint32_t localId=0,striker[3]{},struck[3]{};
+    const bool mine=!flag&&damage&&effectsIn&&LocalPlayerId(localId)&&
+                    Read(attacker,striker)&&Read(defender,struck)&&PlayerContact(localId,striker[0],striker[2],struck[0]);
+    const bool carried=mine&&Read(damage+0x120,steal)&&(steal[0]||steal[1]);
+    bool heroSteal=carried;
+    if(mine&&!carried&&swingTarget!=NoSwing&&struck[2]==swingTarget) {
+        const auto stat=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva));
+        const int life=stat(attacker,60,0),mana=stat(attacker,62,0);
+        if(life>0||mana>0){heroSteal=true;steal[0]=life;steal[1]=mana;}
+    }
     // Unleashed on-hit gate: a gated swing (or trigger hit) leeches nothing (450C90 reads these two).
+    bool stealOff=false;
     if(!flag&&leechGate&&damage&&OnHitOff(attacker,defender)) {
         int32_t leech[2]{};const int32_t none[2]{};
         if(framevr::ReadMemory(leech,reinterpret_cast<const void*>(damage+0x120),sizeof leech)&&(leech[0]||leech[1])&&
-           framevr::WriteMemory(reinterpret_cast<void*>(damage+0x120),none,sizeof none))++gatedLeech;
+           framevr::WriteMemory(reinterpret_cast<void*>(damage+0x120),none,sizeof none)){++gatedLeech;stealOff=true;}
     }
+    leechProbe.open=carried&&!stealOff;
     const auto saved=damageRecord;const auto savedAttacker=damageAttacker;damageRecord=damage;damageAttacker=attacker;
     const int savedFlag=damageFlag;damageFlag=flag;
     // A damage application nested in a Life Tap scope (e.g. a reflect onto the player
@@ -976,14 +1031,32 @@ uint64_t ApplyDamage(uintptr_t game,uintptr_t attacker,uintptr_t defender,int fl
         if(Read(defender,hero)&&hero[0]==0&&LocalPlayerId(id)&&hero[2]==id&&Read(damage+0x134,dealt)&&dealt>0)projectiles::CombatWalk(1);
     }
     if(cleared)++quietHits;
+    if(heroSteal) {
+        lastStealLife=steal[0];lastStealMana=steal[1];
+        switch(LeechOutcome(heroSteal,carried,stealOff,leechProbe.reached,leechProbe.wouldMiss)) {
+            case LeechFate::NotOnRecord:++leechNotOnRecord;break;
+            case LeechFate::OnHitOff:++leechOnHitOff;break;
+            case LeechFate::NotReached:++leechNotReached;break;
+            case LeechFate::WouldMiss:++leechWouldMiss;break;
+            case LeechFate::LetThrough:
+                ++leechLetThrough;leechMana+=leechProbe.mana;leechLife+=leechProbe.life;
+                if(!leechProbe.mana&&!leechProbe.life)++leechNoGain;
+                break;
+            case LeechFate::None:break;
+        }
+        ++leechCarried;
+    }
+    leechProbe=outerProbe;
     tapScope=savedTap;damageFlag=savedFlag;
     damageRecord=saved;damageAttacker=savedAttacker;return result;
 }
 // Set only by melee.cpp around ONE physical swing's native basic attack
 // (synchronous, game thread). Missiles and button attacks never set it.
+thread_local uintptr_t remotePlayer=0;
 thread_local bool nativeRolls=false;
 bool Qualifies(uintptr_t attacker,uintptr_t defender) {
-    if(nativeRolls||!enabled.load(std::memory_order_relaxed)||!ready.load(std::memory_order_relaxed))return false;
+    if(nativeRolls||(!remotePlayer&&!enabled.load(std::memory_order_relaxed))||!ready.load(std::memory_order_relaxed))return false;
+    if(remotePlayer){uint32_t a[3]{},d=~0u;return attacker==remotePlayer&&Read(attacker,a)&&Read(defender,d)&&PlayerContact(a[2],a[0],a[2],d);}
     const uint64_t identity=localIdentity.load();
     const auto session=localSession.load();
     if(!identity||!session||session!=gamestate::LocalPlayer()||uint32_t(GetTickCount())-uint32_t(identity>>32)>1500)return false;
@@ -994,6 +1067,17 @@ struct RollContext {uintptr_t attacker=0;bool missile=false;};
 thread_local RollContext roll;
 thread_local Seed acceptedRoll;
 void IncomingRoll(uintptr_t attacker,uintptr_t defender,bool hit);
+uint64_t ObservedDamage(uintptr_t game,uintptr_t attacker,uintptr_t defender,int flag,uintptr_t damage){
+ framevr::clienthit::LifeLoss life{defender};
+ const auto previous=observedLife;observedLife=&life;
+ struct RestoreLife{framevr::clienthit::LifeLoss*previous;~RestoreLife(){observedLife=previous;}} restore{previous};
+ return framevr::clienthit::Observe(attacker,defender,flag,damage,
+  [](uintptr_t address,void*out,size_t n){return framevr::ReadMemory(out,reinterpret_cast<const void*>(address),n);},
+  [&]{return (fullDamageRules.load()||remotePlayer)?ApplyDamage(game,attacker,defender,flag,damage):originalApplyDamage(game,attacker,defender,flag,damage);},
+  [&]{return life.lost;},
+  [](uint32_t player,uint32_t target){if(const auto fn=clientHitObserver.load())fn(player,target);});
+}
+
 int Hit(uintptr_t attacker,uintptr_t defender,int accuracy,int missile) {
     const auto saved=roll;const bool savedMelee=meleeHit;
     roll={};
@@ -1517,10 +1601,13 @@ bool UnitStat(uintptr_t unit,int stat,int& value) {
     value=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva))(unit,stat,0);return true;
 }
 bool LocalPlayerId(uint32_t& id) {
+    if(remotePlayer){uint32_t h[3]{};if(!Read(remotePlayer,h)||h[0]!=0)return false;id=h[2];return true;}
     const auto identity=localIdentity.load();const auto session=localSession.load();
     if(!identity||!session||session!=gamestate::LocalPlayer()||uint32_t(GetTickCount())-uint32_t(identity>>32)>1500)return false;
     id=uint32_t(identity);return true;
 }
+uintptr_t RemotePlayer(uintptr_t player){const auto before=remotePlayer;remotePlayer=player;return before;}
+void InstallRemote(){const bool prior=enabled.exchange(true);Install();enabled=prior;if(!prior)fullDamageRules=false;}
 void Configure(bool on) {enabled=on;}
 bool NativeRolls(bool on) {const bool was=nativeRolls;nativeRolls=on;return was;}
 void ConfigureMeleeRolls(bool native) {meleeRolls=native;}
@@ -1702,6 +1789,18 @@ bool ReadGuardDebug(framevr::guard::Debug& out) {
        now<guard.state.seenAt||now-guard.state.seenAt>GuardTuning().staleMs)return false;
     out=guard.debug;out.pose=guard.state.surface;out.raised=guard.state.raised;return framevr::guard::Valid(out.pose);
 }
+void SetHitObserver(void(*fn)(uint32_t,uint32_t)){clientHitObserver=fn;}
+void InstallFeedbackObserver(){
+ if(applyDamageIn)return;
+ // Desktop hosts install pass-through damage/life-write observers only.
+ // No roll/input overrides or changes to the stat values are enabled.
+ if(!d2rsig::Check(LifeWriteAt,LifeWriteSig,sizeof LifeWriteSig)||!d2rsig::Check(GetStatRva,GetStatSig,sizeof GetStatSig))return;
+ if(!setStatIn)setStatIn=d2rsig::Hook(SetStatRva,SetStatSig,sizeof SetStatSig,reinterpret_cast<void*>(&SetStat),reinterpret_cast<void**>(&originalSetStat));
+ if(!setStatIn)return;
+ applyDamageIn=d2rsig::Hook(ApplyDamageRva,ApplyDamageSig,sizeof ApplyDamageSig,
+  reinterpret_cast<void*>(&ObservedDamage),reinterpret_cast<void**>(&originalApplyDamage));
+ if(applyDamageIn)framevr::logging::Write("Frame client melee feedback: native damage observer ready");
+}
 void Install() {
     if(!enabled.load()||ready.load())return;
     if(!rollChecked)rollChecked=d2rsig::Check(0x44bd65,RollSig,sizeof RollSig);
@@ -1716,8 +1815,9 @@ void Install() {
     if(!setStatIn&&d2rsig::Check(GetStatRva,GetStatSig,sizeof GetStatSig))
         setStatIn=d2rsig::Hook(SetStatRva,SetStatSig,sizeof SetStatSig,reinterpret_cast<void*>(&SetStat),reinterpret_cast<void**>(&originalSetStat));
     if(setStatIn&&!applyDamageIn&&d2rsig::Check(LifeWriteAt,LifeWriteSig,sizeof LifeWriteSig))
-        applyDamageIn=d2rsig::Hook(ApplyDamageRva,ApplyDamageSig,sizeof ApplyDamageSig,reinterpret_cast<void*>(&ApplyDamage),reinterpret_cast<void**>(&originalApplyDamage));
-    if(applyDamageIn&&!damageScaleReady.exchange(true))
+        applyDamageIn=d2rsig::Hook(ApplyDamageRva,ApplyDamageSig,sizeof ApplyDamageSig,reinterpret_cast<void*>(&ObservedDamage),reinterpret_cast<void**>(&originalApplyDamage));
+    if(setStatIn&&applyDamageIn)fullDamageRules=true;
+    if(setStatIn&&applyDamageIn&&!damageScaleReady.exchange(true))
         framevr::logging::Write("Frame riposte: damage application verified; riposte damage ready");
     // Unleashed attack-rating damage: the native to-hit chance, read where
     // HitSuccessful hands it to 427EA0. Without it swings keep full damage.
@@ -1813,6 +1913,17 @@ void Report() {
                   ab=absorbScaled.exchange(0);ih||im||sh||sm||th||tm||vu||ds||ab) {
         char line[300];snprintf(line,sizeof line,"Frame would-hit gate: incoming would hit=%u would miss=%u swings would hit=%u would miss=%u shots would hit=%u would miss=%u unknown=%u damage over time off=%u absorbs scaled=%u",
             ih,im,sh,sm,th,tm,vu,ds,ab);
+        framevr::logging::Write(line);
+    }
+    // Leech on the local player's melee hits (every build): each hit that carried life or
+    // mana steal, which gate switched it off, or what the game's leech gave the hero.
+    if(const auto lc=leechCarried.exchange(0),lt=leechLetThrough.exchange(0),ng=leechNoGain.exchange(0),oh=leechOnHitOff.exchange(0),
+                  wm=leechWouldMiss.exchange(0),nr=leechNotReached.exchange(0),no=leechNotOnRecord.exchange(0);lc||lt||ng||oh||wm||nr||no) {
+        const auto mana=leechMana.exchange(0),life=leechLife.exchange(0);
+        char line[480];snprintf(line,sizeof line,"Frame leech: your melee hits with life or mana steal=%u; let through to the game's leech=%u "
+            "(mana +%.2f, life +%.2f, nothing gained=%u); switched off by the on-hit gate (in-between stroke, cleave follow-up)=%u, "
+            "by the would-hit gate=%u; the game's leech never ran=%u; the hit carried no steal=%u; last steal mana %d%% life %d%%, physical damage %.1f",
+            lc,lt,double(mana)/256,double(life)/256,ng,oh,wm,nr,no,lastStealMana.load(),lastStealLife.load(),lastStealPhysical.load()/256.);
         framevr::logging::Write(line);
     }
     if(const auto ss=shotScaled.exchange(0),su=shotUnseen.exchange(0);ss||su) {

@@ -84,7 +84,7 @@ void Install() {
 #undef CHECK
     if(throwReady.load())framevr::logging::Write("Frame hand spells: Double Throw and the left hand's throw ready");
     ready=true;
-    framevr::logging::Write("Frame hand spells: Sorceress bolts/balls, Necromancer Bone Spear, Paladin Holy Bolt and native Charged Bolt volleys ready");
+    framevr::logging::Write("Frame hand spells: Sorceress bolts/balls, Necromancer Bone Spear, Paladin Holy Bolt, Warlock Miasma Bolt and native Charged Bolt volleys ready");
 }
 bool Prepare(Shot& shot,uintptr_t game,uintptr_t player) {
     if(!ready.load()||!framevr::SpellHeld(shot))return false;

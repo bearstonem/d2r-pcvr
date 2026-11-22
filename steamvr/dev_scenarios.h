@@ -54,6 +54,10 @@ inline constexpr int ItemBowsChoice=TalRashaTombChoice+1;
 // one and then the other by turns, a press a step (TundraReproStep), each step logged.
 inline constexpr int GlacialTrailChoice=ItemBowsChoice+1,FrozenTundraChoice=ItemBowsChoice+2,TundraReproChoice=ItemBowsChoice+3;
 inline constexpr int TundraReproSteps=10;
+// The 2026-11-19 player reports (#591-#595): the Worldstone Keep, where the ceiling came down to a raised hand (the
+// Throne of Destruction, the Worldstone Chamber and Mephisto's chamber are here already), and a kit of flails with life
+// and mana steal (FlailKit below).
+inline constexpr int WorldstoneKeepChoice=TundraReproChoice+1,FlailsChoice=TundraReproChoice+2;
 struct ReproStep {int step;const char* command;const char* place;};
 // The press'th press (0 first): steps 1 to TundraReproSteps and round again, odd ones to the ice cave.
 inline ReproStep TundraReproStep(unsigned press){
@@ -61,7 +65,7 @@ inline ReproStep TundraReproStep(unsigned press){
     return step%2?ReproStep{step,"goto 115","Glacial Trail"}:ReproStep{step,"goto 117","Frozen Tundra"};
 }
 inline constexpr int PageSize=14;
-inline constexpr std::array<Choice,TundraReproChoice+1> Choices{{
+inline constexpr std::array<Choice,FlailsChoice+1> Choices{{
     {"Level 90", "All class skills rank 20 / test attributes", nullptr},
     {"Primary gear", "Class-specific unique equipment", nullptr},
     {"Alternate gear", "Equipment for the other class abilities", nullptr},
@@ -136,6 +140,9 @@ inline constexpr std::array<Choice,TundraReproChoice+1> Choices{{
     {"Frozen Tundra", "Act V / Tundra crash repro: fight (Bone Spear)", "goto 117"},
     // Its destination is the step's (TundraReproStep), not a fixed command.
     {"Tundra repro step", "Glacial Trail and Frozen Tundra by turns", nullptr},
+    // levels.txt 128 (129 and 130 below it, then the Throne 131 and the Worldstone Chamber 132)
+    {"Worldstone Keep", "Act V / Level 1: its ceiling over the pillars and stairs", "goto 128"},
+    {"Flails + steal", "Tan Do Li Ga (mana steal), Bloodrise (life steal), Flail, Scourge", nullptr},
 }};
 static_assert(limbs::Knobs==10,"one BODIES choice per knob");
 // Stable action IDs are independent of their presentation order.
@@ -150,11 +157,11 @@ inline constexpr const char* PageHelp[]={
     "Each press steps a value and saves it in the dev INI's [bodies]. Then push a body to feel it."
 };
 inline constexpr std::array<std::array<int,PageSize>,PageCount> Pages{{
-    {{Level10Choice,Level30Choice,Level60Choice,0,HealChoice,UnlockQuestsChoice,ThrowingPotionsChoice,TurnsRimsChoice,SkyRimsChoice,LootBeamsChoice,ItemBowsChoice,-1,-1,-1}},
+    {{Level10Choice,Level30Choice,Level60Choice,0,HealChoice,UnlockQuestsChoice,ThrowingPotionsChoice,TurnsRimsChoice,SkyRimsChoice,LootBeamsChoice,ItemBowsChoice,FlailsChoice,-1,-1}},
     {{StarterPrimaryChoice,StarterAlternateChoice,1,2,CrossbowChoice,BowChoice,SmallShieldChoice,DebugDrawsChoice,TurnsKeepOwnChoice,ThrowingChoice,PotionsChoice,TurnsSharpChoice,TurnsFillChoice,TorchChoice}},
     {{4,11,14,15,16,5,3,TalRashaTombChoice,8,9,-1,-1,-1,-1}},
     {{17,UpperKurastChoice,KurastSewersChoice,18,19,26,27,-1,-1,-1,-1,-1,-1,-1}},
-    {{6,7,20,21,22,23,24,25,GlacialTrailChoice,FrozenTundraChoice,TundraReproChoice,-1,-1,-1}},
+    {{6,7,20,21,22,23,24,25,GlacialTrailChoice,FrozenTundraChoice,TundraReproChoice,WorldstoneKeepChoice,-1,-1}},
     {{BodyKnobChoice,BodyKnobChoice+1,BodyKnobChoice+2,BodyKnobChoice+3,BodyKnobChoice+4,BodyKnobChoice+5,BodyKnobChoice+6,
       BodyKnobChoice+7,BodyKnobChoice+8,BodyKnobChoice+9,BodyResetChoice,-1,-1,-1}}
 }};
@@ -287,6 +294,15 @@ inline constexpr std::array<KitItem,10> LootBeamKit{{
 // uniqueitems.txt, read 2026-11-08): Witherstring (hbw) 60, Raven Claw (index "Rimeraven", lbw) 61,
 // Demon Machine (8rx) 199 - the "Expansion" line between them is not a row.
 inline constexpr std::array<uint32_t,3> ItemBowUniques{60,61,199};
+// Flails + steal (2026-11-19, to test #593's leech line and #594's flail reach and chain): two named uniques, forced by
+// their UniqueItems rows (D2R's own uniqueitems.txt, Steam 3.4.95041, read 2026-11-19), and two normal flails. The
+// General's Tan Do Li Ga (fla, row 21: 5% mana steal, level 21) is a flail for one hand; Bloodrise (mst, row 20: 5% life
+// steal, level 15) a mace with it; a Flail (str 41) for the other hand; a Scourge (7fl, str 125, level 57) for the elite
+// model at level 60 or 90. 24 inventory cells.
+inline constexpr std::array<KitItem,4> FlailKit{{
+    {"fla",KitQuality::Unique,99,true},{"mst",KitQuality::Unique,99,true},{"fla",KitQuality::Normal,1,true},{"7fl",KitQuality::Normal,1,true}
+}};
+inline constexpr std::array<uint32_t,2> FlailKitUniques{21,20};
 // Native unique generation selects eligible unique rows and random stat rolls.
 // nullptr skips an off-hand item for a two-handed staff/maul.
 inline std::array<const char*,10> Kit(int cls,int choice){
@@ -316,6 +332,11 @@ inline std::array<const char*,10> Kit(int cls,int choice){
     // (Rancid, Choking, Strangling Gas; Oil, Exploding, Fulminating). 6 cells.
     if(ValidClass(cls)&&choice==ThrowingPotionsChoice)return {"gps","gpm","gpl","ops","opm","opl"};
     if(ValidClass(cls)&&choice==TorchChoice)return {"clb","clb","gcr","r08","clb","clb"};
+    if(ValidClass(cls)&&choice==FlailsChoice) {
+        std::array<const char*,10> codes{};
+        for(size_t i=0;i<FlailKit.size();++i)codes[i]=FlailKit[i].code;
+        return codes;
+    }
     if(ValidClass(cls)&&choice==LootBeamsChoice) {
         std::array<const char*,10> codes{};
         static_assert(LootBeamKit.size()<=10,"Kit() returns at most 10 codes");
@@ -335,6 +356,6 @@ inline bool ValidChoice(int choice){return choice>=0&&choice<int(Choices.size())
 inline bool StarterKit(int choice){return choice==StarterPrimaryChoice||choice==StarterAlternateChoice;}
 // Normal quality at item level 1, usable at once; the other kits roll uniques at 99.
 inline bool NormalKit(int choice){return StarterKit(choice)||choice==ThrowingChoice||choice==PotionsChoice||choice==TorchChoice||choice==ThrowingPotionsChoice||choice==LootBeamsChoice;}
-inline bool IsKit(int choice){return choice==1||choice==2||choice==CrossbowChoice||choice==BowChoice||choice==SmallShieldChoice||choice==ItemBowsChoice||NormalKit(choice);}
+inline bool IsKit(int choice){return choice==1||choice==2||choice==CrossbowChoice||choice==BowChoice||choice==SmallShieldChoice||choice==ItemBowsChoice||choice==FlailsChoice||NormalKit(choice);}
 inline bool Isolated(std::string_view mod,std::string_view metadata){return mod==Mod&&metadata==ModInfo;}
 }

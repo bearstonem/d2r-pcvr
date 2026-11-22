@@ -14,6 +14,36 @@ struct Sim {
     bool Move(Vec d){sample.hand.p=sample.hand.p+d;sample.blade.base=sample.blade.base+d;sample.blade.tip=sample.blade.tip+d;return Step();}
 };
 int main(){
+    {   // Multiplayer: history belongs to a player, not to shared process-wide clocks.
+        // Reuse session/stroke/target values deliberately; counters need not differ across PCs.
+        PlayerCombat host,joining;
+        host.hands[0].recovery.Landed(7,1000,600);
+        host.hands[0].full.Landed(7,1000,600);
+        host.cadence.Landed(7,1000,600);
+        host.triggerLanded={7,1100};host.triggerFull={7,1000};
+        Check(host.hands[0].hits.Insert(7,1,9),"host first contact is recorded");
+        Check(host.hands[0].landed.Insert(7,1,0),"host stroke records its landed target");
+        Check(host.hands[0].felt.Insert(7,1,9),"host contact feedback is recorded");
+        host.hands[0].cleaveSession=7;host.hands[0].cleaveStroke=1;host.hands[0].cleaveLanded=2;
+        host.hands[0].strokeSession=7;host.hands[0].strokeId=1;
+        host.hands[0].strokeRecovery=.25f;host.hands[0].strokeFull=false;
+        Check(!host.cadence.Ready(7,1200)&&joining.cadence.Ready(7,1200),"host attack cannot consume joining player's cycle");
+        Check(joining.hands[0].recovery.Since(7,1200)==UINT64_MAX&&joining.hands[0].full.Since(7,1200)==UINT64_MAX,
+              "host swing cannot weaken joining player's first swing");
+        Check(joining.triggerLanded.session==0&&joining.triggerFull.session==0,"host trigger cannot stamp joining player's recovery");
+        Check(joining.hands[0].hits.Insert(7,1,9)&&joining.hands[0].landed.Insert(7,1,0)&&joining.hands[0].felt.Insert(7,1,9),
+              "same target and counters remain independently hittable and felt by joining player");
+        Check(joining.hands[0].cleaveLanded==0&&joining.hands[0].strokeId==0&&joining.hands[0].strokeRecovery==1&&joining.hands[0].strokeFull,
+              "joining player does not inherit host cleave or partial recovery");
+        joining.hands[1].recovery.Landed(7,1150,400);joining.triggerLanded={7,1175};
+        Check(host.hands[1].recovery.Since(7,1200)==UINT64_MAX&&host.triggerLanded.at==1100,
+              "joining player's offhand and trigger cannot change host history");
+        joining=PlayerCombat{};
+        Check(joining.hands[0].hits.Insert(7,1,9)&&joining.cadence.Ready(7,1200)&&joining.triggerLanded.session==0,
+              "replacing a departed player's context leaves no inherited contacts or clocks");
+        Check(!host.hands[0].hits.Insert(7,1,9)&&!host.cadence.Ready(7,1200)&&host.triggerFull.at==1000,
+              "replacing joining player's context does not reset host state");
+    }
     {   // Melee reach (VR Settings > Combat, 2026-11-08): a blade sweeping past 10 cm beside a body
         // (0.44 m off its axis: 0.30 body + 0.04 blade + 0.10 gap) touches only with enough reach.
         const Body body{{0,.3f,0},{0,1.5f,0},.3f};

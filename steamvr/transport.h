@@ -190,6 +190,9 @@ bool MonsterNearCell(float x,float y,float within,float& monsterX,float& monster
 // Teleport punched while its landing showed (spell_motion.h Output::landing): that landing, in grid
 // cells, for that skill's cast (skill -1: any) just after the punch.
 bool MotionLanding(int skill,float& x,float& y,int* landed=nullptr);   // landed: the landing's own skill (a query of skill -1 takes any)
+// The walk stick as walking reads it (the view's frame: x right, y ahead; after Walk direction's turn), while it is
+// pushed past the game's dead zone in world play; false at rest. Whirlwind aims along it (whirl_steer.h).
+bool WhirlStick(float& x,float& y);
 bool AimRulesDirected();
 bool MeleeSample(uint32_t poseStamp,melee::Sample& sample,int hand=0);
 // The posed melee capsule (world metres) that also pushes dropped bottles:
@@ -317,6 +320,8 @@ bool Active();
 // False in desktop/flat play, so VR-only world effects stay out of it.
 bool VrGameplay(uint64_t now);
 bool SpatialMenu();
+// Horizontal heading of the same frozen head pose used by native View, radians.
+bool ViewHeadHeading(float& heading);
 // mapNorth is the unmodified native camera's horizontal heading (map-up).
 // scaleHeight: the eye height the world's scale is taken from (units per metre over
 // userEyeHeight), 0 = eyeHeight; a druid's form stands its eyes apart from it.

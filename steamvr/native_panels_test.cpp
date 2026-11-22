@@ -217,6 +217,21 @@ int main(){
     Check(typed.Key(900,panels::KeyboardKeyTag)&&typed.Active(900)&&typed.Active(1199),
         "a letter from the VR keyboard lets the keyboard layout in, so a name box takes it");
     Check(!typed.Active(1200),"the VR keyboard holds the keyboard layout only while letters keep coming");
+    Check(panels::HoldController(true,false,false,true),"the laser on a menu holds the controller layout");
+    Check(!panels::HoldController(true,false,true,true),"the multiplayer panel open: the laser lets the keyboard and mouse layout in (its boxes take letters only there)");
+    Check(!panels::HoldController(true,true,false,true)&&!panels::HoldController(false,false,false,true)&&!panels::HoldController(true,false,false,false),
+        "typing, no laser, or the layout already the keyboard's: nothing held");
+    Check(panels::ImeAssociation(false,0x1234,0)==panels::TextFocus::On&&panels::ImeAssociation(false,0,0)==panels::TextFocus::Off,
+        "ImmAssociateContext: a context is a box's focus, none is no box's");
+    Check(panels::ImeAssociation(true,0,panels::ImeDefault)==panels::TextFocus::On&&panels::ImeAssociation(true,0,0)==panels::TextFocus::Off&&
+          panels::ImeAssociation(true,0x1234,1)==panels::TextFocus::On,"ImmAssociateContextEx: IACE_DEFAULT or a context is on, neither is off");
+    Check(panels::TextKeyboardUp(panels::TextFocus::On)&&!panels::TextKeyboardUp(panels::TextFocus::Off),"the multiplayer keyboard comes and goes with a box's focus");
+    Check(panels::TextKeyboardUp(panels::TextFocus::Unknown),"the game silent on it: the keyboard stays up with the panel, as before");
+    Check(panels::NextTextFocus(panels::TextFocus::Unknown,panels::TextFocus::Off)==panels::TextFocus::Unknown,
+        "an off before the game ever turned it on is not believed: the keyboard is never hidden for good");
+    Check(panels::NextTextFocus(panels::TextFocus::Unknown,panels::TextFocus::On)==panels::TextFocus::On&&
+          panels::NextTextFocus(panels::TextFocus::On,panels::TextFocus::Off)==panels::TextFocus::Off&&
+          panels::NextTextFocus(panels::TextFocus::Off,panels::TextFocus::On)==panels::TextFocus::On,"once on, it follows the game both ways");
     panels::ItemTooltipHover hover;
     Check(!hover.Active(100),"desktop starts without immediate tooltip or automatic comparison ownership");
     hover.Update(100,true,true,false);

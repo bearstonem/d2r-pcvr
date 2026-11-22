@@ -1,5 +1,7 @@
 #include <windows.h>
+#include <imm.h>
 #include <intrin.h>
+#include <cstdio>
 #include <atomic>
 #include <cstring>
 #include <utility>
@@ -9,6 +11,8 @@
 #include "sigscan.h"
 #include "logging.h"
 #include "settings_menu.h"
+#include "journal_ui.h"
+#include "MinHook.h"
 
 namespace panelinput {
 namespace {
@@ -212,10 +216,67 @@ void OnFocus(void* self,bool sound) {
     originalFocus(self,sound);
 }
 
+std::atomic<bool> textLayoutTold{false};
 bool Preserve() {
     const auto now=GetTickCount64();
-    if(!ready.load(std::memory_order_acquire)||typed.Active(now)||!lease.PreserveController(now,true))return false;
+    if(!ready.load(std::memory_order_acquire))return false;
+    const bool hold=framevr::panels::HoldController(lease.Active(now),typed.Active(now),gamestate::KeyboardText(),true);
+    if(!hold){
+        if(gamestate::KeyboardText()&&lease.Active(now)&&!textLayoutTold.exchange(true))
+            framevr::logging::Write("Frame panels: multiplayer panel - the laser lets the game take its keyboard and mouse layout (its boxes take letters only there)");
+        return false;
+    }
     return isController();
+}
+
+// The game window's input method, on while a text box marked imeEnabled has the focus (TextFocus).
+using AssociateFn=HIMC(WINAPI*)(HWND,HIMC);
+using AssociateExFn=BOOL(WINAPI*)(HWND,HIMC,DWORD);
+AssociateFn originalAssociate=nullptr;
+AssociateExFn originalAssociateEx=nullptr;
+std::atomic<int> textFocus{int(framevr::panels::TextFocus::Unknown)};
+std::atomic<uint32_t> textFocusOns{0};
+bool imeWatchIn=false;
+void NoteIme(void* caller,HWND hwnd,bool ex,HIMC context,DWORD flags) {
+    DWORD pid=0;
+    if(!hwnd||!GetWindowThreadProcessId(hwnd,&pid)||pid!=GetCurrentProcessId())return;   // the game's own windows only
+    HMODULE from=nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,static_cast<LPCWSTR>(caller),&from);
+    if(from!=GetModuleHandleW(nullptr)) {   // the loader's or ReShade's overlay, not the game's text boxes
+        static std::atomic<int> toldOther{0};
+        if(toldOther.fetch_add(1)<4) {
+            wchar_t name[MAX_PATH]{};if(from)GetModuleFileNameW(from,name,MAX_PATH);
+            const wchar_t* base=wcsrchr(name,L'\\');
+            char line[260];snprintf(line,sizeof line,"Frame panels: input method call from %ls (not the game's) - not a text box's focus",base?base+1:(*name?name:L"unknown code"));
+            framevr::logging::Write(line);
+        }
+        return;
+    }
+    const auto call=framevr::panels::ImeAssociation(ex,reinterpret_cast<uintptr_t>(context),flags);
+    const auto focus=framevr::panels::NextTextFocus(framevr::panels::TextFocus(textFocus.load()),call);
+    const int was=textFocus.exchange(int(focus));
+    if(was==int(focus))return;
+    if(focus==framevr::panels::TextFocus::On)textFocusOns.fetch_add(1);
+    static std::atomic<int> told{0};
+    if(told.fetch_add(1)<40) {
+        char line[200];snprintf(line,sizeof line,"Frame panels: the game window's input method %s (%s flags 0x%lx) - %s",
+            focus==framevr::panels::TextFocus::On?"on":"off",ex?"ImmAssociateContextEx":"ImmAssociateContext",(unsigned long)flags,
+            focus==framevr::panels::TextFocus::On?"a text box has the focus":"no text box has the focus");
+        framevr::logging::Write(line);
+    }
+}
+HIMC WINAPI OnAssociate(HWND hwnd,HIMC context){NoteIme(_ReturnAddress(),hwnd,false,context,0);return originalAssociate(hwnd,context);}
+BOOL WINAPI OnAssociateEx(HWND hwnd,HIMC context,DWORD flags){NoteIme(_ReturnAddress(),hwnd,true,context,flags);return originalAssociateEx(hwnd,context,flags);}
+void InstallImeWatch() {
+    if(imeWatchIn)return;
+    imeWatchIn=true;
+    HMODULE imm=LoadLibraryW(L"imm32.dll");
+    void* a=imm?reinterpret_cast<void*>(GetProcAddress(imm,"ImmAssociateContext")):nullptr;
+    void* b=imm?reinterpret_cast<void*>(GetProcAddress(imm,"ImmAssociateContextEx")):nullptr;
+    const bool okA=a&&MH_CreateHook(a,reinterpret_cast<void*>(&OnAssociate),reinterpret_cast<void**>(&originalAssociate))==MH_OK&&MH_EnableHook(a)==MH_OK;
+    const bool okB=b&&MH_CreateHook(b,reinterpret_cast<void*>(&OnAssociateEx),reinterpret_cast<void**>(&originalAssociateEx))==MH_OK&&MH_EnableHook(b)==MH_OK;
+    framevr::logging::Write(okA&&okB?"Frame panels: watching the game window's input method (a text box's focus: the multiplayer keyboard comes up with it)":
+                                     "Frame panels: the input method watch FAILED - the multiplayer keyboard stays up with its panel");
 }
 void Report() {
     if(!reported.exchange(true))framevr::logging::Write("Frame panels: layout switch suppressed; laser routed through UI-only pointer dispatch");
@@ -242,6 +303,8 @@ void ItemHover(bool active,bool hit,bool dragging){
     itemHover.Update(GetTickCount64(),active,hit,dragging);
 }
 void WorldInput(bool active){worldInput.Update(GetTickCount64(),active);}
+int TextFocusState(){return textFocus.load();}
+uint32_t TextFocusOns(){return textFocusOns.load();}
 void MaintainWorldController(bool player,bool menu){
     if(!ready.load(std::memory_order_acquire))return;
     if(worldInput.NeedsController(GetTickCount64(),player,menu,isController())) {
@@ -267,6 +330,7 @@ bool ControllerReady(){
     return false;
 }
 void Install() {
+    InstallImeWatch();
     InstallCanvasSize();
     if(ready.load()){InstallTooltips();return;}
     if((!controllerIn&&!d2rsig::Check(ControllerRva,ControllerSig,sizeof ControllerSig))||

@@ -11,4 +11,13 @@ struct HandCombat {
     uint64_t strokeSession=0,strokeId=0,cleaveSession=0,cleaveStroke=0;
     float strokeRecovery=1;unsigned cleaveLanded=0;bool strokeFull=true;
 };
+// Game-thread-owned history for one player. These are the existing PCVR clocks
+// and hit sets, grouped so remote dispatch can own a separate instance without
+// changing recovery rules or sharing a host's stroke history.
+struct PlayerCombat {
+    std::array<HandCombat,2> hands;
+    attackspeed::Cadence cadence;
+    struct TriggerLanded {uint64_t session=0,at=0;};
+    TriggerLanded triggerLanded,triggerFull;
+};
 }

@@ -9,7 +9,12 @@
 #include <map>
 #include <string>
 #include "native_ui.h"
+#include "area_banner.h"
 #include "native_ui_signatures.h"
+#include "../steamvr/party_roster.h"
+#include "party_health_reports.h"
+#include "ally_health_state.h"
+#include <mutex>
 #include "sigscan.h"
 #include "memory.h"
 #include "combat.h"
@@ -39,6 +44,28 @@ std::map<int,std::string> names;
 bool ready=false;
 bool bindingReady=false;
 uint64_t retryAt=0;
+std::mutex partyMutex;
+framevr::partyroster::Snapshot partySnapshot;
+void PublishParty(const framevr::partyroster::Snapshot& s){std::lock_guard lock(partyMutex);partySnapshot=s;}
+framevr::partyroster::Snapshot ReadParty(uint64_t session,uint32_t local) {
+    using namespace framevr::partyroster;
+    // Read-only UI-thread path. Both function shapes must match the reference
+    // build before decoding their RIP-relative data pointers. Never call party actions.
+    constexpr uint8_t modeSig[]={0x8b,0x05},ret[]={0xc3};
+    if(!d2rsig::Check(EntryRva,EntrySig,sizeof EntrySig)||
+       !d2rsig::Check(EntryRva+7,EntryTail,sizeof EntryTail)||
+       !d2rsig::Check(0x8af90,modeSig,sizeof modeSig)||!d2rsig::Check(0x8af96,ret,sizeof ret))return {};
+    const auto copy=[](uintptr_t p,void* out,size_t size){return p>0x10000&&framevr::ReadMemory(out,reinterpret_cast<void*>(p),size);};
+    const uintptr_t at=d2rsig::Addr(EntryRva),modeAt=d2rsig::Addr(0x8af90);
+    int32_t displacement=0,modeDisplacement=0;int mode=0;uintptr_t head=0;
+    if(!copy(at+3,&displacement,4)||!copy(modeAt+2,&modeDisplacement,4))return {};
+    // RosterPointer uses a 7-byte instruction; mode's load is six bytes.
+    const auto modePointer=RosterPointer(modeAt-1,modeDisplacement);
+    if(!modePointer||!copy(modePointer,&mode,4)||mode==0)return {};
+    const auto pointer=RosterPointer(at,displacement);
+    if(!pointer||!copy(pointer,&head,sizeof head))return {};
+    return ReadRoster(head,local,session,GetTickCount64(),copy);
+}
 template<class T>bool Read(uintptr_t p,T& t){return p>0x10000&&framevr::ReadMemory(&t,reinterpret_cast<void*>(p),sizeof t);}
 bool Ready() {
     if(ready)return true;
@@ -257,12 +284,22 @@ void Init(const D2RL::PluginContext* c){
     getLevelId=core?reinterpret_cast<D2RL::Reimplementations::GetLevelIdFromUnitFn>(
         GetProcAddress(core,MAKEINTRESOURCEA(D2RL::Reimplementations::GetLevelIdFromUnitInfo.ordinal))):nullptr;
     if(!getLevelId)framevr::logging::Write("Frame navigation: loader level accessor unavailable");
+    areabanner::Install();
+}
+framevr::partyroster::Snapshot PartyRoster(uint64_t session,uint64_t now) {
+    std::lock_guard lock(partyMutex);
+    return partySnapshot.Current(session,now)?partySnapshot:framevr::partyroster::Snapshot{};
 }
 void Capture(framevr::interaction::Snapshot& s) {
+    areabanner::Install();
+    bool allyRead=false;
+    PublishParty({}); // every failed identity/read invalidates the prior sample
+    partyhealthreports::PublishLocal({}); // never carry life across failed identity/session captures
     int reason=1;uintptr_t player=0;uint32_t id=0,clientId=0;
     struct Trace {
-        framevr::interaction::Snapshot& s;int& reason;uintptr_t& player;uint32_t& id;uint32_t& clientId;
+        framevr::interaction::Snapshot& s;int& reason;uintptr_t& player;uint32_t& id;uint32_t& clientId;bool& allyRead;
         ~Trace() {
+            if(!allyRead)allyhealthstate::Clear();
             if(!s.session)return;
             static uint64_t next=0;static int last=-1;const auto now=GetTickCount64();
             if(reason==last&&now<next)return;last=reason;next=now+5000;
@@ -270,7 +307,7 @@ void Capture(framevr::interaction::Snapshot& s) {
                 (unsigned long long)s.session,reinterpret_cast<void*>(player),clientId,id,s.health,s.maxHealth,s.mana,s.maxMana);
             framevr::logging::Write(line);
         }
-    } trace{s,reason,player,id,clientId};
+    } trace{s,reason,player,id,clientId,allyRead};
     if(!s.session||!Ready())return;
     reason=2;
     const int index=reinterpret_cast<int(*)()>(d2rsig::Addr(abi::LocalIndexRva))();
@@ -286,6 +323,8 @@ void Capture(framevr::interaction::Snapshot& s) {
     if(!combat::ObserveUiPlayer(player,s.session))return;
     if(!combat::LocalPlayerId(id))return;
     reason=5;if(id!=h[2])return;
+    PublishParty(ReadParty(s.session,id));
+    allyhealthstate::Capture(player,s.session,id);allyRead=true;
     s.devClass=framevr::dev::ExpansionClass(h[1],gamestate::DataBank());
     s.skillClass=h[1]<framevr::skillcategories::Classes.size()?int(h[1]):-1;
     // The supported loader accessor reads this live, identity-checked UI player.
@@ -322,6 +361,12 @@ void Capture(framevr::interaction::Snapshot& s) {
     s.mana=stat(player,8,0)/256.f;s.maxMana=stat(player,9,0)/256.f;
     s.vitalsKnown=s.health>=0&&s.maxHealth>0&&s.health<=s.maxHealth*2&&s.maxHealth<1000000&&
         s.mana>=0&&s.maxMana>=0&&s.mana<=std::max(1.f,s.maxMana)*2&&s.maxMana<1000000;
+    if(s.vitalsKnown&&s.health<=s.maxHealth) {
+        framevr::partyhealth::Report report{};
+        report.session=s.session;report.at=GetTickCount64();report.unitId=id;
+        report.health=s.health;report.maxHealth=s.maxHealth;report.known=true;
+        partyhealthreports::PublishLocal(report);
+    }
     reason=s.vitalsKnown?0:6;
     // Bone Armor's pool (132) and maximum (133): the forearm grafts (steamvr/bone_graft.h).
     s.boneArmor=stat(player,132,0);s.boneArmorMax=stat(player,133,0);
@@ -463,6 +508,15 @@ void Capture(framevr::interaction::Snapshot& s) {
             if(Read(row+0x4c,start)&&Read(row+0x68,secondary)&&Read(row+0x231,los))skill.physical=skill.owner==-1&&los==0&&
                 framevr::spellcast::Candidate(h[1],skillId,start,serverFunction,missile,flags,secondary)&&
                 (skillId!=101||bowvr::HolyReady());
+            // Telemetry: "Frame hand spells:" when a slot's hand spell is first seen and whenever that changes:
+            // from the hand, or from the hero natively because the game's row is not the one checked for (the
+            // Warlock's Miasma Bolt first: a player saw it leave beside his body, not his hand).
+            if(static uint8_t told[512]{};framevr::spellcast::Supported(skillId)&&skill.owner==-1&&skillId<512&&told[skillId]!=(skill.physical?1:2)) {
+                told[skillId]=skill.physical?1:2;char line[240];
+                std::snprintf(line,sizeof line,"Frame hand spells: skill %d (class %u) %s; its row: start function %d, server function %d, missile %d, line of sight %u",
+                    skillId,h[1],skill.physical?"casts from the hand":"casts natively from the hero",int(start),int(serverFunction),int(missile),unsigned(los));
+                framevr::logging::Write(line);
+            }
         }
         const auto name=Name(skillId);std::snprintf(skill.name,sizeof skill.name,"%s",name.c_str());
     }

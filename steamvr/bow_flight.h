@@ -492,6 +492,8 @@ inline void SpellMatrix(const Flight& f,uint64_t now,float out[16]) {
     // Fireball also has +2.3 forward; Bone Spear has -3. Cancel offsets at the root
     // so the visible emitter starts at the hand for straight shots and on the
     // floor for Charged Bolt. Values verified in owned HD definitions; no assets ship.
+    // Miasma Bolt's definition has not been read: it takes the straight bolts' +4, so
+    // a bolt seen above or below the palm in the headset means its height differs.
     const float ahead=f.shot.skill==47?2.3f:f.shot.skill==84?-3.f:0;
     const float height=f.shot.skill==38?-.25f:4.f;
     out[12]=p.x-out[4]*height-out[8]*ahead;

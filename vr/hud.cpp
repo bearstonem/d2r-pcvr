@@ -67,6 +67,7 @@
 #include "../steamvr/resource_descriptions.h"
 #include "../steamvr/active_keys.h"
 #include "../steamvr/native_hud.h"
+#include "../steamvr/area_banner.h"
 #include "../steamvr/render_resolution.h"
 
 #include "game_hud_shared.h"
@@ -76,6 +77,7 @@
 #include "journal_ui.h"
 #include "../steamvr/journal.h"
 #include "../steamvr/wrist_full_map.h"
+#include "../steamvr/wrist_chat.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "../steamvr/ui_world.h"
 #endif
@@ -149,7 +151,7 @@ framevr::NativeMutex g_lock;
 // Lists that have the interface bound now: the view they draw it through, and
 // whether the map's draws are being sent to our own target right now.
 struct Drawing { resource_view layer{}; bool inMap = false; uint32_t w = 0, h = 0;
-                 bool inFull = false; };   // Map view = Full map: under the full map's box now
+                 bool inFull = false; bool inChat = false;bool privateChat=false;rect listBox{}; };   // private chat list has its own target
 std::unordered_map<command_list*, Drawing> g_drawing;
 framevr::ActiveKeys g_drawingKeys;
 // The command-list API serializes recording on any one list. Unrelated world
@@ -219,6 +221,8 @@ bool IsLayerClear(device* dev, resource_view rtv, const float c[4]) {
     const resource_desc d = dev->get_resource_desc(r);
     if (d.type != resource_type::texture_2d || d.texture.format != format::r16g16b16a16_float || d.texture.width < 640) return false;
     g_layer.store(r.handle);
+    framevr::areabanner::canvasWidth.store(d.texture.width,std::memory_order_relaxed);
+    framevr::areabanner::canvasHeight.store(d.texture.height,std::memory_order_relaxed);
     return true;
 }
 
@@ -328,6 +332,42 @@ FlatVRGameHud* Block() {
     return g_block;
 }
 
+std::atomic<bool> chatWanted{false},chatComposing{false},chatShown{false},chatBootstrap{false};
+resource chatTarget{},chatCopy{};resource_view chatRtv{};
+uint32_t chatW=0,chatH=0,chatCopyW=0,chatCopyH=0;
+framevr::wristchat::HistoryFrame chatHistory;
+bool stockListSeen=false;rect stockBox{};
+bool chatDrawn=false,chatFromStock=false,chatCopyFresh=true;rect chatBox{};
+bool EnsureChat(device* dev,uint32_t w,uint32_t h) {
+ if(chatTarget.handle&&w==chatW&&h==chatH)return true;
+ if(chatTarget.handle)g_retired.push_back({chatTarget,chatRtv,nullptr,g_frames});
+ chatTarget={};chatRtv={};
+ const resource_desc desc(w,h,1,1,format::r16g16b16a16_float,1,memory_heap::default_,resource_usage::render_target|resource_usage::copy_source);
+ if(!dev->create_resource(desc,nullptr,resource_usage::render_target,&chatTarget))return false;
+ if(!dev->create_resource_view(chatTarget,resource_usage::render_target,resource_view_desc(format::r16g16b16a16_float),&chatRtv)){
+  dev->destroy_resource(chatTarget);chatTarget={};return false;
+ }
+ chatW=w;chatH=h;return true;
+}
+void CopyChat(command_list* cl) {
+ if(!chatDrawn||!chatWanted||!chatTarget.handle||!chatHistory.Select(chatFromStock))return;
+ const uint32_t w=chatBox.right-chatBox.left,h=chatBox.bottom-chatBox.top;
+ if(!w||!h||chatBox.left<0||chatBox.top<0||chatBox.right>int(chatW)||chatBox.bottom>int(chatH))return;
+ auto* dev=cl->get_device();
+ if(!chatCopy.handle||w!=chatCopyW||h!=chatCopyH) {
+  if(chatCopy.handle)g_retired.push_back({chatCopy,{},nullptr,g_frames});chatCopy={};chatCopyFresh=true;
+  const resource_desc desc(w,h,1,1,format::r16g16b16a16_float,1,memory_heap::default_,resource_usage::copy_dest|resource_usage::shader_resource);
+  if(!dev->create_resource(desc,nullptr,resource_usage::copy_dest,&chatCopy))return;
+  chatCopyW=w;chatCopyH=h;
+ }
+ const subresource_box from{uint32_t(chatBox.left),uint32_t(chatBox.top),0,uint32_t(chatBox.right),uint32_t(chatBox.bottom),1};
+ cl->barrier(chatTarget,resource_usage::render_target,resource_usage::copy_source);
+ if(!chatCopyFresh)cl->barrier(chatCopy,resource_usage::shader_resource,resource_usage::copy_dest);
+ cl->copy_texture_region(chatTarget,0,&from,chatCopy,0,nullptr,filter_mode::min_mag_mip_point);
+ cl->barrier(chatCopy,resource_usage::copy_dest,resource_usage::shader_resource);
+ cl->barrier(chatTarget,resource_usage::copy_source,resource_usage::render_target);
+ chatCopyFresh=false;chatHistory.Publish(chatFromStock);
+}
 bool EnsureShare(device* dev, int i, uint32_t w, uint32_t h) {
     Share& s = g_share[i];
     if (s.tex.handle && s.w == w && s.h == h) return true;
@@ -579,8 +619,18 @@ bool FullMapDraw(command_list* cl) {
     ++g_fullCounts.skipped;
     return true;
 }
-bool OnMapDraw(command_list* cl, uint32_t, uint32_t, uint32_t, uint32_t) { return FullMapDraw(cl) || SkipMapName(cl); }
-bool OnMapDrawIndexed(command_list* cl, uint32_t, uint32_t, uint32_t, int32_t, uint32_t) { return FullMapDraw(cl) || SkipMapName(cl); }
+// A list scissor can be emitted without any messages drawing inside it.
+// Do not publish that empty pass over the last good history image.
+void NoteChatDraw(command_list* cl){
+    if(!chatWanted.load(std::memory_order_relaxed)||!g_drawingKeys.MaybeContains(ListKey(cl)))return;
+    DrawingLock lock;auto i=g_drawing.find(cl);if(i==g_drawing.end()||!i->second.inChat)return;
+    const auto& d=i->second;
+        // The short-lived notification can draw before or after the complete native list.
+        if(!d.privateChat&&chatDrawn)return; // full list always wins within this pass
+                chatDrawn=true;chatFromStock=!d.privateChat;chatBox=d.listBox;
+}
+bool OnMapDraw(command_list* cl, uint32_t, uint32_t, uint32_t, uint32_t) { if(FullMapDraw(cl)||SkipMapName(cl))return true;NoteChatDraw(cl);return false; }
+bool OnMapDrawIndexed(command_list* cl, uint32_t, uint32_t, uint32_t, int32_t, uint32_t) { if(FullMapDraw(cl)||SkipMapName(cl))return true;NoteChatDraw(cl);return false; }
 
 bool OnClear(command_list* cl, resource_view rtv, const float c[4], uint32_t, const rect*) {
     device* dev = cl->get_device();
@@ -613,8 +663,10 @@ bool OnClear(command_list* cl, resource_view rtv, const float c[4], uint32_t, co
                                      fm::g_layout.load(std::memory_order_relaxed), fm::g_panel.load(std::memory_order_relaxed)), std::memory_order_relaxed);
     }
     const bool redirect = g_frameMap.load() == 1;
-    const resource_desc d = redirect ? framevr::resources::Describe(dev,framevr::resources::Resolve(dev,rtv)) : resource_desc{};
+    const resource_desc d = (redirect||chatWanted.load()) ? framevr::resources::Describe(dev,framevr::resources::Resolve(dev,rtv)) : resource_desc{};
     std::lock_guard g(g_lock);
+    stockListSeen=chatDrawn=false;
+    if(chatWanted&&EnsureChat(dev,d.texture.width,d.texture.height))cl->clear_render_target_view(chatRtv,kEmpty);
     // one full map a frame: a later pass keeps the first pass's share (fullmap::DrawForWrist)
     g_fullReuse = redirect && g_fullFrame.load(std::memory_order_relaxed) &&
                   !framevr::fullmap::DrawForWrist(g_fullThisFrame, GetTickCount64() - g_fullAt);
@@ -628,11 +680,32 @@ void OnScissor(command_list* cl, uint32_t, uint32_t count, const rect* rects) {
     framevr::hookmetrics::Scope measured(framevr::hookmetrics::HudScissor);
     const bool redirect = g_frameMap.load() == 1;   // else only seen: the labels keep the map flat
     const bool fullFrame = g_fullFrame.load(std::memory_order_relaxed);   // Map view = Full map
-    if (count == 0 || (!redirect && !g_labels.load() && !fullFrame) || !g_drawingKeys.MaybeContains(ListKey(cl))) return;
+    if (count == 0 || (!redirect && !g_labels.load() && !fullFrame && !chatWanted.load()) || !g_drawingKeys.MaybeContains(ListKey(cl))) return;
     DrawingLock g;
     auto it = g_drawing.find(cl);
     if (it == g_drawing.end()) return;
     Drawing& d = it->second;
+    const auto& box=rects[0];
+    const bool chatRoot=chatWanted&&chatRtv.handle&&framevr::wristchat::Scissor(box.left,box.top,box.right,box.bottom,d.w,d.h,g_uiScale.load());
+    // Bounded evidence from the actual VR UI pass; no chat text or identifiers.
+    if(chatWanted){
+        struct Sample{rect box;uint32_t w,h;}; static Sample seen[64]{};static unsigned used=0;
+        if(used<64){bool fresh=true;for(unsigned i=0;i<used;i++){
+            const auto& v=seen[i];if(v.w==d.w&&v.h==d.h&&v.box.left==box.left&&v.box.top==box.top&&v.box.right==box.right&&v.box.bottom==box.bottom){fresh=false;break;}}
+            if(fresh){seen[used++]={box,d.w,d.h};char line[192];snprintf(line,sizeof line,"Chat capture: clip %d,%d-%d,%d layer %ux%u scale %.3f target %d match %d",box.left,box.top,box.right,box.bottom,d.w,d.h,g_uiScale.load(),int(chatRtv.handle!=0),int(chatRoot));Log(line);}
+        }
+    }
+    const bool stock=(chatShown||chatBootstrap)&&chatRtv.handle&&framevr::wristchat::StockList(box.left,box.top,box.right,box.bottom,d.w,d.h,g_uiScale.load());
+    if(stock){stockListSeen=true;stockBox=box;}
+    const bool chatChild=d.inChat&&box.left>=d.listBox.left&&box.top>=d.listBox.top&&box.right<=d.listBox.right&&box.bottom<=d.listBox.bottom;
+    if(chatRoot||stock||chatChild){
+        if(!d.inChat)Bind(cl,chatRtv);
+        d.inChat=true;d.inMap=d.inFull=false;
+        if(chatRoot||stock){d.listBox=box;d.privateChat=chatRoot;}
+        return;
+    }
+    if(d.inChat){Bind(cl,d.layer);d.inChat=false;}
+
     // Map view = Full map: the full map's box (the 16:9 band of the layer); its draws go to
     // our target like the corner map's, or are skipped (FullMapDraw) when they cannot, or when
     // this pass reuses the frame's first full map.
@@ -667,9 +740,17 @@ void OnBind(command_list* cl, uint32_t count, const resource_view* rtvs, resourc
     DrawingLock g;
     auto it = g_drawing.find(cl);
     if (it != g_drawing.end() && it->second.layer.handle != now.handle) {
+        CopyChat(cl);
         const resource_view layerRtv = it->second.layer;
         const auto layerResource=framevr::resources::Resolve(dev,layerRtv);
         const auto layerDescription=framevr::resources::Describe(dev,layerResource);
+        // The stock log has a background and composer chrome drawn outside its list scissor.
+        // Remove only their footprint on the VR UI pass, never disable the native input widget.
+        if(chatWanted&&chatComposing&&stockListSeen){
+            const float unit=float(stockBox.right-stockBox.left)/1200.f;
+            const rect chrome{stockBox.left,std::max(0,int(stockBox.top-75*unit)-1),stockBox.right,std::min(int(layerDescription.texture.height),int(stockBox.top+859*unit)+1)};
+            cl->clear_render_target_view(layerRtv,kEmpty,1,&chrome);
+        }
         if(uiActive.load()) {
             ++g_diagEnds;
             const auto tex=layerResource;const auto desc=layerDescription;
@@ -795,6 +876,12 @@ uint64_t UiTexture(uint32_t& width,uint32_t& height,int32_t crop[4]) {
     std::lock_guard lock(g_lock);
     if(!uiActive.load()||!uiCaptured||!g_lab.tex.handle)return 0;
     width=g_lab.w;height=g_lab.h;std::copy_n(uiCrop,4,crop);return g_lab.tex.handle;
+}
+void ChatFrame(bool active,bool composing,bool shown,uint64_t session){std::lock_guard lock(g_lock);chatHistory.Begin(session);chatBootstrap=session&&!chatHistory.available;chatWanted=session&&(active||chatBootstrap);chatShown=shown;chatComposing=active&&composing;}
+bool ChatHistoryReady(uint64_t s){std::lock_guard lock(g_lock);return s&&chatHistory.session==s&&chatHistory.available&&chatCopy.handle;}
+uint64_t ChatTexture(uint32_t& w,uint32_t& h){
+ std::lock_guard lock(g_lock);if(!chatWanted||!chatHistory.available||!chatCopy.handle)return 0;
+ w=chatCopyW;h=chatCopyH;return chatCopy.handle;
 }
 void MenuMapCapture(bool active) {g_menuMap.store(active);}
 void MapFrame() {std::lock_guard lock(g_lock);mapCaptured=false;g_fullThisFrame=false;}
