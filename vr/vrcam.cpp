@@ -23,6 +23,7 @@
 #endif
 #include <windows.h>
 #include "pcvr_identity.h"
+#include "wrist_chat_native.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "summon_range.h"
 #endif
@@ -13633,6 +13634,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     g_iniPath[n] = 0;
     wcscat_s(g_iniPath, D2RPCVR_SETTINGS_FILE_W);
 #ifdef D2RVR_NATIVE_OPENXR
+    wristchatnative::Init(ctx,&ChatFlag,&ChatFlagFound);
     vrsettings::Poll(g_iniPath);
 #endif
     ReloadIfChanged();
@@ -13702,6 +13704,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
 }
 
 D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
+    wristchatnative::Stop();
     if (g_standDown) return;   // nothing was started
 #ifdef D2RVR_NATIVE_OPENXR
     enemysight::Shutdown();

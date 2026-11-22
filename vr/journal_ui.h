@@ -34,6 +34,9 @@ bool NativeToolbarHidden();
 // Menu map lease is maintained by the game's UI thread. Each XR pair must
 // capture a new native map before its texture can be submitted in either eye.
 void MenuMapCapture(bool active);
+void ChatFrame(bool active,bool composing=false,bool shown=false,uint64_t session=0);
+bool ChatHistoryReady(uint64_t session);
+uint64_t ChatTexture(uint32_t& width,uint32_t& height);
 void MapFrame();
 // full (optional): the texture is the game's full map's box (Map view = Full map); gameZoom: the
 // game zoom it was drawn at (0: the game's own).

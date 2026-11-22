@@ -245,7 +245,7 @@ int main(){
         Check(s.out.developer&&s.e.Page()==MenuPage::Developer,"a plain close keeps the developer page for the next open");
         s.in.cancel=true;s.Step();s.in.cancel=false;s.in.wheel=false;s.Step();s.in.wheel=true;s.Step();
         Check(!s.out.developer&&s.e.Page()==MenuPage::Spells,"the engine's cancel (no button sends it in game) leaves the developer page, as before");
-        const auto tab=FooterBounds(4,MenuPage::Spells,true);
+        const auto tab=FooterBounds(5,MenuPage::Spells,true);
         Check(WheelCell((tab.left+tab.right)/2,.93f,-1,MenuPage::Spells,0,true)==13,"developer footer hit matches paint bounds");
         Check(WheelCell(.5f,.45f,-1,MenuPage::Developer,0,true)==-1,"no hidden center spell behind developer page");
         Check(WheelCell(.25f,.27f,-1,MenuPage::Developer,0,true)==DeveloperCell(framevr::dev::Level10Choice),"developer rows share painter hit boxes");
@@ -293,7 +293,7 @@ int main(){
         s.in.hover=13;s.in.trigger=1;s.Step();
         Check(s.out.developer&&s.out.devPage==0,"after the engine's cancel, DEV starts on gear and test controls, as before");
     }
-    for(int footer=0;footer<5;++footer) {
+    for(int footer=0;footer<FooterCount(MenuPage::Developer,true);++footer) {
         Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=3;s.in.wheel=true;s.Step(3);
         s.in.hover=13;s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();
         const auto b=FooterBounds(footer,MenuPage::Developer,true);
@@ -653,9 +653,13 @@ int main(){
     }
     for(int i=0;i<8;++i){float a=i*Pi/4+WheelPhase;Check(WheelCell(.5f+std::sin(a)*.28f,.45f-std::cos(a)*.28f)==i,"wedge centers agree");}
     Check(WheelCell(.5f,.45f)==8&&WheelCell(.18f,.93f)==9,"weapon center and utility tab");
-    Check(WheelCell(.38f,.93f)==12&&WheelCell(.62f,.93f)==10&&WheelCell(.86f,.93f)==11,"map, settings and skill editor tabs");
+    for(int i=0;i<FooterCount(MenuPage::Spells);++i){
+        const auto b=FooterBounds(i,MenuPage::Spells);
+        Check(WheelCell((b.left+b.right)/2,.93f)==FooterCell(i,MenuPage::Spells),"all five tabs hit their painted bounds");
+    }
+    Check(FooterCell(4,MenuPage::Spells)==217,"chat has its own tab without moving existing action IDs");
     Check(WheelCell(.5f,.57f)==-1,"dead zone cannot select");
-    Check(WheelCell(.26f,.94f)==-1&&WheelCell(.5f,.99f)==-1,"footer gap and outside frame cannot select");
+    Check(WheelCell(FooterBounds(0,MenuPage::Spells).right+.005f,.94f)==-1&&WheelCell(.5f,.99f)==-1,"footer gap and outside frame cannot select");
     for(auto page:{MenuPage::EditSlots,MenuPage::EditSkills})
         Check(WheelCell(.18f,.93f,-1,page)==9&&WheelCell(.5f,.93f,-1,page)==10&&WheelCell(.82f,.93f,-1,page)==11,
             "editor keeps three original footer controls");
