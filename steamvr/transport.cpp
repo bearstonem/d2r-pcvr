@@ -2786,7 +2786,9 @@ void MenuPointer(const menus::Pad& controls) {
     }
     bool onKeyboard=false;keyboardLit=-1;
     if(keyboardShown&&aimTracked&&!(mouseDown||rightMouseDown)) {
-        const auto board=keyboard::Place(V(surfacePose.position),Q(surfacePose.orientation),surface.width,surface.height);
+        const auto board=keyboardLayout==keyboard::Layout::Digits
+            ?keyboard::PlaceGoldPad(V(surfacePose.position),Q(surfacePose.orientation),surface.width,surface.height)
+            :keyboard::Place(V(surfacePose.position),Q(surfacePose.orientation),surface.width,surface.height);
         const auto ray=V(aim.pose.position),direction=math::Rotate(Q(aim.pose.orientation),{0,0,-1});
         math::PanelHit on{};
         if(math::IntersectPanel(ray,direction,board.position,board.orientation,board.width,board.height,on)&&(!pointerHit||on.distance<hit.distance)) {
@@ -9505,7 +9507,9 @@ void EndPair() {
        (spatialMode?book.subImage.swapchain!=XR_NULL_HANDLE:menuPlaced)) {
         const auto size=spatialMode?UiSurfaceSize():FlatPanel().size;
         const auto at=spatialMode?UiSurfacePose():menuPose;
-        const auto board=keyboard::Place(V(at.position),Q(at.orientation),size.width,size.height);
+        const auto board=keyboardLayout==keyboard::Layout::Digits
+            ?keyboard::PlaceGoldPad(V(at.position),Q(at.orientation),size.width,size.height)
+            :keyboard::Place(V(at.position),Q(at.orientation),size.width,size.height);
         const bool digits=keyboardLayout==keyboard::Layout::Digits;
         const bool capitals=!digits&&keyboardTypist.Shifted();
         const XrPosef boardPose{{board.orientation.x,board.orientation.y,board.orientation.z,board.orientation.w},{board.position.x,board.position.y,board.position.z}};

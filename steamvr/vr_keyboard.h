@@ -125,6 +125,17 @@ inline Board Place(math::Vec surface,math::Quat facing,float width,float height)
     const math::Quat tilt{-std::sin(t*.5f),0,0,std::cos(t*.5f)};   // about the panel's x axis
     return {surface+math::Rotate(facing,top-up*(h*.5f)),math::Multiply(facing,tilt),w,h};
 }
+// The gold pad in the menu's own plane, just under the game's gold box, which the game puts in
+// the middle of its picture (owner 2026-11-22: under the whole menu it was out of sight - the
+// stash's window is scaled up, so its bottom edge is far down). The board is twice the pad's
+// width (the pad takes its middle five columns): PadWidth of the surface's width.
+constexpr float PadWidthOfSurface=.36f,PadTopBelowCentre=.09f,PadLift=.012f;
+inline Board PlaceGoldPad(math::Vec surface,math::Quat facing,float width,float height) {
+    if(!(width>0)||!(height>0))return {};
+    const float w=PadWidthOfSurface*width,h=w*Rows/Columns;
+    const math::Vec centre{0,-PadTopBelowCentre*height-h*.5f,PadLift};
+    return {surface+math::Rotate(facing,centre),facing,w,h};
+}
 // The key at the laser's hit on the board (u, v from its top left, 0-1: the
 // board's own math::IntersectPanel), or -1: in the gap between two keys.
 inline int KeyAt(float u,float v,Layout l=Layout::Letters) {
