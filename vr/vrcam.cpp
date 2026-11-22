@@ -38,6 +38,8 @@
 #include "room_subscription.h"
 #include "../steamvr/interact_press.h"
 #include "../steamvr/sewer_interaction.h"
+#include "../steamvr/entry_facing.h"
+#include "bow_signatures.h"
 #include "../steamvr/dropped_item_labels.h"
 #include "../steamvr/loot_aim.h"
 #include "../steamvr/arm_pointing.h"
@@ -3451,6 +3453,7 @@ bool VrView(const d2rcam::WorldView& in, float out[16]) {
     }
     return ours;
 }
+void AlignAreaEntry(float cameraHeading);
 bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
     AcquireSRWLockExclusive(&g_lookLock);
     memcpy(g_lookAt, in.lookAt, sizeof g_lookAt);
@@ -3488,6 +3491,7 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
     const float heading0 = atan2f(-gameFwd.x, -gameFwd.z);
     const float down0 = asinf(std::clamp(-gameFwd.y, -1.0f, 1.0f));
     const float d2r = 3.14159265f / 180.0f;
+    AlignAreaEntry(heading0 / d2r);
     yaw = TargetYaw();                                   // + turns right
     const float heading = heading0 - yaw * d2r;
     const float down = std::clamp(down0 + TargetPitch() * d2r, -1.55f, 1.55f);   // + looks further down
@@ -5319,6 +5323,85 @@ bool NativeSpellAimDecide(float playerX,float playerY,framevr::spellaim::Cast& c
     }
     return cast.directed;
 }
+// At most once after a level transition, before either eye uses its yaw.
+bool SewerInteractionLayoutReady();
+void AlignAreaEntry(float cameraHeading) {
+    static framevr::entryfacing::State entry;
+    if(RightOfPair()||!FullBody()||ThirdPerson())return;
+    const auto session=gamestate::LocalPlayer();
+    if(!session){entry.Observe(0,0,0);return;}
+    // Camera updates also happen outside an XR frame. Do not consume an
+    // arrival with a stale/unavailable pose, then miss it in the visible view.
+    float headHeading=0;
+    if(!framevr::Active()||!framevr::ViewHeadHeading(headHeading))return;
+    if(!SewerInteractionLayoutReady())return;
+    static bool geometryReady=false;
+    constexpr uint8_t levelSig[]={0x48,0x85,0xc9,0x75,0x03,0x33,0xc0,0xc3,0x48,0x8b,0x49,0x18,0xe9,0x9f,0x13,0x07,0x00};
+    if(!geometryReady){
+        geometryReady=d2rsig::Check(0x2efc10,levelSig,sizeof levelSig)&&
+            d2rsig::Check(bowvr::native::RoomPointRva,bowvr::native::RoomPointSig,sizeof bowvr::native::RoomPointSig)&&
+            d2rsig::Check(bowvr::native::MaskRva,bowvr::native::MaskSig,sizeof bowvr::native::MaskSig);
+        if(!geometryReady)return;
+    }
+    auto read=[](uintptr_t at,auto& value){return at>=0x10000&&at<=UINTPTR_MAX-sizeof value&&SafeRead(&value,reinterpret_cast<const void*>(at),sizeof value);};
+    uintptr_t player=0,path=0,room=0;
+    if(!combat::LocalPlayerUnit(player)||!read(player+0x38,path)||!read(path+0x20,room)||!room)return;
+    const auto levelOf=reinterpret_cast<int(*)(uintptr_t)>(d2rsig::Addr(0x2efc10));
+    const int level=levelOf(room); // Live destination room, not the delayed UI snapshot.
+    const int previousLevel=entry.level;
+    if(!entry.Observe(session,level,GetTickCount64()))return;
+    float px=0,py=0,tx=0,ty=0,best=20.f;
+    float portalDistance=1000.f;
+    uintptr_t tile=0;uint32_t warp=UINT32_MAX;
+    framevr::lootaim::Walk(player,read,[&](uintptr_t unit,const uint32_t* h){
+        uint32_t cell[2]{};
+        if(h[0]==2&&h[1]==59&&framevr::lootaim::ItemCell(unit,read,cell))
+            portalDistance=std::min(portalDistance,std::hypot(float(cell[0])-px,float(cell[1])-py));
+        if(h[0]!=5||!framevr::lootaim::ItemCell(unit,read,cell))return true;
+        const float d=std::hypot(float(cell[0])-px,float(cell[1])-py);
+        // Multiple tile units at one entrance are not competing entrances.
+        if(d<best){best=d;tile=unit;warp=h[1];tx=float(cell[0]);ty=float(cell[1]);}
+        return true;
+    },px,py);
+    float heading=0;
+    const bool townPortal=framevr::entryfacing::TownArrival(previousLevel,level);
+    if(townPortal){
+        framevr::entryfacing::TownTargets targets;
+        framevr::entryfacing::WalkTown(room,level,read,levelOf,[&](uintptr_t unit,const uint32_t* h){
+            uintptr_t npcPath=0;uint32_t xy[2]{};
+            if(h[0]==1&&read(unit+0x38,npcPath)&&read(npcPath,xy))
+                targets.Add(level,h[1],xy[0]/65536.f,xy[1]/65536.f);
+        });
+        if(!targets.Heading(level,px,py,heading)){
+            LogF("Frame town portal arrival: level=%d target NPC unavailable; keeping facing",level);
+            return;
+        }
+    }else{
+        if(!tile){
+            LogF("Frame area entry: from=%d level=%d no nearby entrance tile; keeping facing",previousLevel,level);
+            return;
+        }
+        const auto roomAt=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(bowvr::native::RoomPointRva));
+        const auto mask=reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(bowvr::native::MaskRva));
+        if(!framevr::entryfacing::NativeExitHeading(warp,heading)&&
+           !framevr::entryfacing::Direction(px,py,tx,ty,[&](int x,int y){
+            const auto r=roomAt(room,x,y);
+            return r&&levelOf(r)==level&&!mask(r,x,y,1,0x1);
+        },heading))return;
+    }
+    const float bodyYaw=g_headHeld.load()?g_heldYaw.load():g_mouseYaw.load()+g_turnYaw.load();
+    const float delta=framevr::entryfacing::NativeTurnDelta(cameraHeading,bodyYaw,
+        headHeading*57.2957795f,g_recenter.load(),heading);
+    g_turnYaw.fetch_add(delta);
+    if(g_headHeld.load())g_heldYaw.fetch_add(delta);
+    g_gen.fetch_add(1);g_meleeTurnEpoch.fetch_add(1);
+    if(townPortal){
+        LogF("Frame town arrival: from=%d level=%d player=%.3f,%.3f portalDistance=%.2f facing=%.1f turn=%.1f head=%.1f base=%.1f body=%.1f",previousLevel,level,px,py,portalDistance,heading,delta,headHeading*57.2957795f,cameraHeading,bodyYaw);
+        return;
+    }
+    LogF("Frame area entry: first destination view level=%d entrance=%p warp=%u player=%.3f,%.3f tile=%.0f,%.0f distance=%.2f facing=%.1f turn=%.1f",level,reinterpret_cast<void*>(tile),warp,px,py,tx,ty,best,heading,delta);
+}
+
 uintptr_t NearbySewerInteraction();
 namespace lootaimvr { uintptr_t Selected(); bool PickInReach(); bool IsItem(uintptr_t unit); }
 // 0x18DDE0 (controller manager, skill) is the controller's own target for a

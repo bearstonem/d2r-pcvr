@@ -297,6 +297,8 @@ add_executable(room-steps-test room_steps_test.cpp)   # Room follows you: the ne
 add_executable(sewer-interaction-test sewer_interaction_test.cpp)
 add_executable(portal-placement-test portal_placement_test.cpp)
 add_test(NAME portal-placement-test COMMAND portal-placement-test)
+add_executable(entry-facing-test entry_facing_test.cpp)
+add_test(NAME entry-facing-test COMMAND entry-facing-test)
 add_executable(notice-card-test notice_card_test.cpp)
 add_executable(melee-weapon-test melee_weapon_test.cpp)
 add_executable(breakables-test breakables_test.cpp)
