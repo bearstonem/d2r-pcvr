@@ -2682,6 +2682,9 @@ XrPosef UiSurfacePose() {
 // scan code (the game reads keys by scan code, SendShift), Shift round it when the layout wants
 // it, all tagged KeyboardKeyTag - typing, so TypedKeys lets the game's keyboard layout in and
 // the name box takes the letter.
+// The game's gold box on the shown surface (the UI image cropped to uiCrop): the pad's top middle.
+float GoldPadU(){return uiCrop[2]>0?(keyboard::GoldBoxCentreX-float(uiCrop[0]))/float(uiCrop[2]):.5f;}
+float GoldPadV(){return uiCrop[3]>0?(keyboard::GoldBoxBottom-float(uiCrop[1]))/float(uiCrop[3]):.5f;}
 bool SendKeyboard(const keyboard::Output& out);
 // The gold pad's All (and Max before its digits): Ctrl+A in the game's box.
 bool SendSelectAll() {
@@ -2787,7 +2790,7 @@ void MenuPointer(const menus::Pad& controls) {
     bool onKeyboard=false;keyboardLit=-1;
     if(keyboardShown&&aimTracked&&!(mouseDown||rightMouseDown)) {
         const auto board=keyboardLayout==keyboard::Layout::Digits
-            ?keyboard::PlaceGoldPad(V(surfacePose.position),Q(surfacePose.orientation),surface.width,surface.height)
+            ?keyboard::PlaceGoldPad(V(surfacePose.position),Q(surfacePose.orientation),surface.width,surface.height,GoldPadU(),GoldPadV())
             :keyboard::Place(V(surfacePose.position),Q(surfacePose.orientation),surface.width,surface.height);
         const auto ray=V(aim.pose.position),direction=math::Rotate(Q(aim.pose.orientation),{0,0,-1});
         math::PanelHit on{};
@@ -9508,7 +9511,7 @@ void EndPair() {
         const auto size=spatialMode?UiSurfaceSize():FlatPanel().size;
         const auto at=spatialMode?UiSurfacePose():menuPose;
         const auto board=keyboardLayout==keyboard::Layout::Digits
-            ?keyboard::PlaceGoldPad(V(at.position),Q(at.orientation),size.width,size.height)
+            ?keyboard::PlaceGoldPad(V(at.position),Q(at.orientation),size.width,size.height,GoldPadU(),GoldPadV())
             :keyboard::Place(V(at.position),Q(at.orientation),size.width,size.height);
         const bool digits=keyboardLayout==keyboard::Layout::Digits;
         const bool capitals=!digits&&keyboardTypist.Shifted();

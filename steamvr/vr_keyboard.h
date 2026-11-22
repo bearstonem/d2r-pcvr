@@ -130,10 +130,13 @@ inline Board Place(math::Vec surface,math::Quat facing,float width,float height)
 // stash's window is scaled up, so its bottom edge is far down). The board is twice the pad's
 // width (the pad takes its middle five columns): PadWidth of the surface's width.
 constexpr float PadWidthOfSurface=.36f,PadTopBelowCentre=.02f,PadLift=.012f;
-inline Board PlaceGoldPad(math::Vec surface,math::Quat facing,float width,float height) {
+// topU / topV: where the pad's top middle goes on the surface (0-1 from its top left) - under
+// the game's gold box, read off the UI image (GoldBoxBottom).
+constexpr float GoldBoxCentreX=1120,GoldBoxBottom=745;   // in the 2244 x 2352 UI image (owner's shot 2026-11-22 23:53)
+inline Board PlaceGoldPad(math::Vec surface,math::Quat facing,float width,float height,float topU=.5f,float topV=.5f) {
     if(!(width>0)||!(height>0))return {};
     const float w=PadWidthOfSurface*width,h=w*Rows/Columns;
-    const math::Vec centre{0,-PadTopBelowCentre*height-h*.5f,PadLift};
+    const math::Vec centre{(topU-.5f)*width,(.5f-topV)*height-h*.5f,PadLift};
     return {surface+math::Rotate(facing,centre),facing,w,h};
 }
 // The key at the laser's hit on the board (u, v from its top left, 0-1: the
