@@ -560,6 +560,19 @@ void DepositPrepareOnGameThread(const D2RL::PluginContext*, void*) noexcept {
         SetPhase(Phase::Idle);
         return;
     }
+    // One copy per entry (owner 2026-11-22: a second Gheed's Fortune went in and was lost from
+    // sight): an entry the collection already holds takes no other.
+    if (!byCode) {
+        const uint32_t slot = library.SlotOf(category, identity);
+        if (slot != UINT32_MAX && library.IsFound(category, slot)) {
+            char line[160];
+            std::snprintf(line, sizeof(line), "Frame collection: the collection already holds this %s item (id %u); it stays in hand",
+                          CategoryName(category), unsigned(identity));
+            Log(line);
+            SetPhase(Phase::Idle);
+            return;
+        }
+    }
     Occupancy grid;
     filter.containerMask = D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::Inventory);
     g_inventory->forEachInventoryItem(g_ctx, player, &filter, &MarkOccupied, &grid);
@@ -908,14 +921,24 @@ void SweepOnGameThread(const D2RL::PluginContext*, void*) noexcept {
             if (ours) strays.push_back(item);
             continue;
         }
+        // In the hidden tabs: the first copy of an entry is the collection's; a second one (put in
+        // before the one-copy rule, owner 2026-11-22) goes back to the player's pages.
+        const auto keep = [&](std::vector<uint32_t>& held, uint32_t identity) {
+            if (std::find(held.begin(), held.end(), identity) == held.end()) { held.push_back(identity); return; }
+            char line[160];
+            std::snprintf(line, sizeof(line), "Frame collection: a second copy of an entry (id %u, code %.3s) on hidden tab %u goes back",
+                          unsigned(identity), reinterpret_cast<const char*>(&item.code), unsigned(item.page));
+            Log(line);
+            strays.push_back(item);
+        };
         if (item.unique && item.recordId != UINT32_MAX && library.SlotOf(Category::Uniques, item.recordId) != UINT32_MAX) {
-            if (ours) { heldUnique.push_back(item.recordId); continue; }
+            if (ours) { keep(heldUnique, item.recordId); continue; }
             loose.push_back({item, Category::Uniques, item.recordId, false});
         } else if (item.set && item.recordId != UINT32_MAX && library.SlotOf(Category::Sets, item.recordId) != UINT32_MAX) {
-            if (ours) { heldSet.push_back(item.recordId); continue; }
+            if (ours) { keep(heldSet, item.recordId); continue; }
             loose.push_back({item, Category::Sets, item.recordId, false});
         } else if (item.runeword != UINT32_MAX && library.SlotOf(Category::Runewords, item.runeword) != UINT32_MAX) {
-            if (ours) { heldRuneword.push_back(item.runeword); continue; }
+            if (ours) { keep(heldRuneword, item.runeword); continue; }
             loose.push_back({item, Category::Runewords, item.runeword, false});
         } else if (stashslots::Find(item.code) != nullptr) {
             // A gem, rune or material belongs in the game's own Gems / Materials / Runes tab

@@ -739,7 +739,17 @@ struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_F
 // The stash's tab bar and shared page counter, read back from the game's UI image every frame
 // (stash_nav.h): a ring of three, each with its two strips, and the fence its copy waits on.
 struct StashStrip {Microsoft::WRL::ComPtr<ID3D12Resource> buffer;D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp{};int w=0,h=0;};
-struct StashRead {StashStrip tabs,counter,plaques;uint64_t fence=0;bool pending=false;};
+struct StashRead {StashStrip tabs,counter,plaques,page;bool pageRead=false;uint64_t fence=0;bool pending=false;};
+// The Collection page's cells the game draws over (an inventory item's tooltip reaching left -
+// owner 2026-11-22: the inventory's items always come first): one row of the game's picture per
+// cell row is read back, against the same rows read while nothing of the game's could be there
+// (the laser on the page, the hand empty: the game's cursor rests on the title). Cells of
+// PageCellW x PageCellH image pixels; a bit a column, a word a row.
+constexpr int PageCellW=20,PageCellH=16,PageCellRows=64;
+std::atomic<uint64_t> pageCover[PageCellRows]{};
+std::atomic<bool> pageCovered{false};
+std::atomic<bool> laserOnCollectionPage{false};   // the laser on the page (the frame thread's overCollectionPage)
+int pageReadX=0,pageReadY=0,pageReadW=0,pageReadH=0;   // the page in the UI image, as last laid in
 std::array<StashRead,3> stashReads;int stashReadNext=0,stashReadRecorded=-1;unsigned stashReadsDone=0,stashReadsRecorded=0;
 // "Page N / 5" (stash_counter_art.h) in the UI image's format, laid over the game's counter.
 struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp[5]{};bool tried=false;} counterUpload;
@@ -2872,6 +2882,7 @@ void MenuPointer(const menus::Pad& controls) {
     const bool overCollectionPage=collection::TabWanted()&&spatialReady&&pointerHit&&
         hit.u>=CollectionPageLeft&&hit.u<=CollectionPageRight&&hit.v>=CollectionPageTop&&hit.v<=CollectionPageBottom;
     const bool onCollectionPage=overCollectionPage;
+    laserOnCollectionPage.store(overCollectionPage);
     // The shared page arrows (the LB / RB marks either side of the counter) stop at the player's
     // five pages: past them the collection keeps its items (stash_nav.h). A pull there is then
     // nobody's - no game cursor, no click.
@@ -7943,7 +7954,22 @@ bool CopyCollectionIntoUi(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,u
     list->ResourceBarrier(1,&b);
     D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=dest;to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;to.SubresourceIndex=0;
     D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=u.upload.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;from.PlacedFootprint=u.footprint;
-    list->CopyTextureRegion(&to,UINT(x0),UINT(y0),0,&from,nullptr);
+    pageReadX=x0;pageReadY=y0;pageReadW=u.w;pageReadH=u.h;
+    if(!pageCovered.load()) list->CopyTextureRegion(&to,UINT(x0),UINT(y0),0,&from,nullptr);
+    else {   // the cells the game draws over (CollectStashReads) stay the game's: the rest in runs
+        for(int cy=0;cy*PageCellH<u.h&&cy<PageCellRows;++cy) {
+            const uint64_t bits=pageCover[cy].load();
+            const int top=cy*PageCellH,bottom=std::min(u.h,top+PageCellH);
+            int c=0;const int cols=(u.w+PageCellW-1)/PageCellW;
+            while(c<cols) {
+                if(c<64&&(bits>>c&1u)){++c;continue;}
+                int e=c;while(e<cols&&!(e<64&&(bits>>e&1u)))++e;
+                const D3D12_BOX box{UINT(c*PageCellW),UINT(top),0,UINT(std::min(u.w,e*PageCellW)),UINT(bottom),1};
+                list->CopyTextureRegion(&to,UINT(x0+c*PageCellW),UINT(y0+top),0,&from,&box);
+                c=e;
+            }
+        }
+    }
     // The tab bar: Collection lit, the game's tabs idle (only at the shot's own size, where the
     // art's place is known).
     auto& t=collectionTabsUpload;
@@ -8071,8 +8097,32 @@ void CollectStashReads() {
             const D3D12_RANGE none{0,0};s.buffer->Unmap(0,&none);
             return true;
         };
-        std::vector<uint8_t> tabs,counter,plaques;
+        std::vector<uint8_t> tabs,counter,plaques,pageRows;
         if(!read(r.tabs,tabs)||!read(r.counter,counter))continue;
+        {   // the Collection page's cells under something of the game's
+            static std::vector<uint8_t> pageRef;static int refW=0,refH=0;
+            bool any=false;
+            if(r.pageRead&&collectionInUiShown&&read(r.page,pageRows)) {
+                const bool bare=laserOnCollectionPage.load()&&!gamestate::CursorItemHeld();
+                if(bare||pageRef.size()!=pageRows.size()||refW!=r.page.w||refH!=r.page.h) {
+                    if(bare){pageRef=pageRows;refW=r.page.w;refH=r.page.h;}
+                    for(auto& row:pageCover)row.store(0);
+                } else {
+                    const int cols=std::min(64,(r.page.w+PageCellW-1)/PageCellW);
+                    for(int cy=0;cy<r.page.h&&cy<PageCellRows;++cy) {
+                        uint64_t bits=0;
+                        for(int c=0;c<cols;++c)
+                            if(CellCovered(pageRows.data(),r.page.w,pageRef.data(),4,r.page.w,c*PageCellW,cy,std::min(r.page.w,(c+1)*PageCellW),cy+1))
+                                bits|=uint64_t(1)<<c;
+                        pageCover[cy].store(bits);any=any||bits!=0;
+                    }
+                }
+            } else if(!collectionInUiShown) {pageRef.clear();for(auto& row:pageCover)row.store(0);}
+            if(any!=pageCovered.load()) {
+                pageCovered.store(any);
+                Say(any?"Frame collection: the game draws over the page (a tooltip); those cells stay the game's":"Frame collection: the page is bare again");
+            }
+        }
         if(read(r.plaques,plaques)) {   // where the game draws something over the bare carving
             using namespace stashplaques;
             const auto bits=[](uint64_t v){int n=0;while(v){v&=v-1;++n;}return n;};
@@ -8192,6 +8242,22 @@ void RecordStashReads(ID3D12GraphicsCommandList* list,ID3D12Resource* src,uint32
     copy(r.tabs,stashnav::TabsX,stashnav::TabsY);
     copy(r.counter,stashnav::CounterX,stashnav::CounterY);
     copy(r.plaques,stashplaques::PreviousX,stashplaques::Y);
+    // a row through the middle of each cell row of the Collection page
+    r.pageRead=false;
+    if(collectionInUiShown&&pageReadW>0&&pageReadH>0) {
+        const int rows=std::min(PageCellRows,(pageReadH+PageCellH-1)/PageCellH);
+        if(r.page.buffer&&(r.page.w!=pageReadW||r.page.h!=rows))r.page={};
+        if(make(r.page,pageReadW,rows)) {
+            for(int row=0;row<rows;++row) {
+                const int y=std::min(pageReadY+row*PageCellH+PageCellH/2,pageReadY+pageReadH-1);
+                D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=r.page.buffer.Get();to.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;to.PlacedFootprint=r.page.fp;
+                D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=src;from.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;from.SubresourceIndex=0;
+                const D3D12_BOX box{UINT(pageReadX),UINT(y),0,UINT(pageReadX+pageReadW),UINT(y+1),1};
+                list->CopyTextureRegion(&to,0,UINT(row),0,&from,&box);
+            }
+            r.pageRead=true;
+        }
+    }
     std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
     list->ResourceBarrier(1,&b);
     stashReadRecorded=stashReadNext;
