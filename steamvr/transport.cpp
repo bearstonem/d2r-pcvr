@@ -121,7 +121,6 @@
 #include "stash_slots.h"
 #include "stash_stick_art.h"
 #include "stash_tab_hover_art.h"
-#include "stash_tab_hovers.h"
 #include "../vr/collection_tab.h"
 #include "../vr/collection_store.h"
 #include "../vr/collection_tooltip_provider.h"
@@ -734,26 +733,6 @@ struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_F
 // The stash's tab bar with Collection as the active tab (collection_art.h, cut from the owner's
 // shot as the mock-up did), in the UI image's format, laid over the bar while the page is shown.
 struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};bool tried=false;} collectionTabsUpload;
-// The game's tab under the laser while that bar is laid over (stash_tab_hovers.h), -1 none: laid in
-// hovered, as the game would draw it (owner 2026-11-22).
-std::atomic<int> collectionBarHover{-1};
-// The laser's point in the UI image (x of 2244; NaN off it): an item in the hand is drawn there by
-// the game, and the bar's art leaves a gap round it (owner 2026-11-22: the item in the hand first).
-std::atomic<float> laserImageX{NAN},laserImageY{NAN};
-// A paste from an upload, less a column round the hand's item while one is held over it.
-void CopyAroundHeld(ID3D12GraphicsCommandList* list,const D3D12_TEXTURE_COPY_LOCATION& to,int x,int y,
-                    const D3D12_TEXTURE_COPY_LOCATION& from,int w,int h) {
-    const float lx=laserImageX.load(),ly=laserImageY.load();
-    constexpr float HalfGap=70.f,Reach=150.f;   // two inventory cells and a little; an item's half height and more
-    if(!gamestate::CursorItemHeld()||!(lx==lx)||ly<float(y)-Reach||ly>float(y+h)+Reach||lx+HalfGap<float(x)||lx-HalfGap>float(x+w)) {
-        list->CopyTextureRegion(&to,UINT(x),UINT(y),0,&from,nullptr);
-        return;
-    }
-    const int g0=std::clamp(int(lx-HalfGap)-x,0,w),g1=std::clamp(int(lx+HalfGap)-x,0,w);
-    if(g0>0){const D3D12_BOX box{0,0,0,UINT(g0),UINT(h),1};list->CopyTextureRegion(&to,UINT(x),UINT(y),0,&from,&box);}
-    if(g1<w){const D3D12_BOX box{UINT(g1),0,0,UINT(w),UINT(h),1};list->CopyTextureRegion(&to,UINT(x+g1),UINT(y),0,&from,&box);}
-}
-struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp[stashtabhovers::Count]{};bool tried=false;} tabHoversUpload;
 // The inventory cells an item passes through on its way in or out of the collection: drawn
 // empty over the UI image while it does (owner 2026-11-21: the item flashed there). Packed
 // x | y<<4 | w<<8 | h<<12 (cells), and until when (GetTickCount64).
@@ -2900,17 +2879,6 @@ void MenuPointer(const menus::Pad& controls) {
         Say("Frame panels: another stash tab was chosen; the Collection page goes");
     }
     otherTabWasDown=pressed;
-    {   // which of the game's tabs the laser is on while the Collection page shows (its hover is the mod's then)
-        int over=-1;
-        if(collectionTabShown&&collection::TabWanted()&&aimTracked&&pointerHit&&!(mouseDown||rightMouseDown)) {
-            const float x=hit.u*2244.f,y=hit.v*2352.f;
-            if(y>=float(stashtabhovers::Y)&&y<float(stashtabhovers::Y+stashtabhovers::Height))
-                for(int i=0;i<stashtabhovers::Count;++i)
-                    if(x>=float(stashtabhovers::Left[i])&&x<float(stashtabhovers::Left[i]+stashtabhovers::Width[i])){over=i;break;}
-        }
-        collectionBarHover.store(over);
-    laserImageX.store(aimTracked&&pointerHit?hit.u*2244.f:NAN);laserImageY.store(aimTracked&&pointerHit?hit.v*2352.f:NAN);
-    }
     {   // diagnostic: where the stash surface sits, to centre the window
         static ULONGLONG reportAt=0;const auto now=GetTickCount64();
         if(collectionTabShown&&now>=reportAt) {
@@ -3260,25 +3228,11 @@ void MenuPointer(const menus::Pad& controls) {
     // 2026-11-20). With an item in the hand it follows the laser under the page, which hides
     // it (the page draws the item itself); empty-handed it rests on the stash's title bar,
     // where nothing is pointed at. The game's click stays withheld either way (onButton).
-    // On the Collection tab of the bar the game's cursor rests on the title too, so no tab of the
-    // game's keeps its hover beside the mod's (owner 2026-11-22: Shared and Collection both lit).
-    // With an item in the hand the cursor follows the laser there instead: the item is drawn where
-    // it is pointed (owner 2026-11-22: it jumped onto Runes). The title "Stash" is at 702,88 of the
-    // 2244 x 2352 image - off every tab (830,138 was over Runes, which kept its hover).
-    if(active&&onCollectionTab&&!overCollectionPage&&!dropOwns&&!handClicking) {
-        const bool holding=gamestate::CursorItemHeld();
-        const float u=holding?hit.u:.313f,v=holding?hit.v:.037f;
-        RECT client{};math::Vec native{u,v,0};
-        if(GetClientRect(gameWindow,&client)&&journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},u,v,uiWidth,uiHeight,native)) {
-            POINT pixel{LONG(native.x*(client.right-1)),LONG(native.y*(client.bottom-1))};
-            if(ClientToScreen(gameWindow,&pixel))SetCursorPos(pixel.x,pixel.y);
-        }
-    }
     if(active&&overCollectionPage&&!dropOwns&&!handClicking) {
         RECT client{};
         if(GetClientRect(gameWindow,&client)) {
             const bool holding=gamestate::CursorItemHeld();
-            const float u=holding?hit.u:.313f,v=holding?hit.v:.037f;   // the title "Stash": 702,88 of the 2244 x 2352 image
+            const float u=holding?hit.u:.370f,v=holding?hit.v:.059f;   // the title "Stash": 830,138 of the 2244 x 2352 image
             math::Vec native{u,v,0};
             if(journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},u,v,uiWidth,uiHeight,native)) {
                 POINT pixel{LONG(native.x*(client.right-1)),LONG(native.y*(client.bottom-1))};
@@ -8140,38 +8094,7 @@ bool CopyCollectionIntoUi(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,u
     }
     if(t.upload&&w==uint32_t(collection::art::ShotWidth)&&h==uint32_t(collection::art::ShotHeight)) {
         D3D12_TEXTURE_COPY_LOCATION tabsFrom{};tabsFrom.pResource=t.upload.Get();tabsFrom.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;tabsFrom.PlacedFootprint=t.footprint;
-        CopyAroundHeld(list,to,collection::art::TabsX,collection::art::TabsY,tabsFrom,collection::art::TabsWidth,collection::art::TabsHeight);
-        auto& hv=tabHoversUpload;
-        if(!hv.tried) {
-            hv.tried=true;
-            using namespace stashtabhovers;
-            UINT64 offset=0;
-            for(int i=0;i<Count;++i) {
-                D3D12_RESOURCE_DESC td{};td.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;td.Width=UINT64(Width[i]);td.Height=UINT(Height);
-                td.DepthOrArraySize=td.MipLevels=1;td.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;td.SampleDesc.Count=1;
-                UINT rows=0;UINT64 rowBytes=0,total=0;
-                device->GetCopyableFootprints(&td,0,1,offset,&hv.fp[i],&rows,&rowBytes,&total);
-                offset=(hv.fp[i].Offset+total+D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT-1)/D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT*D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT;
-            }
-            D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
-            D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=offset;bd.Height=bd.DepthOrArraySize=bd.MipLevels=1;
-            bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-            uint8_t* mapped=nullptr;const D3D12_RANGE none{0,0};
-            if(SUCCEEDED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&hv.upload)))&&
-               SUCCEEDED(hv.upload->Map(0,&none,reinterpret_cast<void**>(&mapped)))&&mapped) {
-                for(int i=0;i<Count;++i) {
-                    const std::vector<uint8_t> art(Tabs[i],Tabs[i]+size_t(Width[i])*Height*4);
-                    const auto half=collection::uiimage::Convert(art,Width[i],Width[i],Height,Width[i],Height);
-                    for(int y=0;y<Height;++y)std::memcpy(mapped+hv.fp[i].Offset+size_t(y)*hv.fp[i].Footprint.RowPitch,
-                                                        reinterpret_cast<const uint8_t*>(half.data())+size_t(y)*Width[i]*8,size_t(Width[i])*8);
-                }
-                hv.upload->Unmap(0,nullptr);
-            } else hv.upload.Reset();
-        }
-        if(const int over=collectionBarHover.load();hv.upload&&over>=0&&over<stashtabhovers::Count) {
-            D3D12_TEXTURE_COPY_LOCATION hoverFrom{};hoverFrom.pResource=hv.upload.Get();hoverFrom.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;hoverFrom.PlacedFootprint=hv.fp[over];
-            CopyAroundHeld(list,to,stashtabhovers::Left[over],stashtabhovers::Y,hoverFrom,stashtabhovers::Width[over],stashtabhovers::Height);
-        }
+        list->CopyTextureRegion(&to,UINT(collection::art::TabsX),UINT(collection::art::TabsY),0,&tabsFrom,nullptr);
     } else {
         static bool told=false;
         if(!told){told=true;char line[160];std::snprintf(line,sizeof line,"Frame collection: UI image %ux%u is not the shot's %dx%d; the tab bar is left as the game draws it",
@@ -8550,7 +8473,7 @@ void CopyTabHoverArt(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,uint32
     list->ResourceBarrier(1,&b);
     D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=dest;to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;to.SubresourceIndex=0;
     D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=upload.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;from.PlacedFootprint=fp;
-    CopyAroundHeld(list,to,cx+X,cy+Y,from,Width,Height);
+    list->CopyTextureRegion(&to,UINT(cx+X),UINT(cy+Y),0,&from,nullptr);
     std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
     list->ResourceBarrier(1,&b);
 }
