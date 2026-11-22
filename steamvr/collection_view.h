@@ -93,6 +93,43 @@ public:
     // shorter text padded with spaces.
     static uint32_t CodeOf(std::string_view text);
 
+    // A unique's extra copy card (panel::CopyStep): not in the counts.
+    static bool ExtraCopy(const Entry& entry) { return entry.category == Category::Uniques && entry.recordId >= panel::CopyStep; }
+    uint32_t Counted(Category category) const {
+        uint32_t n = 0;
+        for (uint32_t slot = 0; slot < Size(category); ++slot) n += ExtraCopy(*At(category, slot)) ? 0 : 1;
+        return n;
+    }
+    uint32_t FoundCounted(Category category) const {
+        uint32_t n = 0;
+        for (uint32_t slot = 0; slot < Size(category); ++slot) n += IsFound(category, slot) && !ExtraCopy(*At(category, slot)) ? 1 : 0;
+        return n;
+    }
+    // How many cards the item with this record id has (1, or its copies).
+    uint32_t CopiesOf(Category category, uint32_t recordId) const {
+        uint32_t n = 0;
+        while (n < 16 && SlotOf(category, panel::BaseRecord(recordId) + panel::CopyStep * n) != UINT32_MAX) ++n;
+        return std::max<uint32_t>(1, n);
+    }
+    // A stored copy found: its preferred card (a Hellfire Torch's class) when it has one, else
+    // the first of its cards not yet found. The card's record id, or UINT32_MAX.
+    uint32_t FreeCopy(Category category, uint32_t recordId, int preferred) const {
+        const uint32_t base = panel::BaseRecord(recordId), copies = CopiesOf(category, base);
+        if (preferred >= 0 && uint32_t(preferred) < copies) {
+            const uint32_t id = base + panel::CopyStep * uint32_t(preferred);
+            return IsFound(category, SlotOf(category, id)) ? UINT32_MAX : id;
+        }
+        for (uint32_t k = 0; k < copies; ++k) {
+            const uint32_t id = base + panel::CopyStep * k;
+            if (!IsFound(category, SlotOf(category, id))) return id;
+        }
+        return UINT32_MAX;
+    }
+    uint32_t MarkFoundCopy(Category category, uint32_t recordId, int preferred) {
+        const uint32_t id = FreeCopy(category, recordId, preferred);
+        return id == UINT32_MAX ? UINT32_MAX : MarkFound(category, id);
+    }
+
     // The copy stored for a found entry: its base item code and its item type with every
     // type above it ("swor blde mele weap") - a runeword's picture and which tiles it counts in.
     struct Made {
@@ -392,7 +429,7 @@ inline GroupShare ShareOf(const Library& library, Category category, int group) 
     GroupShare share;
     for (uint32_t slot = 0; slot < library.Size(category); ++slot) {
         const Entry* entry = library.At(category, slot);
-        if (entry == nullptr || GroupOf(*entry) != group) continue;
+        if (entry == nullptr || GroupOf(*entry) != group || Library::ExtraCopy(*entry)) continue;
         ++share.total;
         if (library.IsFound(category, slot)) ++share.found;
     }
@@ -436,7 +473,7 @@ inline bool SlotFound(const Library& library, const ViewState& view, const std::
 
 // "122 / 403" for the footer, for the open category.
 inline std::string CounterText(const Library& library, const ViewState& view) {
-    return std::to_string(library.Found(view.category)) + " / " + std::to_string(library.Size(view.category));
+    return std::to_string(library.FoundCounted(view.category)) + " / " + std::to_string(library.Counted(view.category));
 }
 
 // A runeword's recipe ("r08 r09 r07") in the runes' own names ("Ral Ort Tal").

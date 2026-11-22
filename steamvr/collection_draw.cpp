@@ -213,8 +213,27 @@ void DrawCard(Painter& p, const panel::Rect& at, const Entry& entry, Category ca
         py1 = y0 + 26;
         p.FillRgb(R(x0 + 7, y0 + 7, x1 - 7, py1), 0x1E1E1D);
         p.LineRgb(Mx(x0 + 7), My(py1), Mx(x1 - 7), My(py1), 0x383834, Md(1.f));
-        const float size = FitSize(p, entry.name, Caps, 13.f, 9.f, Md(x1 - x0 - 20));
-        CapsAt(p, (x0 + x1) / 2, (y0 + 7 + py1) / 2 + 1, entry.name, size, found ? NameColor(category) : DimT);
+        // A name too long for the plate even at its smallest goes on two lines (owner 2026-11-22:
+        // long names ran past the card's edges), broken at the space nearest its middle.
+        const float avail = Md(x1 - x0 - 20);
+        const uint32_t rgb = found ? NameColor(category) : DimT;
+        float size = FitSize(p, entry.name, Caps, 13.f, 9.f, avail);
+        const size_t middle = entry.name.size() / 2;
+        size_t cut = std::string::npos;
+        for (size_t d = 0; d <= middle && cut == std::string::npos; ++d) {
+            if (middle + d < entry.name.size() && entry.name[middle + d] == ' ') cut = middle + d;
+            else if (d <= middle && entry.name[middle - d] == ' ') cut = middle - d;
+        }
+        if (p.Measure(entry.name, Caps, 4096.f, false, 0, Md(size)).width > avail && cut != std::string::npos) {
+            const std::string first = entry.name.substr(0, cut), second = entry.name.substr(cut + 1);
+            const std::string& longer = first.size() > second.size() ? first : second;
+            size = FitSize(p, longer, Caps, 10.f, 6.5f, avail);
+            const float cy = (y0 + 7 + py1) / 2 + 1, half = size * 0.55f;
+            CapsAt(p, (x0 + x1) / 2, cy - half, first, size, rgb);
+            CapsAt(p, (x0 + x1) / 2, cy + half, second, size, rgb);
+        } else {
+            CapsAt(p, (x0 + x1) / 2, (y0 + 7 + py1) / 2 + 1, entry.name, size, rgb);
+        }
     }
     // the picture, scaled to the card
     const RectF area = R(x0 + 12, py1 + 8, x1 - 12, y1 - 8);
@@ -455,7 +474,7 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
     // The found bar, and "Uniques  81 / 403" under it.
     {
         const RectF bar   = Box(layout.progress);
-        const float share = float(library.Found(view.category)) / float(std::max<uint32_t>(1, library.Size(view.category)));
+        const float share = float(library.FoundCounted(view.category)) / float(std::max<uint32_t>(1, library.Counted(view.category)));
         p.FillRgb(bar, 0x0A0A0A);
         p.OutlineRgb(bar, 0x3C3C38, Md(1.f));
         // In the category's own colour (owner 2026-11-20): unique gold, set green, runeword grey.

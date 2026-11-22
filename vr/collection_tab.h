@@ -53,6 +53,8 @@ void            TabToggleDrop(panel::Drop list);   // the footer's Sort / Show l
 void            TabToggleGroup(int group);   // an item-type tile: filter to it, or let go when picked again
 void            TabSelectBand(int band);     // Sets: a level-range button
 void            TabToggleKind(int kind);     // Runewords: a top-row tile (what they are made in)
+// A stored unique found: its free card when it has several (Library::MarkFoundCopy).
+void            TabMarkFoundCopy(Category category, uint32_t recordId, int preferred);
 // The stored copy of a found entry: its base code and item types (Library::SetMade).
 void            TabSetMade(Category category, uint32_t recordId, uint32_t code, const std::string& types);
 

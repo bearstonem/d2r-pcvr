@@ -190,6 +190,7 @@ int main(int argc, char** argv) {
         else std::fprintf(stderr, "unknown category %s\n", categoryName);
     }
     if (kind >= 0) view.ToggleKind(library, kind);   // Runewords: a top-row tile, and its sub-tile
+    view.page = page;   // after the category, which starts at its first page
     if (sub >= 0) view.ToggleGroup(library, sub);
     view.Clamp(library);
     if (hover >= 0) view.hover = {framevr::collection::panel::HitKind::Slot, hover};   // the pointed slot, for the card

@@ -102,6 +102,22 @@ uint32_t RunewordOfItem(const D2RL::Items::ItemInfo& info) {
     return record;
 }
 
+// The class an item's "+N to <class> Skills" names (stat 83, item_addclassskills: its layer is the
+// class), or -1: a Hellfire Torch's card (one per class).
+int ClassSkillsOf(D2RL::ItemHandle item) {
+    if (g_items == nullptr || g_ctx == nullptr || item == 0) return -1;
+    if (!D2RL::HasItemServiceField(g_items, D2RL::ItemServiceDetailsFieldEnd) || g_items->getItemDetails == nullptr) return -1;
+    D2RL::Items::ItemDetails details {};
+    details.structSize = D2RL::Items::ItemDetailsSize;
+    D2RL::Items::ItemStatValue stats[64] {};
+    if (g_items->getItemDetails(g_ctx, item, &details, stats, 64) != D2RL::Items::Result::Success) return -1;
+    for (uint32_t i = 0; i < std::min<uint32_t>(details.statCount, 64); ++i)
+        if (stats[i].statId == 83 && stats[i].layer < 16) return int(stats[i].layer);
+    return -1;
+}
+// A Hellfire Torch's base code: its cards go by class.
+constexpr uint32_t kTorchCode = uint32_t('c') | (uint32_t('m') << 8) | (uint32_t('2') << 16) | (uint32_t(' ') << 24);
+
 // Why an item read as no runeword: the service, the call's result and what it gave.
 std::string RunewordDiag(D2RL::ItemHandle item) {
     char text[200];
@@ -540,6 +556,17 @@ void DepositPrepareOnGameThread(const D2RL::PluginContext*, void*) noexcept {
     }
     if (cursor.unique && cursor.recordId != UINT32_MAX && library.SlotOf(Category::Uniques, cursor.recordId) != UINT32_MAX) {
         category = Category::Uniques; identity = cursor.recordId;
+        // a unique with a card per copy (Ormus' Robes, Hellfire Torch by class): the free card
+        if (library.CopiesOf(category, identity) > 1) {
+            const int preferred = cursor.code == kTorchCode ? ClassSkillsOf(D2RL::ItemHandle(cursor.handle)) : -1;
+            const uint32_t free = library.FreeCopy(category, identity, preferred);
+            if (free == UINT32_MAX) {
+                Log("Frame collection: every card of this unique is taken; it stays in hand");
+                SetPhase(Phase::Idle);
+                return;
+            }
+            identity = free;
+        }
     } else if (cursor.set && cursor.recordId != UINT32_MAX && library.SlotOf(Category::Sets, cursor.recordId) != UINT32_MAX) {
         category = Category::Sets; identity = cursor.recordId;
     } else if (cursor.runeword != UINT32_MAX && library.SlotOf(Category::Runewords, cursor.runeword) != UINT32_MAX) {
@@ -620,7 +647,7 @@ D2RL::Inventory::IterationAction __cdecl FindLanded(const D2RL::PluginContext*, 
     auto& match = *static_cast<LandedMatch*>(userData);
     if (info == nullptr || info->container != D2RL::Items::ItemContainer::Inventory) return D2RL::Inventory::IterationAction::Continue;
     const int32_t record = info->qualityRecordId;
-    const bool matches = (match.category == Category::Uniques   && info->quality == D2RL::Items::Quality::Unique && record >= 0 && uint32_t(record) == match.identity)
+    const bool matches = (match.category == Category::Uniques   && info->quality == D2RL::Items::Quality::Unique && record >= 0 && uint32_t(record) == panel::BaseRecord(match.identity))
                       || (match.category == Category::Sets      && info->quality == D2RL::Items::Quality::Set    && record >= 0 && uint32_t(record) == match.identity)
                       || (match.category == Category::Materials && info->code == match.identity)
                       || (match.category == Category::Runewords && RunewordOfItem(*info) == match.identity);
@@ -718,7 +745,14 @@ D2RL::Inventory::IterationAction __cdecl FindSlotItem(const D2RL::PluginContext*
     auto& match = *static_cast<SlotMatch*>(userData);
     if (info == nullptr) return D2RL::Inventory::IterationAction::Continue;
     const int32_t record = info->qualityRecordId;
-    const bool matches = (match.category == Category::Uniques && info->quality == D2RL::Items::Quality::Unique && record >= 0 && uint32_t(record) == match.identity)
+    // a copy card: the same unique; a Hellfire Torch's card also its class
+    const auto torchClass = [&] {
+        if (info->code != kTorchCode) return true;
+        const int cls = ClassSkillsOf(info->handle);
+        return cls < 0 || uint32_t(cls) == match.identity / panel::CopyStep;
+    };
+    const bool matches = (match.category == Category::Uniques && info->quality == D2RL::Items::Quality::Unique && record >= 0 &&
+                          uint32_t(record) == panel::BaseRecord(match.identity) && torchClass())
                       || (match.category == Category::Sets    && info->quality == D2RL::Items::Quality::Set    && record >= 0 && uint32_t(record) == match.identity)
                       || (match.category == Category::Materials && info->code == match.identity)
                       || (match.category == Category::Runewords && RunewordOfItem(*info) == match.identity);
@@ -924,7 +958,9 @@ void SweepOnGameThread(const D2RL::PluginContext*, void*) noexcept {
         // In the hidden tabs: the first copy of an entry is the collection's; a second one (put in
         // before the one-copy rule, owner 2026-11-22) goes back to the player's pages.
         const auto keep = [&](std::vector<uint32_t>& held, uint32_t identity) {
-            if (std::find(held.begin(), held.end(), identity) == held.end()) { held.push_back(identity); return; }
+            // as many copies as the entry has cards (Ormus' Robes 5, Hellfire Torch one per class)
+            const auto copies = item.unique ? library.CopiesOf(Category::Uniques, identity) : 1u;
+            if (uint32_t(std::count(held.begin(), held.end(), identity)) < copies) { held.push_back(identity); return; }
             char line[160];
             std::snprintf(line, sizeof(line), "Frame collection: a second copy of an entry (id %u, code %.3s) on hidden tab %u goes back",
                           unsigned(identity), reinterpret_cast<const char*>(&item.code), unsigned(item.page));
@@ -980,7 +1016,8 @@ void SweepOnGameThread(const D2RL::PluginContext*, void*) noexcept {
                                     : item.category == Category::Sets      ? heldSet
                                     : item.category == Category::Runewords ? heldRuneword
                                                                            : heldMaterial;
-        if (std::find(held.begin(), held.end(), item.identity) != held.end()) continue;
+        const auto copies = item.category == Category::Uniques ? library.CopiesOf(Category::Uniques, item.identity) : 1u;
+        if (uint32_t(std::count(held.begin(), held.end(), item.identity)) >= copies) continue;
         if (!MoveToBand(player, item.seen.handle, item.category)) {
             char line[192];
             std::snprintf(line, sizeof(line), "Frame collection: could not move a %s item (id %u) out of page %u",
@@ -1187,6 +1224,8 @@ bool InCollectionBand(uint32_t sharedStashPage) {
 
 uint32_t RunewordRecordOf(const D2RL::Items::ItemInfo& item) { return RunewordOfItem(item); }
 std::string ItemTypeChain(uint32_t code) { return TypeChain(code); }
+int ItemClassSkills(uint64_t item) { return ClassSkillsOf(D2RL::ItemHandle(item)); }
+uint32_t TorchCode() { return kTorchCode; }
 
 std::string CarriedIconKey() {
     std::lock_guard lock(g_carriedLock);

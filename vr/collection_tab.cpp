@@ -253,6 +253,11 @@ void TabToggleGroup(int group) {
     g_view.ToggleGroup(g_library, group);
 }
 
+void TabMarkFoundCopy(Category category, uint32_t recordId, int preferred) {
+    std::lock_guard lock(g_lock);
+    if (g_loaded) g_library.MarkFoundCopy(category, recordId, preferred);
+}
+
 void TabSetMade(Category category, uint32_t recordId, uint32_t code, const std::string& types) {
     std::lock_guard lock(g_lock);
     if (g_loaded) g_library.SetMade(category, recordId, code, types);

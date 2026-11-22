@@ -219,6 +219,32 @@ def split_runewords(entries):
     return out
 
 
+# Uniques kept more than once, a card per copy (owner 2026-11-22): Ormus' Robes for its spells,
+# Hellfire Torch one per class (the class its "+3 to <class> Skills" rolls, stat 83's layer order).
+# A copy's recordId is the item's own plus COPY_STEP times the copy; only the first is counted.
+COPY_STEP = 10000
+CLASS_NAMES = ('Amazon', 'Sorceress', 'Necromancer', 'Paladin', 'Barbarian', 'Druid', 'Assassin', 'Warlock')
+UNIQUE_COPIES = {"Ormus' Robes": None, 'Hellfire Torch': CLASS_NAMES}
+ORMUS_COPIES = 5
+
+
+def copy_uniques(entries):
+    out = []
+    for entry in entries:
+        names = UNIQUE_COPIES.get(entry['name'], ())
+        if entry['name'] not in UNIQUE_COPIES:
+            out.append(entry)
+            continue
+        count = ORMUS_COPIES if names is None else len(names)
+        for k in range(count):
+            card = dict(entry)
+            card['recordId'] = entry['recordId'] + COPY_STEP * k
+            if names:
+                card['name'] = '%s (%s)' % (entry['name'], names[k])
+            out.append(card)
+    return out
+
+
 def weapon_hands(read):
     """{base code: 1 one-handed, 2 two-handed} from weapons.txt's 2handed column."""
     try:
@@ -279,7 +305,7 @@ def build(read, strings=None, skill_names=None, names=None):
             'hands': hands.get(code_of(row), 0),
             'stats': stats(row, 'unique'),
         })
-    catalog['uniques'] = sort_entries(entries)
+    catalog['uniques'] = sort_entries(copy_uniques(entries))
 
     _, sets = read(SET_TABLE)
     entries = []

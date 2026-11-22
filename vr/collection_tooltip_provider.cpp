@@ -66,7 +66,7 @@ std::string ReadPreviewTooltip(const PreviewSpec& spec) {
     native.qualityRecordId   = UINT32_MAX;
     native.itemLevel         = spec.level;
     switch (spec.kind) {
-    case PreviewKind::Unique: native.quality = D2RL::Items::Quality::Unique; native.qualityRecordId = spec.recordId; break;
+    case PreviewKind::Unique: native.quality = D2RL::Items::Quality::Unique; native.qualityRecordId = panel::BaseRecord(spec.recordId); break;
     case PreviewKind::Set:    native.quality = D2RL::Items::Quality::Set;    native.qualityRecordId = spec.recordId; break;
     case PreviewKind::Normal: native.quality = D2RL::Items::Quality::Normal; break;
     default: return {};
@@ -83,7 +83,7 @@ Answer Fetch(const Entry& entry) {
     // A found unique or set: the exact item text through its live handle, and -
     // under it - what the item could have rolled, so the two can be compared.
     if (entry.category != Category::Materials) {
-        const auto found = g_handles.find(KeyOf(entry.category, entry.recordId));
+        const auto found = g_handles.find(KeyOf(entry.category, entry.category == Category::Uniques ? panel::BaseRecord(entry.recordId) : entry.recordId));
         if (found != g_handles.end()) {
             answer.text = ReadItemTooltip(found->second);
             if (!answer.text.empty()) {

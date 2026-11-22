@@ -78,6 +78,10 @@ bool InCollectionBand(uint32_t sharedStashPage);
 uint32_t RunewordRecordOf(const D2RL::Items::ItemInfo& item);
 // A base item's type and every type above it ("swor blde mele weap"), from the game's tables.
 std::string ItemTypeChain(uint32_t code);
+// The class an item's "+N to <class> Skills" names, or -1 (game or UI thread). A Hellfire Torch's
+// base code (TorchCode) takes its card by it.
+int      ItemClassSkills(uint64_t item);
+uint32_t TorchCode();
 
 // What the player holds on the game's cursor, for the page to draw under the laser:
 // its icon cache key ("u248", "t12", "i..."; empty when the hand is empty or the item

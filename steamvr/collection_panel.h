@@ -102,6 +102,11 @@ enum class Drop : uint32_t { None = 0, Sort = 1, Show = 2 };
 // filters the grid to its type (again: all types). The codes are the game's item types
 // (ItemTypes.txt) as collection.tsv carries them; types the mock-up has no tile for
 // (maces, staves, wands, daggers, javelins, claws, charms, jewels) show under all types.
+// A unique kept more than once has a card per copy (prepare_collection.py UNIQUE_COPIES: Ormus'
+// Robes for its spells, Hellfire Torch per class): a copy's record id is the item's own plus
+// CopyStep times the copy. The extra copies are not counted in the found share (owner 2026-11-22).
+inline constexpr uint32_t CopyStep = 10000;
+inline constexpr uint32_t BaseRecord(uint32_t recordId) { return recordId % CopyStep; }
 inline constexpr int GroupCount = 12;
 inline constexpr int NoGroup    = -1;
 inline constexpr int BandCount  = 4;    // Sets: level ranges, each holding at most GroupCount sets
@@ -344,7 +349,7 @@ inline Hit Pick(const Layout& layout, float x, float y) {
 // no item of its own until it is made, so it has no icon key; a gem or rune is keyed by
 // its four-character code.
 inline std::string IconKey(Category category, uint32_t recordId, uint32_t code) {
-    if (category == Category::Uniques) return "u" + std::to_string(recordId);
+    if (category == Category::Uniques) return "u" + std::to_string(BaseRecord(recordId));
     if (category == Category::Sets) return "t" + std::to_string(recordId);
     if (category == Category::Materials) {
         constexpr char hex[] = "0123456789abcdef";

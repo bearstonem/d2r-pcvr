@@ -92,7 +92,8 @@ D2RL::Inventory::IterationAction __cdecl CountItem(const D2RL::PluginContext*, c
         ++tally.uniques;
         Note(tally.uniqueRows, record);
         if (record != UINT32_MAX) {
-            if (stored) TabMarkFound(Category::Uniques, record);
+            // a unique with a card per copy: the next free card (a Hellfire Torch: its class's)
+            if (stored) TabMarkFoundCopy(Category::Uniques, record, item->code == TorchCode() ? ItemClassSkills(item->handle) : -1);
             tooltip::RememberHandle(Category::Uniques, record, item->handle);   // its exact text, later
         }
         break;
