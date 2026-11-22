@@ -8103,17 +8103,29 @@ void CollectStashReads() {
             static std::vector<uint8_t> pageRef;static int refW=0,refH=0;
             bool any=false;
             if(r.pageRead&&collectionInUiShown&&read(r.page,pageRows)) {
-                const bool bare=laserOnCollectionPage.load()&&!gamestate::CursorItemHeld();
-                if(bare||pageRef.size()!=pageRows.size()||refW!=r.page.w||refH!=r.page.h) {
+                // Only an inventory item's tooltip may come through (owner 2026-11-22: with an item in
+                // the hand the game's cursor and the stash under the page showed through in patches):
+                // the hand empty and the laser off the page, and per row only the darkened cells
+                // reaching in from the page's right edge, where such a tooltip comes from.
+                const bool held=gamestate::CursorItemHeld(),onPage=laserOnCollectionPage.load();
+                const bool bare=onPage&&!held;
+                if(bare||held||onPage||pageRef.size()!=pageRows.size()||refW!=r.page.w||refH!=r.page.h) {
                     if(bare){pageRef=pageRows;refW=r.page.w;refH=r.page.h;}
                     for(auto& row:pageCover)row.store(0);
                 } else {
                     const int cols=std::min(64,(r.page.w+PageCellW-1)/PageCellW);
                     for(int cy=0;cy<r.page.h&&cy<PageCellRows;++cy) {
                         uint64_t bits=0;
-                        for(int c=0;c<cols;++c)
-                            if(CellCovered(pageRows.data(),r.page.w,pageRef.data(),4,r.page.w,c*PageCellW,cy,std::min(r.page.w,(c+1)*PageCellW),cy+1))
-                                bits|=uint64_t(1)<<c;
+                        for(int c=cols-1;c>=0;--c) {
+                            int dark=0,n=0;
+                            for(int x=c*PageCellW;x<std::min(r.page.w,(c+1)*PageCellW);++x) {
+                                const uint8_t* g=pageRows.data()+(size_t(cy)*size_t(r.page.w)+size_t(x))*4;
+                                const uint8_t* b=pageRef.data()+(size_t(cy)*size_t(r.page.w)+size_t(x))*4;
+                                dark+=(int(b[0])+b[1]+b[2])-(int(g[0])+g[1]+g[2])>40?1:0;++n;
+                            }
+                            if(n==0||dark*2<n)break;   // half the cell darker: the tooltip's box; else its edge is reached
+                            bits|=uint64_t(1)<<c;
+                        }
                         pageCover[cy].store(bits);any=any||bits!=0;
                     }
                 }
