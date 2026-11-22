@@ -3141,7 +3141,10 @@ void MenuPointer(const menus::Pad& controls) {
     // The campfire: the board owns the game's pointer only while the laser is on it - owned, a
     // pointer event no menu takes never reaches the scene, and the heroes could not be picked.
     if(active&&(!campfirePointer.load()||pointerHit))panelinput::OwnPointer();
-    if(active&&pointerHit&&!onButton&&!dropOwns&&!handClicking) {
+    // On the Collection tab of the stash bar the game's cursor follows too, so the game draws
+    // its own hover frame on the tab (owner 2026-11-22: no frame before the click); the click
+    // stays the mod's (gamePointer below leaves it out).
+    if(active&&pointerHit&&(!onButton||onCollectionTab)&&!dropOwns&&!handClicking) {
         RECT client{};
         if(GetClientRect(gameWindow,&client)) {
             math::Vec native{hit.u,hit.v,0};
