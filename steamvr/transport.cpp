@@ -733,23 +733,6 @@ struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_F
 // The stash's tab bar with Collection as the active tab (collection_art.h, cut from the owner's
 // shot as the mock-up did), in the UI image's format, laid over the bar while the page is shown.
 struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};bool tried=false;} collectionTabsUpload;
-// The laser's point in the UI image (x of 2244, y of 2352; NaN off it): an item in the hand is
-// drawn there by the game, and the bar's art leaves a gap round it (owner 2026-11-22: the item
-// in the hand went under the tab bar).
-std::atomic<float> laserImageX{NAN},laserImageY{NAN};
-// A paste from an upload, less a column round the hand's item while one is held over it.
-void CopyAroundHeld(ID3D12GraphicsCommandList* list,const D3D12_TEXTURE_COPY_LOCATION& to,int x,int y,
-                    const D3D12_TEXTURE_COPY_LOCATION& from,int w,int h) {
-    const float lx=laserImageX.load(),ly=laserImageY.load();
-    constexpr float HalfGap=70.f,Reach=150.f;   // two inventory cells and a little; an item's half height and more
-    if(!gamestate::CursorItemHeld()||!(lx==lx)||ly<float(y)-Reach||ly>float(y+h)+Reach||lx+HalfGap<float(x)||lx-HalfGap>float(x+w)) {
-        list->CopyTextureRegion(&to,UINT(x),UINT(y),0,&from,nullptr);
-        return;
-    }
-    const int g0=std::clamp(int(lx-HalfGap)-x,0,w),g1=std::clamp(int(lx+HalfGap)-x,0,w);
-    if(g0>0){const D3D12_BOX box{0,0,0,UINT(g0),UINT(h),1};list->CopyTextureRegion(&to,UINT(x),UINT(y),0,&from,&box);}
-    if(g1<w){const D3D12_BOX box{UINT(g1),0,0,UINT(w),UINT(h),1};list->CopyTextureRegion(&to,UINT(x+g1),UINT(y),0,&from,&box);}
-}
 // The inventory cells an item passes through on its way in or out of the collection: drawn
 // empty over the UI image while it does (owner 2026-11-21: the item flashed there). Packed
 // x | y<<4 | w<<8 | h<<12 (cells), and until when (GetTickCount64).
@@ -2896,7 +2879,6 @@ void MenuPointer(const menus::Pad& controls) {
         Say("Frame panels: another stash tab was chosen; the Collection page goes");
     }
     otherTabWasDown=pressed;
-    laserImageX.store(aimTracked&&pointerHit?hit.u*2244.f:NAN);laserImageY.store(aimTracked&&pointerHit?hit.v*2352.f:NAN);
     {   // diagnostic: where the stash surface sits, to centre the window
         static ULONGLONG reportAt=0;const auto now=GetTickCount64();
         if(collectionTabShown&&now>=reportAt) {
@@ -8112,7 +8094,7 @@ bool CopyCollectionIntoUi(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,u
     }
     if(t.upload&&w==uint32_t(collection::art::ShotWidth)&&h==uint32_t(collection::art::ShotHeight)) {
         D3D12_TEXTURE_COPY_LOCATION tabsFrom{};tabsFrom.pResource=t.upload.Get();tabsFrom.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;tabsFrom.PlacedFootprint=t.footprint;
-        CopyAroundHeld(list,to,collection::art::TabsX,collection::art::TabsY,tabsFrom,collection::art::TabsWidth,collection::art::TabsHeight);
+        list->CopyTextureRegion(&to,UINT(collection::art::TabsX),UINT(collection::art::TabsY),0,&tabsFrom,nullptr);
     } else {
         static bool told=false;
         if(!told){told=true;char line[160];std::snprintf(line,sizeof line,"Frame collection: UI image %ux%u is not the shot's %dx%d; the tab bar is left as the game draws it",
