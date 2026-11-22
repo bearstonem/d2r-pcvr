@@ -104,6 +104,8 @@ static const GoldenRow Golden[]={
     {"interactions.map_top_down",View::Wrist,1,content::RowKind::Choice,"Map view",4,0},
     {"interactions.map_rotate",View::Wrist,1,content::RowKind::Toggle,"Turn map with you",0,0},
     {"interactions.companion_counts",View::Wrist,1,content::RowKind::Toggle,"Buffs and companions",0,0},
+    {"interactions.floating_map_background_pct",View::Wrist,1,content::RowKind::Slider,"Map background",0,2},   // the floating map's see-through backing (ui_blit.cpp)
+    {"interactions.map_grab_hint",View::Wrist,1,content::RowKind::Toggle,"Map grab hint",0,0},   // the floating map's grab hint (grab_hint.h)
     {"hud.menu_distance",View::Menus,0,content::RowKind::Choice,"Menu distance",3,0},
     {"interactions.leather_menu",View::Menus,0,content::RowKind::Stepper,"Hold menu",0,3},   // main's #360, drawn inside Menu distance's row; Off / On / Menu only (2026-10-29)
     {"hud.tooltip_timing",View::Menus,0,content::RowKind::Choice,"Item details delay",3,0},
@@ -135,6 +137,7 @@ static const GoldenRow Golden[]={
     {"render.rings",View::Performance,1,content::RowKind::Stepper,"Terrain distance",0,0},
     {"render.model_radius",View::Performance,1,content::RowKind::Slider,"Scenery distance",0,0},
     {"render.big_radius",View::Performance,1,content::RowKind::Slider,"Big objects",0,1},   // main's #366, drawn inside Scenery distance's row
+    {"render.subscription_rings",View::Performance,1,content::RowKind::Slider,"Enemy activation distance",0,1},
     {"render.frame_generation",View::Frames,0,content::RowKind::Choice,"Frame generation",3,0},   // main's #313
     {"render.frame_generation_preset",View::Frames,0,content::RowKind::Choice,"NVIDIA flow quality",3,0},
     {"render.frame_generation_scale",View::Frames,0,content::RowKind::Choice,"NVIDIA flow scale",3,0},
@@ -148,6 +151,13 @@ static const GoldenRow Golden[]={
     {"torch.flame",View::Environment,1,content::RowKind::Toggle,"Torch flame",0,0},
     {"torch.spell_hands_pct",View::Environment,1,content::RowKind::Slider,"Spell hand light",0,1},   // a Sorceress's (2026-11-06)
     {"light.radius_boost_pct",View::Environment,1,content::RowKind::Slider,"Light Radius boost",0,0},   // #440
+    {"render.ice_armor_visual",View::Effects,0,content::RowKind::Choice,"Ice Armor",3,0},
+    {"render.cyclone_armor_visual",View::Effects,0,content::RowKind::Choice,"Cyclone Armor",2,0},
+    {"render.bone_armor_visual",View::Effects,0,content::RowKind::Choice,"Bone Armor",2,0},
+    {"render.player_aura_visual",View::Effects,1,content::RowKind::Choice,"Your auras",2,0},
+    {"render.summon_aura_visual",View::Effects,1,content::RowKind::Choice,"Friendly auras",2,0},
+    {"render.player_shout_visual",View::Effects,2,content::RowKind::Choice,"Your shout buffs",2,0},
+    {"render.summon_shout_visual",View::Effects,2,content::RowKind::Choice,"Friendly shout buffs",2,0},
 };
 
 static bool PopoverLayer(L::Role r){return r==L::Role::PopoverDim||r==L::Role::Popover||r==L::Role::PopoverTitle||r==L::Role::PopoverOption||r==L::Role::PopoverHint||r==L::Role::ColorDot||r==L::Role::PopoverLabel||r==L::Role::PopoverSwitch;}
@@ -223,6 +233,16 @@ static int Dump(int view,int card){
 int main(int argc,char** argv){
     if(argc>1&&std::string(argv[1])!="--left-handed")return Dump(std::atoi(argv[1]),argc>2?std::atoi(argv[2]):NoHelp);
     const auto& tables=L::ContentTables();
+    {
+        const auto* row=content::RowOf(SubscriptionRings);
+        Check(row&&row->kind==content::RowKind::Slider&&row->page==View::Performance,"subscription distance is a Performance slider");
+        Check(content::ValueText(*row,0)=="Native"&&content::ValueText(*row,3)=="3 rings","subscription slider names native and ring values");
+        Model m;m.Open(Ready());L::Press(m,{Kind::Open,int(View::Performance),-1},0);
+        const auto layout=L::Build(m,{},{});
+        Check(FindRole(layout,L::Role::StepMinus,SubscriptionRings)&&FindRole(layout,L::Role::StepPlus,SubscriptionRings),"subscription row has both step controls");
+        L::Press(m,{Kind::Change,SubscriptionRings,-1},0);
+        Check(m.Get()[SubscriptionRings]==4&&m.Dirty(),"subscription ring changes remain a draft until Apply");
+    }
     // ---- every key reachable: one row, or an override keeping it off the menu ----
     {
         for(int k=0;k<Count;++k){
@@ -242,7 +262,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==116,"116 settings on the menu, each one row");   // + Props have weight (2026-11-12)   // + Weapons hit walls (2026-11-12)   // + Sticks stay right-handed (2026-11-11)   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
+        Check(tables.rowCount==126,"126 settings on the menu, each one row");   // + Enemy activation distance (#576)   // + seven Effects rows (#582)   // + Map grab hint (grab_hint.h)   // + Floating map background   // + Props have weight (2026-11-12)   // + Weapons hit walls (2026-11-12)   // + Sticks stay right-handed (2026-11-11)   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};
@@ -251,7 +271,7 @@ int main(int argc,char** argv){
             {content::Group::Comfort,"Comfort",{"Moving","Body"}},
             {content::Group::Controls,"Controls",{"Hands","Vibration"}},
             {content::Group::Interface,"Interface",{"Wrist","Menus","Labels","Outlines","Warnings"}},
-            {content::Group::Graphics,"Graphics",{"Performance","Frames","Environment"}}};
+            {content::Group::Graphics,"Graphics",{"Performance","Frames","Environment","Effects"}}};
         Check(std::size(content::GroupTable)==rail.size(),"five groups");
         for(size_t g=0;g<rail.size()&&g<std::size(content::GroupTable);++g){
             Check(content::GroupTable[g].id==rail[g].group&&std::string(content::GroupTable[g].name)==rail[g].name,std::string("group in order: ")+rail[g].name);
@@ -275,7 +295,7 @@ int main(int argc,char** argv){
     }
     // ---- golden: the merged rows equal the table they replaced ----
     {
-        Check(tables.rowCount==std::size(Golden),"as many rows as before");
+        Check(tables.rowCount==std::size(Golden),"every original and Effects row accounted for");
         for(size_t i=0;i<std::size(Golden)&&i<tables.rowCount;++i){
             const auto& g=Golden[i];const auto& r=tables.rows[i];
             const std::string where=std::string("golden row ")+g.id;
@@ -791,6 +811,11 @@ int main(int argc,char** argv){
                 for(int i=0;i<rows.count;++i){
                     const auto* r=tables.Row(rows.keys[size_t(i)]);
                     {const auto control=L::ControlOf(*r,x.Get(),c);if(control!=L::Control::Popover&&control!=L::Control::Color)continue;}
+                    if(!L::Editable(x,Key(r->key))) {
+                        L::Press(x,{Kind::Popover,r->key},0);
+                        Check(L::Build(x,c,{}).popover.w==0,"unavailable effect controls cannot open a choice popup");
+                        continue;
+                    }
                     L::Press(x,{Kind::Popover,r->key},0);
                     L::LayoutInput pin;pin.nowMs=1000;
                     const auto pl=L::Build(x,c,pin);CheckLayout(pl,std::string("popover ")+r->label+" "+ViewName(View(view)));++built;

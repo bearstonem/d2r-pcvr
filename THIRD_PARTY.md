@@ -118,8 +118,17 @@ and extracts `c/Redist/D3D/x64/d3dcompiler_47.dll` for mod-local shader compilat
 Neither the SDK package nor its compiler is bundled in this repository or release.
 Microsoft's [Windows SDK license](https://aka.ms/WinSDKLicenseURL) applies.
 
-The campfire's mountain panorama `reshade/sky/D2R_Campfire_Pano.png` was generated
-with ChatGPT by contributor Kudlatytrue and is free to use with this mod.
+The campfire's mountain panorama `reshade/sky/D2R_Campfire_Pano.png` was put together
+by contributor Kudlatytrue from three photographs under the
+[Unsplash License](https://unsplash.com/license), recoloured, cut and joined with
+drawn clouds:
+
+- [Snow covered mountain during daytime](https://unsplash.com/photos/snow-covered-mountain-during-daytime-W4o1oWx0k0g)
+  by Denis Linine (Titlis, Switzerland)
+- [A view of a snowy mountain range from a ski lift](https://unsplash.com/photos/a-view-of-a-snowy-mountain-range-from-a-ski-lift-uJixBsWq3sU)
+  by ENDERjuh (Sochi, Russia)
+- [A mountain range covered in snow under a blue sky](https://unsplash.com/photos/a-mountain-range-covered-in-snow-under-a-blue-sky-wck7qMmJk1s)
+  by fabio Spano (Rocher de Naye, Switzerland)
 
 The visor blood splatters in `steamvr/assets/blood-splatters.png` are eight
 transparent images supplied by contributor ChuckRibbits, who states they are free,
@@ -180,3 +189,11 @@ The texture header/format mapping was checked against
 Original potion models and textures belong to the game and are extracted into
 the local `d2r_vr_potions` cache; neither that cache nor raw game assets are
 distributed in the repository or release. No Granny runtime is needed.
+
+## Sorceress ice armor
+
+`steamvr/assets/ice-armor/` contains geometry adapted from PK Icicles by
+FacadeGaikan / PlanetKiller, released under CC0:
+https://opengameart.org/content/pk-icicles . The accompanying generated frost
+texture and forearm adaptations contain no extracted game assets. See the
+asset README for the editable source and runtime format.

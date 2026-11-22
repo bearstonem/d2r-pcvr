@@ -4,6 +4,12 @@ namespace framevr::potions {
 // Original models are normalized once by prepare_potions.py: 18 cm tall,
 // centered on the neck axis, +Y points out of the bottle's opening.
 constexpr float Height=.18f;
+// Distance to the bottle's full vertical body, with padding supplied by the grab test.
+inline float GrabDistance(math::Vec hand,math::Vec center,math::Quat rotation) {
+    auto local=math::Rotate(math::Conjugate(rotation),hand-center);
+    local.y-=std::clamp(local.y,-Height*.5f,Height*.5f);
+    return std::sqrt(math::Dot(local,local));
+}
 inline math::Quat HeldRotation(math::Quat grip) {
     // Pitch the model -90 degrees around grip-local X: its opening follows
     // grip -Z instead of grip +Y, which points back at the player.

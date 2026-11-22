@@ -22,13 +22,13 @@ namespace framevr::settings {
 // vr_settings_content.h). Presets heads the rail; Guide and WhatsNew open from
 // the page band, not the rail; More (rows no override placed yet, the menu data
 // rules) too, and only while it has rows.
-enum class View : uint8_t { Presets, Combat, Targeting, Shield, Monsters, Physics, Moving, Body, Hands, Vibration, Wrist, Menus, Labels, Outlines, Warnings, Performance, Frames, Environment, Guide, WhatsNew, More, Count };
+enum class View : uint8_t { Presets, Combat, Targeting, Shield, Monsters, Physics, Moving, Body, Hands, Vibration, Wrist, Menus, Labels, Outlines, Warnings, Performance, Frames, Environment, Effects, Guide, WhatsNew, More, Count };
 // The rail's groups (content::Group, content::GroupTable) number below this, so the model
 // can remember a page per group and the help card has an id per group.
 constexpr int MaxRailGroups=8;
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
-           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, MotionsWarlockOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, MeleeReach, WalkDirection, RoomSteps, LightRadiusBoost, WeaponHeft, BowBash, AimWithEyes, MercPotionAssist, ClickToDrink, SkillCooldowns, SummonRangeMultiplier, TCrossCalibrate, LookAtYou, ReverbEcho, HitStagger, HitKnockback, HapticSurfaces, HapticHeartbeat, LeftHanded, HeldCollisions, HeldWorldCollisions, LeftHandedSticks, PropHeft, Count };
+           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, MotionsWarlockOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, MeleeReach, WalkDirection, RoomSteps, LightRadiusBoost, WeaponHeft, BowBash, AimWithEyes, MercPotionAssist, ClickToDrink, SkillCooldowns, SummonRangeMultiplier, TCrossCalibrate, LookAtYou, ReverbEcho, HitStagger, HitKnockback, HapticSurfaces, HapticHeartbeat, LeftHanded, HeldCollisions, HeldWorldCollisions, LeftHandedSticks, PropHeft, FloatingMapBackground, MapGrabHint, PlayerAuraVisual, SummonAuraVisual, IceArmorVisual, CycloneArmorVisual, BoneArmorVisual, PlayerShoutVisual, SummonShoutVisual, SubscriptionRings, Count };
 // One bit per setting, 256 wide: four words, since MSVC has no wider integer.
 // (128 until 2026-11-08, when 126 were in use and more rows were coming.)
 struct ChangeMask {
@@ -80,9 +80,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Added sky", "The mod's outdoor sky effect", L"sky",L"enabled",0,0,1,1},
     {"Added fog", "The mod's distance fog effect", L"fog",L"enabled",0,0,1,1},
     {"Dungeon ceiling", "The mod's overhead dungeon surfaces", L"ceiling",L"enabled",0,0,1,1},
-    // 6 (2026-10-28): standing in the Blood Moor rings 8 held the frame rate of 2 (44 pairs/s); 6 builds about
-    // the 600 units Big objects and the fog reach, with fewer rooms built at a time than 8 while walking.
-    {"Terrain draw distance", "Higher values show more map tiles and cost more to render", L"render",L"rings",6,1,8,1},
+    {"Terrain draw distance", "Higher values show more map tiles and cost more to render", L"render",L"rings",4,1,8,1},
     // 210: just past the fog's end of the time (200). In Rogue Encampment 360 held 45 fps, 260 55-80, 210 88-90 (steamvr/PERFORMANCE.md).
     {"Object draw distance", "Higher values retain more distant scenery", L"render",L"model_radius",210,10,10000,50},
     {"Standing eye height", "Measured from the SteamVR floor", L"calibration",L"eye_height_m",1.64f,.8f,2.3f,.01f},
@@ -176,7 +174,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Big objects", "Trees, houses and walls drawn farther than other objects", L"render",L"big_radius",600,0,1000,100},
     // [fog] end: where the outdoor fog is complete. 600 with the INI's curve 0.4 (2026-10-28; 200 and 0.6 before): the
     // same haze close by, see-through to Big objects' 600. Start and curve stay INI-only.
-    {"Fog distance", "Where the fog is complete; farther shows more of the distance", L"fog",L"end",600,100,1200,50},
+    {"Fog distance", "Where the fog is complete; farther shows more of the distance", L"fog",L"end",400,100,1200,50},
     // The tabbed menu on the hide in the left hand (leather_menu.h), or in front of you as before;
     // VR Settings > Interface > Menus, beside Menu distance on its row (owner 2026-10-28: "a toggle in VR Settings
     // so people can opt out and just use the normal full screen menu"); 2 Menu only: the menu held without the hide
@@ -314,6 +312,24 @@ inline constexpr std::array<Definition,Count> Definitions{{
     // barrel shrugs off a tap a cup flies from. On by default; Off pushes everything aside at the weapon's speed, as
     // before. VR Settings > Gameplay > Physics > Props, under Knock over small props.
     {"Props have weight", "A barrel takes a full swing to move; a cup flies off a tap", L"interactions",L"prop_heft",1,0,1,1},
+    // Floating map background (Jeff, 2026-11-15: "make the background transparent ... a slider for how transparent
+    // ... keep the foreground map parts though solid"): the pulled-off copy's dark backing, 0% see-through to 100%
+    // solid; its walls, markers, labels and arrow stay solid (its frame shows only while pointed at: floating_map.h
+    // FrameStep). The wrist map keeps its own solid, framed picture.
+    // 100% by default, as before. VR Settings > Interface > Wrist > Map, under Buffs and companions.
+    {"Floating map background", "The floating map's background: 0% see-through, 100% solid",L"interactions",L"floating_map_background_pct",100,0,100,10},
+    // Map grab hint (grab_hint.h): pointing at the raised wrist map with no copy out shows that Right Grip pulls it off:
+    // a small controller sign beside it and a glow on its border. On by default; Off shows, buzzes and logs nothing of
+    // it. VR Settings > Interface > Wrist > Map, under Buffs and companions.
+    {"Map grab hint", "Pointing at the wrist map shows that Right Grip pulls it off", L"interactions",L"map_grab_hint",1,0,1,1},
+    {"Your auras", "Show persistent aura visuals on your character", L"render",L"player_aura_visual",1,0,1,1},
+    {"Friendly auras", "Show persistent aura visuals on your owned companions", L"render",L"summon_aura_visual",1,0,1,1},
+    {"Ice Armor", "Your ice armor visuals; gameplay stays active", L"render",L"ice_armor_visual",2,0,2,1},
+    {"Cyclone Armor", "Your original Cyclone Armor visuals; absorption stays active", L"render",L"cyclone_armor_visual",1,0,1,1},
+    {"Bone Armor", "Your forearm bones; absorption stays active", L"render",L"bone_armor_visual",1,0,1,1},
+    {"Your shout buffs", "Show shout buff effects on your character", L"render",L"player_shout_visual",1,0,1,1},
+    {"Friendly shout buffs", "Show shout buff effects on your owned companions", L"render",L"summon_shout_visual",1,0,1,1},
+    {"Enemy activation distance", "Room rings for offline enemies and objects; 0 keeps native coverage", L"render",L"subscription_rings",5,0,8,1},
 }};
 using Values=std::array<float,Count>;
 // The setting holding the skill on glyph shape i (glyph_recognizer.h order): the right hand's (0), or the left's (1).

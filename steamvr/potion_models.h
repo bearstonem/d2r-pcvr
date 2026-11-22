@@ -4,6 +4,14 @@
 #include <filesystem>
 #include <memory>
 namespace framevr::potions {
+// A current scene-depth copy, in a shader-resource state. Pose/FOV belong to
+// the eye that produced it; reprojection allows the other eye to use a fresh
+// source in By turns. nearMetres is the GAME near plane converted to metres.
+struct SceneDepth {
+    ID3D12Resource* resource=nullptr;DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
+    float scale[2]{1,1};float nearMetres=0;
+    interaction::Pose view{};math::Fov fov{};
+};
 class Models {
     struct Impl;
     std::unique_ptr<Impl> impl;
@@ -17,9 +25,10 @@ public:
     float Radius(uint32_t code) const; // widest horizontal extent of that model, metres; 0 unknown
     unsigned Tosses() const; // thrown trap models loaded (toss::Model codes; #224)
     unsigned Bones() const;  // Bone Armor pieces loaded (bn1..bn3; bone_graft.h)
+    unsigned IcePieces() const; // authored ic1..ic3 assets loaded; 0 when missing or invalid
     void Reset();
     // Caller waited the eye's copy fence before reusing its RTV/depth resource.
     bool Render(ID3D12GraphicsCommandList*,ID3D12Resource*,unsigned eye,
-                interaction::Pose view,math::Fov,const Scene&);
+                interaction::Pose view,math::Fov,const Scene&,const SceneDepth& depth={});
 };
 }

@@ -10,6 +10,10 @@ void ConfigureBoneArmorHeight(float units);
 // With the forearm grafts on (steamvr/bone_graft.h), the hero's own Bone Armor
 // orbit is never shown, in any view or menu; off: the native orbit.
 void ConfigureBoneArmorHidden(bool hidden);
+// Ice: 0 Off, 1 Original, 2 Icicles. Cyclone: show its original effect or hide it.
+// Armor filtering is scoped to exact local-hero assets.
+void ConfigureArmorVisuals(int iceMode,bool cyclone);
+void SetFrozenArmorGraftActive(bool active);
 // The hero's point (vrcam's camera target, the feet, game world units), every
 // view build, menus included: which Bone Armor is the hero's. Stale after 500 ms.
 void SetHero(const float position[3]);

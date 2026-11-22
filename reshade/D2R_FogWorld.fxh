@@ -59,6 +59,12 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
         // A rim pixel with no depth of its own but a drawn neighbour takes the neighbour's:
         // left out, the cut shapes stayed outlined in black on the vault.
         const float dPt = d > 1e-6 ? d : dNear;
+        // The main menu's sky ([frontend] cut, sky_edges, sky_blend), looked up ONCE for all four places below that
+        // lay it over the picture, and only while one of them is on (in a game none is). Each Sky() is the whole sky
+        // inlined: four of them made the effect take 47 s to build instead of 18, and the game froze while ReShade
+        // rebuilt it (2026-11-17; depth_fog_test allows DepthFogWorld two calls: this one and the world's below).
+        float3 frontSky = float3(0.0, 0.0, 0.0);
+        [branch] if (SkyOn && (SkyCutOn || SkyEdgeFix || SkyBlendDark > 0.0)) frontSky = Sky(dir) + dither;
         // [frontend] cut_right / cut_left (SkyCut*): another act's scene beside this one's goes to our sky
         if (SkyCutOn && SkyOn && dPt > 1e-6) {
             const float3 offC = (eye == 0 ? v.x * CamRight0 + v.y * CamUp0 + v.z * CamBack0
@@ -66,7 +72,7 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
             const float side = dot(offC.xz, SkyCutDir);
             const float ahead = dot(offC.xz, float2(SkyCutDir.y, -SkyCutDir.x));
             const float kC = SkyCutAt(side, ahead);
-            if (kC > 0.0) return lerp(colour, Sky(dir) + dither, kC);
+            if (kC > 0.0) return lerp(colour, frontSky, kC);
             // In front of the wall, at an edge of what is behind it: the game blended the leaves' and branches' edges
             // with the bright card they stood against - the treetops glowed where nothing was any more (2026-11-14).
             // Two pixels round: the cut ones give the card's colour, the others the tree's own (the darkest); how
@@ -90,7 +96,7 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
             if (nearCut) {
                 const float lc = dot(cardC, lw), lo = dot(ownC, lw);
                 const float card = lc > lo + 1e-3 ? saturate((dot(colour, lw) - lo) / (lc - lo)) : 0.0;
-                return max(colour - cardC * card, 0.0) + (Sky(dir) + dither) * card;
+                return max(colour - cardC * card, 0.0) + frontSky * card;
             }
         }
         // What the ceiling is wanted for here, and as far along the ray as: 1 a cut point, 2 a point
@@ -152,7 +158,7 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
             c = tex2D(FogColorSmp, uv + float2(0.0, cy)).rgb;   if (d3 > 1e-6 && dot(c, lw) > dot(obj, lw)) obj = c;
             c = tex2D(FogColorSmp, uv - float2(0.0, cy)).rgb;   if (d4 > 1e-6 && dot(c, lw) > dot(obj, lw)) obj = c;
             const float cover = saturate(dot(colour, lw) / max(dot(obj, lw), 1e-3));
-            return colour + (Sky(dir) + dither) * (1.0 - cover);
+            return colour + frontSky * (1.0 - cover);
         }
         if (ceilMode == 0 && (dNear <= 1e-6 || rim)) {
             if (SkyOn) {
@@ -185,7 +191,7 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
         if (!back && ceilMode == 0 && SkyOn && SkyBlendDark > 0.0 && d > 1e-6 && NearPlane / d > SkyBlendFar) {
             const float lumaB = dot(colour, float3(0.2126, 0.7152, 0.0722));
             const float kB = (1.0 - smoothstep(SkyBlendLo, SkyBlendHi, lumaB)) * saturate(SkyBlendDark) * smoothstep(-0.02, 0.06, dir.y);
-            return lerp(colour, Sky(dir) + dither, kB);
+            return lerp(colour, frontSky, kB);
         }
         if (back) {
             // [frontend] cut: what another act's scene draws with no depth (its painted sky card) is known only by

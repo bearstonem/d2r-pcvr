@@ -129,7 +129,7 @@ int main(int argc,char** argv){
         Check(Defaults()[BigObjectDistance]==600&&std::wstring(Definitions[BigObjectDistance].section)==L"render"&&
               std::wstring(Definitions[BigObjectDistance].key)==L"big_radius"&&HelpText(BigObjectDistance)[0]!=0,"big objects: [render] big_radius, 600 by default, explained");
         Check(Normalize(BigObjectDistance,250)==300&&Normalize(BigObjectDistance,-1)==0&&Normalize(BigObjectDistance,4000)==1000,"big objects: Off or 300 - 1000");
-        Check(Defaults()[DrawDistance]==6,"terrain draw distance: 6 rings as shipped (main's #366)");
+        Check(Defaults()[DrawDistance]==4,"terrain draw distance: 4 rings as shipped");
         {
             Model big;big.Open(s);
             layout::Press(big,Step(BigObjectDistance),0);
@@ -155,8 +155,8 @@ int main(int argc,char** argv){
             Check(big.Get()[BigObjectDistance]==300&&big.popoverKey<0,"a pick sets it and closes the list");
         }
         // Fog distance (main's #366): [fog] end, 100 - 1200, under Distance fog, locked while the fog is off.
-        Check(Defaults()[FogDistance]==600&&std::wstring(Definitions[FogDistance].section)==L"fog"&&
-              std::wstring(Definitions[FogDistance].key)==L"end"&&HelpText(FogDistance)[0]!=0,"the fog's distance: [fog] end, 600 as shipped, explained");
+        Check(Defaults()[FogDistance]==400&&std::wstring(Definitions[FogDistance].section)==L"fog"&&
+              std::wstring(Definitions[FogDistance].key)==L"end"&&HelpText(FogDistance)[0]!=0,"the fog's distance: [fog] end, 400 as shipped, explained");
         Check(Normalize(FogDistance,50)==100&&Normalize(FogDistance,5000)==1200,"the fog's distance: 100 - 1200");
         {
             Values on=Defaults();on[Fog]=1;Values off=on;off[Fog]=0;
@@ -164,17 +164,17 @@ int main(int argc,char** argv){
             Snapshot fogged=s;fogged.values[Fog]=1;
             Model fog;fog.Open(fogged);
             layout::Press(fog,Step(FogDistance),0);layout::Press(fog,Step(FogDistance),0);
-            Check(fog.Get()[FogDistance]==700&&fog.Get()[Fog]==1,"600, 650, 700 - the fog stays on");
+            Check(fog.Get()[FogDistance]==500&&fog.Get()[Fog]==1,"400, 450, 500 - the fog stays on");
             layout::Press(fog,{Kind::Set,Fog,0,0},0);
-            Check(fog.Get()[Fog]==0&&fog.Get()[FogDistance]==700,"the fog's switch turns it off, the distance kept");
+            Check(fog.Get()[Fog]==0&&fog.Get()[FogDistance]==500,"the fog's switch turns it off, the distance kept");
             layout::Press(fog,Step(FogDistance),0);
-            Check(fog.Get()[FogDistance]==700,"no change to the distance while the fog is off");
+            Check(fog.Get()[FogDistance]==500,"no change to the distance while the fog is off");
             Check(layout::KeyVisible(FogDistance,on,{})&&!layout::KeyVisible(FogDistance,off,{}),"its box shows beside Distance fog while the fog is on");
             Model list;list.Open(fogged);layout::Press(list,{Kind::Open,int(View::Environment),-1},0);layout::Press(list,{Kind::Popover,FogDistance},0);
             int listed=0;for(const auto& e:layout::Build(list,list.context,{}).elements)listed+=e.role==layout::Role::PopoverOption&&e.key==FogDistance;
             const auto built=layout::Build(list,list.context,{});   // Find points into it: kept for the check
             const auto* box=layout::Find(built,{Kind::Popover,FogDistance});
-            Check(listed==23&&box&&box->text=="Ends at 600","Fog distance: Ends at 600, a list of 100 - 1200 in 50s");
+            Check(listed==23&&box&&box->text=="Ends at 400","Fog distance: Ends at 400, a list of 100 - 1200 in 50s");
         }
         Model strength;strength.Open(s);
         Check(strength.Get()[Foveation]==1&&strength.Get()[FoveationStrength]==1,"fixed foveation at Medium strength by default");
@@ -746,7 +746,7 @@ int main(int argc,char** argv){
         layout::Press(chooser,{Kind::Set,ControllerLabels,0,3},0);Check(chooser.Get()[ControllerLabels]==2,"cannot edit while saving");
         chooser.Close();chooser.Open(s);Check(chooser.Get()[ControllerLabels]==0,"reopen discards unsaved choice");
     }
-    Check(s.values[DrawDistance]==6&&s.values[ObjectDistance]==210,"distance fallbacks match release configuration: 6 rings, objects 210");
+    Check(s.values[DrawDistance]==4&&s.values[ObjectDistance]==210,"distance fallbacks match release configuration: 4 rings, objects 210");
     {Model distance;distance.Open(s);
         distance.Click({Kind::Change,ObjectDistance,-1});
         Check(distance.Get()[ObjectDistance]==160,"object distance steps by 50, never jumping to the minimum");
@@ -1057,8 +1057,8 @@ int main(int argc,char** argv){
     {   // Props have weight (prop_heft.h): On by default, a switch under Knock over small props, shown while it is on, saved alone
         Check(Defaults()[PropHeft]==1&&std::wstring(Definitions[PropHeft].section)==L"interactions"&&
               std::wstring(Definitions[PropHeft].key)==L"prop_heft"&&Definitions[PropHeft].min==0&&Definitions[PropHeft].max==1&&
-              Definitions[PropHeft].step==1&&HelpText(PropHeft)[0]!=0&&PropHeft<ChangeMask::Bits&&PropHeft==Count-1,
-              "Props have weight: On by default, [interactions] prop_heft Off / On, explained, its own change bit, appended last");
+              Definitions[PropHeft].step==1&&HelpText(PropHeft)[0]!=0&&PropHeft<ChangeMask::Bits&&PropHeft+1==FloatingMapBackground,
+              "Props have weight: On by default, [interactions] prop_heft Off / On, explained, its own change bit, appended (Floating map background after it)");
         const auto* row=content::RowOf(PropHeft);const auto* props=content::RowOf(PropPhysics);
         Check(row&&props&&!row->beside&&row->page==View::Physics&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Props have weight")==0&&
               row->section==props->section&&row->classes==content::AllClasses&&std::strlen(row->help)<=160,
@@ -1072,6 +1072,46 @@ int main(int argc,char** argv){
         for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(PropHeft,on,{c})&&!RowShown(PropHeft,off,{c}),"shown while props are knocked about, for every class");
         Model t;Snapshot ready;ready.ready=true;ready.values=Defaults();t.Open(ready);layout::Press(t,{Kind::Set,PropHeft,0,0},0);
         Check(t.Get()[PropHeft]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<PropHeft),"the switch turns it Off, and Apply saves only it");
+    }
+    {   // Floating map background (ui_blit.cpp's see-through copy): 100% by default (solid, as before), 0 to 100 in 10s,
+        // a slider on Interface > Wrist > Map under Buffs and companions, every class, its ends named, saved alone
+        const auto& d=Definitions[FloatingMapBackground];
+        Check(Defaults()[FloatingMapBackground]==100&&std::wstring(d.section)==L"interactions"&&std::wstring(d.key)==L"floating_map_background_pct"&&
+              d.min==0&&d.max==100&&d.step==10&&HelpText(FloatingMapBackground)[0]!=0&&FloatingMapBackground<ChangeMask::Bits&&FloatingMapBackground+1==MapGrabHint,
+              "Floating map background: 100% by default, [interactions] floating_map_background_pct 0 to 100 in 10s, explained, its own change bit, appended (Map grab hint after it)");
+        const auto* row=content::RowOf(FloatingMapBackground);const auto* companions=content::RowOf(CompanionCounts);
+        Check(row&&companions&&!row->beside&&row->page==View::Wrist&&row->kind==content::RowKind::Slider&&std::strcmp(row->label,"Map background")==0&&
+              row->section==companions->section&&row->classes==content::AllClasses&&std::strlen(row->help)<=160,
+              "a slider of its own on Interface > Wrist, in the Map section, every class");
+        {
+            const auto& rows=content::Menu().rows;size_t at=rows.size(),companionsAt=rows.size();
+            for(size_t i=0;i<rows.size();++i){if(rows[i].key==FloatingMapBackground)at=i;if(rows[i].key==CompanionCounts)companionsAt=i;}
+            Check(companionsAt+1==at,"listed right under Buffs and companions");
+        }
+        for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(FloatingMapBackground,Defaults(),{c}),"shown for every class");
+        for(const float pct:{0.f,50.f,100.f}) {   // the full range, a real Off (100: solid) and see-through (0)
+            Model t;Snapshot ready;ready.ready=true;ready.values=Defaults();t.Open(ready);layout::Press(t,{Kind::Set,FloatingMapBackground,0,pct},0);
+            Check(t.Get()[FloatingMapBackground]==pct,"the slider takes 0, 50 and 100%");
+            if(pct<100)Check(t.Click({Kind::Apply}).changed==(ChangeMask{1}<<FloatingMapBackground),"Apply saves only it");
+        }
+    }
+    {   // Map grab hint (grab_hint.h): On by default, a switch on Interface > Wrist > Map under Buffs and companions, every class, saved alone
+        Check(Defaults()[MapGrabHint]==1&&std::wstring(Definitions[MapGrabHint].section)==L"interactions"&&
+              std::wstring(Definitions[MapGrabHint].key)==L"map_grab_hint"&&Definitions[MapGrabHint].min==0&&Definitions[MapGrabHint].max==1&&
+              Definitions[MapGrabHint].step==1&&HelpText(MapGrabHint)[0]!=0&&MapGrabHint<ChangeMask::Bits&&MapGrabHint+1==PlayerAuraVisual,
+              "Map grab hint: On by default, [interactions] map_grab_hint Off / On, explained, its own change bit, appended (the Effects settings after it)");
+        const auto* row=content::RowOf(MapGrabHint);const auto* companions=content::RowOf(FloatingMapBackground);
+        Check(row&&companions&&row->beside&&row->page==View::Wrist&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Map grab hint")==0&&
+              row->section==companions->section&&row->classes==content::AllClasses&&std::strlen(row->help)<=160,
+              "a switch on the right half of Floating map background's row, Interface > Wrist > Map, every class");
+        {
+            const auto& rows=content::Menu().rows;size_t at=rows.size(),companionsAt=rows.size();
+            for(size_t i=0;i<rows.size();++i){if(rows[i].key==MapGrabHint)at=i;if(rows[i].key==FloatingMapBackground)companionsAt=i;}
+            Check(companionsAt+1==at,"listed right under Floating map background (under Buffs and companions)");
+        }
+        for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(MapGrabHint,Defaults(),{c}),"shown for every class");
+        Model t;Snapshot ready;ready.ready=true;ready.values=Defaults();t.Open(ready);layout::Press(t,{Kind::Set,MapGrabHint,0,0},0);
+        Check(t.Get()[MapGrabHint]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<MapGrabHint),"the switch turns it Off, and Apply saves only it");
     }
     {   // Loot pick (#257): On by default, a switch on Interface, the right half of Loot name size's row, saved alone
         Check(Defaults()[LootPick]==1&&std::wstring(Definitions[LootPick].section)==L"interactions"&&
@@ -1128,6 +1168,16 @@ int main(int argc,char** argv){
         Check(m.Get()[SummonRangeMultiplier]==1.25f,"presets preserve summon range");
         Check(Normalize(SummonRangeMultiplier,NAN)==1&&Normalize(SummonRangeMultiplier,0)==1&&Normalize(SummonRangeMultiplier,6)==5,
               "shared multiplier normalizes invalid and out-of-range choices");
+    }
+    {
+        const auto defaults=Defaults();
+        Check(defaults[IceArmorVisual]==2&&defaults[CycloneArmorVisual]==1&&defaults[BoneArmorVisual]==1,"effect defaults retain ice, wind and bones");
+        for(int mode:{0,1,2})Check(Normalize(IceArmorVisual,float(mode))==mode,"three ice visual modes remain distinct");
+        for(auto key:{PlayerAuraVisual,SummonAuraVisual,PlayerShoutVisual,SummonShoutVisual}) {
+            Check(RowEnabled(defaults,key)&&Normalize(key,0)==0&&defaults[key]==1,"aura controls default visible and allow explicit Off");
+        }
+        int rows=0;for(const auto& row:content::Menu().rows)if(row.page==View::Effects)++rows;
+        Check(rows==7,"Effects contains three armor, two aura and two shout controls");
     }
     PrintReport();
     std::puts("VR settings draft, persistence requests, conflicts, row rules and input-gating tests passed");

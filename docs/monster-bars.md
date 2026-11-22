@@ -13,6 +13,30 @@ NPC, mercenary, player, object and item labels are not monster names: they
 show with every choice. The setting applies only to native stereo VR; the
 desktop and flat views keep the game's own labels.
 
+## Descriptions under the target
+
+The PC controller layout adds the native `Unique` and `Additional` text boxes
+to `TargetAttached`. The game fills these when it sends `SetInfo` to the
+health panel, using its own localized monster modifiers, immunities and
+creature descriptions, and clears them on `SetNoInfo`. Both lines therefore
+follow the same per-eye anchor and visibility rules as the health bar.
+
+`steamvr/enemy_health_layout.py` generates the small layout override. It
+inherits the game's controller layout and artwork and retains the PC name
+font size. The installer journals the override with the other mod files.
+Existing developer environments need the updated layout staged separately;
+initial developer staging copies it from the normal mod's data directory.
+
+The background widgets have priority -20, the health widget 0 and the
+description widgets 10, making their ordering explicit. The owner confirmed
+the first layout candidate in game on Quest 3 / Virtual Desktop / Battle.net
+3.4.95032 on 2026-11-14, reporting that everything appeared in place after
+checking the new text and red fill. Exhaustive modifier coverage and both
+stereo modes have not been separately verified.
+Check a unique with several modifiers, an immune enemy, a demon and an undead,
+then change targets and move the head while damaging an enemy. Check the text
+for overlap and the red fill in both stereo modes.
+
 ## Ini keys
 
 `[hud] monster_names`: 0 All, 1 Bosses and elites, 2 None. New installs ship

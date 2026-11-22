@@ -254,6 +254,7 @@ inline constexpr ContentPage PageTable[]={
     {View::Performance,"Performance",Group::Graphics,Icon::Performance,"Image detail and how far you see, with the last second's frame times below.",true},
     {View::Frames,"Frames",Group::Graphics,Icon::Fast,"How each frame is made: the eyes drawn, generated frames and the GPU wait.",true},
     {View::Environment,"Environment",Group::Graphics,Icon::World,"Extra sights and sound the mod adds to the game world. Far objects: Graphics > Performance.",true},
+    {View::Effects,"Effects",Group::Graphics,Icon::Effects,"Visual effects only: buffs and damage absorption remain active.",true},
     {View::Guide,"Guide",Group::Header,Icon::Controls,"Each stick opens its hand's wheel. Point the other hand's laser at a wedge to assign a skill.",false},
     {View::WhatsNew,"What's new",Group::Header,Icon::Notes,"Changes in this version of the mod.",false},
     // A safety net: settings no override placed whose owner page is full or unknown
@@ -306,6 +307,7 @@ inline constexpr ContentSection SectionTable[]={
     {View::Performance,"Image"},{View::Performance,"Draw distance"},
     {View::Frames,"Frame generation"},
     {View::Environment,"Sky and dungeons"},{View::Environment,"Glow"},
+    {View::Effects,"Armor"},{View::Effects,"Auras"},{View::Effects,"Shouts"},
 };
 
 // ---- options and value words (ini order: option i has value min + i) ----
@@ -420,12 +422,14 @@ inline constexpr Option FrameGenScaleOptions[]={
     {2,"50%","Half size: OFXR's suggested balance."},
 };
 
+inline constexpr ValueName NativeAtZero[]={{0,"Native"}};
 inline constexpr ValueName OffAtZero[]={{0,"Off"}};
 inline constexpr ValueName WalkNames[]={{0,"Look"},{1,"Controller"}};   // walk_direction.h: where you look, or where the left controller points
 inline constexpr ValueName LeatherNames[]={{0,"Off"},{1,"Leather"},{2,"Menu only"}};   // leather::Style; owner 2026-10-29: "Hold Menu > Off/Leather/Menu Only"
 inline constexpr ValueName ByRangeAtZero[]={{0,"By range"}};
 inline constexpr ValueName LaserOffName[]={{LaserOff,"Off"}};
 inline constexpr ValueName ShieldFollowNames[]={{0,"Forearm"},{100,"Wrist"}};
+inline constexpr ValueName MapBackgroundNames[]={{0,"See-through"},{100,"Solid"}};   // Floating map background's ends
 inline constexpr ValueName OfflinePlayersNames[]={{0,"Game's setting"},{1,"1 player"}};
 // Main's Movement speed words (ValueLabel): Walk, Base run, Run N%, Full run (run_speed.h stops).
 inline constexpr ValueName RunSpeedNames[]={{-10,"Walk"},{0,"Base run"},{10,"Run 10%"},{20,"Run 20%"},{30,"Run 30%"},{40,"Run 40%"},
@@ -440,6 +444,11 @@ inline constexpr const char* DegreesPerSecond="\xc2\xb0/s";
 
 // ---- rows, page by page, section by section (layout::RowsOf keeps this order) ----
 
+inline constexpr Option AuraVisualOptions[]={{0,"Off","Hide recognized aura visuals on this recipient; protection stays active."},{1,"On","Show the original aura visuals."}};
+inline constexpr Option ShoutVisualOptions[]={{0,"Off","Hide recognized shout buff visuals on this recipient; bonuses stay active."},{1,"On","Show the original shout buff visuals."}};
+inline constexpr Option IceArmorOptions[]={{0,"Off","Hide your native ice armor and icicles; protection remains active."},{1,"Original","Show the original ice armor effect."},{2,"Icicles","Show the forearm icicles instead of your original effect."}};
+inline constexpr Option CycloneArmorOptions[]={{0,"Off","Hide your original Cyclone Armor visual; absorption remains active."},{1,"Original","Show the original Cyclone Armor visual."}};
+inline constexpr Option BoneArmorOptions[]={{0,"Off","Hide your native Bone Armor orbit and the forearm bones."},{1,"Bones","Show forearm bones instead of your native orbit."}};
 inline constexpr Override Overrides[]={
     // Combat: Melee
     {.id="gameplay.motion_controls",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Motion combat",
@@ -675,6 +684,12 @@ inline constexpr Override Overrides[]={
      .help="On keeps the way you face at the top of the map. Off keeps north at the top and turns the arrow. Top-down views only."},
     {.id="interactions.companion_counts",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Buffs and companions",
      .help="Under the minimap: your companion counts, and the buffs, auras and harmful effects on you. Follows the minimap's gesture."},
+    {.id="interactions.floating_map_background_pct",.page=View::Wrist,.section="Map",.kind=RowKind::Slider,.label="Map background",
+     .help="The floating map's background: 0% shows the world through it, 100% is solid. Walls, the arrow, markers and names stay solid, as does the wrist map.",
+     .format={.unit="%"},FRAMEVR_NAMES(MapBackgroundNames)},
+    {.id="interactions.map_grab_hint",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Map grab hint",
+     .help="Point at the raised map: a sign and a glow show that Right Grip pulls a copy off. The sign stops after three pulls a game.",
+     .beside=true,.besideLabel="Grab hint"},   // the right half of Floating map background's row: the Wrist page holds at most 8 rows (dev build with #581)
     // Menus: Game menus
     {.id="hud.menu_distance",.page=View::Menus,.section="Game menus",.kind=RowKind::Choice,.label="Menu distance",
      .help="How far away merchants, the stash and the main menu open, and the inventory with Hold menu Off. Point at one, hold Right Grip and push or pull it.",
@@ -779,6 +794,9 @@ inline constexpr Override Overrides[]={
     {.id="render.big_radius",.page=View::Performance,.section="Draw distance",.kind=RowKind::Slider,.label="Big objects",
      .help="Trees, houses and walls stay drawn past Scenery distance: the bigger, the farther, out to this. Needs Terrain distance 3 or more. Costs frames in forests.",
      FRAMEVR_NAMES(OffAtZero),.beside=true,.besideLabel="Big:"},
+    {.id="render.subscription_rings",.page=View::Performance,.section="Draw distance",.kind=RowKind::Slider,.label="Enemy activation distance",
+     .help="Room rings for offline enemies and objects. Native keeps the game's coverage. Apply updates while standing still; draw distances still limit visibility.",
+     .format={.unit="rings"},FRAMEVR_NAMES(NativeAtZero)},
     // Frames: Frame generation (main's #313, OFXR Bridge). Eyes drawn per frame is drawn above it
     // (.alsoOn): it runs with Both eyes only, so By turns grays these rows, and PageReason says why.
     // NVIDIA's quality and scale show while NVIDIA is chosen. Its status: the row's sub line and card
@@ -831,6 +849,14 @@ inline constexpr Override Overrides[]={
     {.id="light.radius_boost_pct",.page=View::Environment,.section="Glow",.kind=RowKind::Slider,.label="Light Radius boost",
      .help="How much +Light Radius items and skills widen your light in dungeons. 100% is about the game's own amount; more is easier to see in VR.",
      .format={.unit="%"}},
+    // Graphics > Effects. Unknown recipients and enemy auras remain visible.
+    {.id="render.ice_armor_visual",.page=View::Effects,.section="Armor",.label="Ice Armor",.help="Choose your armor visuals. Protection stays active in every mode.",FRAMEVR_OPTIONS(IceArmorOptions)},
+    {.id="render.cyclone_armor_visual",.page=View::Effects,.section="Armor",.label="Cyclone Armor",.help="Hide or show your original wind effect. Damage absorption is unchanged.",FRAMEVR_OPTIONS(CycloneArmorOptions)},
+    {.id="render.bone_armor_visual",.page=View::Effects,.section="Armor",.label="Bone Armor",.help="Hide or show your forearm bones. Damage absorption is unchanged.",FRAMEVR_OPTIONS(BoneArmorOptions)},
+    {.id="render.player_aura_visual",.page=View::Effects,.section="Auras",.kind=RowKind::Choice,.label="Your auras",.help="Show or hide recognized persistent aura visuals on your character. Enemy auras, curses and unknown effects remain visible; gameplay is unchanged.",FRAMEVR_OPTIONS(AuraVisualOptions)},
+    {.id="render.summon_aura_visual",.page=View::Effects,.section="Auras",.kind=RowKind::Choice,.label="Friendly auras",.help="Aura visuals on your summons and mercenary. Enemy and unknown recipients remain visible; gameplay is unchanged.",FRAMEVR_OPTIONS(AuraVisualOptions)},
+    {.id="render.player_shout_visual",.page=View::Effects,.section="Shouts",.kind=RowKind::Choice,.label="Your shout buffs",.help="Shout, Battle Orders and Battle Command visuals on you. Independent of auras. Bonuses stay active; enemy and unknown effects stay visible.",FRAMEVR_OPTIONS(ShoutVisualOptions)},
+    {.id="render.summon_shout_visual",.page=View::Effects,.section="Shouts",.kind=RowKind::Choice,.label="Friendly shout buffs",.help="Shout, Battle Orders and Battle Command visuals on your summons and mercenary. Independent of auras; bonuses stay active.",FRAMEVR_OPTIONS(ShoutVisualOptions)},
     // Settings with an ini key but no row: set by Calibrate body, legacy, the
     // ini only on main ([render] desktop_one_eye), or the skill wheel's Left
     // claw strikes box ([gameplay] left_hand_strikes).

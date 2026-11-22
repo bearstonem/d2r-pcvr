@@ -250,6 +250,9 @@ sampler2D SkyPanoSmp { Texture = SkyPanoTex; AddressU = WRAP; AddressV = CLAMP; 
 // The main menu's act scenes' own skies ([frontend] pano_N): one texture each, all loaded once, so changing acts in the
 // menu only changes SkyPanoSlot (2026-11-15: one shared slot, renamed per act, recompiled the effect at every change -
 // a half-second to a second's hitch). D2R_SKY_FRONT_ON_N 0: that act has none - a tiny stand-in, no memory spent.
+// The defaults are what vrcam sets with [frontend] as it ships - acts 2-5 their pictures (installed with the effect),
+// act 1 none - so a preset without these names builds the right effect at once: vrcam reads a name missing from the
+// preset as this default and leaves it unset (setting one rebuilds the effect, a long freeze; 2026-11-17).
 #ifndef D2R_SKY_FRONT_1
  #define D2R_SKY_FRONT_1 "D2R_Sky_ours/D2R_Sky_act1.png"
 #endif
@@ -263,10 +266,10 @@ texture2D SkyFront1Tex < source = D2R_SKY_FRONT_1; > { Width = 16; Height = 8; F
 #endif
 sampler2D SkyFront1Smp { Texture = SkyFront1Tex; AddressU = WRAP; AddressV = CLAMP; };
 #ifndef D2R_SKY_FRONT_2
- #define D2R_SKY_FRONT_2 "D2R_Sky_ours/D2R_Sky_act1.png"
+ #define D2R_SKY_FRONT_2 "D2R_Sky_ours/D2R_Front_act2.png"
 #endif
 #ifndef D2R_SKY_FRONT_ON_2
- #define D2R_SKY_FRONT_ON_2 0
+ #define D2R_SKY_FRONT_ON_2 1
 #endif
 #if D2R_SKY_FRONT_ON_2
 texture2D SkyFront2Tex < source = D2R_SKY_FRONT_2; > { Width = 4096; Height = 2048; Format = RGBA8; MipLevels = 13; };
@@ -275,10 +278,10 @@ texture2D SkyFront2Tex < source = D2R_SKY_FRONT_2; > { Width = 16; Height = 8; F
 #endif
 sampler2D SkyFront2Smp { Texture = SkyFront2Tex; AddressU = WRAP; AddressV = CLAMP; };
 #ifndef D2R_SKY_FRONT_3
- #define D2R_SKY_FRONT_3 "D2R_Sky_ours/D2R_Sky_act1.png"
+ #define D2R_SKY_FRONT_3 "D2R_Sky_ours/D2R_Front_act3.png"
 #endif
 #ifndef D2R_SKY_FRONT_ON_3
- #define D2R_SKY_FRONT_ON_3 0
+ #define D2R_SKY_FRONT_ON_3 1
 #endif
 #if D2R_SKY_FRONT_ON_3
 texture2D SkyFront3Tex < source = D2R_SKY_FRONT_3; > { Width = 4096; Height = 2048; Format = RGBA8; MipLevels = 13; };
@@ -287,10 +290,10 @@ texture2D SkyFront3Tex < source = D2R_SKY_FRONT_3; > { Width = 16; Height = 8; F
 #endif
 sampler2D SkyFront3Smp { Texture = SkyFront3Tex; AddressU = WRAP; AddressV = CLAMP; };
 #ifndef D2R_SKY_FRONT_4
- #define D2R_SKY_FRONT_4 "D2R_Sky_ours/D2R_Sky_act1.png"
+ #define D2R_SKY_FRONT_4 "D2R_Sky_ours/D2R_Front_act4.png"
 #endif
 #ifndef D2R_SKY_FRONT_ON_4
- #define D2R_SKY_FRONT_ON_4 0
+ #define D2R_SKY_FRONT_ON_4 1
 #endif
 #if D2R_SKY_FRONT_ON_4
 texture2D SkyFront4Tex < source = D2R_SKY_FRONT_4; > { Width = 4096; Height = 2048; Format = RGBA8; MipLevels = 13; };
@@ -299,10 +302,10 @@ texture2D SkyFront4Tex < source = D2R_SKY_FRONT_4; > { Width = 16; Height = 8; F
 #endif
 sampler2D SkyFront4Smp { Texture = SkyFront4Tex; AddressU = WRAP; AddressV = CLAMP; };
 #ifndef D2R_SKY_FRONT_5
- #define D2R_SKY_FRONT_5 "D2R_Sky_ours/D2R_Sky_act1.png"
+ #define D2R_SKY_FRONT_5 "D2R_Sky_ours/D2R_Front_act5.png"
 #endif
 #ifndef D2R_SKY_FRONT_ON_5
- #define D2R_SKY_FRONT_ON_5 0
+ #define D2R_SKY_FRONT_ON_5 1
 #endif
 #if D2R_SKY_FRONT_ON_5
 texture2D SkyFront5Tex < source = D2R_SKY_FRONT_5; > { Width = 4096; Height = 2048; Format = RGBA8; MipLevels = 13; };

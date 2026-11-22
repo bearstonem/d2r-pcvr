@@ -140,6 +140,7 @@ class InstallationTests(unittest.TestCase):
                 (Path(out_dir) / 'collection.tsv').write_bytes(catalog_line)
                 return {'uniques': 1, 'sets': 0, 'runewords': 0, 'materials': 0, 'source': 'fixture'}
             with patch.object(install, 'require_game_closed'), contextlib.redirect_stdout(io.StringIO()), \
+                    patch('casc_assets.CascAssets', side_effect=ValueError('Fixture has no game archives')), \
                     patch.object(install, 'COMPILER_HASH', hashlib.sha256(compiler.read_bytes()).hexdigest()), \
                     patch.object(install, 'OFXR_HASH', ofxr_hash), \
                     patch.object(install, 'prepare_icons', side_effect=icons), \
@@ -185,6 +186,9 @@ class InstallationTests(unittest.TestCase):
                 self.assertEqual((potion_dir / 'hp1.pvr').read_bytes(), b'local potion fixture')
                 self.assertTrue((potion_dir / 'rvl.pvr').is_file())
                 self.assertTrue((potion_dir / 'arw.pvr').is_file())
+                for name in ('ic1.pvr', 'ic2.pvr', 'ic3.pvr'):
+                    self.assertEqual((potion_dir / name).read_bytes(),
+                                     (install.ROOT / 'steamvr/assets/ice-armor' / name).read_bytes())
                 self.assertEqual((mod_plugins / 'd2r_vr_spell_sprites' / install.SPELL_SPRITES).read_bytes(), b'local sprite fixture')
                 self.assertEqual((mod_plugins / 'd2r_vr_props/props.bin').read_bytes(), b'local prop fixture')
                 for name, data in arcane.items():
@@ -198,6 +202,9 @@ class InstallationTests(unittest.TestCase):
                 self.assertEqual((mod_plugins / 'collection.tsv').read_bytes(), catalog_line)
                 self.assertIn('add_shared_tabs = 24', (game / 'd2rloader/config/d2rloader.toml').read_text())
                 journal = json.loads((snapshot / 'manifest.json').read_text())
+                health_layout = mod_identity.MODINFO.parent / install.enemy_health_layout.RELATIVE_PATH
+                self.assertEqual((game / health_layout).read_bytes(), install.enemy_health_layout.payload())
+                self.assertIn(str(health_layout), journal['installed'])
                 for name in sewers:
                     self.assertIn(str(mod_identity.MOD_DIR / name), journal['installed'])
                 self.assertEqual((game / 'd2rloader/runtime/d3dcompiler_47.dll').read_bytes(), compiler.read_bytes())

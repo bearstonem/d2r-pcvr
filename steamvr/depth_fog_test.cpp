@@ -4,7 +4,9 @@
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -112,6 +114,25 @@ int main(int argc,char** argv) {try {
     // Optional so running against the pre-fix shader demonstrates the regression.
     if(source.find("float ParticleFog(")!=std::string::npos) shader+=Function(source,"float ParticleFog(");
     shader+=Function(source,"float3 DepthFogWorld(");
+    {   // Each Sky() in DepthFogWorld is the whole sky inlined, seconds of ReShade's build each: the main menu's four
+        // made D2R_DepthFog.fx take 47 s instead of 18, and the game froze while ReShade rebuilt it (2026-11-17).
+        // Two: the world's, and the main menu's one for all of its uses.
+        std::string body;   // the function without its // comments, which name Sky() too
+        {
+            const std::string all=Function(source,"float3 DepthFogWorld(");
+            for(size_t line=0;line<all.size();) {
+                const auto end=std::min(all.find('\n',line),all.size());
+                const auto comment=all.find("//",line);
+                body+=all.substr(line,(comment<end?comment:end)-line)+"\n";
+                line=end+1;
+            }
+        }
+        size_t calls=0;
+        for(auto at=body.find("Sky(");at!=std::string::npos;at=body.find("Sky(",at+4))
+            if(at==0||!(std::isalnum(static_cast<unsigned char>(body[at-1]))||body[at-1]=='_'))++calls;
+        if(calls>2) throw std::runtime_error("DepthFogWorld calls Sky() "+std::to_string(calls)+" times, at most 2: each inlines the whole sky into the build");
+        std::printf("DepthFogWorld calls Sky() %zu times (at most 2)\n",calls);
+    }
     shader+=R"hlsl(
         [numthreads(1,1,1)] void main(uint3 id:SV_DispatchThreadID) {
             fixture=id.x;

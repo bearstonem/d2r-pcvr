@@ -12,7 +12,8 @@
 // wrist, the floating map goes away"; 2026-11-03: "it should grab just from pointing at the direction".
 //  - Right Grip with the right controller pointing at the raised wrist map (or roughly at it, within PointDeg past
 //    its edge; or the right hand on it) pulls out a copy there and holds it. The wrist keeps its own map: both quads
-//    draw the one map picture (transport's mapEye), so the copy is always what VR Settings > Interface > Wrist > Map view shows.
+//    draw the one map picture (transport's mapEye), so the copy is always what VR Settings > Interface > Wrist > Map view shows;
+//    the copy its own square of it when its background (Floating map background) or its frame (FrameStep) differs.
 //  - Held, the copy follows the controller 1:1 in position, yaw, pitch and roll (its pose is kept in the controller's
 //    frame); the right stick forward / back pushes it along the laser or pulls it in (0.25 to 3 m). Let go: it stays
 //    there in the room, turned to face you (FaceMe). Point at it again to grab it: anywhere on it, or within PointMargin
@@ -22,6 +23,7 @@
 //    squeeze to shrink; it stays centered between the hands. Left Grip while Right Grip holds it does the same.
 //  - Let go with its center within AwayM of the wrist map: put away (gone). A light buzz says so while held there.
 //  - Shown while it is within LookDeg of where you look (so it never covers the fight); held, always.
+//  - Its frame (border) shows only while it is pointed at as a grab would take it, held or sized, fading over FrameFadeS.
 //  - A light buzz when the right laser comes onto a map Right Grip would take, only while a copy is out.
 //  - The right stick's up / down zooms the floating map while the right laser is anywhere on it (out.pointed; Jeff
 //    2026-11-06: "zooming on the map if pointing at the map and using the up and down, thats a deliberate movement").
@@ -29,7 +31,8 @@
 //  - Save and Exit or a new game puts it back on the wrist (Jeff 2026-11-07: "have it not save the map location on save
 //    and exit, should default back to the wrist"): nothing is remembered, and the next pull is the shipped size. A load
 //    screen inside the same game (a waypoint, an Act change) keeps it where it is. Nothing is written to disk.
-// With no copy pulled nothing is drawn, captured or buzzed, and the stick is never taken.
+// With no copy pulled nothing is drawn, captured or buzzed, and the stick is never taken; only the grab hint (grab_hint.h)
+// shows at the raised wrist map while the laser is in the pull band, and it takes nothing either.
 namespace framevr::floatmap {
 namespace math=framevr::math;
 constexpr float Deg=.0174532925f;
@@ -59,6 +62,15 @@ constexpr double AimRearmS=.3;        // Aim buzz: the laser off the map this lo
 constexpr float TouchM=.12f;          // the right hand this close to the wrist map's center pulls a copy too
 constexpr float AwayOutExtra=.03f;    // put away: the reach's buzz re-arms only past awayM plus this (no buzz on jitter)
 constexpr float TieDeg=1;             // point to grab: both maps this close in angle: the one nearer the hand takes it
+// The copy's frame (its gold border and dark bands; Jeff 2026-11-15: "the floating map should not show the border when
+// looking at the map ... can show up when you point to the map"): hidden, it fades in over FrameFadeS while Right Grip
+// would take the copy (the laser on it or in its grab band) or it is held or sized, and out again over FrameFadeS.
+constexpr float FrameFadeS=.15f;
+// The frame's fade, one step: 0 hidden .. 1 shown, toward `on` by dt / FrameFadeS (a long dt, as after a gap: at once).
+inline float FrameStep(float frame,bool on,float dt){
+    const float step=dt>0?dt/FrameFadeS:0.f;
+    return on?std::min(1.f,frame+step):std::max(0.f,frame-step);
+}
 
 // The values above, as one struct, so the tests can try each one's other settings (0 is each one's Off).
 struct Tuning {
@@ -129,6 +141,7 @@ struct Output {
     int pulse=-1;             // a hand to buzz (0 right, 1 left; -1 none)
     bool aimed=false;         // the right laser is on a map Right Grip would take (shown, the hand free, not held)
     bool aimEdge=false;       // Aim buzz: aimed now with a copy out, off it for AimRearmS before (a light buzz)
+    float frame=0;            // the copy's frame: 0 hidden .. 1 shown (FrameStep: pointed at as a grab would take it, held or sized)
     bool atWrist=false;       // held within awayM of the wrist's map: a let go now puts it away
     bool awayEdge=false;      // came into that reach this frame (a light buzz)
     // The log: a fresh Right Grip in the world, where its ray passed each map, and why it was not taken.
@@ -295,6 +308,7 @@ class Engine {
     float scale=0;            // the two-hand size (0: the tuning's)
     float startSize=0,startSpread=0;
     bool aiming=false;double aimOffAt=-1e9;   // Aim buzz: the laser on it last frame; when it last left (or a let go)
+    float frame=0;            // the copy's frame, as Output::frame (0 with no copy out)
     bool atWrist=false;       // held within awayM of the wrist's map last frame (its buzz once per coming in)
     double wait[2]={-1,-1};   // two-hand size: a grip held back from the game since this time, for the other (0 right, 1 left; -1 none)
     bool twoHand=false;       // two-hand size: both hands have it: centered on their middle (the offset it had), its turn kept
@@ -362,6 +376,7 @@ public:
         const bool mapIn=onMap.known&&(onMap.miss<=0||(pointing&&onMap.miss<=tolerance&&InBand(in.aim,aim.q,at,size,margin)));
         const int pick=pointing?Choose(mapIn,onWrist.known&&onWrist.miss<=tolerance,onMap,onWrist):onMap.known&&onMap.miss<=0?0:onWrist.known&&onWrist.miss<=0?1:-1;
         bool aimedNow=pick==0,force=false;
+        const bool copyAimed=pick==0;   // Right Grip would take the copy (its frame shows)
         const bool wristNow=pick==1;
         math::Vec hitAt=aimedNow?onMap.point:onWrist.point;
         // Two-hand size: both grips within the window, in either order, with either hand pointing at it. A grip that may be
@@ -485,6 +500,8 @@ public:
         // the stick stays the run toggle and Show Items. Never the wrist map: it zooms as upstream, by looking at it.
         out.pointed=watch&&placed&&!owned&&onMap.known&&onMap.miss<=0;
         out.pointedMap=out.pointed?0:-1;
+        frame=placed?FrameStep(frame,owned||copyAimed,float(dt)):0.f;
+        out.frame=frame;
         if(!placed){gripWas[0]=right;gripWas[1]=left;return out;}   // nothing out
         out.p=at.p;out.q=at.q;out.size=Size(t);
         // Look to show: within lookDeg it shows, it hides past lookDeg + LookOutExtra; held, always.
@@ -514,6 +531,7 @@ struct InputFrame {
     float& gripRight; float& gripLeft;
     int16_t& stickRx; int16_t& stickRy;
     bool& want; bool& pointed;
+    float& frame;             // the copy's frame, 0 hidden .. 1 shown (Output::frame): the map capture draws it so
     void (*pulse)(int hand, float strength);
     void (*say)(const char*);
 };
@@ -527,6 +545,22 @@ struct LayerFrame {
     void (*quad)(void* ctx, math::Vec p, math::Quat q, float side);
     void (*say)(const char*);
 };
+// DrawHint: transport EndPair, right after DrawFrame (the grab hint, grab_hint.h, which StepFrame steps). visible: as
+// LayerFrame's, and the wrist map drawn this frame; art: the hint's pictures are in the static image this session
+// (panelatlas::GrabHint), signs: its sign pictures too; wrist*: the wrist map quad as drawn this frame; side: +1 the
+// pulling hand is the right one, -1 left-handed; room: the content layer slots still free. quad: one premultiplied quad
+// of the static image's rect (x, y, w, h in the GrabHint region's texels) at pose (p, q), w x h m, slot 0 ..
+// grabhint::MaxQuads-1 (each its own layer), added last; transport then moves the hint's quads just above the wrist
+// panels, as the copy's.
+struct HintFrame {
+    bool visible, art, signs;
+    math::Vec wristP; math::Quat wristQ; float wristSize;
+    int side;
+    uint32_t room;
+    void* quadCtx;
+    void (*quad)(void* ctx, int slot, math::Vec p, math::Quat q, float w, float h, int x, int y, int rw, int rh);
+};
 void StepFrame(InputFrame& f);
 void DrawFrame(const LayerFrame& f);
+void DrawHint(const HintFrame& f);
 }

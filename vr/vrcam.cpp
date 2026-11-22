@@ -33,6 +33,9 @@
 #include "../steamvr/biome_list.h"
 #include "../steamvr/limb_tuning.h"
 #include "../steamvr/far_objects.h"
+#include "../cleanroom/drawdist/drawdist.h"
+#include "../steamvr/render_distance_status.h"
+#include "room_subscription.h"
 #include "../steamvr/interact_press.h"
 #include "../steamvr/sewer_interaction.h"
 #include "../steamvr/dropped_item_labels.h"
@@ -179,12 +182,14 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "stereo_replay.h"
 #include "dlss_depth.h"
 #include "billboards.h"
+#include "aura_filter.h"
 #include "engine_units.h"
 #include "../shared/game_ceiling.h"
 #include "../shared/ceiling_measures.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "panel_input.h"
 #include "native_belt.h"
+#include "monster_labels.h"
 #endif
 #include "../steamvr/panel_input_mode.h"
 #include "pad_mirror_shared.h"
@@ -332,7 +337,7 @@ struct Settings {
     std::atomic<bool>  afrSwap{false};      // the presented frame is the other eye: swap the halves
     std::atomic<bool>  fogOn{false};        // D2R_DepthFog.fx driven from here through ReShade
     std::atomic<float> fogStart{150.0f};    // world units from the eye
-    std::atomic<float> fogEnd{600.0f};
+    std::atomic<float> fogEnd{framevr::settings::Definitions[framevr::settings::FogDistance].defaultValue};
     std::atomic<float> fogCaveStart{150.0f};   // [fog] caves_start / caves_end: the same, in caves and dungeons (every area off [sky] outdoor)
     std::atomic<float> fogCaveEnd{600.0f};
     std::atomic<float> fogCaveStrength{1.0f};  // [fog] caves_strength: how much the full fog covers in caves, 0..1
@@ -1080,6 +1085,9 @@ int SkyPaletteFor(const std::string& biome, bool always) {
 // rest after them by name. Only the files' times are set (their content is never opened); the saves are the
 // game's own (the mod's savepath "../": Saved Games\Diablo II Resurrected). At the plugin's load and each
 // time the main menu comes up; nothing is set when the order is already so.
+// On by default on purpose, as part of the mod: with many heroes the game's own order (last played only) buries
+// the rest, and in the 3D menu the list is picked by pointing - so the 5 last played stay on top and the others
+// follow alphabetically, where they are easy to find.
 void SortCharacters() {
     if (!IniB(L"frontend", L"sort_characters", true)) return;
     const int keep = std::clamp((int)IniF(L"frontend", L"sort_recent", 5.0f), 0, 100);
@@ -1316,8 +1324,16 @@ void LoadSettings() {
     framevr::ConfigureGuardStrainRecover(IniF(L"gameplay",L"guard_strain_recover_ms",1500)/1000.f);
     // Bone Armor grafted onto both forearms (steamvr/bone_graft.h); missing keys: the defaults.
     // On, the hero's own spinning orbit is never shown (any view, menus too).
-    billboards::ConfigureBoneArmorHidden(IniB(L"render",L"bone_armor_graft",true));
-    framevr::ConfigureBoneGraft(IniB(L"render",L"bone_armor_graft",true),IniF(L"render",L"bone_armor_graft_size",1.f),
+    const bool bonesVisual=IniB(L"render",L"bone_armor_visual",IniB(L"render",L"bone_armor_graft",true));
+    const int iceVisual=int(framevr::settings::Normalize(framevr::settings::IceArmorVisual,
+        IniF(L"render",L"ice_armor_visual",IniB(L"render",L"frozen_armor_graft",true)?2.f:1.f)));
+    billboards::ConfigureBoneArmorHidden(true); // both Off and Bones hide the local native orbit
+    // Native Sorceress armor states carry authored icicles on both forearms.
+    framevr::ConfigureFrozenArmorGraft(iceVisual==2);
+    billboards::ConfigureArmorVisuals(iceVisual,IniB(L"render",L"cyclone_armor_visual",true));
+    aurafilter::Configure(IniB(L"render",L"player_aura_visual",true),IniB(L"render",L"summon_aura_visual",true),
+        IniB(L"render",L"player_shout_visual",true),IniB(L"render",L"summon_shout_visual",true));
+    framevr::ConfigureBoneGraft(bonesVisual,IniF(L"render",L"bone_armor_graft_size",1.f),
         IniF(L"render",L"bone_armor_graft_out",.05f),IniF(L"render",L"bone_armor_graft_spread",40.f),IniF(L"render",L"bone_armor_graft_along",.5f),
         IniF(L"render",L"bone_armor_graft_width",.5f));
     {   // Low-life heartbeat (start: VR Settings > Interface > Warnings, [gameplay] low_life_heart_start): % on top of
@@ -1837,8 +1853,15 @@ void LoadSettings() {
         g_set.campfireLogsRadius.store(std::clamp(IniF(L"campfire", L"fire_logs_radius", 0.0f), 0.0f, 10.0f));
         g_set.campfireLogsHeight.store(std::clamp(IniF(L"campfire", L"fire_logs_height", 1.5f), 0.0f, 10.0f));
         g_set.campfirePanoYaw.store(std::clamp(IniF(L"campfire", L"pano_yaw", 0.0f), -360.0f, 360.0f));
-        g_set.campfirePanoLow.store(std::clamp(IniF(L"campfire", L"pano_low", -90.0f), -90.0f, 89.0f));
-        g_set.campfirePanoHigh.store(std::clamp(IniF(L"campfire", L"pano_high", 90.0f), -89.0f, 90.0f));
+        {   // The campfire's panorama from photographs (#568) lies -90..90; the earlier template shipped -60 / 120 for the
+            // old picture, and an update keeps a player's saved ini - so exactly that old pair is read as the new one,
+            // and every updated install shows the panorama at its height with no setting to change. Any other pair is
+            // the player's own and is kept.
+            float low = IniF(L"campfire", L"pano_low", -90.0f), high = IniF(L"campfire", L"pano_high", 90.0f);
+            if (low == -60.0f && high == 120.0f) { low = -90.0f; high = 90.0f; }
+            g_set.campfirePanoLow.store(std::clamp(low, -90.0f, 89.0f));
+            g_set.campfirePanoHigh.store(std::clamp(high, -89.0f, 90.0f));
+        }
         g_set.campfirePanoBright.store(std::clamp(IniF(L"campfire", L"pano_brightness", 1.0f), 0.0f, 4.0f));
         {
             wchar_t f[260] = {};
@@ -7466,6 +7489,7 @@ void MouseTick() {
 std::atomic<bool> g_renderDirty{true};
 std::atomic<bool> g_bigDirty{true};
 void ApplyRender() {
+    d2rcam::drawdist::Refresh();
     if (g_renderDirty.load()) {
         d2rcam::SetRenderRadius(g_set.rings.load());
         if (d2rcam::SetModelRadius(g_set.modelRadius.load())) {
@@ -7487,6 +7511,31 @@ void ApplyRender() {
         ticks = 0;
         LogF("vrcam: big objects - %u model decisions kept past %.0f by size in 10 s", d2rcam::TakeBigModelsKept(), g_set.modelRadius.load());
     }
+#ifdef D2RVR_NATIVE_OPENXR
+    // Published from the existing worker, never from Present/the render hook.
+    // Per-profile shared memory lets the desktop GUI show live readback without
+    // polling logs, writing to disk or changing the game's INI.
+    static framevr::renderstatus::Writer statusWriter;
+    const auto status=d2rcam::drawdist::ReadStatus();const auto units=roomsubscription::ReadStatus();char json[2000];
+    std::snprintf(json,sizeof json,
+        "{\"schema\":1,\"pid\":%lu,\"tick_ms\":%llu,\"in_world\":%s,\"requested_rings\":%d,"
+        "\"requested_model_radius\":%.3f,\"active_model_radius\":%.3f,\"room_hooks\":%s,"
+        "\"tiler_ready\":%s,\"append_ready\":%s,\"radius_ready\":%s,\"recalculate_ready\":%s,"
+        "\"expansion_state\":%d,\"furthest_room\":%d,\"rooms_added\":%d,\"rooms_loaded\":%d,"
+        "\"tile_attempts\":%d,\"last_expansion_ms\":%llu,"
+        "\"subscription_ready\":%s,\"subscription_requested_rings\":%d,\"subscription_state\":%d,"
+        "\"subscription_held_rooms\":%u,\"subscription_client_rooms\":%u,\"subscription_depth\":%u,"
+        "\"subscription_capped\":%s,\"subscription_transitions\":%llu,"
+        "\"subscription_update_passes\":%llu,\"subscription_removal_passes\":%llu,\"subscription_update_rooms\":%u}",
+        GetCurrentProcessId(),static_cast<unsigned long long>(GetTickCount64()),g_inWorld.load()?"true":"false",g_set.rings.load(),
+        g_set.modelRadius.load(),status.activeModelRadius,status.hooks?"true":"false",status.tiler?"true":"false",
+        status.append?"true":"false",status.modelRadius?"true":"false",status.recalculate?"true":"false",
+        status.expansion,status.furthestRoom,status.roomsAdded,status.roomsLoaded,status.tileAttempts,
+        static_cast<unsigned long long>(status.lastExpansionMs),units.ready?"true":"false",units.requested,units.state,
+        units.held,units.subscribed,units.depth,units.truncated?"true":"false",static_cast<unsigned long long>(units.transitions),
+        static_cast<unsigned long long>(units.updatePasses),static_cast<unsigned long long>(units.removalPasses),units.updateRooms);
+    statusWriter.Publish(g_iniPath,json);
+#endif
 }
 
 void ToggleShooter() {
@@ -11522,16 +11571,23 @@ bool ApplySkyPictures(reshade::api::effect_runtime* rt) {
         snprintf(onName, sizeof onName, "D2R_SKY_FRONT_ON_%d", n);
         const std::string want = "\"" + (mine.empty() ? std::string("D2R_Sky_ours/D2R_Sky_act1.png") : mine) + "\"";
         const char* wantOn = mine.empty() ? "0" : "1";
+        // A name the preset does not have is the effect's own default (D2R_Sky.fxh: acts 2-5 their shipped pictures,
+        // on; act 1 none): equal to it, it is left unset. Set, ReShade rebuilds the effect on the render thread -
+        // 36 s frozen on the first menu after an update (2026-11-17), every name of these new to the player's preset.
+        const std::string def = n >= 2 ? "\"D2R_Sky_ours/D2R_Front_act" + std::to_string(n) + ".png\"" : std::string("\"D2R_Sky_ours/D2R_Sky_act1.png\"");
+        const char* defOn = n >= 2 ? "1" : "0";
         char have[1024] = {};
         size_t size = sizeof have;
-        if (!(rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", name, have, &size) && want == have)) {
+        const bool known = rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", name, have, &size);
+        if (known ? want != have : want != def) {
             rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", name, want.c_str());
             LogF("vrcam: menu act %d's panorama %s = %s", n, name, want.c_str());
             set = true;
         }
         char haveOn[16] = {};
         size = sizeof haveOn;
-        if (!(rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", onName, haveOn, &size) && !strcmp(haveOn, wantOn))) {
+        const bool knownOn = rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", onName, haveOn, &size);
+        if (knownOn ? strcmp(haveOn, wantOn) != 0 : strcmp(defOn, wantOn) != 0) {
             rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", onName, wantOn);
             set = true;
         }
@@ -11923,7 +11979,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         const bool campfireNight=g_campfire.load()&&!g_frontend3d.load()&&!g_set.campfireEffects.load()&&g_set.campfireNight.load()&&FogWanted();
         const bool ownDepth=g_enabled.load()&&g_inWorld.load()&&(framevr::Active()||campfireNight||CampfireSky())&&
             (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted()||BeamWanted()||ImmunityWanted());
-        const bool turnDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&framevr::TurnDepthWanted();
+        const bool turnDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&(framevr::TurnDepthWanted()||framevr::IceArmorDepthWanted());
         framevr::scenedepth::Bind(rt,cl,ownDepth,turnDepth,stereoreplay::RightEffects(),s);
         SetBool(rt,"OwnDepth",ownDepth);
 #else
@@ -13273,6 +13329,7 @@ DWORD WINAPI UpdateThread(void*) {
             if (!AllHooksIn()) InstallHooks();
 #ifdef D2RVR_NATIVE_OPENXR
             offlinedifficulty::Install();
+            roomsubscription::Poll(g_ctx,g_iniPath,g_set.platform.load()==1);
             offlinedifficulty::Report();
             enemysight::Install();
             enemysight::Tick();
@@ -13298,6 +13355,7 @@ DWORD WINAPI UpdateThread(void*) {
             projectiles::Install();
             panelinput::Install();
             nativebelt::Install();
+            monsterlabels::Install();
             projectiles::Report();
             combat::Install();
             combat::Report();
