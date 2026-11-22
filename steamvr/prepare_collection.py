@@ -137,7 +137,7 @@ def sort_entries(entries):
 def stat_tables(read):
     """The tables collection_stats words the properties with."""
     tables = {}
-    for name in ('properties', 'itemstatcost', 'skills', 'skilldesc'):
+    for name in ('properties', 'itemstatcost', 'skills', 'skilldesc', 'monstats'):
         try:
             tables[name] = read(name + '.txt')[1]
         except (FileNotFoundError, ValueError, KeyError):
@@ -146,22 +146,25 @@ def stat_tables(read):
 
 
 def read_strings(game, casclib=None):
-    """(item-modifiers, skill names) from the install's string tables; empty when unreadable."""
+    """(item-modifiers, skill names, item and monster names) from the install's string tables;
+    empty when unreadable. The names are the game's own English ones (item-names, item-runes,
+    monsters): "Axe of Fechmar", not the table's index "Fechmars Axe" (owner 2026-11-22)."""
     from collection_stats import load_strings
     try:
         from game_assets import open_assets
         assets = open_assets(game, casclib)
         texts = {}
-        for name in ('item-modifiers', 'skills'):
+        for name in ('item-modifiers', 'skills', 'item-names', 'item-runes', 'monsters'):
             data = assets.read('data/local/lng/strings/%s.json' % name)
             texts[name] = (data[3:] if data.startswith(b'\xef\xbb\xbf') else data).decode('utf-8')
-        return load_strings([texts['item-modifiers']]), load_strings([texts['skills']])
+        return (load_strings([texts['item-modifiers']]), load_strings([texts['skills']]),
+                load_strings([texts['item-names'], texts['item-runes'], texts['monsters']]))
     except Exception as error:   # the catalog still builds; the tooltips go without stat lines
         print('collection: no string tables (%s); tooltips without stat lines' % error)
-        return {}, {}
+        return {}, {}, {}
 
 
-def build(read, strings=None, skill_names=None):
+def build(read, strings=None, skill_names=None, names=None):
     """The catalog: per category, entries in a stable order.
 
     recordId is the id the game stores on the item and reports back as
@@ -171,11 +174,27 @@ def build(read, strings=None, skill_names=None):
     """
     from collection_stats import stat_lines
     tables = stat_tables(read)
+    names = names or {}
     tables['skillnames'] = skill_names or {}
+    tables['names'] = names
     stats = lambda row, kind: stat_lines(row, kind, tables, strings or {})
     bases = base_items(read)
     types = {code: kind for code, (kind, _) in bases.items()}
-    base_name = lambda code: bases.get(code, ('', ''))[1]
+    # the base's shown name: its namestr string, else the table's name
+    shown_base = {}
+    for table in BASE_TABLES:
+        try:
+            for row in read(table)[1]:
+                code = cell(row, 'code')
+                if code and names.get(cell(row, 'namestr')):
+                    shown_base[code[:4].ljust(4)] = names[cell(row, 'namestr')]
+        except (FileNotFoundError, ValueError, KeyError):
+            pass
+    base_name = lambda code: shown_base.get(code) or bases.get(code, ('', ''))[1]
+    shown = lambda key: names.get(key) or key
+    # what the character needs: the row's 'lvl req' (its 'lvl' is the item level - owner
+    # 2026-11-22: the Warlock books read 85)
+    required = lambda row: number(row, 'lvl req') or number(row, 'lvl')
     catalog = {}
 
     _, uniques = read(UNIQUE_TABLE)
@@ -188,8 +207,8 @@ def build(read, strings=None, skill_names=None):
         entries.append({
             'code': code_of(row),
             'recordId': number(row, '*ID'),
-            'name': cell(row, 'index'),
-            'level': number(row, 'lvl'),
+            'name': shown(cell(row, 'index')),
+            'level': required(row),
             'type': types.get(code_of(row), ''),
             'base': base_name(code_of(row)),
             'stats': stats(row, 'unique'),
@@ -204,10 +223,10 @@ def build(read, strings=None, skill_names=None):
         entries.append({
             'code': code_of(row),
             'recordId': number(row, '*ID'),
-            'name': cell(row, 'index'),
-            'level': number(row, 'lvl'),
+            'name': shown(cell(row, 'index')),
+            'level': required(row),
             'type': types.get(code_of(row), ''),
-            'setName': cell(row, 'set'),
+            'setName': shown(cell(row, 'set')),
             'base': base_name(code_of(row)),
             'stats': stats(row, 'set'),
         })
@@ -224,7 +243,7 @@ def build(read, strings=None, skill_names=None):
         entries.append({
             'code': '',
             'recordId': position,
-            'name': cell(row, '*Rune Name'),
+            'name': names.get(cell(row, 'Name')) or cell(row, '*Rune Name'),
             'level': max([rune_level.get(cell(row, 'Rune%d' % n), 0) for n in range(1, 7)] or [0]),
             'type': cell(row, 'itype1'),
             # the item types it can be made in (the panel draws them on the card)
@@ -288,8 +307,8 @@ def prepare(game, out_dir, casclib=None):
     excel = find_excel(game)
     read = folder_reader(excel) if excel else archive_reader(game, casclib)
 
-    strings, skill_names = read_strings(game, casclib)
-    catalog = build(read, strings, skill_names)
+    strings, skill_names, names = read_strings(game, casclib)
+    catalog = build(read, strings, skill_names, names)
     write_catalog(catalog, out_dir)
 
     summary = {category: len(catalog[category]) for category in CATEGORIES}

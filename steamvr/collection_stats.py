@@ -12,14 +12,16 @@ import json
 import re
 
 CLASSES = {'ama': 'Amazon', 'sor': 'Sorceress', 'nec': 'Necromancer', 'pal': 'Paladin',
-           'bar': 'Barbarian', 'dru': 'Druid', 'ass': 'Assassin'}
+           'bar': 'Barbarian', 'dru': 'Druid', 'ass': 'Assassin', 'war': 'Warlock'}
 SKILL_TABS = ['Bow and Crossbow Skills/ama', 'Passive and Magic Skills/ama', 'Javelin and Spear Skills/ama',
               'Fire Skills/sor', 'Lightning Skills/sor', 'Cold Skills/sor',
               'Curses/nec', 'Poison and Bone Skills/nec', 'Summoning Skills/nec',
               'Combat Skills/pal', 'Offensive Auras/pal', 'Defensive Auras/pal',
               'Combat Skills/bar', 'Combat Masteries/bar', 'Warcries/bar',
               'Summoning Skills/dru', 'Shape Shifting Skills/dru', 'Elemental Skills/dru',
-              'Traps/ass', 'Shadow Disciplines/ass', 'Martial Arts/ass']
+              'Traps/ass', 'Shadow Disciplines/ass', 'Martial Arts/ass',
+              # the Warlock's (Ars Tor'Baalos 21: demons; Ars Al'Diablolos 23: Apocalypse)
+              'Demon Skills/war', 'Eldritch Skills/war', 'Chaos Skills/war']
 # Damage pairs: one line 'Adds a-b ... damage' when an item has both halves.
 PAIRS = {'dmg-min': ('dmg-max', 'strModMinDamageRange'), 'fire-min': ('fire-max', 'strModFireDamageRange'),
          'ltng-min': ('ltng-max', 'strModLightningDamageRange'), 'cold-min': ('cold-max', 'strModColdDamageRange'),
@@ -67,7 +69,14 @@ def _lookups(tables):
             skills_by_name[name.lower()] = r
             if sid.isdigit():
                 skills_by_id[int(sid)] = r
-    found = (props, stats, skills_by_id, skills_by_name)
+    monsters = {}
+    names_shown = tables.get('names', {})
+    for r in tables.get('monstats', []):
+        idx = (r.get('*hcIdx') or r.get('hcIdx') or '').strip()
+        if idx:
+            key = r.get('NameStr', '').strip()
+            monsters[idx] = names_shown.get(key) or key or r.get('Id', '').strip()
+    found = (props, stats, skills_by_id, skills_by_name, monsters)
     _CACHE[id(tables)] = found
     return found
 
@@ -79,7 +88,7 @@ def _int(text, default=0):
 
 def _skill(par, look):
     """(English skill name, its class code) from a name or a numeric id."""
-    _, _, by_id, by_name = look
+    by_id, by_name = look[2], look[3]
     par = (par or '').strip()
     row = by_id.get(int(par)) if par.isdigit() else by_name.get(par.lower())
     if row is None:
@@ -123,7 +132,7 @@ def _priority(stat_row):
 
 def _line(code, par, lo, hi, look, strings):
     """(priority, text) for one property, or None when the game shows nothing for it."""
-    props, stats, _, _ = look
+    props, stats = look[0], look[1]
     prop = props.get(code)
     stat = stats.get(prop.get('stat1', '').strip(), {}) if prop else {}
     prio = _priority(stat)
@@ -176,7 +185,15 @@ def _line(code, par, lo, hi, look, strings):
     if code == 'randclassskill':   # Hellfire Torch: min..max is the class drawn, the bonus is three
         return prio, '+3 to (Random Class) Skill Levels'
     if code == 'sock':
-        return prio, 'Socketed (%s)' % _value(lo, hi, False)
+        return prio, 'Socketed (%s)' % _value(lo, hi, False).strip('()')
+    if code == 'rep-dur':   # descfunc 11: one durability every 100 / value seconds
+        per = _int(par) or lo
+        text = strings.get('ModStre9u')
+        return (prio, _fill(text, [1, max(1, 100 // per) if per else 0])) if text and per else None
+    if code == 'reanimate':   # the monster by its MonStats row (hcIdx)
+        text = strings.get(stat.get('descstrpos', '').strip())
+        monster = look[4].get(par.strip(), par)
+        return (prio, _fill(text, [(lo, hi), monster])) if text else None
     if code == 'indestruct':
         return prio, strings.get('ModStre9s') or 'Indestructible'
     if code.endswith('/lvl'):
@@ -235,13 +252,34 @@ def stat_lines(row, kind, tables, strings):
     lines = []
     codes = {e[0]: e for e in entries}
     used = set()
+    # The game's stat groups (ItemStatCost dgrp): all four attributes, or all four resistances,
+    # at one value read as one line ("+2 to all Attributes" - Harlequin Crest).
+    props, stats = look[0], look[1]
+    stat_of = {e[0]: (props.get(e[0]) or {}).get('stat1', '').strip() for e in entries}
+    groups = {}
+    for name, srow in stats.items():
+        g = _int(srow.get('dgrp', ''))
+        if g:
+            groups.setdefault(g, []).append(name)
+    for g, members in groups.items():
+        have = [e for e in entries if stat_of[e[0]] in members and e[0] not in used]
+        if len({stat_of[e[0]] for e in have}) != len(members) or len({(e[2], e[3]) for e in have}) != 1:
+            continue
+        first = stats[members[0]]
+        text = strings.get(first.get('dgrpstrpos', '').strip())
+        if not text:
+            continue
+        lo, hi = have[0][2], have[0][3]
+        lines.append((max(_priority(stats[m]) for m in members), min(entries.index(e) for e in have),
+                      _fill(text, [(lo, hi)])))
+        used.update(e[0] for e in have)
     for order, (code, par, lo, hi) in enumerate(entries):
         if code in used:
             continue
         if code in PAIRS and PAIRS[code][0] in codes and strings.get(PAIRS[code][1]):
             other = codes[PAIRS[code][0]]
             used.add(other[0])
-            _, stats, _, _ = _lookups(tables)
+            stats = _lookups(tables)[1]
             text = _fill(strings[PAIRS[code][1]], [_value(lo, hi, False), _value(other[2], other[3], False)])
             prio = _priority(stats.get((_lookups(tables)[0].get(code) or {}).get('stat1', '').strip(), {}))
             lines.append((prio, order, text))
