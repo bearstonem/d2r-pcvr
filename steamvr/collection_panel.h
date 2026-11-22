@@ -105,6 +105,7 @@ enum class Drop : uint32_t { None = 0, Sort = 1, Show = 2 };
 inline constexpr int GroupCount = 12;
 inline constexpr int NoGroup    = -1;
 inline constexpr int BandCount  = 4;    // Sets: level ranges, each holding at most GroupCount sets
+inline constexpr int KindCount  = 6;    // Runewords: what they are made in (the top row of tiles)
 
 inline constexpr const char* GroupName(int group) {
     constexpr const char* names[GroupCount] = {"Helms", "Armor", "Shields", "Gloves", "Boots", "Belts",
@@ -162,6 +163,7 @@ struct Layout {
     Rect progress {}, counter {};                     // the found bar and "Uniques  81 / 403" under it
     Rect groups[GroupCount] {};
     Rect bands[4] {};                                 // Sets: the level-range buttons right of the count (AddBands)
+    Rect kinds[KindCount] {};                         // Runewords: the top row of tiles (UseKindRows)
     Rect sizeLabel {}, sizeSteps[static_cast<int>(Size::Count)] {};
     Rect sortLabel {}, sortBox {}, sortOptions[static_cast<int>(Sort::Count)] {};
     Rect showLabel {}, showBox {}, showOptions[static_cast<int>(Show::Count)] {};
@@ -260,6 +262,20 @@ inline void AddBands(Layout& layout) {
         layout.bands[i] = FromMock(x0, 620.0f, x0 + w, 641.0f);
     }
 }
+// Runewords: three shorter rows in the tiles' place - what a runeword is made in on top,
+// and under it, two rows of six, the kinds of that (the weapon types of Melee).
+inline void UseKindRows(Layout& layout) {
+    constexpr float gx0 = 141.0f, h = 25.0f, gap = 4.0f, y0 = 644.0f;
+    const float cbw = (707.0f - gx0 - 6.0f * 5.0f) / 6.0f;
+    for (int i = 0; i < KindCount; ++i) {
+        const float x0 = gx0 + float(i) * (cbw + 6.0f);
+        layout.kinds[i] = FromMock(x0, y0, x0 + cbw, y0 + h);
+    }
+    for (int i = 0; i < GroupCount; ++i) {
+        const float x0 = gx0 + float(i % 6) * (cbw + 6.0f), y = y0 + float(1 + i / 6) * (h + gap);
+        layout.groups[i] = FromMock(x0, y, x0 + cbw, y + h);
+    }
+}
 inline float BandsLeft(const Layout& layout) { return layout.bands[0].width > 0 ? layout.bands[0].x : layout.counter.x + layout.counter.width; }
 
 enum class HitKind {
@@ -276,6 +292,7 @@ enum class HitKind {
     SortBox,    // the Sort list itself: opens / closes it
     ShowBox,
     Band,       // Sets: a level-range button (index 0..3)
+    Kind,       // Runewords: a top-row tile (index 0..KindCount-1)
 };
 
 struct Hit {
@@ -306,6 +323,8 @@ inline Hit Pick(const Layout& layout, float x, float y) {
     if (Inside(layout.showBox, x, y)) return {HitKind::ShowBox, 0};
     for (int i = 0; i < BandCount; ++i)
         if (Inside(layout.bands[i], x, y)) return {HitKind::Band, i};
+    for (int i = 0; i < KindCount; ++i)
+        if (Inside(layout.kinds[i], x, y)) return {HitKind::Kind, i};
     for (int i = 0; i < GroupCount; ++i)
         if (Inside(layout.groups[i], x, y)) return {HitKind::Group, i};
     for (int i = 0; i < layout.slotCount; ++i)

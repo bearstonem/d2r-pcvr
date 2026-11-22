@@ -367,6 +367,7 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
     panel::Layout layout = panel::Build(view.page, pages, int(TabCategoryCount), view.size, view.open);
     const bool    onSets = view.category == Category::Sets;
     if (onSets) panel::AddBands(layout);
+    if (view.category == Category::Runewords) panel::UseKindRows(layout);
     const auto pointed = [&](panel::HitKind kind, int index) { return view.hover.kind == kind && view.hover.index == index; };
     constexpr float PX0 = panel::MockLeft, PY0 = panel::MockTop, PX1 = panel::MockRight, PY1 = panel::MockBottom;
 
@@ -499,6 +500,38 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
                 p.FillRgb(R(dx, dy, dx + dot, dy + dot), complete ? GoldHi : have ? SetName : 0x1A1A18);
                 if (!have) p.OutlineRgb(R(dx, dy, dx + dot, dy + dot), 0x5E5E58, Md(1.f));
             }
+        }
+    }
+    // Runewords: what they are made in on top, the kinds of the chosen one in the two rows
+    // under it (empty recesses when it has none); each tile its name and found / all.
+    else if (view.category == Category::Runewords) {
+        const auto tileAt = [&](const panel::Rect& rect, const RunewordTile& tile, bool on, bool lit) {
+            const RectF r = Box(rect);
+            Button(p, r, on);
+            if (lit) p.OutlineRgb(r, GoldHi, Md(1.5f));
+            const float x0 = r.x / panel::Scale + PX0, y0 = r.y / panel::Scale + PY0;
+            const float tw = r.w / panel::Scale, th = r.h / panel::Scale;
+            const GroupShare share = RunewordShare(library, tile.accepts);
+            const std::string count = std::to_string(share.found) + "/" + std::to_string(share.total);
+            const float countW = p.Measure(count, Plain, 4096.f, false, 0, Md(11.f)).width / panel::Scale;
+            const float nameW  = tw - countW - 15.f;
+            const float size   = FitSize(p, tile.name, Plain, 13.f, 8.f, Md(nameW));
+            const bool  done   = share.total && share.found == share.total;
+            p.TextRgb(tile.name, Plain, Md(size), R(x0 + 4, y0, x0 + 4 + nameW, y0 + th), on ? OnText : Txt, Align::Leading);
+            p.TextRgb(count, Plain, Md(11.f), R(x0 + tw - countW - 5, y0, x0 + tw - 3, y0 + th),
+                      done ? Unique : on ? OnText : 0x9A9A94, Align::Leading);
+        };
+        for (int kind = 0; kind < panel::KindCount; ++kind)
+            tileAt(layout.kinds[kind], RunewordKinds[kind], view.kind == kind, pointed(panel::HitKind::Kind, kind));
+        const int subs = RunewordSubCount(view.kind);
+        for (int sub = 0; sub < panel::GroupCount; ++sub) {
+            if (sub >= subs) {
+                const RectF r = Box(layout.groups[sub]);
+                p.FillRgb(r, 0x0E0E0E, 0.55f);
+                p.OutlineRgb(r, 0x060606, Md(2.f));
+                continue;
+            }
+            tileAt(layout.groups[sub], *RunewordSub(view.kind, sub), view.group == sub, pointed(panel::HitKind::Group, sub));
         }
     }
     // The item types: the silhouette (36 px, a ring or an amulet 22 - they are small items)

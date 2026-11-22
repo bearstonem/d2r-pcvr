@@ -233,7 +233,14 @@ void TabToggleGroup(int group) {
     std::lock_guard lock(g_lock);
     // Sets: a tile past the band's last set is an empty recess
     if (g_view.category == Category::Sets && group >= int(SetsInBand(g_library, g_view.band).size())) return;
+    // Runewords: a sub-tile only under a top-row tile that has it
+    if (g_view.category == Category::Runewords && group >= RunewordSubCount(g_view.kind)) return;
     g_view.ToggleGroup(g_library, group);
+}
+
+void TabToggleKind(int kind) {
+    std::lock_guard lock(g_lock);
+    g_view.ToggleKind(g_library, kind);
 }
 
 void TabSelectBand(int band) {

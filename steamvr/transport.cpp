@@ -3650,6 +3650,7 @@ void RequestCollectionPaint(bool force=false) {
        collectionPaintedUiW==collectionUiW&&collectionPaintedUiH==collectionUiH&&
        collectionPaintedView.show==collectionView.show&&collectionPaintedView.sort==collectionView.sort&&
        collectionPaintedView.group==collectionView.group&&collectionPaintedView.band==collectionView.band&&
+       collectionPaintedView.kind==collectionView.kind&&
        collectionPaintedView.open==collectionView.open&&
        collectionPaintedCarried.key==collectionCarried.key&&
        (collectionCarried.key.empty()||(std::fabs(collectionPaintedCarried.x-collectionCarried.x)<4.f&&
@@ -3719,6 +3720,7 @@ void CollectionPress(const collection::panel::Hit& hit) {
     case HitKind::Sort:     collection::TabSetSort(static_cast<collection::panel::Sort>(hit.index)); break;
     case HitKind::Group:    collection::TabToggleGroup(hit.index); break;
     case HitKind::Band:     collection::TabSelectBand(hit.index); break;
+    case HitKind::Kind:     collection::TabToggleKind(hit.index); break;
     case HitKind::Slot: {
         const auto& library=collection::TabLibrary();const auto& view=collection::TabView();
         const auto visible=collection::VisibleSlots(library,view);
@@ -3786,6 +3788,7 @@ void CollectionPointer(bool grip) {
         collectionView.Pages(collection::TabLibrary()),
         int(collection::TabCategoryCount),collectionView.size,collectionView.open);
     if(collectionView.category==collection::Category::Sets)collection::panel::AddBands(layout);
+    if(collectionView.category==collection::Category::Runewords)collection::panel::UseKindRows(layout);
     collectionPointer.Step(canvasX,canvasY,layout,collectionTriggerDown,ms);   // hover, hysteresis, the pre-trigger lock
     collectionHover=collectionPointer.Hover();
     // A menu of buttons answers on the PRESS, not the release: waiting for the trigger

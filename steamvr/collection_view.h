@@ -93,6 +93,7 @@ struct ViewState {
     panel::Sort  sort     = panel::Sort::Name;
     int          group    = panel::NoGroup;   // an item-type tile filtering the grid, or NoGroup; on Sets a set tile of the band
     int          band     = 0;                // Sets: the level range whose sets the tiles show
+    int          kind     = panel::NoGroup;   // Runewords: the top-row tile (what they are made in); group is its sub-tile
     panel::Drop  open     = panel::Drop::None;   // the footer list that is open
     int          page     = 0;
     panel::Hit   hover {};   // what the laser is over: the slot or control to light
@@ -105,7 +106,7 @@ struct ViewState {
         hover = {};
     }
     void SelectCategory(const Library& library, Category want) {
-        if (category != want) group = panel::NoGroup;   // a tile means another thing on each page
+        if (category != want) group = kind = panel::NoGroup;   // a tile means another thing on each page
         category = want;
         page     = 0;
         hover = {};
@@ -140,6 +141,14 @@ struct ViewState {
     // A tile picked again lets go: all types.
     void ToggleGroup(const Library& library, int want) {
         group = group == want ? panel::NoGroup : want;
+        page  = 0;
+        hover = {};
+        Clamp(library);
+    }
+    // Runewords: a top-row tile; another one (or the same again) lets the sub-tile go.
+    void ToggleKind(const Library& library, int want) {
+        kind  = kind == want ? panel::NoGroup : want;
+        group = panel::NoGroup;
         page  = 0;
         hover = {};
         Clamp(library);
@@ -202,6 +211,63 @@ inline std::vector<SetInfo> SetsInBand(const Library& library, int band) {
     return sets;
 }
 
+// Runewords' tiles. A tile keeps the runewords that can be made in every item it
+// stands for: its accepts are its own item type and every type above it in the
+// game's itemtypes.txt (a sword is a blde, a mele and a weap), and a runeword fits
+// when one of its own types (Entry::base) is among them.
+struct RunewordTile {
+    const char* name;
+    const char* accepts;
+};
+inline constexpr RunewordTile RunewordKinds[panel::KindCount] = {
+    {"All weapons", "weap"},      {"Melee", "mele weap"},  {"Missile", "miss weap"},
+    {"Body armor", "tors armo"},  {"Helms", "helm armo"},  {"Shields", "shld armo"},
+};
+inline constexpr RunewordTile MeleeTypes[panel::GroupCount] = {
+    {"Swords", "swor blde mele weap"},     {"Axes", "axe mele weap"},
+    {"Daggers", "knif blde mele weap"},    {"Polearms", "pole sppl mele weap"},
+    {"Spears", "spea sppl mele weap"},     {"Hammers", "hamm blun mele weap"},
+    {"Clubs", "club blun mele weap"},      {"Scepters", "scep rod blun mele weap"},
+    {"Maces", "mace blun mele weap"},      {"Katars", "h2h mele weap"},
+    {"Wands", "wand rod blun mele weap"},  {"Staves", "staf rod blun mele weap"},
+};
+inline constexpr RunewordTile ShieldTypes[] = {
+    {"Paladin", "ashd pala shld armo"}, {"Necromancer", "head shld armo"}, {"Warlock", "grim shld armo"},
+};
+// The sub-tiles under a top-row tile: the melee weapon types under All weapons and
+// Melee, the class shields under Shields; none under the rest.
+inline int RunewordSubCount(int kind) {
+    return kind == 0 || kind == 1 ? panel::GroupCount : kind == 5 ? int(std::size(ShieldTypes)) : 0;
+}
+inline const RunewordTile* RunewordSub(int kind, int sub) {
+    if (sub < 0 || sub >= RunewordSubCount(kind)) return nullptr;
+    return kind == 5 ? &ShieldTypes[sub] : &MeleeTypes[sub];
+}
+// What the open tiles accept: the sub-tile's, else the top-row tile's; null for no filter.
+inline const char* RunewordAccepts(int kind, int sub) {
+    if (kind < 0 || kind >= panel::KindCount) return nullptr;
+    if (const RunewordTile* tile = RunewordSub(kind, sub)) return tile->accepts;
+    return RunewordKinds[kind].accepts;
+}
+inline bool RunewordFits(std::string_view accepts, std::string_view types) {
+    const auto has = [&](std::string_view type) {
+        size_t at = 0;
+        while (at < accepts.size()) {
+            const size_t end = std::min(accepts.find(' ', at), accepts.size());
+            if (accepts.substr(at, end - at) == type) return true;
+            at = end + 1;
+        }
+        return false;
+    };
+    size_t at = 0;
+    while (at < types.size()) {
+        const size_t end = std::min(types.find(' ', at), types.size());
+        if (end > at && has(types.substr(at, end - at))) return true;
+        at = end + 1;
+    }
+    return false;
+}
+
 // The catalog slots the filter keeps, in order: the page's slots are positions
 // in this list, not catalog slots. Built once per paint.
 inline std::vector<uint32_t> VisibleSlots(const Library& library, const ViewState& view) {
@@ -220,6 +286,10 @@ inline std::vector<uint32_t> VisibleSlots(const Library& library, const ViewStat
         if (sets) {
             const Entry* entry = library.At(view.category, slot);
             if (picked && (entry == nullptr || entry->extra != band[size_t(view.group)].name)) continue;
+        } else if (view.category == Category::Runewords) {
+            const char* accepts = RunewordAccepts(view.kind, view.group);
+            const Entry* entry  = library.At(view.category, slot);
+            if (accepts != nullptr && (entry == nullptr || !RunewordFits(accepts, entry->base))) continue;
         } else if (view.group != panel::NoGroup) {
             const Entry* entry = library.At(view.category, slot);
             if (entry == nullptr || panel::GroupOfType(entry->type) != view.group) continue;
@@ -252,6 +322,18 @@ inline GroupShare ShareOf(const Library& library, Category category, int group) 
         if (entry == nullptr || panel::GroupOfType(entry->type) != group) continue;
         ++share.total;
         if (library.IsFound(category, slot)) ++share.found;
+    }
+    return share;
+}
+
+// A runeword tile's share: the runewords that fit it, and how many of them are found.
+inline GroupShare RunewordShare(const Library& library, std::string_view accepts) {
+    GroupShare share;
+    for (uint32_t slot = 0; slot < library.Size(Category::Runewords); ++slot) {
+        const Entry* entry = library.At(Category::Runewords, slot);
+        if (entry == nullptr || !RunewordFits(accepts, entry->base)) continue;
+        ++share.total;
+        if (library.IsFound(Category::Runewords, slot)) ++share.found;
     }
     return share;
 }
