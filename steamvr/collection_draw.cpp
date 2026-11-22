@@ -222,33 +222,35 @@ bool BaseLine(const std::string& line) {
 
 void DrawTooltip(Painter& p, const panel::Rect& card, const tooltip::Tooltip& tip, Category category, const std::string& base) {
     if (tip.Empty()) return;
+    // 10% larger than the first cut, box and text alike (owner 2026-11-22)
+    constexpr float K = 1.1f;
     struct Line { std::string text; uint32_t rgb; float size; };
     std::vector<Line> lines;
-    lines.push_back({tip.title, NameColor(category), 16.f});
+    lines.push_back({tip.title, NameColor(category), 16.f * K});
     // the kind of item, grey, between the name and its text (owner: Harlequin Crest - Shako)
-    if (!base.empty()) lines.push_back({base, Grey, 13.f});
+    if (!base.empty()) lines.push_back({base, Grey, 13.f * K});
     for (const std::string& line : tip.body) {
         if (line == tip.title || (!base.empty() && line == base)) continue;   // the game's text repeats both
-        lines.push_back({line.empty() ? " " : line, BaseLine(line) ? White : Blue, 13.f});
+        lines.push_back({line.empty() ? " " : line, BaseLine(line) ? White : Blue, 13.f * K});
     }
     if (!tip.ranges.empty()) {
-        lines.push_back({"Possible ranges", Grey, 12.f});
-        for (const std::string& line : tip.ranges) lines.push_back({line, Grey, 12.f});
+        lines.push_back({"Possible ranges", Grey, 12.f * K});
+        for (const std::string& line : tip.ranges) lines.push_back({line, Grey, 12.f * K});
     }
-    if (!tip.subtitle.empty()) lines.push_back({tip.subtitle, Grey, 12.f});
-    constexpr float tw = 250.f, step = 21.f;
-    const float th = 14.f + step * float(lines.size());
+    if (!tip.subtitle.empty()) lines.push_back({tip.subtitle, Grey, 12.f * K});
+    constexpr float tw = 250.f * K, step = 21.f * K;
+    const float th = 14.f * K + step * float(lines.size());
     // beside the card, in mock-up pixels; to its left when the right would leave the page
     const float cx0 = card.x / panel::Scale + panel::MockLeft, cy0 = card.y / panel::Scale + panel::MockTop;
     const float cw  = card.width / panel::Scale;
     float tx = cx0 + cw + 8, ty = cy0 + 20;
     if (tx + tw > panel::MockRight - 10) tx = cx0 - tw - 8;
     tx = std::max(panel::MockLeft + 10, tx);
-    ty = std::min(ty, panel::MockBottom - 10 - th);
+    ty = std::max(panel::MockTop + 10, std::min(ty, panel::ContentBottom - 10 - th));   // above the tab plaques
     p.FillRgb(R(tx, ty, tx + tw, ty + th), 0x000000, 215.f / 255.f);
     for (size_t i = 0; i < lines.size(); ++i) {
-        const float size = FitSize(p, lines[i].text, Plain, lines[i].size, 9.f, Md(tw - 12));
-        p.TextRgb(lines[i].text, Plain, Md(size), R(tx + 4, ty + 7 + float(i) * step, tx + tw - 4, ty + 7 + float(i + 1) * step),
+        const float size = FitSize(p, lines[i].text, Plain, lines[i].size, 9.f * K, Md(tw - 12 * K));
+        p.TextRgb(lines[i].text, Plain, Md(size), R(tx + 4 * K, ty + 7 * K + float(i) * step, tx + tw - 4 * K, ty + 7 * K + float(i + 1) * step),
                   lines[i].rgb, Align::Center);
     }
 }
@@ -348,7 +350,7 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
             if (best != nullptr && icons) {
                 const std::string key = panel::IconKey(Category::Uniques, best->recordId, best->code);
                 if (const IconPixels* icon = icons(key); icon != nullptr && icon->rgba != nullptr) {
-                    const float most = (group == 6 || group == 7) ? 22.f : 36.f;
+                    const float most = std::min((group == 6 || group == 7) ? 22.f : 36.f, cbh - 6.f);   // the tiles are 38 tall now
                     const float s = most / float(std::max(icon->width, icon->height));
                     const float w = float(icon->width) * s, h = float(icon->height) * s;
                     const float ix = (x0 + x1) / 2 - w / 2 - 18, iy = y0 + (cbh - h) / 2;

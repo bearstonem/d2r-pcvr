@@ -23,6 +23,9 @@ inline constexpr float MockLeft = 113.0f, MockTop = 180.0f, MockRight = 733.0f, 
 inline constexpr float Scale        = 1024.0f / (MockBottom - MockTop);
 inline constexpr float CanvasHeight = 1024.0f;
 inline constexpr float CanvasWidth  = 851.0f;   // 620 * Scale
+// Everything on the page ends above the stash's carved recesses (owner 2026-11-22: the tab
+// plaques fit on the Collection page too); below it the page is bare stone, the plaques on it.
+inline constexpr float ContentBottom = 780.0f;
 inline constexpr float Mx(float x) { return (x - MockLeft) * Scale; }
 inline constexpr float My(float y) { return (y - MockTop) * Scale; }
 inline constexpr float Md(float d) { return d * Scale; }
@@ -189,8 +192,8 @@ inline Layout Build(int page, int pages, int tabs, Size size = Size::Medium, Dro
         layout.tabs[i] = FromMock(x, 204.0f, x + 186.0f, 244.0f);
     }
 
-    // The cards: gx0 141 .. gx1 681, gy0 258 .. gy1 662, 10 apart.
-    constexpr float gx0 = 141.0f, gy0 = 258.0f, gx1 = 681.0f, gy1 = 662.0f, gap = 10.0f;
+    // The cards: gx0 141 .. gx1 681, gy0 258 .. gy1 600, 10 apart.
+    constexpr float gx0 = 141.0f, gy0 = 258.0f, gx1 = 681.0f, gy1 = 600.0f, gap = 10.0f;
     layout.grid      = FromMock(gx0, gy0, gx1, gy1);
     const Grid grid  = GridOf(size);
     layout.columns   = grid.columns;
@@ -211,18 +214,18 @@ inline Layout Build(int page, int pages, int tabs, Size size = Size::Medium, Dro
     layout.track    = FromMock(691.0f, gy0 + 22.0f, 706.0f, gy1 - 22.0f);
 
     // The found bar under the cards, and the count under it.
-    layout.progress = FromMock(gx0, 676.0f, 707.0f, 686.0f);
-    layout.counter  = FromMock(gx0, 692.0f, 707.0f, 716.0f);
+    layout.progress = FromMock(gx0, 610.0f, 707.0f, 618.0f);
+    layout.counter  = FromMock(gx0, 621.0f, 707.0f, 639.0f);
 
-    // The item types: 6 a row, 6 apart, 58 tall, from 724.
+    // The item types: 6 a row, 6 apart, 38 tall, 4 between the rows, from 644.
     const float cbw = (707.0f - gx0 - 6.0f * 5.0f) / 6.0f;
     for (int i = 0; i < GroupCount; ++i) {
-        const float x0 = gx0 + float(i % 6) * (cbw + 6.0f), y0 = 724.0f + float(i / 6) * (58.0f + 6.0f);
-        layout.groups[i] = FromMock(x0, y0, x0 + cbw, y0 + 58.0f);
+        const float x0 = gx0 + float(i % 6) * (cbw + 6.0f), y0 = 644.0f + float(i / 6) * (38.0f + 4.0f);
+        layout.groups[i] = FromMock(x0, y0, x0 + cbw, y0 + 38.0f);
     }
 
-    // Footer at 858: Size and its S / M / L, the Sort list (402..542) and the Show list (600..707).
-    constexpr float by = 858.0f;
+    // Footer at 732: Size and its S / M / L, the Sort list (402..542) and the Show list (600..707).
+    constexpr float by = 732.0f;
     layout.sizeLabel = FromMock(gx0, by, gx0 + 52.0f, by + 36.0f);
     for (int i = 0; i < static_cast<int>(Size::Count); ++i) {
         const float x0 = gx0 + 56.0f + float(i) * 44.0f;
