@@ -129,7 +129,7 @@ inline Board Place(math::Vec surface,math::Quat facing,float width,float height)
 // the middle of its picture (owner 2026-11-22: under the whole menu it was out of sight - the
 // stash's window is scaled up, so its bottom edge is far down). The board is twice the pad's
 // width (the pad takes its middle five columns): PadWidth of the surface's width.
-constexpr float PadWidthOfSurface=.36f,PadTopBelowCentre=.09f,PadLift=.012f;
+constexpr float PadWidthOfSurface=.36f,PadTopBelowCentre=.02f,PadLift=.012f;
 inline Board PlaceGoldPad(math::Vec surface,math::Quat facing,float width,float height) {
     if(!(width>0)||!(height>0))return {};
     const float w=PadWidthOfSurface*width,h=w*Rows/Columns;
