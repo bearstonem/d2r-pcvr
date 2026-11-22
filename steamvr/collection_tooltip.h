@@ -68,7 +68,7 @@ Tooltip BuildTooltip(const Entry& entry, bool found, std::string_view gameText, 
 // A Sets tile's tooltip: the set's own bonuses, all of them, whatever is held (owner 2026-11-22).
 Tooltip SetTooltip(const std::string& setName, const std::string& bonus, int pieces, int total);
 // Line marks DrawTooltip reads: a set bonus (green), a made runeword's runes (grey label, rune colour).
-inline constexpr char kSetBonusMark = '\x02', kRunesMark = '\x03';
+inline constexpr char kSetBonusMark = '\x02', kRunesMark = '\x03', kFullSetMark = '\x04';   // green, runes, gold
 
 // A tooltip rectangle in canvas space, placed beside the slot it belongs to and
 // kept inside the canvas. Prefers the right of the slot, then the left; drops

@@ -53,11 +53,9 @@ Tooltip SetTooltip(const std::string& setName, const std::string& bonus, int pie
     Tooltip tip;
     tip.title    = setName;
     tip.subtitle = "Set \xC2\xB7 " + std::to_string(pieces) + " / " + std::to_string(total) + " pieces in the stash";
-    for (const BonusLine& line : BonusLines(bonus)) {
-        if (!line.set) continue;
-        tip.body.push_back(std::string(1, kSetBonusMark) + line.text +
-                           (line.pieces ? " (" + std::to_string(line.pieces) + " items)" : std::string(" (full set)")));
-    }
+    // the whole set's bonus only, gold as the game shows it (owner 2026-11-22)
+    for (const BonusLine& line : BonusLines(bonus))
+        if (line.set && line.pieces == 0) tip.body.push_back(std::string(1, kFullSetMark) + line.text);
     if (tip.body.empty()) tip.body.push_back("No set bonuses.");
     return tip;
 }
@@ -95,10 +93,9 @@ Tooltip BuildTooltip(const Entry& entry, bool found, std::string_view gameText, 
     // A set piece: the set's bonuses it would bring with the pieces the collection holds, green as
     // the game shows them (owner 2026-11-22): its own with 2, 3 ... pieces, the set's, the whole set's.
     if (entry.category == Category::Sets && setPieces > 0)
-        for (const BonusLine& line : BonusLines(entry.bonus)) {
-            const bool on = line.pieces ? line.pieces <= setPieces : setTotal > 0 && setPieces >= setTotal;
-            if (on) tip.body.push_back(std::string(1, kSetBonusMark) + line.text);
-        }
+        // the piece's own lines only (owner 2026-11-22: as Sigon's boots gain them, piece by piece)
+        for (const BonusLine& line : BonusLines(entry.bonus))
+            if (!line.set && line.pieces <= setPieces) tip.body.push_back(std::string(1, kSetBonusMark) + line.text);
 
     if (tip.body.empty() && found) {
         tip.body.push_back(PreviewOf(entry).kind == PreviewKind::Unsupported

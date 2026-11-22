@@ -403,6 +403,7 @@ void DrawTooltip(Painter& p, const panel::Rect& card, const tooltip::Tooltip& ti
     for (const std::string& line : tip.body) {
         if (line == tip.title || (!base.empty() && line == base)) continue;   // the game's text repeats both
         if (!line.empty() && line[0] == tooltip::kSetBonusMark) { lines.push_back({line.substr(1), SetName, 13.f * K}); continue; }
+        if (!line.empty() && line[0] == tooltip::kFullSetMark) { lines.push_back({line.substr(1), Unique, 13.f * K}); continue; }
         if (!line.empty() && line[0] == tooltip::kRunesMark) { lines.push_back({line.substr(1), RuneColor, 13.f * K, true}); continue; }
         lines.push_back({line.empty() ? " " : line, BaseLine(line) ? White : Blue, 13.f * K});
     }
