@@ -1,5 +1,21 @@
 # VR performance investigations
 
+## Game-thread target scans, November 22
+
+The November 22 SteamVR session on game build 3.4.95041 recorded about 21
+target scans per second in combat, averaging 0.39–0.48 ms per scan. The
+offline and host-assisted scans now read each monster's header, data pointer,
+path pointer and next bucket link in one guarded copy. The pointers and
+coordinates are read fresh on every scan.
+
+A Windows benchmark ran the old and new offline scans over the same 128
+synthetic unit records using the production guarded reader. Both selected
+the same 64 targets in order, with identical coordinates and visibility,
+and made 92 relation and 64 line-of-sight calls to test doubles. Guarded
+reads fell from 723 to 402 per scan. Across 31 alternating batches of 20
+scans, median batch time per scan fell from 355 to 199 microseconds.
+In-game scan time and headset frame rate still need a matched run.
+
 ## Draw thread: props with weight, November 12
 
 **Measured in the test only; not yet in a headset.** Props with weight

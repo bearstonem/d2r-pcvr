@@ -270,10 +270,14 @@ uint16_t Flags(uintptr_t game,uintptr_t attacker,uintptr_t defender,int accuracy
        (reinterpret_cast<uintptr_t>(_ReturnAddress())==d2rsig::Addr(0x430084)||(contact.skill&&!contact.resolved))){contact.resolved=true;contact.accepted=(result&1)!=0;}
     return result;
 }
-bool Position(uintptr_t unit,Vec& out) {
-    uintptr_t path=0;uint16_t p[4]{};
-    if(!Read(unit+0x38,path)||!Read(path,p))return false;
+bool PathPosition(uintptr_t path,Vec& out) {
+    uint16_t p[4]{};
+    if(!Read(path,p))return false;
     out={2*(p[1]+p[0]/65536.f),0,2*(p[3]+p[2]/65536.f)};return true;
+}
+bool Position(uintptr_t unit,Vec& out) {
+    uintptr_t path=0;
+    return Read(unit+0x38,path)&&PathPosition(path,out);
 }
 // Why a queued sweep was dropped as stale (diagnostics).
 enum StaleReason {StaleInactive,StaleEpoch,StaleEquipment,StaleSkill,StaleAge,StaleMenu,StaleHands,StaleReasons};
@@ -1642,10 +1646,14 @@ uintptr_t Hireling(uintptr_t game,uintptr_t self,uint32_t id,bool alive) {
 // +0x3C, matching every row of monstats.txt). 0x100
 // npc, 0x400 inTown: town residents such as the Rogue camp's cows (class 179),
 // which the relation check still calls attackable. Unread: 0.
-uint32_t MonsterFlags(uintptr_t unit) {
-    uintptr_t data=0,stats=0;uint32_t flags=0;
-    if(!Read(unit+0x10,data)||data<0x10000||!Read(data,stats)||stats<0x10000||!Read(stats+0x3c,flags))return 0;
+uint32_t MonsterDataFlags(uintptr_t data) {
+    uintptr_t stats=0;uint32_t flags=0;
+    if(data<0x10000||!Read(data,stats)||stats<0x10000||!Read(stats+0x3c,flags))return 0;
     return flags;
+}
+uint32_t MonsterFlags(uintptr_t unit) {
+    uintptr_t data=0;
+    return Read(unit+0x10,data)?MonsterDataFlags(data):0;
 }
 constexpr uint32_t kMonNpc=0x100,kMonInTown=0x400;
 int HostilesAround(Hostile* out,int max,float range,float centerX,float centerY,uintptr_t viewerUnit) {
@@ -1660,17 +1668,18 @@ int HostilesAround(Hostile* out,int max,float range,float centerX,float centerY,
     int n=0,inRange=0;unsigned visited=0;
     for(uintptr_t unit:buckets) {
         for(unsigned chain=0;unit&&chain<256&&visited++<4096;++chain) {
-            uintptr_t next=0;uint32_t header[4]{};Vec pos{};
-            if(!Read(unit+0x158,next)||!Read(unit,header))break;
-            const float d=header[0]==1&&header[3]!=0&&header[3]!=12&&Position(unit,pos)?std::hypot(pos.x*.5f-centerX,pos.z*.5f-centerY):-1.f;
+            framevr::servertarget::MonsterNode node;Vec pos{};
+            if(!Read(unit,node))break;
+            const bool positioned=node.type==1&&node.mode!=0&&node.mode!=12&&PathPosition(node.path,pos);
+            const float d=positioned?std::hypot(pos.x*.5f-centerX,pos.z*.5f-centerY):-1.f;
             if(d>=0&&d<=range&&
                reinterpret_cast<int(*)(uintptr_t,uintptr_t,uintptr_t)>(d2rsig::Addr(RelationRva))(game,self,unit)&&
-               !(MonsterFlags(unit)&(kMonNpc|kMonInTown))) {   // not town residents
+               !(MonsterDataFlags(node.data)&(kMonNpc|kMonInTown))) {   // not town residents
                 ++inRange;
                 const int slot=framevr::targetcone::NearestSlot(distance,n,max,d);
-                if(slot>=0){units[slot]=unit;distance[slot]=d;out[slot]={header[2],header[1],pos.x*.5f,pos.z*.5f,false};if(slot==n)++n;}
+                if(slot>=0){units[slot]=unit;distance[slot]=d;out[slot]={node.id,node.classId,pos.x*.5f,pos.z*.5f,false};if(slot==n)++n;}
             }
-            unit=next;
+            unit=node.next;
         }
     }
     for(int i=0;i<n;++i)out[i].clear=reinterpret_cast<int(*)(uintptr_t,uintptr_t,int)>(d2rsig::Addr(LineRva))(viewerUnit,units[i],0x804)==0;
