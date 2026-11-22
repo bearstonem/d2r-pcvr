@@ -35,14 +35,14 @@ int main(){
  assert(wristchat::Scissor(1320,200,2520,970,3840,2160,1));
  assert(!wristchat::Scissor(0,0,1200,770,3840,2160,1));
  assert(!wristchat::Scissor(1320,200,2520,970,3840,2160,0));
- keyboard::Typist type;auto space=type.Press(keyboard::KeyCount-3,true);assert(space.ch==L' ');
- type.Press(keyboard::KeyCount-2,true);assert(type.Symbols());assert(type.Press(0,true).ch==L'1');
- type.Reset();assert(type.Press(keyboard::KeyCount-3).ch==L'-');
- for(int i=0;i<keyboard::KeyCount;++i){
-  assert(!keyboard::Label(i,false,true,false).empty());assert(!keyboard::Label(i,false,true,true).empty());
+ keyboard::Typist type;auto space=type.Press(keyboard::Name,keyboard::Name.count-3,true);assert(space.ch==L' ');
+ type.Press(keyboard::Name,keyboard::Name.count-2,true);assert(type.Symbols());assert(type.Press(keyboard::Name,0,true).ch==L'1');
+ type.Reset();assert(type.Press(keyboard::Name,keyboard::Name.count-3).ch==L'-');
+ for(int i=0;i<keyboard::Name.count;++i){
+  assert(!keyboard::Label(keyboard::Name,i,false,true,false).empty());assert(!keyboard::Label(keyboard::Name,i,false,true,true).empty());
  }
- assert(keyboard::Label(keyboard::KeyCount-3,false,true)==L"Space");
- assert(keyboard::Label(keyboard::KeyCount-2,false,true,true)==L"ABC");
+ assert(keyboard::Label(keyboard::Name,keyboard::Name.count-3,false,true)==L"Space");
+ assert(keyboard::Label(keyboard::Name,keyboard::Name.count-2,false,true,true)==L"ABC");
  const floatmap::Pose head{{1,2,3},math::Yaw(.7f)},panel{{.2f,1.2f,-.5f},math::Yaw(-.1f)};
  const auto relative=floatmap::Relative(head,panel),restored=floatmap::Compose(head,relative);
  assert(math::Dot(restored.p-panel.p,restored.p-panel.p)<.00001f);

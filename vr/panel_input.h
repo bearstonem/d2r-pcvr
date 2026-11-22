@@ -7,6 +7,8 @@ void Typed(uintptr_t extra); // game window thread: a key-down and its extra inf
 void UseController(); // restore native focus/snapping, retain protection for queued mouse releases
 void ItemHover(bool active,bool hit=false,bool dragging=false); // XR thread: valid laser hover only
 void WorldInput(bool active); // XR thread: bounded ownership of tracked gameplay input
+int TextFocusState(); // framevr::panels::TextFocus: the game window's input method (a text box's focus), Unknown until the game sets it
+uint32_t TextFocusOns(); // how many times a text box took the focus (a closed VR keyboard comes back)
 void MaintainWorldController(bool player,bool menu); // UI thread: restore native interaction targeting
 bool BlocksWorld(); // includes queued release after the menu closes
 bool ControllerReady(); // UI thread: request native controller mode, report when committed

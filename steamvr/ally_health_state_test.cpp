@@ -41,6 +41,7 @@ int main(){
  remote={7001,now,202,20,100,0,0,0,false,true};assert(allyhealthstate::Current(7001,now).entries[0].health==20);
  // Network presence cannot introduce a player outside the actual party.
  remote.unitId=303;assert(allyhealthstate::Current(7001,now).count==2);
+ assert(allyhealthstate::OwnedMercenary(7001,now)==404&&allyhealthstate::OwnedMercenary(9999,now)==0);
  // The client replica is not authoritative: server full life must win.
  allyhealthstate::PublishMerc({7001,now,404,100,100,0,0,0,false,true});
  assert(allyhealthstate::Current(7001,now).entries[1].health==100);
@@ -50,6 +51,9 @@ int main(){
  assert(allyhealthstate::Current(7001,now).count==1); // another merc is never substituted
  allyhealthstate::PublishMerc({7001,now-1100,404,100,100,0,0,0,false,true});
  assert(allyhealthstate::Current(7001,now).count==1); // no fallback to wrong client percentage
+ allyhealthstate::PublishMerc({7001,now,404,85,100,0,0,0,false,true});
+ allyhealthstate::PublishMerc({7001,now,0,0,0,0,0,0,false,false});
+ assert(allyhealthstate::Current(7001,now).entries[1].health==85);
  // Session reset must not keep a previous authoritative report.
  allyhealthstate::Clear();allyhealthstate::Capture(at(0x2000),7001,101);
  assert(allyhealthstate::Current(7001,GetTickCount64()).entries[1].health==70);

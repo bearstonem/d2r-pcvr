@@ -990,7 +990,15 @@ void FeelSurface(int hand,uint32_t target) {
     framevr::ImpactSurface(hand,int(framevr::haptics::MonsterSurface(flags)),flags);
 }
 void Feel(const Request& r,uint32_t target) {
-    if(remoteInput)return; // The joining headset owns contact feedback, not the host's controllers.
+    if(remoteInput){
+        // Match the exact dispatched sweep; never create another attack or buzz the host.
+        const auto& value=remoteInput->value;
+        if(r.session==value.session&&r.sweep.stroke==value.sweep.stroke&&
+           r.sample.handIndex==value.sample.handIndex&&r.sample.shield==value.sample.shield&&
+           localCombat.hands[r.sample.handIndex].felt.Insert(r.session,r.sweep.stroke,target))
+            meleedispatch::NotifyContact(value,target);
+        return;
+    }
     if(localCombat.hands[r.sample.handIndex].felt.Insert(r.session,r.sweep.stroke,target)){FeelSurface(r.sample.handIndex,target);framevr::MeleeImpact(r.sample.handIndex);}
 }
 // Bow bash (bow_bash.h, #443): a stroke of the bow, its string not drawn, touched this hostile monster
@@ -2036,9 +2044,9 @@ void Submit(const Sample& sample) {
                     const bool sent=meleedispatch::Send(value);
                     static uint64_t nextLog=0;const auto now=GetTickCount64();
                     if(now>=nextLog){nextLog=now+1000;char text[160];snprintf(text,sizeof text,"Frame client PCVR swing: hand=%d stroke=%llu queued=%d",sample.handIndex,(unsigned long long)sweep.stroke,int(sent));framevr::logging::Write(text);}
-                    static HitSet felt[3];
+                    // Local prediction and host receipts share one feedback-only deduplication gate.
                     const auto targets=targetreports::Get(session,hero,GetTickCount64());
-                    if(sent)if(const auto target=framevr::clientcontact::Touched(sample,sweep,targets,GetTickCount64());target&&felt[Lane(sample)].Insert(session,sweep.stroke,target)) {
+                    if(sent)if(const auto target=framevr::clientcontact::Touched(sample,sweep,targets,GetTickCount64());target&&meleedispatch::Predicted(value,target)) {
                         framevr::ImpactSurface(sample.handIndex,int(framevr::haptics::Surface::Flesh),0);
                         framevr::MeleeImpact(sample.handIndex);
                         projectiles::CombatWalk(2);
@@ -2080,7 +2088,22 @@ void InstallRemoteHost() {
     combat::InstallRemote();
 }
 void TickNetwork() {
-    meleedispatch::Tick(gamestate::LocalPlayer());
+    const auto feedbackSession=gamestate::LocalPlayer();
+    meleedispatch::Tick(feedbackSession);
+    meleedispatch::Feedback feedback;
+    while(meleedispatch::TakeFeedback(feedbackSession,feedback)) {
+        if(!clientcombat::NativeOnly(feedbackSession)||gamestate::MenuOpen())continue;
+        std::lock_guard lock(queueMutex);
+        const int lane=feedback.shield?1:feedback.hand==1?2:0;
+        const auto& sample=current[lane];
+        if(inputSession!=feedbackSession||!sample.active||sample.epoch!=feedback.epoch||sample.equipment!=feedback.equipment)continue;
+        framevr::ImpactSurface(feedback.hand,int(framevr::haptics::Surface::Flesh),0);
+        framevr::MeleeImpact(feedback.hand);
+        static uint64_t reportAt=0;const auto feedbackNow=GetTickCount64();
+        if(feedbackNow>=reportAt){reportAt=feedbackNow+1000;char text[160];
+            snprintf(text,sizeof text,"Frame client contact haptics: host-confirmed hand=%d stroke=%llu target=%u",feedback.hand,(unsigned long long)feedback.stroke,feedback.target);
+            framevr::logging::Write(text);}
+    }
     static uint64_t nextSequence=0;const auto now=GetTickCount64();if(now<nextSequence)return;nextSequence=now+20;
     if(ready.load()&&!clientcombat::NativeOnly(gamestate::LocalPlayer())&&context&&threads&&threads->runOnGameThread&&!remoteTickPosted.exchange(true)&&
        threads->runOnGameThread(context,&RemoteSequenceTick,nullptr)!=D2RL::Threads::Result::Success)remoteTickPosted=false;

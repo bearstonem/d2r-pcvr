@@ -78,6 +78,34 @@ public:
     }
     bool Active(uint64_t now) const { return lease.Active(now); }
 };
+// D2RLoader's multiplayer panel open: its text boxes take letters only in the
+// game's keyboard-and-mouse layout (in the controller layout nothing typed went
+// in, owner's 2026-11-17 23:53 log: the layout switch suppressed, every box's
+// length unchanged), so the laser no longer holds the controller layout there:
+// its mouse events switch the game as a desktop mouse does.
+constexpr bool HoldController(bool laserLease,bool typing,bool textPanel,bool controller) {
+    return laserLease&&!typing&&!textPanel&&controller;
+}
+
+// Which text box has the game's focus is said nowhere the mod can read, but a
+// box marked imeEnabled turns Windows' input method on for the game window
+// while it has the focus. The game's calls on its window: an input context
+// associated (a handle, or ImmAssociateContextEx's IACE_DEFAULT) is On, none is
+// Off. Unknown until the game makes one.
+enum class TextFocus : int { Unknown=0, Off=1, On=2 };
+inline constexpr uint32_t ImeDefault=0x10;   // IACE_DEFAULT
+constexpr TextFocus ImeAssociation(bool ex,uintptr_t context,uint32_t flags) {
+    if(ex&&(flags&ImeDefault))return TextFocus::On;
+    return context?TextFocus::On:TextFocus::Off;
+}
+// Only once the game has turned it on is an Off believed: a game that only ever
+// turns it off (or another module's call) must not hide the keyboard for good.
+constexpr TextFocus NextTextFocus(TextFocus was,TextFocus call) {
+    return was==TextFocus::Unknown&&call==TextFocus::Off?TextFocus::Unknown:call;
+}
+// The multiplayer panel's VR keyboard: up while a box has the focus; while the
+// game has not turned it on this session (Unknown), up as long as the panel.
+constexpr bool TextKeyboardUp(TextFocus focus){return focus!=TextFocus::Off;}
 
 // Item hover ends immediately on a ray miss, drag, or ownership change. It
 // must not inherit the longer protection kept for queued mouse releases.

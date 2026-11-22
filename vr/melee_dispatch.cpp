@@ -10,7 +10,7 @@ namespace meleedispatch { namespace {
 namespace nw=D2RL::Network;
 namespace wire=framevr::melee::dispatch;
 using wire::Contact;
-constexpr uint16_t Hello=1,Ack=2,Data=3;
+constexpr uint16_t Hello=1,Ack=2,Data=3,ContactFelt=4; // additive feedback; attack wire remains unchanged
 constexpr uint64_t Fresh=250,Lease=1500;
 struct Peer {nw::PeerHandle id=0;uint64_t sender=0,sequence=0;uint32_t hero=0;};
 enum class Kind {HelloSend,HelloReceive,AckSend,ContactSend,ContactReceive};
@@ -25,6 +25,26 @@ const D2RL::ThreadService* threads=nullptr;
 ApplyFn apply=nullptr;nw::ChannelHandle channel=0;
 bool dead=true;uint64_t session=0,serial=0,helloNonce=0,helloAt=0,nextHello=0,readyUntil=0;
 std::array<Peer,8> peers{};std::array<Job,64> jobs{};
+// Separate bounded feedback storage cannot consume attack-dispatch job slots.
+constexpr uint64_t FeedbackFresh=500;
+struct FeedbackJob {uint64_t ticket=0,hostSession=0,at=0;nw::PeerHandle peer=0;Feedback value{};};
+struct TimedFeedback {Feedback value{};uint64_t at=0;};
+std::array<FeedbackJob,64> feedbackJobs{};
+std::array<TimedFeedback,256> sentSweeps{};
+std::array<TimedFeedback,64> receivedFeedback{};
+framevr::melee::HitSet felt[3];size_t sentNext=0;
+void ClearFeedback(){feedbackJobs={};sentSweeps={};receivedFeedback={};for(auto& f:felt)f={};sentNext=0;}
+Feedback From(const Contact& c,uint32_t target){
+    Feedback f;f.session=c.session;f.sequence=c.sequence;f.stroke=c.sweep.stroke;f.epoch=c.sample.epoch;
+    f.hero=c.hero;f.target=target;f.equipment=c.sample.equipment;f.hand=c.sample.handIndex;f.shield=c.sample.shield;return f;
+}
+TimedFeedback* Sent(const Feedback& f,uint64_t now){
+    for(auto& p:sentSweeps)if(p.at&&now>=p.at&&now-p.at<=FeedbackFresh&&
+       p.value.session==f.session&&p.value.sequence==f.sequence&&p.value.stroke==f.stroke&&
+       p.value.hero==f.hero&&p.value.hand==f.hand&&p.value.shield==f.shield)return &p;
+    return nullptr;
+}
+bool MarkFelt(const Feedback& f){return felt[f.shield?2:f.hand].Insert(f.session,f.stroke,f.target);}
 uint64_t Next(){if(!++serial)++serial;return serial;}
 Peer* FindPeer(nw::PeerHandle id){for(auto& p:peers)if(id&&p.id==id)return &p;return nullptr;}
 Job* FindJob(uint64_t id){for(auto& j:jobs)if(id&&j.ticket==id)return &j;return nullptr;}
@@ -41,6 +61,20 @@ bool Take(uint64_t ticket,Job& out){
 }
 void Put64(uint8_t* b,uint64_t x){for(int k=0;k<8;++k)b[k]=uint8_t(x>>(8*k));}
 uint64_t Get64(const uint8_t* b){uint64_t x=0;for(int k=0;k<8;++k)x|=uint64_t(b[k])<<(8*k);return x;}
+void __cdecl SendFeedback(const D2RL::PluginContext*,void* data)noexcept {
+    FeedbackJob copy;const auto ticket=uint64_t(uintptr_t(data));
+    {std::lock_guard lock(mutex);if(dead||!session)return;
+     auto* found=static_cast<FeedbackJob*>(nullptr);
+     for(auto& j:feedbackJobs)if(j.ticket==ticket&&ticket){found=&j;break;}
+     if(!found)return;copy=*found;*found={};
+     const auto* peer=FindPeer(copy.peer);const auto now=GetTickCount64();
+     if(copy.hostSession!=session||now<copy.at||now-copy.at>Fresh||!peer||
+        peer->sender!=copy.value.session||peer->hero!=copy.value.hero)return;}
+    const auto& f=copy.value;uint8_t bytes[48]{};
+    Put64(bytes,f.session);Put64(bytes+8,f.sequence);Put64(bytes+16,f.stroke);
+    Put64(bytes+24,f.hero);Put64(bytes+32,f.target);Put64(bytes+40,uint64_t(f.hand)|(uint64_t(f.shield)<<1));
+    net->sendToClient(ctx,channel,copy.peer,ContactFelt,bytes,sizeof bytes);
+}
 void __cdecl SendJob(const D2RL::PluginContext*,void* data)noexcept {
     Job j;if(!Take(uint64_t(uintptr_t(data)),j))return;
     if(j.kind==Kind::ContactSend){
@@ -94,6 +128,21 @@ void __cdecl Host(const D2RL::PluginContext*,nw::ChannelHandle ch,nw::PeerHandle
     Post(ticket,true);
 }
 void __cdecl Client(const D2RL::PluginContext*,nw::ChannelHandle ch,uint16_t id,const void* data,uint32_t size,void*)noexcept {
+    if(id==ContactFelt){
+        if(!data||size!=48)return;const auto* b=static_cast<const uint8_t*>(data);
+        const auto hero=Get64(b+24),target=Get64(b+32),flags=Get64(b+40);
+        if(!hero||hero>UINT32_MAX||!target||target>UINT32_MAX||flags>3)return;
+        Feedback f;f.session=Get64(b);f.sequence=Get64(b+8);f.stroke=Get64(b+16);
+        f.hero=uint32_t(hero);f.target=uint32_t(target);f.hand=int(flags&1);f.shield=bool(flags&2);
+        std::lock_guard lock(mutex);const auto now=GetTickCount64();
+        if(dead||ch!=channel||!session||f.session!=session)return;
+        const auto* pending=Sent(f,now);if(!pending)return;
+        f.epoch=pending->value.epoch;f.equipment=pending->value.equipment;
+        for(auto& slot:receivedFeedback)if(!slot.at||now-slot.at>150){
+            if(MarkFelt(f))slot={f,now};return;
+        }
+        return;
+    }
     if(id!=Ack||!data||size!=16)return;const auto* b=static_cast<const uint8_t*>(data);
     std::lock_guard lock(mutex);const auto now=GetTickCount64();
     if(dead||ch!=channel||!session||!helloNonce||Get64(b)!=session||Get64(b+8)!=helloNonce||now-helloAt>Lease)return;
@@ -105,7 +154,7 @@ void __cdecl Connection(const D2RL::PluginContext*,const nw::ConnectionEvent* e,
     std::lock_guard lock(mutex);if(dead||e->channel!=channel)return;
     for(auto& p:peers)if(p.id==e->peer)p={};
     for(auto& j:jobs)if(j.peer==e->peer||j.kind==Kind::ContactSend||j.kind==Kind::HelloSend)j={};
-    helloNonce=readyUntil=nextHello=0;
+    helloNonce=readyUntil=nextHello=0;ClearFeedback();
 }
 }
 bool Init(const D2RL::PluginContext* c,ApplyFn fn){
@@ -114,7 +163,7 @@ bool Init(const D2RL::PluginContext* c,ApplyFn fn){
        !n->registerChannel||!n->unregisterChannel||!n->connectToHost||!n->sendToHost||!n->sendToClient||!n->getPeerPlayer||
        c->QueryService(&t)!=D2RL::ServiceQueryResult::Success||!D2RL::HasThreadServiceField(t,D2RL::ThreadServiceRequiredSize)||
        !t->runOnGameThread||!t->runOnUiThread)return false;
-    {std::lock_guard lock(mutex);if(!dead)return false;ctx=c;net=n;threads=t;apply=fn;session=helloNonce=helloAt=nextHello=readyUntil=0;peers={};jobs={};}
+    {std::lock_guard lock(mutex);if(!dead)return false;ctx=c;net=n;threads=t;apply=fn;session=helloNonce=helloAt=nextHello=readyUntil=0;peers={};jobs={};ClearFeedback();}
     nw::ChannelRegistration registration{};registration.structSize=sizeof registration;
     registration.localChannelId=0x4d44;registration.compatibilityToken=0x504356524d440001ull;
     registration.hostMessage=Host;registration.clientMessage=Client;registration.connectionState=Connection;
@@ -124,7 +173,7 @@ bool Init(const D2RL::PluginContext* c,ApplyFn fn){
 void Tick(uint64_t s){
     uint64_t ticket=0;
     {std::lock_guard lock(mutex);if(dead)return;
-        if(s!=session){session=s;peers={};jobs={};helloNonce=helloAt=nextHello=readyUntil=0;}
+        if(s!=session){session=s;peers={};jobs={};ClearFeedback();helloNonce=helloAt=nextHello=readyUntil=0;}
         const auto now=GetTickCount64();if(!s||now<nextHello)return;
         nextHello=now+500;helloNonce=Next();helloAt=now;
         Job j;j.kind=Kind::HelloSend;j.sender=s;j.nonce=helloNonce;ticket=Queue(j);
@@ -136,8 +185,34 @@ bool Send(const Contact& c){
     if(!wire::Valid(c))return false;uint64_t ticket=0;
     {std::lock_guard lock(mutex);if(dead||!session||c.session!=session||!readyUntil||GetTickCount64()>readyUntil)return false;
         Job j;j.kind=Kind::ContactSend;j.contact=c;ticket=Queue(j);
+        if(ticket)sentSweeps[sentNext++%sentSweeps.size()]={From(c,0),GetTickCount64()};
     }
-    return Post(ticket,false);
+    if(Post(ticket,false))return true;
+    {std::lock_guard lock(mutex);for(auto& p:sentSweeps)if(p.value.session==c.session&&p.value.sequence==c.sequence)p={};}
+    return false;
+}
+void NotifyContact(const Contact& c,uint32_t target){
+    if(!target||!wire::Valid(c))return;uint64_t ticket=0;
+    {std::lock_guard lock(mutex);if(dead||!session)return;
+     const Peer* peer=nullptr;for(const auto& p:peers)if(p.id&&p.sender==c.session&&p.hero==c.hero){peer=&p;break;}
+     if(!peer)return;const auto now=GetTickCount64();
+     for(auto& slot:feedbackJobs)if(!slot.ticket||now-slot.at>Fresh){
+         ticket=Next();slot={ticket,session,now,peer->id,From(c,target)};break;
+     }}
+    if(ticket&&threads->runOnUiThread(ctx,SendFeedback,reinterpret_cast<void*>(uintptr_t(ticket)))!=D2RL::Threads::Result::Success){
+        std::lock_guard lock(mutex);for(auto& j:feedbackJobs)if(j.ticket==ticket)j={};
+    }
+}
+bool Predicted(const Contact& c,uint32_t target){
+    if(!target||!wire::Valid(c))return false;const auto f=From(c,target);
+    std::lock_guard lock(mutex);
+    return !dead&&session==c.session&&Sent(f,GetTickCount64())&&MarkFelt(f);
+}
+bool TakeFeedback(uint64_t s,Feedback& out){
+    std::lock_guard lock(mutex);if(dead||!s||s!=session)return false;const auto now=GetTickCount64();
+    for(auto& slot:receivedFeedback)if(slot.at){const auto copy=slot;slot={};
+        if(now>=copy.at&&now-copy.at<=150){out=copy.value;return true;}}
+    return false;
 }
 bool Alive(uint64_t peer,uint64_t sender){
     const D2RL::NetworkService* n=nullptr;const D2RL::PluginContext* c=nullptr;nw::ChannelHandle ch=0;
@@ -150,7 +225,7 @@ bool Alive(uint64_t peer,uint64_t sender){
 }
 void Stop(){
     const D2RL::NetworkService* n;const D2RL::PluginContext* c;nw::ChannelHandle h;
-    {std::lock_guard lock(mutex);dead=true;session=helloNonce=readyUntil=0;peers={};jobs={};n=net;c=ctx;h=channel;channel=0;}
+    {std::lock_guard lock(mutex);dead=true;session=helloNonce=readyUntil=0;peers={};jobs={};ClearFeedback();n=net;c=ctx;h=channel;channel=0;}
     if(n&&c&&h)n->unregisterChannel(c,h);
 }
 }
