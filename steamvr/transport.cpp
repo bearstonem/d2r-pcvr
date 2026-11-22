@@ -3086,10 +3086,22 @@ void MenuPointer(const menus::Pad& controls) {
         const auto clickTab=[&](int to){
             uiClickU=(float(stashnav::TabsX+stashnav::TabStep*to)+stashnav::TabStep*.5f)/2244.f;uiClickV=200.f/2352.f;uiClickPending=true;
         };
-        const auto clickArrow=[&](bool next){
-            uiClickU=(next?810.f:584.f)/2244.f;uiClickV=861.f/2352.f;uiClickPending=true;
-            Say(next?"Frame stash: the next shared page (the game's arrow clicked)":"Frame stash: the previous shared page (the game's arrow clicked)");
+        // The shared pages: the stash's controller layout has no arrows to click (LB / RB are
+        // only legends - bankexpansionlayouthd's controller file), so the game gets a bumper of
+        // the mod's. With the laser up the game's first pad press only wakes its controller mode
+        // (the "A first" the owner met), so the page is read back and the bumper sent once more
+        // if it did not turn (owner 2026-11-22: LB / RB and the upper plaques did nothing).
+        static int pageWant=0;static bool pageNextWant=true;static int pageTries=0;static ULONGLONG pageCheckAt=0;
+        const auto turnPage=[&](bool next){
+            if(page<1||page>stashnav::PlayerPages){send(next,false);return;}
+            pageWant=page+(next?1:-1);pageNextWant=next;pageTries=1;pageCheckAt=now+300;send(next,false);
+            Say(next?"Frame stash: the next shared page (a bumper sent)":"Frame stash: the previous shared page (a bumper sent)");
         };
+        if(pageWant>0&&now>=pageCheckAt) {
+            if(tab!=stashnav::Shared||page==pageWant)pageWant=0;
+            else if(pageTries<3){++pageTries;pageCheckAt=now+300;send(pageNextWant,false);}
+            else {pageWant=0;Say("Frame stash: the shared page did not turn for the bumper");}
+        }
         if(tabNext||tabPrev) {
             const bool next=tabNext;
             const int under=tab>=0&&tab<stashnav::Collection?tab:-1;
@@ -3110,7 +3122,7 @@ void MenuPointer(const menus::Pad& controls) {
         if(pageNext||pagePrev) {
             const bool allowed=tab!=stashnav::Shared||page==stashnav::PageUnknown||
                 (pageNext&&page<stashnav::PlayerPages)||(pagePrev&&page>1);
-            if(allowed&&!collection::TabWanted()){if(native)send(pageNext,false);else if(tab==stashnav::Shared)clickArrow(pageNext);}
+            if(allowed&&!collection::TabWanted()&&pageWant==0){if(native)send(pageNext,false);else if(tab==stashnav::Shared)turnPage(pageNext);}
             else if(!allowed)Say("Frame stash: the shared pages stop at the player's five");
         }
         if(queued>0&&now>=nextPulseAt){send(queuedNext,true);--queued;}
