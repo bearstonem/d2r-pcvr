@@ -3070,6 +3070,20 @@ void MenuPointer(const menus::Pad& controls) {
                 if(dir!=0&&stickWas==0){if(dir>0)tabNext=true;else tabPrev=true;}
                 stickWas=dir;
             }
+            {   // On the Collection page a stick up / down scrolls its grid a page, again while held
+                // (owner 2026-11-22).
+                static int scrollWas=0,scrollSteps=0;static ULONGLONG scrollAt=0;
+                const int y=std::abs(int(controls.ly))>std::abs(int(controls.ry))?controls.ly:controls.ry;
+                const int x=std::abs(int(controls.ly))>std::abs(int(controls.ry))?controls.lx:controls.rx;
+                const int dir=!collection::TabWanted()?0:
+                    std::abs(y)>20000&&std::abs(y)*2>std::abs(x)*3?(y>0?-1:1):std::abs(y)<8000?0:scrollWas;
+                if(dir!=scrollWas)scrollSteps=0;
+                if(dir!=0&&(scrollSteps==0||now-scrollAt>=(scrollSteps==1?450u:250u))) {
+                    collection::TabStep(dir);
+                    scrollAt=now;++scrollSteps;
+                }
+                scrollWas=dir;
+            }
         } else {lbSpoiled=rbSpoiled=true;stickWas=0;queued=0;}
         rtWas=rt;ltWas=lt;lbWas=lb;rbWas=rb;
         if(plaquePull==0)tabPrev=true;

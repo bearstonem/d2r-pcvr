@@ -112,8 +112,9 @@ int main() {
 
     // Item types to tiles.
     assert(GroupOfType("helm") == 0 && GroupOfType("circ") == 0 && GroupOfType("tors") == 1);
-    assert(GroupOfType("ashd") == 2 && GroupOfType("ring") == 7 && GroupOfType("xbow") == 10 && GroupOfType("spea") == 11);
-    assert(GroupOfType("mace") == NoGroup && GroupOfType("jewl") == NoGroup && GroupOfType("") == NoGroup);
+    assert(GroupOfType("ashd") == 2 && GroupOfType("ring") == 7 && GroupOfType("xbow") == 10 && GroupOfType("spea") == TwoHanded);
+    assert(GroupOfType("grim") == 2 && GroupOfType("club") == OneHanded && GroupOfType("staf") == TwoHanded);   // weapons by hands
+    assert(GroupOfType("jewl") == 11 && GroupOfType("scha") == 11 && GroupOfType("") == NoGroup);
 
     // Icon keys match the cache the mod already extracts.
     assert(IconKey(Category::Uniques, 122, 0) == "u122");

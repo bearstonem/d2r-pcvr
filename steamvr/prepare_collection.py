@@ -178,6 +178,56 @@ def read_rune_name_ids(game, casclib=None):
         return {}
 
 
+# Runewords made in two kinds of item get a card for each (owner 2026-11-22): the second card's
+# recordId is the Runes row plus VARIANT_STEP, and each card's base keeps only its kind's types.
+VARIANT_STEP = 1000
+RUNEWORD_KINDS = {
+    'melee': {'mele', 'swor', 'axe', 'knif', 'pole', 'spea', 'hamm', 'club', 'scep', 'mace', 'h2h', 'wand', 'staf',
+              'blde', 'sppl', 'blun', 'rod'},
+    'missile': {'miss', 'bow', 'xbow'},
+    'swords': {'swor'},
+    'shields': {'shld', 'shie', 'ashd', 'pala', 'head', 'grim'},
+    'helms': {'helm', 'pelt', 'phlm', 'circ'},
+    'body armor': {'tors'},
+}
+RUNEWORD_KINDS['weapons'] = RUNEWORD_KINDS['melee'] | RUNEWORD_KINDS['missile'] | {'weap', 'orb', 'jave'}
+RUNEWORD_SPLITS = {
+    'Eternity': ('melee', 'missile'), 'Insight': ('melee', 'missile'), 'Dream': ('helms', 'shields'),
+    'Dragon': ('shields', 'body armor'), 'Fortitude': ('weapons', 'body armor'), 'Phoenix': ('weapons', 'shields'),
+    'Spirit': ('swords', 'shields'),
+}
+
+
+def split_runewords(entries):
+    """Each RUNEWORD_SPLITS runeword as two cards, one per kind, in the order given."""
+    out = []
+    for entry in entries:
+        kinds = RUNEWORD_SPLITS.get(entry['name'])
+        if not kinds:
+            out.append(entry)
+            continue
+        types = entry['base'].split()
+        for variant, kind in enumerate(kinds):
+            own = [t for t in types if t in RUNEWORD_KINDS[kind]]
+            if not own:
+                continue
+            card = dict(entry)
+            card['recordId'] = entry['recordId'] + VARIANT_STEP * variant
+            card['base'] = ' '.join(own)
+            card['type'] = own[0]
+            out.append(card)
+    return out
+
+
+def weapon_hands(read):
+    """{base code: 1 one-handed, 2 two-handed} from weapons.txt's 2handed column."""
+    try:
+        return {cell(row, 'code')[:4].ljust(4): 2 if cell(row, '2handed') == '1' else 1
+                for row in read('weapons.txt')[1] if cell(row, 'code')}
+    except (FileNotFoundError, ValueError, KeyError):
+        return {}
+
+
 def build(read, strings=None, skill_names=None, names=None):
     """The catalog: per category, entries in a stable order.
 
@@ -209,6 +259,7 @@ def build(read, strings=None, skill_names=None, names=None):
     # what the character needs: the row's 'lvl req' (its 'lvl' is the item level - owner
     # 2026-11-22: the Warlock books read 85)
     required = lambda row: number(row, 'lvl req') or number(row, 'lvl')
+    hands = weapon_hands(read)
     catalog = {}
 
     _, uniques = read(UNIQUE_TABLE)
@@ -225,6 +276,7 @@ def build(read, strings=None, skill_names=None, names=None):
             'level': required(row),
             'type': types.get(code_of(row), ''),
             'base': base_name(code_of(row)),
+            'hands': hands.get(code_of(row), 0),
             'stats': stats(row, 'unique'),
         })
     catalog['uniques'] = sort_entries(entries)
@@ -242,6 +294,7 @@ def build(read, strings=None, skill_names=None, names=None):
             'type': types.get(code_of(row), ''),
             'setName': shown(cell(row, 'set')),
             'base': base_name(code_of(row)),
+            'hands': hands.get(code_of(row), 0),
             'stats': stats(row, 'set'),
         })
     catalog['sets'] = sort_entries(entries)
@@ -266,7 +319,7 @@ def build(read, strings=None, skill_names=None, names=None):
             'runes': [cell(row, 'Rune%d' % n) for n in range(1, 7) if cell(row, 'Rune%d' % n)],
             'stats': stats(row, 'runeword'),
         })
-    catalog['runewords'] = sort_entries(entries)
+    catalog['runewords'] = sort_entries(split_runewords(entries))
 
     # Gems and runes: base items, so their own record id is zero and the storage
     # layer matches them by their code. They are stackable, so the tab shows one
@@ -307,14 +360,14 @@ def write_catalog(catalog, out_dir):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     lines = ['# collection %d' % VERSION,
-             '# category\tcode\trecordId\tname\tlevel\ttype\textra\tbase\tstats\tnameId']
+             '# category\tcode\trecordId\tname\tlevel\ttype\textra\tbase\tstats\tnameId\thands']
     for category in CATEGORIES:
         for entry in catalog[category]:
             extra = entry.get('setName', '') or (' '.join(entry.get('runes', [])) if entry.get('runes') else '')
             stat_text = '|'.join(line.replace('|', '/').replace('\t', ' ') for line in entry.get('stats', []))
             lines.append('\t'.join((category, entry['code'].strip(), str(entry['recordId']), entry['name'],
                                     str(entry['level']), entry['type'], extra, entry.get('base', ''), stat_text,
-                                    str(entry.get('nameId', 0)))))
+                                    str(entry.get('nameId', 0)), str(entry.get('hands', 0)))))
     (out_dir / 'collection.tsv').write_text('\n'.join(lines) + '\n', encoding='utf-8')
     return out_dir / 'collection.tsv'
 

@@ -184,6 +184,9 @@ std::array<bool, Kinds> KindsOf(std::string_view types) {
 }
 // The item-type tiles' pictures (the plainest unique of each type), set by Paint.
 std::array<std::string, panel::GroupCount> g_groupKeys;
+// The runeword cards' pictures: the plainest unique of each of these types (Paint fills it).
+constexpr const char* KindTypes[] = {"swor", "axe", "bow", "tors", "helm", "shie"};
+std::array<std::string, std::size(KindTypes)> g_kindKeys;
 
 uint32_t NameColor(Category category) { return category == Category::Sets ? SetName : Unique; }
 
@@ -230,26 +233,27 @@ void DrawCard(Painter& p, const panel::Rect& at, const Entry& entry, Category ca
         const auto kinds = KindsOf(entry.base);
         int count = 0;
         for (bool k : kinds) count += k ? 1 : 0;
-        const float split = count > 0 && icons ? 0.45f : 1.0f;
+        // the small cards of size L: the pictures only, the runes would cover them (owner 2026-11-22)
+        const float split = !plate ? 0.0f : count > 0 && icons ? 0.45f : 1.0f;
         const RectF text = {area.x, area.y, area.w, area.h * split};
-        p.TextRgb(RuneNames(entry.extra), Caps, Md(13.f), text, found ? GoldHi : DimT, Align::Center, true);
-        if (split < 1.0f) {
+        if (plate) p.TextRgb(RuneNames(entry.extra), Caps, Md(13.f), text, found ? GoldHi : DimT, Align::Center, true);
+        if (split < 1.0f && count > 0) {
             const uint32_t rgb = found ? 0x8C8C86 : 0x55554F;
             const float top = area.y + area.h * split, h = area.h * (1.0f - split);
             const float s = std::min(h, area.w / float(count));
             float x = area.x + (area.w - s * float(count)) * 0.5f;
             const auto draw = [&](int group, int deg, float scale) {
-                const std::string& key = g_groupKeys[size_t(group)];
+                const std::string& key = g_kindKeys[size_t(group)];
                 const IconPixels* icon = key.empty() ? nullptr : icons(key);
                 if (icon == nullptr || icon->rgba == nullptr) return;
                 const Turned& t = TurnedSilhouette(key, *icon, rgb, deg);
                 const RectF box = {x + s * (1 - scale) * 0.5f, top + (h - s * scale) * 0.5f, s * scale, s * scale};
                 p.Image(FitImage(box, t.w, t.h), t.px.data(), t.w, t.h);
             };
-            const int groupOf[Kinds] = {9, 10, 1, 0, 2};   // swords, bows, armor, helms, shields
+            const int groupOf[Kinds] = {0, 2, 3, 4, 5};   // KindTypes: swords, bows, armor, helms, shields
             for (int k = 0; k < Kinds; ++k) {
                 if (!kinds[size_t(k)]) continue;
-                if (k == Melee) { draw(9, 45, 1.3f); draw(8, -45, 1.3f); }   // the sword and the axe crossed
+                if (k == Melee) { draw(0, 45, 1.3f); draw(1, -45, 1.3f); }   // the sword and the axe crossed
                 else draw(groupOf[k], 0, 0.8f);
                 x += s;
             }
@@ -328,7 +332,7 @@ void DrawTooltip(Painter& p, const panel::Rect& card, const tooltip::Tooltip& ti
     if (tip.Empty()) return;
     // 10% and then 20% larger than the first cut, box and text alike (owner 2026-11-22: the game's
     // own tooltips are much bigger)
-    constexpr float K = 1.1f * 1.2f;
+    constexpr float K = 1.1f * 1.2f * 1.3f;   // +10%, +20%, +30% (owner 2026-11-22)
     struct Line { std::string text; uint32_t rgb; float size; };
     std::vector<Line> lines;
     lines.push_back({tip.title, NameColor(category), 16.f * K});
@@ -397,11 +401,19 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
         for (int pass = 0; pass < 2 && best == nullptr; ++pass)
             for (uint32_t slot = 0; slot < library.Size(Category::Uniques); ++slot) {
                 const Entry* e = library.At(Category::Uniques, slot);
-                if (e == nullptr || panel::GroupOfType(e->type) != group) continue;
+                if (e == nullptr || GroupOf(*e) != group) continue;
                 if (pass == 0 && e->type != panel::GroupMainType(group)) continue;
                 if (best == nullptr || e->level < best->level) best = e;
             }
         g_groupKeys[size_t(group)] = best ? panel::IconKey(Category::Uniques, best->recordId, best->code) : std::string();
+    }
+    for (size_t kind = 0; kind < g_kindKeys.size(); ++kind) {
+        const Entry* best = nullptr;
+        for (uint32_t slot = 0; slot < library.Size(Category::Uniques); ++slot) {
+            const Entry* e = library.At(Category::Uniques, slot);
+            if (e != nullptr && e->type == KindTypes[kind] && (best == nullptr || e->level < best->level)) best = e;
+        }
+        g_kindKeys[kind] = best ? panel::IconKey(Category::Uniques, best->recordId, best->code) : std::string();
     }
 
     // The cards.
@@ -555,7 +567,7 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
             for (int pass = 0; pass < 2 && best == nullptr; ++pass)
                 for (uint32_t slot = 0; slot < library.Size(Category::Uniques); ++slot) {
                     const Entry* e = library.At(Category::Uniques, slot);
-                    if (e == nullptr || panel::GroupOfType(e->type) != group) continue;
+                    if (e == nullptr || GroupOf(*e) != group) continue;
                     if (pass == 0 && e->type != panel::GroupMainType(group)) continue;
                     if (best == nullptr || e->level < best->level) best = e;
                 }

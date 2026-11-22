@@ -80,10 +80,24 @@ uint32_t RunewordOf(D2RL::ItemHandle item) {
 // The same from the item's own record: getItemDetails first, else the name string id a completed
 // runeword keeps in prefixIds[0] (a Normal or Superior item has no affix there), matched to the
 // catalog's nameId (2026-11-22: getItemDetails gave no runeword for the owner's Insight).
+std::string TypeChain(uint32_t code);   // defined below
+// A runeword made in two kinds of item has a card for each (prepare_collection.py
+// RUNEWORD_SPLITS): the second card's id is the row plus kVariantStep, and the item belongs to
+// the card whose types its base is (a Spirit shield to the shield card).
+constexpr uint32_t kVariantStep = 1000;
 uint32_t RunewordOfItem(const D2RL::Items::ItemInfo& info) {
     if (info.quality != D2RL::Items::Quality::Normal && info.quality != D2RL::Items::Quality::Superior) return UINT32_MAX;
-    if (const uint32_t record = RunewordOf(info.handle); record != UINT32_MAX) return record;
-    return info.prefixIds[0] != 0 ? TabLibrary().RecordOfName(Category::Runewords, info.prefixIds[0]) : UINT32_MAX;
+    uint32_t record = RunewordOf(info.handle);
+    if (record == UINT32_MAX && info.prefixIds[0] != 0) record = TabLibrary().RecordOfName(Category::Runewords, info.prefixIds[0]);
+    if (record == UINT32_MAX) return UINT32_MAX;
+    record %= kVariantStep;
+    const Library& library = TabLibrary();
+    const uint32_t second = library.SlotOf(Category::Runewords, record + kVariantStep);
+    if (second != UINT32_MAX) {
+        const Entry* card = library.At(Category::Runewords, second);
+        if (card != nullptr && RunewordFits(TypeChain(info.code), card->base)) return record + kVariantStep;
+    }
+    return record;
 }
 
 // Why an item read as no runeword: the service, the call's result and what it gave.

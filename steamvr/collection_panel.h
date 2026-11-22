@@ -107,30 +107,38 @@ inline constexpr int NoGroup    = -1;
 inline constexpr int BandCount  = 4;    // Sets: level ranges, each holding at most GroupCount sets
 inline constexpr int KindCount  = 6;    // Runewords: what they are made in (the top row of tiles)
 
+// Weapons by how they are held (owner 2026-11-22: the weapon types left most of them, Demon
+// Limb's club among them, under no tile): one-handed, two-handed (weapons.txt 2handed, which
+// the catalog's hands column carries - GroupOf in collection_view.h), and shot (bows and
+// crossbows). Charms and jewels share the last tile.
+inline constexpr int OneHanded = 8, TwoHanded = 9;
 inline constexpr const char* GroupName(int group) {
     constexpr const char* names[GroupCount] = {"Helms", "Armor", "Shields", "Gloves", "Boots", "Belts",
-                                               "Amulets", "Rings", "Axes", "Swords", "Bows", "Polearms"};
+                                               "Amulets", "Rings", "One-handed", "Two-handed", "Missile", "Charms"};
     return group >= 0 && group < GroupCount ? names[group] : "";
 }
 
 // Each tile's plain type: its silhouette is taken from it first.
 inline constexpr const char* GroupMainType(int group) {
     constexpr const char* types[GroupCount] = {"helm", "tors", "shie", "glov", "boot", "belt",
-                                               "amul", "ring", "axe", "swor", "bow", "pole"};
+                                               "amul", "ring", "swor", "pole", "bow", "lcha"};
     return group >= 0 && group < GroupCount ? types[group] : "";
 }
 
+// By the type alone: a weapon one-handed unless its type is always held in both hands
+// (GroupOf moves a two-handed sword, axe or club by the catalog's hands column).
 inline int GroupOfType(std::string_view type) {
     struct Pair { const char* type; int group; };
     constexpr Pair pairs[] = {
         {"helm", 0}, {"phlm", 0}, {"pelt", 0}, {"circ", 0},
         {"tors", 1},
-        {"shie", 2}, {"ashd", 2}, {"head", 2}, {"shld", 2},
+        {"shie", 2}, {"ashd", 2}, {"head", 2}, {"shld", 2}, {"grim", 2},
         {"glov", 3}, {"boot", 4}, {"belt", 5}, {"amul", 6}, {"ring", 7},
-        {"axe", 8},  {"taxe", 8},
-        {"swor", 9},
+        {"swor", 8}, {"axe", 8}, {"knif", 8}, {"club", 8}, {"mace", 8}, {"hamm", 8}, {"scep", 8},
+        {"wand", 8}, {"orb", 8}, {"h2h", 8}, {"h2h2", 8}, {"jave", 8}, {"ajav", 8}, {"tkni", 8}, {"taxe", 8},
+        {"staf", 9}, {"pole", 9}, {"spea", 9}, {"aspe", 9},
         {"bow", 10}, {"abow", 10}, {"xbow", 10},
-        {"pole", 11}, {"spea", 11}, {"aspe", 11},
+        {"lcha", 11}, {"mcha", 11}, {"scha", 11}, {"jewl", 11},
     };
     for (const Pair& pair : pairs)
         if (type == pair.type) return pair.group;
