@@ -36,6 +36,7 @@ inline const Rect* RectOf(const Layout& layout, const Hit& hit) {
     case HitKind::SortBox:  return &layout.sortBox;
     case HitKind::ShowBox:  return &layout.showBox;
     case HitKind::Group:    return hit.index >= 0 && hit.index < panel::GroupCount ? &layout.groups[hit.index] : nullptr;
+    case HitKind::Band:     return hit.index >= 0 && hit.index < panel::BandCount ? &layout.bands[hit.index] : nullptr;
     case HitKind::Previous: return &layout.previous;
     case HitKind::Next:     return &layout.next;
     case HitKind::Size:     return hit.index >= 0 && hit.index < int(panel::Size::Count) ? &layout.sizeSteps[hit.index] : nullptr;

@@ -91,7 +91,8 @@ struct ViewState {
     panel::Size  size     = panel::Size::Medium;
     panel::Show  show     = panel::Show::All;
     panel::Sort  sort     = panel::Sort::Name;
-    int          group    = panel::NoGroup;   // an item-type tile filtering the grid, or NoGroup
+    int          group    = panel::NoGroup;   // an item-type tile filtering the grid, or NoGroup; on Sets a set tile of the band
+    int          band     = 0;                // Sets: the level range whose sets the tiles show
     panel::Drop  open     = panel::Drop::None;   // the footer list that is open
     int          page     = 0;
     panel::Hit   hover {};   // what the laser is over: the slot or control to light
@@ -104,6 +105,7 @@ struct ViewState {
         hover = {};
     }
     void SelectCategory(const Library& library, Category want) {
+        if (category != want) group = panel::NoGroup;   // a tile means another thing on each page
         category = want;
         page     = 0;
         hover = {};
@@ -142,11 +144,63 @@ struct ViewState {
         hover = {};
         Clamp(library);
     }
+    // Sets: another level range shows other set tiles, so a picked one lets go.
+    void SelectBand(const Library& library, int want) {
+        want = std::clamp(want, 0, panel::BandCount - 1);
+        if (band == want) return;
+        band  = want;
+        group = panel::NoGroup;
+        page  = 0;
+        hover = {};
+        Clamp(library);
+    }
     void Step(const Library& library, int by) {
         page += by;
         Clamp(library);
     }
 };
+
+// One set as its tile shows it: the name, the pieces found of all, and the
+// highest piece level, which places it in a band.
+struct SetInfo {
+    std::string_view name;
+    uint32_t         level = 0, found = 0, total = 0;
+};
+// The level each band ends at, sorted by a set's highest piece: 34 sets, at most
+// 12 a band, class sets mixed in with the rest.
+inline constexpr uint32_t BandTop[panel::BandCount] = {8, 28, 69, 999};
+inline constexpr const char* BandName(int band) {
+    constexpr const char* names[panel::BandCount] = {"1-8", "9-28", "42-69", "70+"};
+    return band >= 0 && band < panel::BandCount ? names[band] : "";
+}
+inline int BandOfLevel(uint32_t level) {
+    for (int band = 0; band < panel::BandCount; ++band)
+        if (level <= BandTop[band]) return band;
+    return panel::BandCount - 1;
+}
+inline std::vector<SetInfo> AllSets(const Library& library) {
+    std::vector<SetInfo> sets;
+    for (uint32_t slot = 0; slot < library.Size(Category::Sets); ++slot) {
+        const Entry* entry = library.At(Category::Sets, slot);
+        if (entry == nullptr || entry->extra.empty()) continue;
+        auto it = std::find_if(sets.begin(), sets.end(), [&](const SetInfo& s) { return s.name == entry->extra; });
+        if (it == sets.end()) it = sets.insert(sets.end(), SetInfo{entry->extra});
+        it->level = std::max(it->level, entry->level);
+        ++it->total;
+        if (library.IsFound(Category::Sets, slot)) ++it->found;
+    }
+    std::stable_sort(sets.begin(), sets.end(), [](const SetInfo& a, const SetInfo& b) {
+        return a.level != b.level ? a.level < b.level : a.name < b.name;
+    });
+    return sets;
+}
+// The sets of one band, lowest first; at most GroupCount, the tiles there are.
+inline std::vector<SetInfo> SetsInBand(const Library& library, int band) {
+    std::vector<SetInfo> sets;
+    for (const SetInfo& set : AllSets(library))
+        if (BandOfLevel(set.level) == band && int(sets.size()) < panel::GroupCount) sets.push_back(set);
+    return sets;
+}
 
 // The catalog slots the filter keeps, in order: the page's slots are positions
 // in this list, not catalog slots. Built once per paint.
@@ -154,11 +208,19 @@ inline std::vector<uint32_t> VisibleSlots(const Library& library, const ViewStat
     std::vector<uint32_t> slots;
     const uint32_t        count = library.Size(view.category);
     slots.reserve(count);
+    // Sets: a picked tile keeps only its set's pieces.
+    const bool          sets = view.category == Category::Sets;
+    std::vector<SetInfo> band;
+    if (sets) band = SetsInBand(library, view.band);
+    const bool picked = sets && view.group >= 0 && view.group < int(band.size());
     for (uint32_t slot = 0; slot < count; ++slot) {
         const bool found = library.IsFound(view.category, slot);
         if (view.show == panel::Show::Missing && found) continue;
         if (view.show == panel::Show::Found && !found) continue;
-        if (view.group != panel::NoGroup) {
+        if (sets) {
+            const Entry* entry = library.At(view.category, slot);
+            if (picked && (entry == nullptr || entry->extra != band[size_t(view.group)].name)) continue;
+        } else if (view.group != panel::NoGroup) {
             const Entry* entry = library.At(view.category, slot);
             if (entry == nullptr || panel::GroupOfType(entry->type) != view.group) continue;
         }

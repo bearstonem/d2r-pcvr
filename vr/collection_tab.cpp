@@ -231,7 +231,14 @@ void TabToggleDrop(panel::Drop list) {
 
 void TabToggleGroup(int group) {
     std::lock_guard lock(g_lock);
+    // Sets: a tile past the band's last set is an empty recess
+    if (g_view.category == Category::Sets && group >= int(SetsInBand(g_library, g_view.band).size())) return;
     g_view.ToggleGroup(g_library, group);
+}
+
+void TabSelectBand(int band) {
+    std::lock_guard lock(g_lock);
+    g_view.SelectBand(g_library, band);
 }
 
 bool TabWanted() { return g_wanted.load(); }

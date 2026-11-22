@@ -104,6 +104,14 @@ void CapsAt(Painter& p, float cx, float cy, std::string_view text, float size, u
     p.TextRgb(text, Caps, s, {Mx(cx) - Md(150.f), My(cy) - s, Md(300.f), s * 2.f}, rgb, Align::Center);
 }
 
+// A set's name on its small tile: the owner's part before "'s" ("Tal Rasha's
+// Wrappings" -> "Tal Rasha", "Bul-Kathos' Children" -> "Bul-Kathos"), else whole.
+std::string ShortSetName(std::string_view name) {
+    for (std::string_view mark : {std::string_view("'s "), std::string_view("' ")})
+        if (const size_t at = name.find(mark); at != std::string_view::npos && at > 2) return std::string(name.substr(0, at));
+    return std::string(name);
+}
+
 // The largest size, from the mock-up's start down to its floor, at which the text fits.
 float FitSize(Painter& p, std::string_view text, TextStyle style, float size, float floor, float width) {
     for (; size > floor; size -= 0.5f)
@@ -356,7 +364,9 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
     Painter& p = painter;
     const auto          visible = VisibleSlots(library, view);
     const int           pages   = panel::PagesFor(int(visible.size()), view.size);
-    const panel::Layout layout  = panel::Build(view.page, pages, int(TabCategoryCount), view.size, view.open);
+    panel::Layout layout = panel::Build(view.page, pages, int(TabCategoryCount), view.size, view.open);
+    const bool    onSets = view.category == Category::Sets;
+    if (onSets) panel::AddBands(layout);
     const auto pointed = [&](panel::HitKind kind, int index) { return view.hover.kind == kind && view.hover.index == index; };
     constexpr float PX0 = panel::MockLeft, PY0 = panel::MockTop, PX1 = panel::MockRight, PY1 = panel::MockBottom;
 
@@ -429,13 +439,71 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
                             : view.category == Category::Runewords ? Grey
                                                                    : Unique;
         p.FillRgb({bar.x + Md(2.f), bar.y + Md(2.f), (bar.w - Md(4.f)) * share, bar.h - Md(4.f)}, fill);
-        CapsAt(p, (PX0 + PX1) / 2, layout.counter.y / panel::Scale + PY0 + 12,
-               std::string(CategoryName(view.category)) + "  " + CounterText(library, view), 15.f, Txt);
+        if (!onSets) {
+            CapsAt(p, (PX0 + PX1) / 2, layout.counter.y / panel::Scale + PY0 + 12,
+                   std::string(CategoryName(view.category)) + "  " + CounterText(library, view), 15.f, Txt);
+        } else {
+            // "Sets 12 / 135   Complete 1 / 34" left of the four level-range buttons.
+            const auto all      = AllSets(library);
+            const auto complete = std::count_if(all.begin(), all.end(), [](const SetInfo& s) { return s.total && s.found == s.total; });
+            const float left = layout.counter.x / panel::Scale + PX0, right = panel::BandsLeft(layout) / panel::Scale + PX0;
+            CapsAt(p, (left + right) / 2, layout.counter.y / panel::Scale + PY0 + 12,
+                   "Sets  " + std::to_string(library.Found(Category::Sets)) + " / " + std::to_string(library.Size(Category::Sets)) +
+                       "    Complete  " + std::to_string(complete) + " / " + std::to_string(all.size()),
+                   14.f, Txt);
+            for (int band = 0; band < panel::BandCount; ++band) {
+                const RectF r  = Box(layout.bands[band]);
+                const bool  on = view.band == band;
+                Button(p, r, on);
+                if (pointed(panel::HitKind::Band, band)) p.OutlineRgb(r, GoldHi, Md(1.5f));
+                CapsAt(p, (r.x + r.w / 2) / panel::Scale + PX0, (r.y + r.h / 2) / panel::Scale + PY0 + 1, BandName(band), 13.f,
+                       on ? OnText : OffText);
+            }
+        }
     }
 
+    // Sets: the band's sets, a tile each - the name over a dot a piece (green found),
+    // all gold with a gold frame once the set is complete; the picked one lit.
+    if (onSets) {
+        const auto sets = SetsInBand(library, view.band);
+        for (int tile = 0; tile < panel::GroupCount; ++tile) {
+            const RectF r = Box(layout.groups[tile]);
+            if (tile >= int(sets.size())) {
+                p.FillRgb(r, 0x0E0E0E, 0.55f);
+                p.OutlineRgb(r, 0x060606, Md(2.f));
+                continue;
+            }
+            const SetInfo& set      = sets[size_t(tile)];
+            const bool     on       = view.group == tile;
+            const bool     complete = set.total && set.found == set.total;
+            Button(p, r, on);
+            if (complete) p.OutlineRgb(r, Gold, Md(1.5f));
+            if (pointed(panel::HitKind::Group, tile)) p.OutlineRgb(r, GoldHi, Md(1.5f));
+            const float x0 = r.x / panel::Scale + PX0, y0 = r.y / panel::Scale + PY0;
+            const float tw = r.w / panel::Scale;
+            // the whole name when it fits at 10 px, else the owner's part
+            std::string name(set.name);
+            float       size = FitSize(p, name, Plain, 13.f, 10.f, Md(tw - 6.f));
+            if (p.Measure(name, Plain, 4096.f, false, 0, Md(size)).width > Md(tw - 6.f)) {
+                name = ShortSetName(set.name);
+                size = FitSize(p, name, Plain, 13.f, 8.f, Md(tw - 6.f));
+            }
+            p.TextRgb(name, Plain, Md(size), R(x0 + 2, y0 + 2, x0 + tw - 2, y0 + 21),
+                      complete ? Unique : on ? OnText : Txt, Align::Center);
+            constexpr float dot = 6.f, gap = 3.f;
+            const float row = float(set.total) * dot + float(std::max<uint32_t>(1, set.total) - 1) * gap;
+            float dx = x0 + (tw - row) / 2;
+            const float dy = y0 + 25.f;
+            for (uint32_t piece = 0; piece < set.total; ++piece, dx += dot + gap) {
+                const bool have = piece < set.found;
+                p.FillRgb(R(dx, dy, dx + dot, dy + dot), complete ? GoldHi : have ? SetName : 0x1A1A18);
+                if (!have) p.OutlineRgb(R(dx, dy, dx + dot, dy + dot), 0x5E5E58, Md(1.f));
+            }
+        }
+    }
     // The item types: the silhouette (36 px, a ring or an amulet 22 - they are small items)
     // with the share found beside it; the chosen tile lit.
-    {
+    else {
         for (int group = 0; group < panel::GroupCount; ++group) {
             const RectF r  = Box(layout.groups[group]);
             const bool  on = view.group == group;

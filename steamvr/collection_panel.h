@@ -104,6 +104,7 @@ enum class Drop : uint32_t { None = 0, Sort = 1, Show = 2 };
 // (maces, staves, wands, daggers, javelins, claws, charms, jewels) show under all types.
 inline constexpr int GroupCount = 12;
 inline constexpr int NoGroup    = -1;
+inline constexpr int BandCount  = 4;    // Sets: level ranges, each holding at most GroupCount sets
 
 inline constexpr const char* GroupName(int group) {
     constexpr const char* names[GroupCount] = {"Helms", "Armor", "Shields", "Gloves", "Boots", "Belts",
@@ -160,6 +161,7 @@ struct Layout {
     int  page = 0, pages = 1;
     Rect progress {}, counter {};                     // the found bar and "Uniques  81 / 403" under it
     Rect groups[GroupCount] {};
+    Rect bands[4] {};                                 // Sets: the level-range buttons right of the count (AddBands)
     Rect sizeLabel {}, sizeSteps[static_cast<int>(Size::Count)] {};
     Rect sortLabel {}, sortBox {}, sortOptions[static_cast<int>(Sort::Count)] {};
     Rect showLabel {}, showBox {}, showOptions[static_cast<int>(Show::Count)] {};
@@ -249,6 +251,17 @@ inline Layout Build(int page, int pages, int tabs, Size size = Size::Medium, Dro
     return layout;
 }
 
+// Sets: four level-range buttons stand at the right of the count line, which
+// then keeps its text to the left of them. Only the Sets page has them.
+inline void AddBands(Layout& layout) {
+    constexpr float w = 56.0f, gap = 4.0f, x1 = 707.0f;
+    for (int i = 0; i < BandCount; ++i) {
+        const float x0 = x1 - float(BandCount - i) * w - float(BandCount - 1 - i) * gap;
+        layout.bands[i] = FromMock(x0, 620.0f, x0 + w, 641.0f);
+    }
+}
+inline float BandsLeft(const Layout& layout) { return layout.bands[0].width > 0 ? layout.bands[0].x : layout.counter.x + layout.counter.width; }
+
 enum class HitKind {
     None,
     Tab,
@@ -262,6 +275,7 @@ enum class HitKind {
     Group,
     SortBox,    // the Sort list itself: opens / closes it
     ShowBox,
+    Band,       // Sets: a level-range button (index 0..3)
 };
 
 struct Hit {
@@ -290,6 +304,8 @@ inline Hit Pick(const Layout& layout, float x, float y) {
         if (Inside(layout.sizeSteps[i], x, y)) return {HitKind::Size, i};
     if (Inside(layout.sortBox, x, y)) return {HitKind::SortBox, 0};
     if (Inside(layout.showBox, x, y)) return {HitKind::ShowBox, 0};
+    for (int i = 0; i < BandCount; ++i)
+        if (Inside(layout.bands[i], x, y)) return {HitKind::Band, i};
     for (int i = 0; i < GroupCount; ++i)
         if (Inside(layout.groups[i], x, y)) return {HitKind::Group, i};
     for (int i = 0; i < layout.slotCount; ++i)
