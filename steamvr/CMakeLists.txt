@@ -106,7 +106,7 @@ target_link_libraries(d2rl-pcvr PRIVATE box3d)
 target_sources(d2rl-pcvr PRIVATE elemental_hands_renderer.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/settings_menu.cpp ${CMAKE_CURRENT_SOURCE_DIR}/vr_settings_ui.cpp ${ROOT}/vr/native_ui.cpp ${CMAKE_CURRENT_SOURCE_DIR}/interaction_ui.cpp ${ROOT}/vr/interactionstate.cpp ${ROOT}/vr/bow.cpp ${ROOT}/vr/projectiles.cpp ${ROOT}/vr/combat.cpp ${ROOT}/vr/melee.cpp ${CMAKE_CURRENT_SOURCE_DIR}/transport.cpp ${CMAKE_CURRENT_SOURCE_DIR}/floating_map_frame.cpp ${CMAKE_CURRENT_SOURCE_DIR}/foveation.cpp ${CMAKE_CURRENT_SOURCE_DIR}/effects_layer.cpp ${CMAKE_CURRENT_SOURCE_DIR}/logging.cpp ${CMAKE_CURRENT_SOURCE_DIR}/profile.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/native_belt.cpp ${ROOT}/vr/quick_items.cpp ${ROOT}/vr/melee_weapon.cpp)
-target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/monster_labels.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/monster_labels.cpp ${ROOT}/vr/portal_placement.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/breakables.cpp ${ROOT}/vr/offline_difficulty.cpp ${ROOT}/vr/enemy_sight.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/spell_impacts.cpp)   # spells break containers and push props (spell_impacts.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/respec.cpp)   # Reset Skills & Stats (respec_button.h)
@@ -295,6 +295,8 @@ add_executable(whirl-steer-test whirl_steer_test.cpp)   # Whirlwind aimed along 
 add_executable(room-scale-test room_scale_test.cpp)   # room-scale: a turn pivots at the head
 add_executable(room-steps-test room_steps_test.cpp)   # Room follows you: the neck, the dead zone, pauses, walls, the origin follow
 add_executable(sewer-interaction-test sewer_interaction_test.cpp)
+add_executable(portal-placement-test portal_placement_test.cpp)
+add_test(NAME portal-placement-test COMMAND portal-placement-test)
 add_executable(notice-card-test notice_card_test.cpp)
 add_executable(melee-weapon-test melee_weapon_test.cpp)
 add_executable(breakables-test breakables_test.cpp)

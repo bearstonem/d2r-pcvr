@@ -187,6 +187,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "panel_input.h"
 #include "native_belt.h"
 #include "monster_labels.h"
+#include "portal_placement.h"
 #endif
 #include "../steamvr/panel_input_mode.h"
 #include "pad_mirror_shared.h"
@@ -3493,6 +3494,7 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
     fwd = Facing(heading, down);
     ahead = Facing(heading, 0.0f);
     right = {cosf(heading), 0.0f, -sinf(heading)};
+    portalplacement::Publish(gamestate::LocalPlayer(),ahead.x,ahead.z,FullBody()&&!ThirdPerson()&&!gamestate::MenuOpen());
     const V3 up0 = d2rcam::m4::Cross(right, fwd);
     const float roll = TargetRoll() * d2r;               // + = the right ear down
     up = up0 * cosf(roll) + right * sinf(roll);
@@ -13348,6 +13350,7 @@ DWORD WINAPI UpdateThread(void*) {
             panelinput::Install();
             nativebelt::Install();
             monsterlabels::Install();
+            portalplacement::Install();
             projectiles::Report();
             combat::Install();
             combat::Report();
