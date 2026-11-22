@@ -3,10 +3,27 @@
 #include <cstdio>
 using namespace framevr;
 int main(){
+ wristchat::HistoryFrame history;history.Begin(11);assert(!history.available);
+ assert(history.Select(true));history.Publish(true);history.Begin(11);assert(history.available&&!history.Select(true));
+ assert(history.Select(false));history.Publish(false);history.Begin(11);assert(history.available);
+ assert(!history.Select(true));assert(history.Select(false)); // popup must never replace full history
+ for(int i=0;i<9000;++i){history.Begin(11);assert(history.available);} // missing redraws are not a history reset
+ history.Begin(12);assert(!history.available);history.Begin(0);assert(!history.Select(true));
+ wristchat::Model route;route.Session(9);route.Open(1);
+ assert(route.NeedsSource(true,1));assert(!route.NeedsSource(false,1)); // inventory owns the surface
+ assert(!route.NeedsSource(true,-1));route.Detach();assert(route.NeedsSource(true,-1));
+ assert(!route.OwnsWheel(true,1));route.Open(1);assert(route.OwnsWheel(true,1));
+ assert(!route.OwnsWheel(false,1)&&!route.OwnsWheel(true,0));route.Close();assert(!route.NeedsSource(true,1));
+ wristchat::FirstHistory seed;assert(!seed.Want(0,10,true,false));
+ assert(!seed.Want(11,100,false,false));assert(seed.Want(11,1000,true,false));
+ assert(!seed.Want(11,1100,false,false));assert(!seed.Want(11,1200,true,true));assert(!seed.Want(11,1300,true,false));
+ assert(seed.Want(12,5000,true,false));assert(!seed.Want(12,16000,true,false));
+ wristchat::Composer gate;assert(gate.Allow(1));gate.Submitted(100);assert(!gate.Allow(101));assert(gate.Allow(1100));gate.Reset();assert(gate.Allow(1));
+ assert(!wristchat::UseHistory(true,false,false)&&wristchat::UseHistory(true,true,false)&&!wristchat::UseHistory(true,true,true));
  wristchat::Model m;m.Open(1);assert(!m.CanType());m.Session(1);m.Open(1);assert(m.open&&!m.editing);
  m.Focus(true);assert(m.editing);m.Detach();assert(m.pinned&&!m.editing&&!m.CanType());
- m.Open(0);assert(m.pinned&&!m.CanType()); // selecting Chat must not redock a HUD copy
- m.Focus(true);assert(!m.editing);m.Dock();assert(!m.pinned&&!m.editing);
+ m.Open(0);assert(m.pinned&&m.CanType()&&m.hand==0); // selecting Chat must not redock a HUD copy
+ m.Focus(true);assert(m.editing);m.LeaveTab();assert(m.pinned&&m.open&&!m.CanType());m.Open(1);m.Dock();assert(!m.pinned&&!m.editing&&m.CanType());
  m.dragging=true;m.Focus(true);assert(!m.editing&&!m.CanType());m.dragging=false;
  m.Focus(false);assert(!m.editing);m.Focus(true);assert(m.editing);m.Close();assert(!m.open&&!m.editing);
  assert(m.AtDock({0,0,.03f},.45f,.45f));assert(!m.AtDock({0,0,.2f},.45f,.45f));assert(!m.AtDock({.3f,0,0},.45f,.45f));

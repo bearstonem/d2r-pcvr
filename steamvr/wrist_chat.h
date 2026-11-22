@@ -19,15 +19,43 @@ inline bool LayoutClip(int l,int t,int r,int b,int w,int h,float safe,int sx,int
 }
 inline bool Scissor(int l,int t,int r,int b,int w,int h,float safe){return LayoutClip(l,t,r,b,w,h,safe,SourceX,SourceY,SourceWidth,SourceHeight);}
 inline bool StockList(int l,int t,int r,int b,int w,int h,float safe){return LayoutClip(l,t,r,b,w,h,safe,40,910,1200,770);}
+inline bool UseHistory(bool surface,bool lastWasChat,bool spatial){return surface&&lastWasChat&&!spatial;}
+// Keep the native history image on the HUD capture side, independent of the
+// XR surface also used by inventory and other menus. A missed draw is not a reset.
+struct HistoryFrame {
+ uint64_t session=0;bool available=false;
+ void Begin(uint64_t s){if(session!=s)available=false;session=s;}
+ bool Select(bool stock)const{return session&&(!stock||!available);}
+ void Publish(bool stock){if(Select(stock))available=true;}
+};
+// Capture the initial native history before the wrist tab is first visited.
+struct FirstHistory {
+ uint64_t session=0,until=0;bool done=false;
+ bool Want(uint64_t s,uint64_t now,bool gameplay,bool captured){
+  if(s!=session){session=s;until=0;done=false;}
+  if(!s||done)return false;
+  if(captured||(until&&now>=until)){done=true;return false;}
+  if(!gameplay)return false;
+  if(!until)until=now+10000;
+  return true;
+ }
+};
+struct Composer {
+ uint64_t next=0;bool Allow(uint64_t now)const{return now>=next;}
+ void Submitted(uint64_t now){next=now+1000;}void Reset(){next=0;}
+};
 struct Model {
- uint64_t session=0;bool open=false,pinned=false,editing=false,dragging=false;int hand=1;
+ uint64_t session=0;bool open=false,pinned=false,editing=false,dragging=false;int hand=1;bool tab=false;
  void Session(uint64_t s){if(s!=session){*this={};session=s;}}
- void Open(int h){if(pinned)return;open=true;pinned=editing=dragging=false;hand=h==0?0:1;}
- void Close(){open=pinned=editing=dragging=false;}
- bool CanType()const{return session!=0&&open&&!pinned&&!dragging;}
+ void Open(int h){open=tab=true;hand=h==0?0:1;}
+ void LeaveTab(){tab=editing=false;if(!pinned)open=false;}
+ void Close(){open=pinned=editing=dragging=tab=false;}
+ bool OwnsWheel(bool visible,int wheel)const{return visible&&session&&open&&tab&&wheel==hand;}
+ bool NeedsSource(bool visible,int wheel)const{return visible&&session&&open&&(pinned||OwnsWheel(visible,wheel));}
+ bool CanType()const{return session!=0&&open&&tab&&!dragging;}
  void Focus(bool nativeReady){editing=CanType()&&nativeReady;}
- void Detach(){pinned=true;editing=false;}
+ void Detach(){pinned=true;tab=editing=false;}
  static bool AtDock(math::Vec delta,float width,float height){return std::abs(delta.x)<=width*.42f&&std::abs(delta.y)<=height*.36f&&std::abs(delta.z)<=.075f;}
- void Dock(){pinned=false;editing=dragging=false;}
+ void Dock(){pinned=false;open=tab=true;editing=dragging=false;}
 };
 }
