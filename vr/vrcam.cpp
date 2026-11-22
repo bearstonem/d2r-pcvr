@@ -1087,6 +1087,9 @@ int SkyPaletteFor(const std::string& biome, bool always) {
 // rest after them by name. Only the files' times are set (their content is never opened); the saves are the
 // game's own (the mod's savepath "../": Saved Games\Diablo II Resurrected). At the plugin's load and each
 // time the main menu comes up; nothing is set when the order is already so.
+// On by default on purpose, as part of the mod: with many heroes the game's own order (last played only) buries
+// the rest, and in the 3D menu the list is picked by pointing - so the 5 last played stay on top and the others
+// follow alphabetically, where they are easy to find.
 void SortCharacters() {
     if (!IniB(L"frontend", L"sort_characters", true)) return;
     const int keep = std::clamp((int)IniF(L"frontend", L"sort_recent", 5.0f), 0, 100);
@@ -1838,8 +1841,15 @@ void LoadSettings() {
         g_set.campfireLogsRadius.store(std::clamp(IniF(L"campfire", L"fire_logs_radius", 0.0f), 0.0f, 10.0f));
         g_set.campfireLogsHeight.store(std::clamp(IniF(L"campfire", L"fire_logs_height", 1.5f), 0.0f, 10.0f));
         g_set.campfirePanoYaw.store(std::clamp(IniF(L"campfire", L"pano_yaw", 0.0f), -360.0f, 360.0f));
-        g_set.campfirePanoLow.store(std::clamp(IniF(L"campfire", L"pano_low", -90.0f), -90.0f, 89.0f));
-        g_set.campfirePanoHigh.store(std::clamp(IniF(L"campfire", L"pano_high", 90.0f), -89.0f, 90.0f));
+        {   // The campfire's panorama from photographs (#568) lies -90..90; the earlier template shipped -60 / 120 for the
+            // old picture, and an update keeps a player's saved ini - so exactly that old pair is read as the new one,
+            // and every updated install shows the panorama at its height with no setting to change. Any other pair is
+            // the player's own and is kept.
+            float low = IniF(L"campfire", L"pano_low", -90.0f), high = IniF(L"campfire", L"pano_high", 90.0f);
+            if (low == -60.0f && high == 120.0f) { low = -90.0f; high = 90.0f; }
+            g_set.campfirePanoLow.store(std::clamp(low, -90.0f, 89.0f));
+            g_set.campfirePanoHigh.store(std::clamp(high, -89.0f, 90.0f));
+        }
         g_set.campfirePanoBright.store(std::clamp(IniF(L"campfire", L"pano_brightness", 1.0f), 0.0f, 4.0f));
         {
             wchar_t f[260] = {};
