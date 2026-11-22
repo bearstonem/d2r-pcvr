@@ -737,6 +737,22 @@ struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_F
 // The game's tab under the laser while that bar is laid over (stash_tab_hovers.h), -1 none: laid in
 // hovered, as the game would draw it (owner 2026-11-22).
 std::atomic<int> collectionBarHover{-1};
+// The laser's point in the UI image (x of 2244; NaN off it): an item in the hand is drawn there by
+// the game, and the bar's art leaves a gap round it (owner 2026-11-22: the item in the hand first).
+std::atomic<float> laserImageX{NAN},laserImageY{NAN};
+// A paste from an upload, less a column round the hand's item while one is held over it.
+void CopyAroundHeld(ID3D12GraphicsCommandList* list,const D3D12_TEXTURE_COPY_LOCATION& to,int x,int y,
+                    const D3D12_TEXTURE_COPY_LOCATION& from,int w,int h) {
+    const float lx=laserImageX.load(),ly=laserImageY.load();
+    constexpr float HalfGap=70.f,Reach=150.f;   // two inventory cells and a little; an item's half height and more
+    if(!gamestate::CursorItemHeld()||!(lx==lx)||ly<float(y)-Reach||ly>float(y+h)+Reach||lx+HalfGap<float(x)||lx-HalfGap>float(x+w)) {
+        list->CopyTextureRegion(&to,UINT(x),UINT(y),0,&from,nullptr);
+        return;
+    }
+    const int g0=std::clamp(int(lx-HalfGap)-x,0,w),g1=std::clamp(int(lx+HalfGap)-x,0,w);
+    if(g0>0){const D3D12_BOX box{0,0,0,UINT(g0),UINT(h),1};list->CopyTextureRegion(&to,UINT(x),UINT(y),0,&from,&box);}
+    if(g1<w){const D3D12_BOX box{UINT(g1),0,0,UINT(w),UINT(h),1};list->CopyTextureRegion(&to,UINT(x+g1),UINT(y),0,&from,&box);}
+}
 struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp[stashtabhovers::Count]{};bool tried=false;} tabHoversUpload;
 // The inventory cells an item passes through on its way in or out of the collection: drawn
 // empty over the UI image while it does (owner 2026-11-21: the item flashed there). Packed
@@ -2893,6 +2909,7 @@ void MenuPointer(const menus::Pad& controls) {
                     if(x>=float(stashtabhovers::Left[i])&&x<float(stashtabhovers::Left[i]+stashtabhovers::Width[i])){over=i;break;}
         }
         collectionBarHover.store(over);
+    laserImageX.store(aimTracked&&pointerHit?hit.u*2244.f:NAN);laserImageY.store(aimTracked&&pointerHit?hit.v*2352.f:NAN);
     }
     {   // diagnostic: where the stash surface sits, to centre the window
         static ULONGLONG reportAt=0;const auto now=GetTickCount64();
@@ -3245,9 +3262,14 @@ void MenuPointer(const menus::Pad& controls) {
     // where nothing is pointed at. The game's click stays withheld either way (onButton).
     // On the Collection tab of the bar the game's cursor rests on the title too, so no tab of the
     // game's keeps its hover beside the mod's (owner 2026-11-22: Shared and Collection both lit).
+    // With an item in the hand the cursor follows the laser there instead: the item is drawn where
+    // it is pointed (owner 2026-11-22: it jumped onto Runes). The title "Stash" is at 702,88 of the
+    // 2244 x 2352 image - off every tab (830,138 was over Runes, which kept its hover).
     if(active&&onCollectionTab&&!overCollectionPage&&!dropOwns&&!handClicking) {
-        RECT client{};math::Vec native{.370f,.059f,0};
-        if(GetClientRect(gameWindow,&client)&&journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},.370f,.059f,uiWidth,uiHeight,native)) {
+        const bool holding=gamestate::CursorItemHeld();
+        const float u=holding?hit.u:.313f,v=holding?hit.v:.037f;
+        RECT client{};math::Vec native{u,v,0};
+        if(GetClientRect(gameWindow,&client)&&journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},u,v,uiWidth,uiHeight,native)) {
             POINT pixel{LONG(native.x*(client.right-1)),LONG(native.y*(client.bottom-1))};
             if(ClientToScreen(gameWindow,&pixel))SetCursorPos(pixel.x,pixel.y);
         }
@@ -3256,7 +3278,7 @@ void MenuPointer(const menus::Pad& controls) {
         RECT client{};
         if(GetClientRect(gameWindow,&client)) {
             const bool holding=gamestate::CursorItemHeld();
-            const float u=holding?hit.u:.370f,v=holding?hit.v:.059f;   // the title "Stash": 830,138 of the 2244 x 2352 image
+            const float u=holding?hit.u:.313f,v=holding?hit.v:.037f;   // the title "Stash": 702,88 of the 2244 x 2352 image
             math::Vec native{u,v,0};
             if(journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},u,v,uiWidth,uiHeight,native)) {
                 POINT pixel{LONG(native.x*(client.right-1)),LONG(native.y*(client.bottom-1))};
@@ -8118,7 +8140,7 @@ bool CopyCollectionIntoUi(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,u
     }
     if(t.upload&&w==uint32_t(collection::art::ShotWidth)&&h==uint32_t(collection::art::ShotHeight)) {
         D3D12_TEXTURE_COPY_LOCATION tabsFrom{};tabsFrom.pResource=t.upload.Get();tabsFrom.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;tabsFrom.PlacedFootprint=t.footprint;
-        list->CopyTextureRegion(&to,UINT(collection::art::TabsX),UINT(collection::art::TabsY),0,&tabsFrom,nullptr);
+        CopyAroundHeld(list,to,collection::art::TabsX,collection::art::TabsY,tabsFrom,collection::art::TabsWidth,collection::art::TabsHeight);
         auto& hv=tabHoversUpload;
         if(!hv.tried) {
             hv.tried=true;
@@ -8148,7 +8170,7 @@ bool CopyCollectionIntoUi(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,u
         }
         if(const int over=collectionBarHover.load();hv.upload&&over>=0&&over<stashtabhovers::Count) {
             D3D12_TEXTURE_COPY_LOCATION hoverFrom{};hoverFrom.pResource=hv.upload.Get();hoverFrom.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;hoverFrom.PlacedFootprint=hv.fp[over];
-            list->CopyTextureRegion(&to,UINT(stashtabhovers::Left[over]),UINT(stashtabhovers::Y),0,&hoverFrom,nullptr);
+            CopyAroundHeld(list,to,stashtabhovers::Left[over],stashtabhovers::Y,hoverFrom,stashtabhovers::Width[over],stashtabhovers::Height);
         }
     } else {
         static bool told=false;
@@ -8528,7 +8550,7 @@ void CopyTabHoverArt(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,uint32
     list->ResourceBarrier(1,&b);
     D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=dest;to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;to.SubresourceIndex=0;
     D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=upload.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;from.PlacedFootprint=fp;
-    list->CopyTextureRegion(&to,UINT(cx+X),UINT(cy+Y),0,&from,nullptr);
+    CopyAroundHeld(list,to,cx+X,cy+Y,from,Width,Height);
     std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
     list->ResourceBarrier(1,&b);
 }

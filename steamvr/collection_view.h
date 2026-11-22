@@ -26,6 +26,9 @@ struct Entry {
     std::string stats;          // the tooltip's stat lines with their ranges, '|' between them (from the game's tables)
     uint32_t    nameId   = 0;   // a runeword's name string id (the item's prefixIds[0]); 0 otherwise or in an older catalog
     uint32_t    hands    = 0;   // a weapon's base: 1 one-handed, 2 two-handed (weapons.txt 2handed); 0 not a weapon / unknown
+    // A set piece's set bonuses, '|' between lines, each "<when>:<text>": "i2".."i6" its own with that
+    // many pieces, "s2".."s5" the set's, "sF" the whole set's (prepare_collection.py). Empty otherwise.
+    std::string bonus;
 };
 
 // The item-type tile an entry belongs on: by its type, a weapon by how it is held.
@@ -567,10 +570,10 @@ inline uint32_t Library::CodeOf(std::string_view text) {
 
 inline bool Library::LoadLine(std::string_view line) {
     if (line.empty() || line[0] == '#') return true;   // a comment, not a data line
-    std::string_view field[11];
+    std::string_view field[12];
     int              count = 0;
     std::size_t      at    = 0;
-    while (count < 11) {
+    while (count < 12) {
         const std::size_t tab = line.find('\t', at);
         field[count++] = line.substr(at, tab == std::string_view::npos ? std::string_view::npos : tab - at);
         if (tab == std::string_view::npos) break;
@@ -585,7 +588,8 @@ inline bool Library::LoadLine(std::string_view line) {
                         count > 7 ? std::string(field[7]) : std::string(),
                         count > 8 ? std::string(field[8]) : std::string(),
                         count > 9 ? detail::ParseU32(field[9]) : 0u,
-                        count > 10 ? detail::ParseU32(field[10]) : 0u});
+                        count > 10 ? detail::ParseU32(field[10]) : 0u,
+                        count > 11 ? std::string(field[11]) : std::string()});
     return true;
 }
 

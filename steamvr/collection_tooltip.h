@@ -61,7 +61,14 @@ struct Tooltip {
 // (empty until it arrives, or when the provider is unavailable); rangeText is the
 // same item's possible ranges (only a found item has both). extra is carried into
 // the subtitle/body for the catalog's own detail (a set's name, a runeword's runes).
-Tooltip BuildTooltip(const Entry& entry, bool found, std::string_view gameText, std::string_view rangeText = {});
+// setPieces / setTotal: a set piece's set, the pieces the collection holds of how many - the set
+// bonuses that many bring are added, green.
+Tooltip BuildTooltip(const Entry& entry, bool found, std::string_view gameText, std::string_view rangeText = {},
+                     int setPieces = 0, int setTotal = 0);
+// A Sets tile's tooltip: the set's own bonuses, all of them, whatever is held (owner 2026-11-22).
+Tooltip SetTooltip(const std::string& setName, const std::string& bonus, int pieces, int total);
+// Line marks DrawTooltip reads: a set bonus (green), a made runeword's runes (grey label, rune colour).
+inline constexpr char kSetBonusMark = '\x02', kRunesMark = '\x03';
 
 // A tooltip rectangle in canvas space, placed beside the slot it belongs to and
 // kept inside the canvas. Prefers the right of the slot, then the left; drops

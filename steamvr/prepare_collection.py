@@ -307,6 +307,38 @@ def build(read, strings=None, skill_names=None, names=None):
         })
     catalog['uniques'] = sort_entries(copy_uniques(entries))
 
+    # The set bonuses (owner 2026-11-22): a piece's own green lines with 2, 3 ... pieces worn
+    # (SetItems aprop1..5 a/b: "i2:".."i6:"), and the set's (Sets PCode2..5 a/b: "s2:".."s5:", and
+    # FCode1..8 for the whole set: "sF:"), each line its pieces' count before a colon.
+    def prop_lines(props):
+        row = {}
+        for i, (code, par, lo, hi) in enumerate(props, 1):
+            row.update({'prop%d' % i: code, 'par%d' % i: par, 'min%d' % i: lo, 'max%d' % i: hi})
+        return stat_lines(row, 'unique', tables, strings or {}) if props else []
+    try:
+        set_rows = {cell(r, 'index'): r for r in read('sets.txt')[1]}
+    except (FileNotFoundError, ValueError, KeyError):
+        set_rows = {}
+    def set_bonus(set_key):
+        row = set_rows.get(set_key)
+        if not row:
+            return []
+        out = []
+        for n in range(2, 6):
+            props = [(cell(row, 'PCode%d%s' % (n, s)), cell(row, 'PParam%d%s' % (n, s)), cell(row, 'PMin%d%s' % (n, s)),
+                      cell(row, 'PMax%d%s' % (n, s))) for s in 'ab' if cell(row, 'PCode%d%s' % (n, s))]
+            out += ['s%d:%s' % (n, line) for line in prop_lines(props)]
+        props = [(cell(row, 'FCode%d' % n), cell(row, 'FParam%d' % n), cell(row, 'FMin%d' % n), cell(row, 'FMax%d' % n))
+                 for n in range(1, 9) if cell(row, 'FCode%d' % n)]
+        return out + ['sF:%s' % line for line in prop_lines(props)]
+    def piece_bonus(row):
+        out = []
+        for n in range(1, 6):
+            props = [(cell(row, 'aprop%d%s' % (n, s)), cell(row, 'apar%d%s' % (n, s)), cell(row, 'amin%d%s' % (n, s)),
+                      cell(row, 'amax%d%s' % (n, s))) for s in 'ab' if cell(row, 'aprop%d%s' % (n, s))]
+            out += ['i%d:%s' % (n + 1, line) for line in prop_lines(props)]
+        return out
+
     _, sets = read(SET_TABLE)
     entries = []
     for row in sets:
@@ -319,6 +351,7 @@ def build(read, strings=None, skill_names=None, names=None):
             'level': required(row),
             'type': types.get(code_of(row), ''),
             'setName': shown(cell(row, 'set')),
+            'bonus': piece_bonus(row) + set_bonus(cell(row, 'set')),
             'base': base_name(code_of(row)),
             'hands': hands.get(code_of(row), 0),
             'stats': stats(row, 'set'),
@@ -386,14 +419,15 @@ def write_catalog(catalog, out_dir):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     lines = ['# collection %d' % VERSION,
-             '# category\tcode\trecordId\tname\tlevel\ttype\textra\tbase\tstats\tnameId\thands']
+             '# category\tcode\trecordId\tname\tlevel\ttype\textra\tbase\tstats\tnameId\thands\tbonus']
     for category in CATEGORIES:
         for entry in catalog[category]:
             extra = entry.get('setName', '') or (' '.join(entry.get('runes', [])) if entry.get('runes') else '')
             stat_text = '|'.join(line.replace('|', '/').replace('\t', ' ') for line in entry.get('stats', []))
             lines.append('\t'.join((category, entry['code'].strip(), str(entry['recordId']), entry['name'],
                                     str(entry['level']), entry['type'], extra, entry.get('base', ''), stat_text,
-                                    str(entry.get('nameId', 0)), str(entry.get('hands', 0)))))
+                                    str(entry.get('nameId', 0)), str(entry.get('hands', 0)),
+                                    '|'.join(line.replace('|', '/').replace('\t', ' ') for line in entry.get('bonus', [])))))
     (out_dir / 'collection.tsv').write_text('\n'.join(lines) + '\n', encoding='utf-8')
     return out_dir / 'collection.tsv'
 

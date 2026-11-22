@@ -274,12 +274,20 @@ void DrawCard(Painter& p, const panel::Rect& at, const Entry& entry, Category ca
                                  ? panel::IconKey(Category::Materials, 0, made->code)
                                  : panel::IconKey(category, entry.recordId, entry.code);
     const IconPixels* pixels = icons && !key.empty() ? icons(key) : nullptr;
+    // no art of its own in the game's dictionary (the newest charms): its base item's (owner 2026-11-22)
+    std::string baseKey;
+    if ((pixels == nullptr || pixels->rgba == nullptr) && icons && entry.code != 0 &&
+        (category == Category::Uniques || category == Category::Sets)) {
+        baseKey = panel::IconKey(Category::Materials, 0, entry.code);
+        pixels  = icons(baseKey);
+    }
+    const std::string& shown = baseKey.empty() ? key : baseKey;
     if (pixels != nullptr && pixels->rgba != nullptr) {
         const RectF fit = FitImage(area, pixels->width, pixels->height);
         if (const uint32_t facet = FacetColour(entry))
-            p.Image(fit, Tinted(key, *pixels, facet, !found).data(), pixels->width, pixels->height);
+            p.Image(fit, Tinted(shown, *pixels, facet, !found).data(), pixels->width, pixels->height);
         else if (found) p.Image(fit, pixels->rgba, pixels->width, pixels->height);
-        else            p.Image(fit, Ghost(key, *pixels).data(), pixels->width, pixels->height);
+        else            p.Image(fit, Ghost(shown, *pixels).data(), pixels->width, pixels->height);
     } else if (!entry.extra.empty()) {
         // a runeword is no item until it is made: its runes stand for the picture, and under them
         // what it can be made in, in grey (owner 2026-11-22)
@@ -348,6 +356,7 @@ bool BaseLine(const std::string& line) {
 // game's Chronicle shows them (owner 2026-11-22): the line centred in the box, each piece placed
 // at the width of the text before it.
 constexpr uint32_t RangeColor = 0x7CDDCC;   // provisional: the profile's FontColorLightTeal
+constexpr uint32_t RuneColor  = 0xC8963C;   // the runes' own orange-brown (their names on the stash's Runes tab)
 void RichLine(Painter& p, const std::string& text, float size, const RectF& box, uint32_t rgb) {
     struct Piece { size_t at, length; bool range; };
     std::vector<Piece> pieces;
@@ -386,13 +395,15 @@ void DrawTooltip(Painter& p, const panel::Rect& card, const tooltip::Tooltip& ti
     // 10% and then 20% larger than the first cut, box and text alike (owner 2026-11-22: the game's
     // own tooltips are much bigger)
     constexpr float K = 1.1f * 1.2f * 1.3f;   // +10%, +20%, +30% (owner 2026-11-22)
-    struct Line { std::string text; uint32_t rgb; float size; };
+    struct Line { std::string text; uint32_t rgb; float size; bool runes = false; };
     std::vector<Line> lines;
     lines.push_back({tip.title, NameColor(category), 16.f * K});
     // the kind of item, grey, between the name and its text (owner: Harlequin Crest - Shako)
     if (!base.empty()) lines.push_back({base, Grey, 13.f * K});
     for (const std::string& line : tip.body) {
         if (line == tip.title || (!base.empty() && line == base)) continue;   // the game's text repeats both
+        if (!line.empty() && line[0] == tooltip::kSetBonusMark) { lines.push_back({line.substr(1), SetName, 13.f * K}); continue; }
+        if (!line.empty() && line[0] == tooltip::kRunesMark) { lines.push_back({line.substr(1), RuneColor, 13.f * K, true}); continue; }
         lines.push_back({line.empty() ? " " : line, BaseLine(line) ? White : Blue, 13.f * K});
     }
     if (!tip.ranges.empty()) {
@@ -419,8 +430,19 @@ void DrawTooltip(Painter& p, const panel::Rect& card, const tooltip::Tooltip& ti
     p.FillRgb(R(tx, ty, tx + tw, ty + th), 0x000000, 215.f / 255.f);
     for (size_t i = 0; i < lines.size(); ++i) {
         const float size = FitSize(p, lines[i].text, Plain, lines[i].size * s, 9.f * K * s, Md(tw - 12 * K * s));
-        RichLine(p, lines[i].text, Md(size), R(tx + 4 * K * s, ty + 7 * K * s + float(i) * step, tx + tw - 4 * K * s, ty + 7 * K * s + float(i + 1) * step),
-                 lines[i].rgb);
+        const RectF box = R(tx + 4 * K * s, ty + 7 * K * s + float(i) * step, tx + tw - 4 * K * s, ty + 7 * K * s + float(i + 1) * step);
+        if (lines[i].runes && lines[i].text.rfind("Runes: ", 0) == 0) {
+            // "Runes:" grey, the runes in their own colour (owner 2026-11-22), the line centred
+            const std::string lead = "Runes: ", names = lines[i].text.substr(lead.size());
+            const auto width = [&](const std::string& t) {
+                return p.Measure(t + "|", Plain, 4096.f, false, 0, Md(size)).width - p.Measure("|", Plain, 4096.f, false, 0, Md(size)).width;
+            };
+            const float left = box.x + (box.w - width(lines[i].text)) * 0.5f;
+            p.TextRgb(lead, Plain, Md(size), {left, box.y, box.w, box.h}, Grey, Align::Leading);
+            p.TextRgb(names, Plain, Md(size), {left + width(lead), box.y, box.w, box.h}, lines[i].rgb, Align::Leading);
+        } else {
+            RichLine(p, lines[i].text, Md(size), box, lines[i].rgb);
+        }
     }
 }
 
@@ -703,8 +725,24 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
     if (view.hover.kind == panel::HitKind::Slot && carried.key.empty()) {
         if (const Entry* entry = SlotEntry(library, view, visible, view.hover.index)) {
             const bool found = SlotFound(library, view, visible, view.hover.index);
-            DrawTooltip(p, layout.slots[view.hover.index], tooltip::BuildTooltip(*entry, found, gameText, rangeText),
+            int pieces = 0, total = 0;   // a set piece: how much of its set the collection holds
+            if (entry->category == Category::Sets)
+                for (const SetInfo& set : AllSets(library))
+                    if (set.name == entry->extra) { pieces = int(set.found); total = int(set.total); break; }
+            DrawTooltip(p, layout.slots[view.hover.index], tooltip::BuildTooltip(*entry, found, gameText, rangeText, pieces, total),
                         view.category, view.category == Category::Runewords ? TypeNames(entry->base) : entry->base);
+        }
+    }
+    // A Sets tile pointed: the set's bonuses (owner 2026-11-22).
+    if (onSets && view.hover.kind == panel::HitKind::Group && carried.key.empty()) {
+        const auto sets = SetsInBand(library, view.band);
+        if (view.hover.index >= 0 && view.hover.index < int(sets.size())) {
+            const SetInfo& set = sets[size_t(view.hover.index)];
+            std::string bonus;
+            for (uint32_t slot = 0; slot < library.Size(Category::Sets) && bonus.empty(); ++slot)
+                if (const Entry* e = library.At(Category::Sets, slot); e != nullptr && e->extra == set.name) bonus = e->bonus;
+            DrawTooltip(p, layout.groups[view.hover.index],
+                        tooltip::SetTooltip(std::string(set.name), bonus, int(set.found), int(set.total)), Category::Sets, "");
         }
     }
 
