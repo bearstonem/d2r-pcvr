@@ -13,7 +13,7 @@ inline std::atomic<uint32_t> canvasWidth{0},canvasHeight{0};
 inline float ViewAnchor(uint32_t width,uint32_t height,float native) {
     if(width<640||height<480)return native;
     const float band=std::min(float(height),float(width)*9.f/16.f);
-    return std::min(.95f,.42f*float(height)/band);
+    return std::min(.95f,.44f*float(height)/band);
 }
 // Both children are unconditionally dereferenced, even when the timer expires.
 inline bool CanUpdate(bool readable,uintptr_t name,uintptr_t terror) {

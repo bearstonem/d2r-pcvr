@@ -13,7 +13,7 @@ int main(){
     // The same visible baseline on widescreen, square and portrait eye sources.
     for(auto size:{std::pair{1920u,1080u},std::pair{1536u,1536u},std::pair{2000u,2200u}}){
         const float band=std::min(float(size.second),float(size.first)*9.f/16.f);
-        Check(std::abs(ViewAnchor(size.first,size.second,.4f)*band/size.second-.42f)<.0001f);
+        Check(std::abs(ViewAnchor(size.first,size.second,.4f)*band/size.second-.44f)<.0001f);
     }
     Check(ViewAnchor(0,0,.4f)==.4f);
     char text[544]{};TerrorInfo info{85,1,{},2};
