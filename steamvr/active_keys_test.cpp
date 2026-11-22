@@ -27,6 +27,20 @@ void Correctness() {
     active.Remove(collision);assert(!active.MaybeContains(first));
     active.Add(first);assert(active.MaybeContains(first));active.Remove(first);
 
+    // HUD scissors can move from map to chat on the same list while another
+    // list in the bucket also draws a map. Resetting either drops just its ref.
+    active.Update(first,false,false);
+    active.Update(first,false,true);
+    active.Update(first,true,true);
+    active.Update(collision,false,true);
+    active.Update(first,true,false);
+    assert(active.MaybeContains(collision));
+    active.Update(collision,true,false);
+    assert(!active.MaybeContains(first));
+    active.Update(first,false,true);
+    assert(active.MaybeContains(first));
+    active.Update(first,true,false);
+
     // Registry mutations are serialized. Readers can skip negative entries
     // without acquiring that mutex; a published live key must never be missed.
     framevr::NativeMutex mutex;std::vector<std::thread> workers;
