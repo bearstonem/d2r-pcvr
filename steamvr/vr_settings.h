@@ -124,7 +124,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Desktop shows one eye", "Monitor shows the left eye only; one extra GPU copy per frame", L"render",L"desktop_one_eye",1,0,1,1},
     // 0 Isometric, 1 Top-down (the corner map, as before); 2 Full map, 3 Full top-down: the game's full map, zoomed from its widest (wrist_full_map.h)
     {"Map view", "The minimap Isometric or Top-down, or the game's full map", L"interactions",L"map_top_down",0,0,3,1},
-    {"Rotate map", "Top-down only: keep your facing direction at the top", L"interactions",L"map_rotate",0,0,1,1},
+    {"Rotate map", "Top-down wrist and HUD maps only: keep your facing direction at the top", L"interactions",L"map_rotate",0,0,1,1},
     {"Foveation strength", "Higher levels shade a larger edge area more coarsely", L"render",L"foveation_strength",1,0,3,1},
     {"Stereo rendering", "Both eyes: each frame twice; By turns: one eye a frame", L"stereo",L"rendering",1,0,1,1},
     {"Defer GPU wait", "Start the next frame while the GPU finishes the last", L"render",L"defer_gpu_wait",0,0,1,1},
@@ -324,7 +324,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Controller menu size", "Size of the stick-click menus on both hands; 100% is the original size", L"interactions",L"controller_menu_size",100,50,200,5},
     {"Ally health bars", "Party and owned mercenary: Off, Wrist, Overhead, or Both", L"interactions",L"ally_health_bars",3,0,3,1},
     {"Detached map", "Where the map goes when released away from the wrist",L"interactions",L"detached_map_placement",0,0,1,1},
-    {"Ground map size", "Diameter of the minimap at your feet", L"interactions",L"ground_map_size",100,50,200,5},
+    {"Floor map width", "Diameter of the minimap at your feet", L"interactions",L"ground_map_size",100,50,200,5},
     {"Ground map distance", "Distance ahead to the centre of the floor map",L"interactions",L"ground_map_distance_cm",250,150,400,10},
 }};
 using Values=std::array<float,Count>;

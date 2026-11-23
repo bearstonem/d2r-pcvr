@@ -111,7 +111,7 @@ static const GoldenRow Golden[]={
     {"hud.tooltip_timing",View::Menus,0,content::RowKind::Choice,"Item details delay",3,0},
     {"interactions.controller_menu_size",View::Menus,1,content::RowKind::Slider,"Controller menu size",0,0},
     {"interactions.detached_map_placement",View::Menus,1,content::RowKind::Choice,"Detached map",2,0},
-    {"interactions.ground_map_size",View::Menus,1,content::RowKind::Slider,"Ground map size",0,0},
+    {"interactions.ground_map_size",View::Menus,1,content::RowKind::Slider,"Floor map width",0,0},
     {"interactions.ground_map_distance_cm",View::Menus,1,content::RowKind::Slider,"Ground map distance",0,0},
     {"hud.labels_size",View::Labels,0,content::RowKind::Slider,"Loot name size",0,0},
     {"interactions.loot_pick",View::Labels,0,content::RowKind::Toggle,"Loot pick",0,0},   // #257: Loot pick, Off / On

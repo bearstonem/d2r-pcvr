@@ -7485,7 +7485,7 @@ bool CopyMap(reshade::api::command_queue* rq) {
     }
     if(!mapBlit.Render(device.Get(),e.commands.Get(),src,e.images[e.index].texture,true,true,flags,float(wristHeading.bearing),1.f,
                        fullMap?1.f:std::min(mapZoom.Zoom(),mapzoom::Max),span,search.reach,search.right,search.down,nullptr,
-                       own?mapCopyTop:0,back,frame,floatmap::Grounded()?mapGroundTop:0,groundBearing)) {
+                       own?mapCopyTop:0,back,frame,floatmap::Grounded()?mapGroundTop:0,groundBearing,fullMap?fullmap::Span(w,h,true,topDown,mapZoom.Zoom(),drawnZoom):0.f)) {
         e.commands->Close();return false;
     }
     if(FAILED(e.commands->Close()))return false;
