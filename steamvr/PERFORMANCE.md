@@ -28,8 +28,8 @@ A Windows CPU fixture replayed both barrier callbacks with four tracked
 depth resources. Every eighth four-resource batch contained a depth
 transition. Out of 256 batches, the old callback took the mutex 256 times and
 the new callback took it 84 times, including hash collisions. Both selected
-the same depth resource and state after each batch. The headset log does not
-count barrier batches or time this callback individually.
+the same depth resource and state after each batch. The original headset log
+did not count barrier batches or time this callback individually.
 
 The follow-up headset run was slower. Both runs used an offline Paladin in
 the Players 7 Rocky Waste with 3072 × 3072 eyes, SteamVR/OpenXR 2.18.4 and
@@ -46,8 +46,7 @@ ten-second intervals within the area. Stage times are weighted by pair count.
 
 One interval in the new run included the exit menu. Excluding it gives
 34.1 native pairs per second over 4,100 pairs. The runs used different live
-encounters, so the contribution of the depth filter remains unmeasured in
-the headset.
+encounters. Those two runs alone could not isolate the depth filter.
 
 The last complete town interval before the Rocky Waste measured 16.75 ms for
 both eyes on the previous build and 16.53 ms with the filter. The field routes
@@ -67,6 +66,31 @@ depth-view lookup. Each block's first four pairs allow the pipeline to settle.
 averaging one sample per 64.5 batches. The reported callback time includes
 lock waits and clock overhead. Use complete four-block groups inside one area
 with menus closed, and compare the two modes within each group.
+
+On November 23 the same offline Paladin ran this comparison in the Players 7
+Rocky Waste. With menus and transitions excluded, 74 complete four-block
+groups provided 4,144 native stereo pairs per mode.
+
+| Within the same encounter | Always lock | Filter enabled |
+| --- | ---: | ---: |
+| Samples taking the lock | 100% | 12.6% |
+| Mean sampled callback time, ns | 206 | 115 |
+| Mean time for both eyes, ms | 19.07 | 19.31 |
+| Mean full stereo cycle, ms | 23.53 | 23.79 |
+| Native stereo pairs per second | 42.51 | 42.03 |
+
+The filter saved about 0.019 ms of estimated recording-thread time per
+pair, summed across threads. It produced a shorter full cycle in 36 of
+74 groups. The median paired cycle difference was 0.07 ms slower, with the
+middle half of groups ranging from 0.95 ms faster to 1.26 ms slower. This
+run shows cheaper barrier callbacks and no consistent frame-rate gain. It
+did not reproduce the earlier 3.57 ms increase in eye time.
+
+The draw thread used a median 98% of one core over 21 complete field
+intervals. The mod's skeleton pose hook averaged 35,798 calls and 81,961
+guarded reads per second over 20 complete intervals. Its time summed
+across threads averaged 170 ms per second. The share of that work that
+holds up the draw thread remains to be measured.
 
 ## Frame generation's wait, November 10
 
