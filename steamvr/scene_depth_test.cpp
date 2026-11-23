@@ -1,4 +1,5 @@
 #include "scene_depth.h"
+#include "depth_barrier_compare.h"
 #include <cassert>
 #include <cstdio>
 using namespace framevr::scenedepth;
@@ -47,6 +48,13 @@ static void BarrierBatches() {
     }
 }
 int main(){
+    compare::Block block;
+    for(unsigned i=0;i<8;++i) {
+        assert(block.index==i && block.Filtered()==(i%4==1||i%4==2));
+        for(unsigned j=0;j<32;++j)block.Pair(j<4?500:25,j<4?400:20);
+        assert(block.pairs==32 && block.cycleMs==28*25 && block.eyesMs==28*20);
+        block.Next();
+    }
     BarrierBatches();
     Candidates scene;
     auto bind=[&](uintptr_t device,uint64_t resource,uint32_t w,uint32_t h,int n=1){

@@ -49,6 +49,25 @@ One interval in the new run included the exit menu. Excluding it gives
 encounters, so the contribution of the depth filter remains unmeasured in
 the headset.
 
+The last complete town interval before the Rocky Waste measured 16.75 ms for
+both eyes on the previous build and 16.53 ms with the filter. The field routes
+differed. Of 480 camera samples in the new run's menu-free timing windows,
+11% had a sample in the earlier run within 10 game units and 15 degrees of
+horizontal view direction. With menus excluded, the two eye passes took
+3.57 ms longer. The logged effects and Present portions together accounted
+for 0.03 ms of that difference.
+
+To measure the filter within one encounter, configure a diagnostic build
+with `-DD2RVR_COMPARE_DEPTH_BARRIERS=ON` (default off). The two-eye renderer
+alternates blocks of 32 native pairs in always-lock, filtered, filtered,
+always-lock order. Both modes maintain the same depth table and use the same
+depth-view lookup. Each block's first four pairs allow the pipeline to settle.
+`Frame depth compare` reports the mean cycle and eye time for the remaining
+28 pairs and samples recording-thread callbacks at randomized intervals
+averaging one sample per 64.5 batches. The reported callback time includes
+lock waits and clock overhead. Use complete four-block groups inside one area
+with menus closed, and compare the two modes within each group.
+
 ## Frame generation's wait, November 10
 
 **On for every install since the headset run of November 11**: no key in the
