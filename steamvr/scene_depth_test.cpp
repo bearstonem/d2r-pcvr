@@ -39,8 +39,8 @@ static void BarrierBatches() {
 
     // Overflow must not publish an extra reference for a handle the table cannot retain.
     scene.Destroy(1);
-    for (uint64_t i=0;i<33;++i) scene.Bind(1,depth.handle+i*16,512,512,true);
-    scene.Destroy(1);
+    for (uint64_t i=0;i<33;++i) scene.Bind(1+i%2,depth.handle+i*16,512,512,true);
+    scene.Clear();
     for (uint64_t i=0;i<33;++i) {
         const resource released{depth.handle+i*16};
         assert(!scene.MayTransition(1,&released));

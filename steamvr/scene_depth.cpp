@@ -150,5 +150,5 @@ void Register(void (*log)(const char*)) {
     reshade::register_event<reshade::addon_event::destroy_effect_runtime>(&d2rvr::D3D12Only<&RuntimeDestroyed>::Call);
     reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(&d2rvr::D3D12Only<&Reloaded>::Call);
 }
-void Shutdown(){std::lock_guard lock(mutex);OwnScope scope;enabled=false;latest={};lastPick={};Release();candidates={};}
+void Shutdown(){std::lock_guard lock(mutex);OwnScope scope;enabled=false;latest={};lastPick={};Release();candidates.Clear();}
 }

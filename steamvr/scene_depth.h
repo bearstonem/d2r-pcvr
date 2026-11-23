@@ -46,6 +46,9 @@ public:
     void Destroy(uintptr_t device,uint64_t resource=0) {
         for(auto& e:entries)if(e.resource&&e.device==device&&(!resource||e.resource==resource))Erase(e);
     }
+    void Clear() {
+        for(auto& e:entries)if(e.resource)Erase(e);
+    }
     void EndEye(uintptr_t device) {
         for(auto& e:entries)if(e.resource&&e.device==device) {if(!e.binds)Erase(e);else e.binds=0;}
     }
