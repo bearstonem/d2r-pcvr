@@ -128,6 +128,27 @@ int main(){
     Check(panels::ItemCursorSnap(false,true,true)&&panels::ItemCursorSnap(true,false,true),"desktop and unrelated cursor queries remain native");
     Check(panels::CursorBoundsCaller(0x7f4b2)&&panels::CursorBoundsCaller(0x14fb2a),
         "native height and tail-called width clamp use full-source bounds");
+    {
+        Check(!panels::MonsterClipCaller(0x846239),"ordinary UI keeps its widescreen bounds");
+        {
+            panels::MonsterPlateScope desktop(false);
+            Check(!panels::MonsterClipCaller(0x846239),"desktop monster drawing remains native");
+        }
+        {
+            panels::MonsterPlateScope stereo(true);
+            Check(panels::MonsterClipCaller(0x846239),"VR health fill uses full-eye clipping bounds");
+            for(auto caller:panels::UiCanvasReturns)if(caller!=0x846239)
+                Check(!panels::MonsterClipCaller(caller),"health draw does not change font/layout sizing");
+            for(unsigned height:{1536u,3072u}) {
+                const resolution::Size eye{height,height},band=resolution::UiCanvas(eye);
+                const unsigned barTop=height*3/4,barBottom=barTop+16;
+                const auto bounds=panels::MonsterClipCaller(0x846239)?eye:band;
+                Check(barTop>band.h&&barBottom<bounds.h,"red fill below old menu-band boundary remains unclipped");
+            }
+            {panels::MonsterPlateScope nested(false);Check(panels::MonsterClipCaller(0x846239),"nested draw preserves scope");}
+        }
+        Check(!panels::MonsterClipCaller(0x846239),"following menu draw restores original bounds");
+    }
     for(auto address:panels::CursorConversionReturns)
         Check(panels::CursorBoundsCaller(address)&&!panels::UiCanvasCaller(address),
             "the cursor's window/game conversions use full-source bounds, never the UI band (X stopped at 2100 of 3072)");

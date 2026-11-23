@@ -20,6 +20,7 @@
 
 #include "d2rcam.h"
 #include "../../steamvr/profile.h"
+#include "../../steamvr/panel_input_mode.h"
 
 #include "../drawdist/drawdist.h"
 #include "game_layout.h"
@@ -589,6 +590,7 @@ void __fastcall DrawMonsterHealth(void* widget) {
         if(framevr::ReadMemory(&visible,static_cast<uint8_t*>(widget)+0x51,sizeof visible)&&visible)CountPanelSkipped();
         return;
     }
+    const framevr::panels::MonsterPlateScope clip(StereoUiPass());
     g_drawMonsterHealth(widget);
 }
 void __fastcall DrawPanelManager(void* widget) {
@@ -618,6 +620,7 @@ void __fastcall DrawPanelManager(void* widget) {
                     "Frame label paint: eye %d health panel %p after current-eye tooltip updates",t_stereoUiEye,reinterpret_cast<void*>(address));
                 framevr::logging::Write(line);
             }
+            const framevr::panels::MonsterPlateScope clip(StereoUiPass());
             g_drawMonsterHealth(reinterpret_cast<void*>(address));
         }
     });
