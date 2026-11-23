@@ -5271,7 +5271,7 @@ bool HandOffUnit(const aimtargets::Cast& c) {
         g_note.unit="none (last hand-off dropped)";
     return false;
 }
-// Teleport, Leap and Leap Attack grip aim bypasses general spell-lock options. Both the
+// Supported movement skills use explicit grip aim before general spell-lock rules. Both the
 // preview and command use this raw tracked pointer, never staff/arm/gaze fallback.
 bool TeleportGripPoint(float playerX,float playerY,float& x,float& y) {
     namespace ga=framevr::gripaim;
