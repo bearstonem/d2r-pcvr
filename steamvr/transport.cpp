@@ -2952,22 +2952,22 @@ void MenuPointer(const menus::Pad& controls) {
     // The multiplayer panel's keyboard: up while one of its boxes has the game's focus (the game window's
     // input method on, panels::TextKeyboardUp; owner 2026-11-17: "keyboard is always up anyway"), or with the
     // panel while the game has said nothing of it this session.
-    keyboardShown=keyboardArtReady&&uiActive&&!journalMode&&!leatherMode&&gamestate::KeyboardShown()&&!keyboardClosed&&
+    // The gold pad (owner 2026-11-22): while the game's box for an amount of gold is up. Decided before
+    // the change check, or the check reset the pad's press every frame and no key took (2026-11-23).
+    const bool goldWas=keyboardGold;
+    keyboardGold=keyboardArtReady&&uiActive&&!journalMode&&gamestate::GoldBoxShown();
+    if(keyboardGold!=goldWas)Say(keyboardGold?"Frame panels: gold pad shown (the game's gold box is up)":"Frame panels: gold pad hidden");
+    keyboardShown=keyboardGold||(keyboardArtReady&&uiActive&&!journalMode&&!leatherMode&&gamestate::KeyboardShown()&&!keyboardClosed&&
         (!campfirePointer.load()||campfireKeyboardOpen||keyboardText)&&
-        (!keyboardText||field>=0||(field==-2&&panels::TextFocus(panelinput::TextFocusState())==panels::TextFocus::On));
-    if(keyboardShown!=keyboardWas||(keyboardShown&&keyboardText!=keyboardTextWas)) {
+        (!keyboardText||field>=0||(field==-2&&panels::TextFocus(panelinput::TextFocusState())==panels::TextFocus::On)));
+    if(keyboardGold!=goldWas){keyboardTypist.Reset();keyboardPress.Reset();}
+    else if(!keyboardGold&&(keyboardShown!=keyboardWas||(keyboardShown&&keyboardText!=keyboardTextWas))) {
         keyboardTypist.Reset();keyboardPress.Reset();
         Say(!keyboardShown?"Frame panels: VR keyboard hidden":
             !keyboardText?"Frame panels: VR keyboard shown (the name box is up)":
             panels::TextFocus(panelinput::TextFocusState())==panels::TextFocus::On?"Frame panels: VR keyboard shown (a multiplayer box has the focus, with digits)":
                                                                                    "Frame panels: VR keyboard shown (the multiplayer panel, with digits; the game has not said which box has the focus)");
     }
-    // The gold pad (owner 2026-11-22): while the game's box for an amount of gold is up.
-    const bool goldWas=keyboardGold;
-    keyboardGold=keyboardArtReady&&uiActive&&!journalMode&&gamestate::GoldBoxShown();
-    if(keyboardGold)keyboardShown=true;
-    if(keyboardGold!=goldWas){keyboardTypist.Reset();keyboardPress.Reset();
-        Say(keyboardGold?"Frame panels: gold pad shown (the game's gold box is up)":"Frame panels: gold pad hidden");}
     bool onKeyboard=false;keyboardLit=-1;
     if(keyboardShown&&aimTracked&&!(mouseDown||rightMouseDown)) {
         const auto board=KeyboardBoard(surfacePose,surface);
