@@ -295,7 +295,7 @@ inline constexpr ContentSection SectionTable[]={
     {View::Shield,"Bash and block"},{View::Shield,"Fit on the arm"},
     {View::Monsters,"Offline difficulty"},{View::Monsters,"Mercenary"},{View::Monsters,"Summons"},
     {View::Physics,"Props"},{View::Physics,"Monsters and townsfolk"},{View::Physics,"Struck monsters"},
-    {View::Moving,"Turning"},{View::Moving,"Speed"},
+    {View::Moving,"Turning"},{View::Moving,"Speed"},{View::Moving,"Teleport aiming"},
     {View::Body,"Play space"},{View::Body,"Potion belt"},
     {View::Hands,"Hands and buttons"},
     {View::Vibration,"Strength"},
@@ -325,6 +325,9 @@ inline constexpr Option SpellLockSpellsOnly[]={
     {0,"Off","Spells fly along your casting hand."},
     {1,"On","Spells go to the monster you aim at."},
 };
+inline constexpr Option GripAimOptions[]={
+    {0,"Off","No grip aiming marker"},{1,"Left","Left grip only"},
+    {2,"Right","Right grip only"},{3,"Both","Each grip shows its target"}};
 inline constexpr Option AimAssistOptions[]={
     {0,"Off","Spells fly exactly where your hand aims."},
     {1,"Light","A launch within 4\xc2\xb0 of a monster turns toward it."},
@@ -601,6 +604,9 @@ inline constexpr Override Overrides[]={
      .help="Walk, or run from Base run (your class's run, no speed bonus) up to Full run (default: your gear's and skills' speed). Movement skills keep their own speed.",
      FRAMEVR_NAMES(RunSpeedNames)},
     // Body: Play space
+    {.id="gameplay.grip_aim_indicator",.page=View::Moving,.section="Teleport aiming",.kind=RowKind::Choice,.label="Grip aim indicator",
+     .help="Hold a grip to preview the aimed floor destination. Uses teleport range; blocked terrain can prevent landing.",
+     FRAMEVR_OPTIONS(GripAimOptions)},
     {.id="interactions.seated",.page=View::Body,.section="Play space",.kind=RowKind::Toggle,.label="Seated play",
      .help="Raises the potion belt so you can reach it sitting down. Your body measurements still come from standing."},
     // Room follows you (room_steps.h; Discord, 2026-11-04: "my character's feet stay anchored near the calibration

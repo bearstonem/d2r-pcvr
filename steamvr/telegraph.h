@@ -27,7 +27,8 @@ inline constexpr int MaxMarks=6;              // D2R_DepthFog.fx draws RingPos0.
 // command and Teleport's landing while its fist is drawn in (spell_motion.h).
 // TossMark: where an aimed throw will land (toss.h), drawn as Teleport's sigil in the thrown skill's color.
 // TossOffMark: the same for the off trigger's throw (a throwing potion in the other hand), so both can show.
-inline constexpr int CompanionMark=-2,TeleportMark=-3,TossMark=-4,TossOffMark=-5;
+inline constexpr int CompanionMark=-2,TeleportMark=-3,TossMark=-4,TossOffMark=-5,GripRightMark=-6,GripLeftMark=-7;
+inline constexpr bool GripMark(int skill){return skill==GripRightMark||skill==GripLeftMark;}
 inline constexpr bool TossSigil(int skill){return skill==TossMark||skill==TossOffMark;}
 struct Mark {
     float x=0,y=0;            // target cell

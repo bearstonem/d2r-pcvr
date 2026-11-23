@@ -109,6 +109,7 @@
 #include "../vr/companion_ai.h"
 #include "telegraph.h"
 #include "teleport_arc.h"
+#include "grip_aim.h"
 #include "tactical_chord.h"
 #include "../vr/target_lock.h" 
 #include "vr_settings_ui.h"
@@ -6518,6 +6519,13 @@ void Input() {
             walkdir::ToView(x,y,walkPointing.heading,math::Heading(Q(head.orientation)));
             walkLx=int16_t(std::clamp(x,-1.f,1.f)*32767);walkLy=int16_t(std::clamp(y,-1.f,1.f)*32767);
         }
+    }
+    {
+        unsigned bits=0;
+        const int mode=int(vrsettings::Read().values[settings::GripAimIndicator]);
+        if(interactionInput.active&&!interactionOutput.block&&!interactionOutput.wheel&&!settingsOwned)
+            for(int h=0;h<2;++h)if(gripaim::Selected(mode,h)&&handAimTracked[h]&&motionInput.grip[h]>.6f)bits|=1u<<h;
+        gripaim::held.store(bits);gripaim::updated.store(GetTickCount64());
     }
     // Whirlwind steers by this same stick (whirl_steer.h): the motions above read last frame's, vrcam's aim the newest.
     whirlStick={walkLx/32767.f,walkLy/32767.f,GetTickCount64()};

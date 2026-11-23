@@ -972,7 +972,7 @@ int main(int argc,char** argv){
     {   // Left-handed (#307, hand_role.h): Off by default, experimental, a row of its own, saved alone
         Check(Defaults()[LeftHanded]==0&&std::wstring(Definitions[LeftHanded].section)==L"interactions"&&
               std::wstring(Definitions[LeftHanded].key)==L"left_handed"&&Definitions[LeftHanded].min==0&&Definitions[LeftHanded].max==1&&
-              HelpText(LeftHanded)[0]!=0&&LeftHanded<ChangeMask::Bits&&LeftHanded+1==HeldCollisions&&ControllerMenuSize<AllyHealthBars&&AllyHealthBars==Count-1,
+              HelpText(LeftHanded)[0]!=0&&LeftHanded<ChangeMask::Bits&&LeftHanded+1==HeldCollisions&&ControllerMenuSize<AllyHealthBars&&AllyHealthBars+1==GripAimIndicator&&GripAimIndicator==Count-1,
               "Left-handed: Off by default, [interactions] left_handed Off / On, explained, its own change bit, appended after the haptics (Weapons collide after it)");
         const auto* row=content::RowOf(LeftHanded);
         Check(row&&!row->beside&&row->page==View::Hands&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Left-handed (experimental)")==0&&

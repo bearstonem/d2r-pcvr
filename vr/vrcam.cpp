@@ -45,6 +45,7 @@
 #include "../steamvr/loot_aim.h"
 #include "../steamvr/arm_pointing.h"
 #include "../steamvr/aim_reach.h"
+#include "../steamvr/grip_aim.h"
 #include "../steamvr/gaze_aim.h"
 #include "../steamvr/torch_light.h"
 #include "../steamvr/light_radius.h"
@@ -5147,11 +5148,7 @@ bool PointSpellAim(float playerX,float playerY,float& targetX,float& targetY) {
         if(c.use==framevr::aimrules::Use::Ground&&!c.bow&&g_eyeOk.load()&&HandRay(o,d,false,c.button)&&d[1]<0)how=aimtargets::SourceName(c.button);
         else if(!aimtargets::FreeAimRay(c.button,c.bow,o,d,false,&how))return false;
         AcquireSRWLockShared(&g_lookLock);memcpy(L,g_lookAt,sizeof L);ReleaseSRWLockShared(&g_lookLock);
-        if(framevr::spellaim::GroundPoint({o[0],o[1],o[2]},{d[0],d[1],d[2]},L[1],.5f,playerX,playerY,fx,fy,framevr::aimreach::CornerCells)){dx=fx-playerX;dy=fy-playerY;}
-        else {   // the ray never meets the floor: as far as the reach goes along its heading
-            if(!framevr::spellaim::Horizontal({d[0],d[1],d[2]},dx,dy))return false;
-            dx*=framevr::aimreach::CornerCells*2;dy*=framevr::aimreach::CornerCells*2;
-        }
+        if(!framevr::gripaim::Delta({o[0],o[1],o[2]},{d[0],d[1],d[2]},L[1],playerX,playerY,dx,dy))return false;
     }
     const float wanted=std::hypot(dx,dy);
     if(wanted<framevr::spellaim::GroundMinDistance&&wanted>.001f){dx*=framevr::spellaim::GroundMinDistance/wanted;dy*=framevr::spellaim::GroundMinDistance/wanted;}
@@ -11540,6 +11537,22 @@ bool OutlineWanted() {
 }
 // Landing circles (same pass): while any ground skill's circle is showing.
 bool RingWanted() {
+    {
+        namespace ga=framevr::gripaim;
+        const auto now=GetTickCount64();
+        const unsigned held=ga::Active(ga::held.load(),ga::updated.load(),now);
+        float L[3];AcquireSRWLockShared(&g_lookLock);memcpy(L,g_lookAt,sizeof L);ReleaseSRWLockShared(&g_lookLock);
+        const float px=(L[0]-L[1]*framevr::coordinates::GroundShear)*.5f;
+        const float py=(L[2]-L[1]*framevr::coordinates::GroundShear)*.5f;
+        for(int h=0;h<2;++h){
+            const int mark=h?framevr::telegraph::GripLeftMark:framevr::telegraph::GripRightMark;
+            float o[3],d[3],dx=0,dy=0;
+            if(g_enabled.load()&&g_inWorld.load()&&!gamestate::MenuOpen()&&(held&(1u<<h))&&
+               aimtargets::FreeAimRay(h,false,o,d,false)&&ga::Delta({o[0],o[1],o[2]},{d[0],d[1],d[2]},L[1],px,py,dx,dy))
+                framevr::telegraph::Current().Place(px+dx,py+dy,now,250,5,.65f,0,0,0,mark);
+            else framevr::telegraph::Current().ClearSkill(mark);
+        }
+    }
     const bool tacticalActive = companionai::IsTacticalCommandsEnabled() &&
         (companionai::GetActiveTacticalOrder().type == framevr::companionai::TacticalOrderType::MoveAndHold);
     // Teleport's landing while its fist is drawn in shows whatever the Aim options (its motion is the aim).
@@ -11547,6 +11560,8 @@ bool RingWanted() {
     const auto now = GetTickCount64();
     return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() &&
         (((AimOn(framevr::settings::LandingCircles) || tacticalActive) && framevr::telegraph::AnyOn(marks, now)) ||
+         framevr::telegraph::SkillOn(marks, framevr::telegraph::GripRightMark, now) ||
+         framevr::telegraph::SkillOn(marks, framevr::telegraph::GripLeftMark, now) ||
          framevr::telegraph::SkillOn(marks, framevr::telegraph::TeleportMark, now) ||
          framevr::telegraph::SkillOn(marks, framevr::telegraph::TossMark, now) ||   // an aimed throw's sigil too (toss.h)
          framevr::telegraph::SkillOn(marks, framevr::telegraph::TossOffMark, now));  // and the off trigger's
@@ -12810,7 +12825,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                 if (draw.on && mark.sequence != anchored[k]) { anchored[k] = mark.sequence; floorY[k] = sv[0].hero[1]; }
                 // xyz: centre relative to the hero; w: alpha (0 = not drawn)
                 const float ring[4] = {mark.x * 2.0f + floorY[k] * shear - sv[0].hero[0], floorY[k] - sv[0].hero[1],
-                                       mark.y * 2.0f + floorY[k] * shear - sv[0].hero[2], draw.on ? draw.alpha : 0.0f};
+                                       mark.y * 2.0f + floorY[k] * shear - sv[0].hero[2], draw.on ? draw.alpha * (framevr::telegraph::GripMark(mark.skill) ? .3f : 1.f) : 0.0f};
                 char n[16];
                 snprintf(n, sizeof n, "RingPos%d", k); SetFloats(rt, n, ring, 4);
                 snprintf(n, sizeof n, "RingFill%d", k); SetFloat(rt, n, draw.fill);
