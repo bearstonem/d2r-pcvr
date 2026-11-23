@@ -20,8 +20,23 @@ changes. Median CPU time across nine samples per build was:
 | Full | 1.68 | 0.51 |
 
 Both versions suppressed the same draws and selected the same chat history.
-The draw mix is synthetic. The change's effect on stereo-pair time still needs
-a matched headset run.
+
+Two headset sessions used the same offline Paladin in the Players 7 Rocky
+Waste, with SteamVR/OpenXR 2.18.4, 3072 × 3072 eyes and NVIDIA Medium frame
+generation at 50% scale. The comparison uses complete ten-second intervals
+wholly in the area. Stage times are weighted by native stereo pair count.
+
+| Rocky Waste gameplay | Before | With the HUD change |
+| --- | ---: | ---: |
+| Native pairs measured | 7,571 | 5,952 |
+| Both eye passes, ms per pair | 23.62 | 20.85 |
+| Full cycle, ms per pair | 29.08 | 25.21 |
+| Native stereo pairs per second | 34.4 | 39.7 |
+| Pairs taking at least 30 ms | 36.7% | 17.5% |
+
+The newer session also spent less time in XR end (2.05 to 1.21 ms per pair).
+The encounters varied and the headset logs time the complete eye passes.
+Only the synthetic benchmark isolates the HUD callbacks' contribution.
 
 ## Draw thread: props with weight, November 12
 
