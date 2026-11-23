@@ -5005,7 +5005,7 @@ bool TargetsOn(const Cast& c) { return framevr::aimrules::TakesTarget(c.use) && 
 bool RulesAimCast() {
     const int mode=int(vrsettings::Read().values[framevr::settings::TeleportSkillAiming]);
     if((mode==1||mode==2)&&framevr::gripaim::Active(framevr::gripaim::held.load(),framevr::gripaim::updated.load(),GetTickCount64())&&
-       framevr::NativeSkillCasting()&&aimtargets::Now().skill==54)return true;
+       framevr::NativeSkillCasting()&&framevr::gripaim::Supported(aimtargets::Now().skill))return true;
     // Every option Off: no transport reads (the attack hooks ask on every walk step too).
     return framevr::aimrules::Any(aimtargets::Options()) && framevr::NativeSkillCasting() && aimtargets::RulesOn(aimtargets::Now());
 }
@@ -5271,7 +5271,7 @@ bool HandOffUnit(const aimtargets::Cast& c) {
         g_note.unit="none (last hand-off dropped)";
     return false;
 }
-// Teleport's explicit grip aim bypasses general spell-lock options. Both the
+// Teleport, Leap and Leap Attack grip aim bypasses general spell-lock options. Both the
 // preview and command use this raw tracked pointer, never staff/arm/gaze fallback.
 bool TeleportGripPoint(float playerX,float playerY,float& x,float& y) {
     namespace ga=framevr::gripaim;
@@ -5298,7 +5298,7 @@ bool TeleportGripPoint(float playerX,float playerY,float& x,float& y) {
     x=playerX+dx;y=playerY+dy;return ga::Cell(x,y);
 }
 bool TeleportGripAim(int skill,float px,float py,framevr::spellaim::Cast& cast){
-    if(skill!=54)return false;
+    if(!framevr::gripaim::Supported(skill))return false;
     float x=0,y=0;
     if(!TeleportGripPoint(px,py,x,y))return false;
     // Native aim/command hooks execute on the game thread. Recheck here rather
@@ -5308,7 +5308,7 @@ bool TeleportGripAim(int skill,float px,float py,framevr::spellaim::Cast& cast){
 
     const int mode=int(vrsettings::Read().values[framevr::settings::TeleportSkillAiming]);
     if(!framevr::gripaim::CastAt(skill,mode,true,x,y,cast))return false;
-    g_note.by="teleport grip";g_note.distance=std::hypot(x-px,y-py);return true;
+    g_note.by="movement skill grip";g_note.distance=std::hypot(x-px,y-py);return true;
 }
 bool NativeSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast) {
     g_note={};

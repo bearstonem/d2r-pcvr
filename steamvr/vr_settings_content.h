@@ -326,8 +326,8 @@ inline constexpr Option SpellLockSpellsOnly[]={
     {1,"On","Spells go to the monster you aim at."},
 };
 inline constexpr Option GripAimOptions[]={
-    {0,"Off","Keep existing teleport behavior"},{1,"Left grip","Aim Teleport with the left grip held"},
-    {2,"Right grip","Aim Teleport with the right grip held"}};
+    {0,"Off","Keep existing skill behavior"},{1,"Left grip","Aim all three skills with the left grip held"},
+    {2,"Right grip","Aim all three skills with the right grip held"}};
 inline constexpr Option AimAssistOptions[]={
     {0,"Off","Spells fly exactly where your hand aims."},
     {1,"Light","A launch within 4\xc2\xb0 of a monster turns toward it."},
@@ -494,8 +494,8 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.throw_lift_deg",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Stepper,.label="Thrown weapon lift",
      .help="Your hand dips as you let go. This lifts javelins, knives, axes and thrown potions above that path. Minus lowers them; Off follows your hand.",
      .format={.unit=Degrees,.sign=true},FRAMEVR_NAMES(OffAtZero),.classes=Amazon|Barbarian|Assassin|WithThrown},
-    {.id="gameplay.teleport_skill_aiming",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Choice,.label="Teleport skill aiming",
-     .help="Hold the selected grip and cast Teleport to land at the marker. Off keeps existing casting. Blocked terrain can prevent landing.",
+    {.id="gameplay.teleport_skill_aiming",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Choice,.label="Teleport / Leap aiming",
+     .help="Aim Teleport, Leap and Leap Attack with the selected grip. Uses the farthest clear landing toward the marker. Off keeps existing casting.",
      FRAMEVR_OPTIONS(GripAimOptions)},
     // Targeting: Target selection
     {.id="gameplay.spell_lock",.page=View::Targeting,.section="Target selection",.kind=RowKind::Choice,.label="Skills go to the aimed monster",

@@ -33,8 +33,9 @@ inline bool Cell(float& x,float& y){
     if(!std::isfinite(x+y)||x<1||y<1||x>65534||y>65534)return false;
     x=float(int(x));y=float(int(y));return true;
 }
+inline constexpr bool Supported(int skill){return skill==54||skill==132||skill==143;} // Teleport, Leap, Leap Attack
 inline bool CastAt(int skill,int mode,bool grip,float x,float y,spellaim::Cast& cast){
-    if(skill!=54||(mode!=1&&mode!=2)||!grip||!std::isfinite(x+y))return false;
+    if(!Supported(skill)||(mode!=1&&mode!=2)||!grip||!std::isfinite(x+y))return false;
     cast={true,x,y,true};return true;
 }
 inline bool Delta(math::Vec o,math::Vec d,float floor,float px,float py,float& dx,float& dy){

@@ -323,7 +323,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Assassin charges", "Original or compact forearm charges", L"render",L"assassin_charges_visual",1,0,2,1},
     {"Controller menu size", "Size of the stick-click menus on both hands; 100% is the original size", L"interactions",L"controller_menu_size",100,50,200,5},
     {"Ally health bars", "Party and owned mercenary: Off, Wrist, Overhead, or Both", L"interactions",L"ally_health_bars",3,0,3,1},
-    {"Teleport skill aiming", "Aim Teleport at the floor with the selected grip; Off keeps existing casting", L"gameplay",L"teleport_skill_aiming",0,0,2,1},
+    {"Teleport / Leap aiming", "Aim Teleport, Leap and Leap Attack with the selected grip; Off keeps existing casting", L"gameplay",L"teleport_skill_aiming",0,0,2,1},
 }};
 using Values=std::array<float,Count>;
 // The setting holding the skill on glyph shape i (glyph_recognizer.h order): the right hand's (0), or the left's (1).

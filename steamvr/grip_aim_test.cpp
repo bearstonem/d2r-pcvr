@@ -15,11 +15,11 @@ int main(){
  assert(gripaim::Delta({0,2,0},{1,0,1},0,0,0,dx,dy));assert(std::abs(dx)<=aimreach::GameCells&&std::abs(dy)<=aimreach::GameCells);
  assert(!gripaim::Delta({0,2,0},{0,0,0},0,0,0,dx,dy));
  // Exact near/far destinations survive both native resolution and controller commands.
- for(float slope:{-1.f,-.2f}){
+ for(int skill:{54,132,143})for(float slope:{-1.f,-.2f}){
     float x=0,y=0;
     assert(gripaim::Delta({200,4,200},{0,slope,-1},0,100,100,x,y));
     spellaim::Cast cast;
-    assert(gripaim::CastAt(54,2,true,100+x,100+y,cast));
+    assert(gripaim::CastAt(skill,2,true,100+x,100+y,cast));
     float tx=0,ty=0;assert(spellaim::Resolve(cast,100,100,tx,ty));
     assert(tx==100+x&&ty==100+y);
     int ix=0,iy=0;assert(spellaim::ControllerPoint(cast,100,100,ix,iy));
@@ -27,11 +27,13 @@ int main(){
     assert(spellaim::ApplyCommand({123,ix,iy},command));assert(command.target==0&&command.x==ix&&command.y==iy);
     assert(slope== -1.f?ty>95:ty<95);
  }
+ for(int skill:{54,132,143}){
  spellaim::Cast unchanged{true,1,0,false};
- assert(!gripaim::CastAt(54,0,true,100,101,unchanged));
- assert(!gripaim::CastAt(54,1,false,100,101,unchanged));
+ assert(!gripaim::CastAt(skill,0,true,100,101,unchanged));
+ assert(!gripaim::CastAt(skill,1,false,100,101,unchanged));
  assert(!gripaim::CastAt(53,1,true,100,101,unchanged));
  assert(!unchanged.contactPoint&&unchanged.x==1&&unchanged.y==0);
+ }
  auto edge=gripaim::Backtrack(100,100,145,100,[](int x,int){return x<=120;});
  assert(edge.known&&edge.found&&edge.x==120&&edge.y==100);
  auto exact=gripaim::Backtrack(100,100,120,100,[](int,int){return true;});
