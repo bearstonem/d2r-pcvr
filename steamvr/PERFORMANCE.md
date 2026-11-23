@@ -15,6 +15,22 @@ once (`b3Body_GetContactData`, one entry) and may set its mass data, and after
 the frame's steps what the blades touch is listed (8 entries each) for freezing. No
 allocation beyond the `pressed` list, which keeps its capacity.
 
+## Scene depth on the recording threads, November 22
+
+The Rocky Waste headset log shows the private 3072 × 3072 scene depth copy
+active. While tracking depth, the plugin checked every resource barrier under
+one mutex. Recording threads now read a shared mask once per batch. They take
+the mutex only if a resource might be tracked, then verify the device and
+resource and apply transitions in order. Binding a depth view also resolves
+its resource once for both the description and the tracker.
+
+A Windows CPU fixture replayed both barrier callbacks with four tracked
+depth resources. Every eighth four-resource batch contained a depth
+transition. Out of 256 batches, the old callback took the mutex 256 times and
+the new callback took it 84 times, including hash collisions. Both selected
+the same depth resource and state after each batch. The headset log does not
+count barrier batches or time this callback individually.
+
 ## Frame generation's wait, November 10
 
 **On for every install since the headset run of November 11**: no key in the

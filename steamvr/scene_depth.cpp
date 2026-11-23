@@ -63,9 +63,10 @@ void Reloaded(effect_runtime* rt) {
     std::lock_guard lock(mutex);if(runtime==rt)bound=false;
 }
 void Barrier(command_list* cl,uint32_t count,const resource* resources,const resource_usage*,const resource_usage* after) {
-    if(own||!enabled.load(std::memory_order_relaxed))return;
+    if(own||!enabled.load(std::memory_order_relaxed)||!candidates.MayTransition(count,resources))return;
     std::lock_guard lock(mutex);
-    for(uint32_t i=0;i<count;++i)candidates.Barrier(uintptr_t(cl->get_device()),resources[i].handle,uint32_t(after[i]));
+    const auto device=uintptr_t(cl->get_device());
+    for(uint32_t i=0;i<count;++i)candidates.Barrier(device,resources[i].handle,uint32_t(after[i]));
 }
 }
 void Observe(reshade::api::command_list* cl,uint32_t count,const reshade::api::resource_view* rtvs,

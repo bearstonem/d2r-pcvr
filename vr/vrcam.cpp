@@ -11881,9 +11881,10 @@ void OnBind(command_list* cl, uint32_t count, const resource_view* rtvs, resourc
     t_dsW = t_dsH = 0;
     if (dsv.handle) {
         device* dev = cl->get_device();
-        const resource_desc d = framevr::resources::Describe(dev,framevr::resources::Resolve(dev,dsv));
+        const resource depth = framevr::resources::Resolve(dev,dsv);
+        const resource_desc d = framevr::resources::Describe(dev,depth);
 #ifdef D2RVR_NATIVE_OPENXR
-        framevr::scenedepth::Observe(cl,count,rtvs,framevr::resources::Resolve(dev,dsv),d);
+        framevr::scenedepth::Observe(cl,count,rtvs,depth,d);
 #endif
         t_dsW = d.texture.width; t_dsH = d.texture.height;
     }
