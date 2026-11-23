@@ -412,7 +412,7 @@ struct Settings {
     std::atomic<float> campfireSnowChance{0.3f}, campfireSnowDensity{0.25f};
     std::atomic<float> campfireSnowTurn{40.0f};   // snow_turn: after this many seconds in the scene the snow begins or ends (0: never)
     std::atomic<bool>  campfirePano{false};      // [campfire] panorama: one picture round the scene (pano_file), in the void
-    std::atomic<float> campfirePanoYaw{0.0f}, campfirePanoLow{-90.0f}, campfirePanoHigh{90.0f}, campfirePanoBright{1.0f};   // [campfire] pano_yaw/low/high/brightness
+    std::atomic<float> campfirePanoYaw{0.0f}, campfirePanoLow{-60.0f}, campfirePanoHigh{90.0f}, campfirePanoBright{1.0f};   // [campfire] pano_yaw/low/high/brightness
     std::atomic<float> campfireMenuTop{0.78f};  // [campfire] menu_top: where the strip begins, a share of the game's menu band from its top
     std::atomic<float> campfirePickDist{22.0f};// [campfire] pick_distance: how far along the hand's ray the pointer is put, world units
     // [frontend] enabled: the main menu's act scenes (character select, biome act*_frontend_biome; one preset,
@@ -1856,12 +1856,13 @@ void LoadSettings() {
         g_set.campfireLogsRadius.store(std::clamp(IniF(L"campfire", L"fire_logs_radius", 0.0f), 0.0f, 10.0f));
         g_set.campfireLogsHeight.store(std::clamp(IniF(L"campfire", L"fire_logs_height", 1.5f), 0.0f, 10.0f));
         g_set.campfirePanoYaw.store(std::clamp(IniF(L"campfire", L"pano_yaw", 0.0f), -360.0f, 360.0f));
-        {   // The campfire's panorama from photographs (#568) lies -90..90; the earlier template shipped -60 / 120 for the
-            // old picture, and an update keeps a player's saved ini - so exactly that old pair is read as the new one,
-            // and every updated install shows the panorama at its height with no setting to change. Any other pair is
-            // the player's own and is kept.
-            float low = IniF(L"campfire", L"pano_low", -90.0f), high = IniF(L"campfire", L"pano_high", 90.0f);
-            if (low == -60.0f && high == 120.0f) { low = -90.0f; high = 90.0f; }
+        {   // The campfire's panorama: its peaks stand round the picture's middle row, which -60 / 90 lifts to about
+            // 15 degrees over the horizon, over the scene's walls (owner 2026-11-23: at -90 / 90, the 1.0 template,
+            // they sank behind the walls, only one peak left in sight). Both pairs an earlier template shipped
+            // (-60 / 120, its 120 clamped to 90 anyway, and -90 / 90) are read as this one, so an update kept with a
+            // player's saved ini shows it right with nothing to set; any other pair is the player's own and is kept.
+            float low = IniF(L"campfire", L"pano_low", -60.0f), high = IniF(L"campfire", L"pano_high", 90.0f);
+            if ((low == -60.0f && high == 120.0f) || (low == -90.0f && high == 90.0f)) { low = -60.0f; high = 90.0f; }
             g_set.campfirePanoLow.store(std::clamp(low, -90.0f, 89.0f));
             g_set.campfirePanoHigh.store(std::clamp(high, -89.0f, 90.0f));
         }
