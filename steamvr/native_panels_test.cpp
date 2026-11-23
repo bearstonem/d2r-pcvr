@@ -396,11 +396,20 @@ int main(){
     Check(!menus::Busy(navigation.Step(true,ui,false,0,0,true))&&!navigation.Native(),"drag retains ownership while ray leaves canvas or a face button is touched");
     auto native=navigation.Step(true,ui,true,.5f,.5f,false);
     Check(navigation.Native()&&native.buttons==menus::A&&!native.lt&&!native.rt,"native A has one action and existing laser modifiers are consumed");
+    for(int frame=0;frame<90;++frame) {
+        native=navigation.Step(true,ui,true,.5f,.5f,false);
+        Check(native.buttons==menus::A&&navigation.Native()&&navigation.LaserVisible(),"A hold keeps aiming ray visible and forwards native action every frame");
+    }
+    ui.buttons=menus::RightBumper;
+    Check(!menus::Busy(navigation.Step(true,ui,true,.5f,.5f,false))&&!navigation.Native()&&navigation.LaserVisible(),"stationary A release restores laser even with modifiers held");
+    navigation.Step(true,menus::Pad{menus::X},true,.5f,.5f,false);
     navigation.Step(true,{},true,.5f,.5f,false);
-    Check(navigation.Native(),"idle laser does not steal native focus");
+    Check(navigation.Native()&&!navigation.LaserVisible(),"idle laser does not steal explicit native navigation focus");
     ui={};ui.buttons=menus::LeftBumper|menus::RightBumper;ui.lt=128;ui.rt=255;ui.ly=18000;ui.rx=-18000;
     native=navigation.Step(true,ui,true,.8f,.5f,false);
     Check(navigation.Native()&&native.buttons==ui.buttons&&native.lt==128&&native.rt==255&&native.ly==18000&&native.rx==-18000,"native bumpers, triggers and both sticks pass while navigating");
+    navigation.Step(true,menus::Pad{menus::A},true,.8f,.5f,false);
+    Check(!navigation.LaserVisible(),"A in existing stick navigation preserves native focus");
     navigation.Step(true,{},true,.81f,.51f,false);
     Check(navigation.Native(),"small tracked aim jitter cannot overwrite native focus");
     Check(!menus::Busy(navigation.Step(true,{},true,.9f,.5f,false))&&!navigation.Native(),"deliberate reaim returns to laser without synthetic native action");
