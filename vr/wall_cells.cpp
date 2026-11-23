@@ -46,30 +46,6 @@ bool Verified() {
     }
     return v>0;
 }
-struct TeleportRequest {uint64_t session=0,asked=0;int x=0,y=0;};
-TeleportRequest teleportRequest;
-framevr::gripaim::LandingSample teleportSample;
-bool teleportScheduled=false;
-void __cdecl SampleTeleport(const D2RL::PluginContext*,void*) noexcept {
-    TeleportRequest r;
-    {std::lock_guard lock(mutex);r=teleportRequest;}
-    using framevr::gripaim::Landing;
-    Landing state=Landing::Unknown;
-    uintptr_t game=0,player=0;
-    if(r.session&&r.session==gamestate::LocalPlayer()&&melee::LocalServer(game,player)){
-        const auto room=reinterpret_cast<uintptr_t(*)(uintptr_t)>(d2rsig::Addr(RoomRva))(player);
-        if(room){
-            const auto target=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(RoomPointRva))(room,r.x,r.y);
-            // The existing native walkability sampler uses bit 1 for solid ground.
-            // Never call room/collision functions from the render thread.
-            const auto bits=target?reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(MaskRva))(target,r.x,r.y,1,1):0;
-            state=framevr::gripaim::Terrain(target!=0,bits);
-        }
-    }
-    std::lock_guard lock(mutex);
-    teleportScheduled=false;
-    if(r.session==gamestate::LocalPlayer())teleportSample={r.session,GetTickCount64(),r.x,r.y,state};
-}
 void __cdecl Sample(const D2RL::PluginContext*,void* token) noexcept {
     const int which=int(reinterpret_cast<uintptr_t>(token)&1);
     LARGE_INTEGER began;QueryPerformanceCounter(&began);
@@ -148,24 +124,17 @@ void Want(const framevr::bottles::WallRequest& r,uint64_t now) {Ask(0,r,now);}
 bool Latest(framevr::bottles::Patch& out) {return Take(0,out);}
 void WantHeld(const framevr::bottles::WallRequest& r,uint64_t now) {Ask(1,r,now);}
 bool LatestHeld(framevr::bottles::Patch& out) {return Take(1,out);}
-framevr::gripaim::Landing TeleportLanding(uint64_t session,int x,int y,uint64_t now){
-    using framevr::gripaim::Landing;
-    if(x<1||y<1||x>65534||y>65534)return Landing::Blocked;
-    if(!session||!context||!threads||!threads->runOnGameThread)return Landing::Unknown;
-    Landing state=Landing::Unknown;
-    {
-        std::lock_guard lock(mutex);
-        state=teleportSample.For(session,x,y,now);
-        if(state!=Landing::Unknown&&now-teleportSample.at<150)return state;
-        if(teleportScheduled&&now>=teleportRequest.asked&&now-teleportRequest.asked<2000)return state;
-        // Failed/unavailable samples must not enqueue work every render frame.
-        if(now>=teleportRequest.asked&&now-teleportRequest.asked<50)return state;
-        teleportRequest={session,now,x,y};teleportScheduled=true;
-    }
-    if(!Verified()||threads->runOnGameThread(context,&SampleTeleport,nullptr)!=D2RL::Threads::Result::Success){
-        std::lock_guard lock(mutex);teleportScheduled=false;
-    }
-    return state;
+framevr::gripaim::LandingResult ResolveTeleportOnGameThread(uint64_t session,float px,float py,int x,int y){
+    uintptr_t game=0,player=0;
+    if(!session||session!=gamestate::LocalPlayer()||!Verified()||!melee::LocalServer(game,player))return {};
+    const auto room=reinterpret_cast<uintptr_t(*)(uintptr_t)>(d2rsig::Addr(RoomRva))(player);
+    if(!room)return {};
+    return framevr::gripaim::Backtrack(px,py,float(x),float(y),[&](int cx,int cy){
+        const auto target=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(RoomPointRva))(room,cx,cy);
+        if(!target)return false;
+        // Size 2 checks the player's footprint, not just the marker's center.
+        return reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(MaskRva))(target,cx,cy,2,1)==0;
+    });
 }
 void Report() {
     const auto s=samples[0].exchange(0),h=samples[1].exchange(0),f=refused.exchange(0);

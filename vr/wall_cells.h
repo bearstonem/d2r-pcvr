@@ -14,8 +14,7 @@ bool Latest(framevr::bottles::Patch&); // the newest sample, if any
 // its own, so a rolling bottle and the hero never recentre each other's patch.
 void WantHeld(const framevr::bottles::WallRequest&,uint64_t now);
 bool LatestHeld(framevr::bottles::Patch&);
-// Exact-cell solid-ground check, sampled on the game thread. Clear is not a
-// guarantee of skill success (mana, transient units and native skill rules remain).
-framevr::gripaim::Landing TeleportLanding(uint64_t session,int x,int y,uint64_t now);
+// Called only by native skill/command hooks on the game thread.
+framevr::gripaim::LandingResult ResolveTeleportOnGameThread(uint64_t session,float px,float py,int x,int y);
 void Report();                          // ten-second log line when used
 }

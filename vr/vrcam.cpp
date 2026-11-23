@@ -5301,6 +5301,11 @@ bool TeleportGripAim(int skill,float px,float py,framevr::spellaim::Cast& cast){
     if(skill!=54)return false;
     float x=0,y=0;
     if(!TeleportGripPoint(px,py,x,y))return false;
+    // Native aim/command hooks execute on the game thread. Recheck here rather
+    // than trusting a render-thread preview after a door/actor/player moved.
+    const auto landing=wallcells::ResolveTeleportOnGameThread(gamestate::LocalPlayer(),px,py,int(x),int(y));
+    if(landing.known){x=landing.x;y=landing.y;}
+
     const int mode=int(vrsettings::Read().values[framevr::settings::TeleportSkillAiming]);
     if(!framevr::gripaim::CastAt(skill,mode,true,x,y,cast))return false;
     g_note.by="teleport grip";g_note.distance=std::hypot(x-px,y-py);return true;
@@ -11581,8 +11586,7 @@ bool RingWanted() {
         float x=0,y=0;
         if(TeleportGripPoint(px,py,x,y)){
             const auto now=GetTickCount64();
-            const auto landing=wallcells::TeleportLanding(gamestate::LocalPlayer(),int(x),int(y),now);
-            framevr::telegraph::Current().Place(x,y,now,250,framevr::gripaim::Element(landing),1.2f,0,0,0,framevr::telegraph::GripRightMark);
+            framevr::telegraph::Current().Place(x,y,now,250,5,1.2f,0,0,0,framevr::telegraph::GripRightMark);
         }
         else framevr::telegraph::Current().ClearSkill(framevr::telegraph::GripRightMark);
         framevr::telegraph::Current().ClearSkill(framevr::telegraph::GripLeftMark);

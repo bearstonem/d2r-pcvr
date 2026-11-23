@@ -7,15 +7,27 @@ inline std::atomic<unsigned> held{0};
 inline std::atomic<uint64_t> updated{0};
 inline bool Selected(int mode,int hand){return (mode==1&&hand==1)||(mode==2&&hand==0);}
 inline unsigned Active(unsigned bits,uint64_t stamp,uint64_t now){return stamp&&now>=stamp&&now-stamp<250?bits:0;}
-enum class Landing {Unknown,Clear,Blocked};
-struct LandingSample {
-    uint64_t session=0,at=0;int x=0,y=0;Landing state=Landing::Unknown;
-    Landing For(uint64_t owner,int cx,int cy,uint64_t now) const {
-        return owner&&owner==session&&cx==x&&cy==y&&now>=at&&now-at<250?state:Landing::Unknown;
-    }
+struct LandingResult {
+    bool known=false,found=false;float x=0,y=0;
 };
-inline Landing Terrain(bool room,uint16_t mask){return !room||(mask&1)?Landing::Blocked:Landing::Clear;}
-inline int Element(Landing state){return state==Landing::Blocked?4:state==Landing::Clear?5:2;}
+// Search backward from the requested point. Only landing cells are tested:
+// Teleport may cross a wall, but must never finish inside it.
+template<class Safe> LandingResult Backtrack(float px,float py,float tx,float ty,Safe safe){
+    LandingResult result{true,false,px,py};
+    const float dx=tx-px,dy=ty-py,length=std::hypot(dx,dy);
+    if(!std::isfinite(length)||length<2||length>100)return result;
+    const int steps=int(std::ceil(std::max(std::fabs(dx),std::fabs(dy))*2));
+    int lastX=-1,lastY=-1;
+    for(int i=steps;i>0;--i){
+        const float t=float(i)/steps;
+        const int x=int(px+dx*t),y=int(py+dy*t);
+        if(x==lastX&&y==lastY)continue;
+        lastX=x;lastY=y;
+        if(x<1||y<1||x>65534||y>65534||std::hypot(float(x)-px,float(y)-py)<2)continue;
+        if(safe(x,y))return {true,true,float(x),float(y)};
+    }
+    return result;
+}
 // Native commands truncate to integer subtiles. Preview exactly that same cell.
 inline bool Cell(float& x,float& y){
     if(!std::isfinite(x+y)||x<1||y<1||x>65534||y>65534)return false;
