@@ -5295,7 +5295,7 @@ bool TeleportGripPoint(float playerX,float playerY,float& x,float& y) {
     AcquireSRWLockShared(&g_lookLock);memcpy(L,g_lookAt,sizeof L);ReleaseSRWLockShared(&g_lookLock);
     float dx=0,dy=0;
     if(!ga::Delta({o[0],o[1],o[2]},{d[0],d[1],d[2]},L[1],playerX,playerY,dx,dy))return false;
-    x=playerX+dx;y=playerY+dy;return true;
+    x=playerX+dx;y=playerY+dy;return ga::Cell(x,y);
 }
 bool TeleportGripAim(int skill,float px,float py,framevr::spellaim::Cast& cast){
     if(skill!=54)return false;
@@ -11579,8 +11579,11 @@ bool RingWanted() {
         const float px=(L[0]-L[1]*framevr::coordinates::GroundShear)*.5f;
         const float py=(L[2]-L[1]*framevr::coordinates::GroundShear)*.5f;
         float x=0,y=0;
-        if(TeleportGripPoint(px,py,x,y))
-            framevr::telegraph::Current().Place(x,y,GetTickCount64(),250,5,1.2f,0,0,0,framevr::telegraph::GripRightMark);
+        if(TeleportGripPoint(px,py,x,y)){
+            const auto now=GetTickCount64();
+            const auto landing=wallcells::TeleportLanding(gamestate::LocalPlayer(),int(x),int(y),now);
+            framevr::telegraph::Current().Place(x,y,now,250,framevr::gripaim::Element(landing),1.2f,0,0,0,framevr::telegraph::GripRightMark);
+        }
         else framevr::telegraph::Current().ClearSkill(framevr::telegraph::GripRightMark);
         framevr::telegraph::Current().ClearSkill(framevr::telegraph::GripLeftMark);
     }
