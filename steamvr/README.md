@@ -639,6 +639,13 @@ python3 steamvr/profile_report.py "/path/to/game/mods/D2R-PCVR/d2rloader/logs/d2
   --sequence 1 --csv build-frame/profile-stationary.csv
 ```
 
+For a completed all-thread capture, find the thread ID marked `(draw)` in
+the surrounding `Frame CPU threads` lines. Pass that ID with `--draw-thread`
+to see the mod's skeleton pose time per stereo pair on the draw thread, its
+portion inside the two eye passes, and the sum across other threads. Worker
+callbacks can overlap one another and the draw thread. Their summed time
+does not establish how long the frame waited for them.
+
 `Frame scope` records describe the main stereo drawing thread. The current
 development build also emits `Frame hook` records for each recording/input
 thread, including guarded memory copy calls/bytes, portal callbacks, VRS cache

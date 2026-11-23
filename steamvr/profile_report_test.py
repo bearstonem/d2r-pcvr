@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 from unittest.mock import patch
-from profile_report import COLUMNS, records, hook_records, late_pairs, timing_text, main
+from profile_report import COLUMNS, records, hook_records, late_pairs, timing_text, skeleton_report, main
 
 
 class ReportTest(unittest.TestCase):
@@ -33,6 +33,30 @@ class ReportTest(unittest.TestCase):
                 dict(gap=1, begin=4, left=7, right=7, end=4)]
         self.assertEqual(late_pairs(rows, 22.222), 1)
         self.assertEqual(late_pairs(rows, 18.519), 2)
+
+    def test_skeleton_draw_and_other_threads_use_one_complete_sequence(self):
+        text = 'Frame profile,7,360,0\nFrame profile: complete\n'
+        scopes = {(7, 0, 'skeleton-mod'): (360, 360, 360, .1),
+                  (7, 1, 'skeleton-mod'): (360, 720, 720, .2)}
+        hooks = {(7, 11, 'view'): (360, 1, 1, .1, 0),
+                 (7, 11, 'skeleton-mod'): (360, 1440, 1440, .4, 0),
+                 (7, 22, 'skeleton-mod'): (360, 3600, 3600, .7, 0),
+                 (7, 33, 'skeleton-mod'): (360, 3600, 3600, .5, 0),
+                 (8, 33, 'skeleton-mod'): (360, 10, 10, 90., 0)}
+        def report(log=text):
+            return skeleton_report(log, 7, 11, scopes, hooks)
+        self.assertIn('0.400 ms/pair, 4.0 calls/pair', report())
+        self.assertIn('0.300 ms/pair, 3.0 calls/pair', report())
+        self.assertIn('1.200 ms/pair, 20.0 calls/pair', report())
+        self.assertIn('unavailable', report('Frame profile,7,360,0'))
+        self.assertIn('unavailable', skeleton_report(text, 7, 99, scopes, hooks))
+        self.assertIn('unavailable', report(text.replace('7,360', '7,361')))
+        self.assertIn('unavailable', report(text.replace('Frame profile: complete',
+                                            'Frame profile: all-thread registry full\nFrame profile: complete')))
+        hooks[(7, 22, 'skeleton-mod')] = (360, 1, 0, 0, 0)
+        self.assertIn('timing unavailable', report())
+        scopes[(7, 0, 'skeleton-mod')] = (120, 120, 120, .1)
+        self.assertIn('snapshots do not match', report())
 
     def report(self, *options):
         row = dict.fromkeys(COLUMNS, 0)
