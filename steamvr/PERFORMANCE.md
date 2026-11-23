@@ -31,6 +31,24 @@ the new callback took it 84 times, including hash collisions. Both selected
 the same depth resource and state after each batch. The headset log does not
 count barrier batches or time this callback individually.
 
+The follow-up headset run was slower. Both runs used an offline Paladin in
+the Players 7 Rocky Waste with 3072 × 3072 eyes, SteamVR/OpenXR 2.18.4 and
+NVIDIA Medium frame generation at 50% scale. Each mean below covers complete
+ten-second intervals within the area. Stage times are weighted by pair count.
+
+| Rocky Waste gameplay | Previous dev build | With the depth filter |
+| --- | ---: | ---: |
+| Native pairs measured | 5,952 | 4,518 |
+| Native stereo pairs per second | 39.7 | 34.7 |
+| Both eye passes, ms per pair | 20.85 | 23.90 |
+| Full cycle, ms per pair | 25.21 | 28.80 |
+| Pairs taking at least 30 ms | 17.5% | 39.8% |
+
+One interval in the new run included the exit menu. Excluding it gives
+34.1 native pairs per second over 4,100 pairs. The runs used different live
+encounters, so the contribution of the depth filter remains unmeasured in
+the headset.
+
 ## Frame generation's wait, November 10
 
 **On for every install since the headset run of November 11**: no key in the
