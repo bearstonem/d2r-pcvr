@@ -136,7 +136,7 @@ bool MotionCastRay(float origin[3],float direction[3]);   // a motion's cast wit
 bool RecordCastLive();      // a glyph's or motion's press of the right trigger's record, now or within 150 ms (lock-free)
 // Aim rules: each hand's own aim in GameplayRay's frame - the controller's
 // pointer, or the bow's forward for the left hand holding a bow.
-bool HandAimRay(int hand,float origin[3],float direction[3]);
+bool HandAimRay(int hand,float origin[3],float direction[3],bool pointerOnly=false);
 // Loot pick: the same, alive while that hand is tracked in the world (not in menus or the skill wheel) even with the
 // motion layer off; gate: why the motion layer is off (lootaim::Gate bits, 0 while on).
 bool LootHandRay(int hand,float origin[3],float direction[3],uint32_t* gate);

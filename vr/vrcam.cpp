@@ -5003,6 +5003,9 @@ bool TargetsOn(const Cast& c) { return framevr::aimrules::TakesTarget(c.use) && 
 // point 20 cells along the hand and the hero turned to the hand (Jeff,
 // 2026-10-20: Warlock spells without a rule went behind him).
 bool RulesAimCast() {
+    const int mode=int(vrsettings::Read().values[framevr::settings::TeleportSkillAiming]);
+    if((mode==1||mode==2)&&framevr::gripaim::Active(framevr::gripaim::held.load(),framevr::gripaim::updated.load(),GetTickCount64())&&
+       framevr::NativeSkillCasting()&&aimtargets::Now().skill==54)return true;
     // Every option Off: no transport reads (the attack hooks ask on every walk step too).
     return framevr::aimrules::Any(aimtargets::Options()) && framevr::NativeSkillCasting() && aimtargets::RulesOn(aimtargets::Now());
 }
@@ -5268,6 +5271,40 @@ bool HandOffUnit(const aimtargets::Cast& c) {
         g_note.unit="none (last hand-off dropped)";
     return false;
 }
+// Teleport's explicit grip aim bypasses general spell-lock options. Both the
+// preview and command use this raw tracked pointer, never staff/arm/gaze fallback.
+bool TeleportGripPoint(float playerX,float playerY,float& x,float& y) {
+    namespace ga=framevr::gripaim;
+    const int mode=int(vrsettings::Read().values[framevr::settings::TeleportSkillAiming]);
+    if(mode!=1&&mode!=2)return false;
+    if(!g_spellAimReady.load()||!g_enabled.load()||!g_inWorld.load()||gamestate::MenuOpen()||!g_eyeOk.load())return false;
+    const unsigned held=ga::Active(ga::held.load(),ga::updated.load(),GetTickCount64());
+    int hand=-1;
+    for(int h=0;h<2;++h)if(ga::Selected(mode,framevr::HandSide(h))&&(held&(1u<<h)))hand=h;
+    float origin[3],direction[3];
+    if(hand<0||!framevr::HandAimRay(hand,origin,direction,true))return false;
+    AcquireSRWLockShared(&g_stickLock);const StickFrame f=g_stickFrame;ReleaseSRWLockShared(&g_stickLock);
+    if(!f.valid)return false;
+    const float scale=std::max(1.0f,ScaleHeight())/UserEyeHeightM();
+    float o[3],d[3],L[3];
+    for(int i=0;i<3;++i){
+        o[i]=g_eyeWorld[i].load()+scale*(origin[0]*f.camR[i]-origin[2]*f.camF[i]);
+        d[i]=direction[0]*f.camR[i]-direction[2]*f.camF[i];
+    }
+    o[1]+=scale*origin[1];d[1]+=direction[1];
+    AcquireSRWLockShared(&g_lookLock);memcpy(L,g_lookAt,sizeof L);ReleaseSRWLockShared(&g_lookLock);
+    float dx=0,dy=0;
+    if(!ga::Delta({o[0],o[1],o[2]},{d[0],d[1],d[2]},L[1],playerX,playerY,dx,dy))return false;
+    x=playerX+dx;y=playerY+dy;return true;
+}
+bool TeleportGripAim(int skill,float px,float py,framevr::spellaim::Cast& cast){
+    if(skill!=54)return false;
+    float x=0,y=0;
+    if(!TeleportGripPoint(px,py,x,y))return false;
+    const int mode=int(vrsettings::Read().values[framevr::settings::TeleportSkillAiming]);
+    if(!framevr::gripaim::CastAt(skill,mode,true,x,y,cast))return false;
+    g_note.by="teleport grip";g_note.distance=std::hypot(x-px,y-py);return true;
+}
 bool NativeSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast) {
     g_note={};
     const auto c=aimtargets::Now();
@@ -5278,7 +5315,7 @@ bool NativeSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast) {
     // Teleport on its shown landing, a thrown trap or Whirlwind along the pushed walk stick first; then the aim
     // rules only with this kind of cast's Aim option On; Off, as before them - except
     // Guided Arrow and Charge, handed the aimed monster whatever the option (aimrules::AlwaysHomes).
-    bool directed=MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast)||WhirlSteerAim(c.skill,playerX,playerY,cast);
+    bool directed=TeleportGripAim(c.skill,playerX,playerY,cast)||MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast)||WhirlSteerAim(c.skill,playerX,playerY,cast);
     if(!directed) {
         if(aimtargets::RulesOn(c))directed=NativeSpellAimDecide(playerX,playerY,cast);
         else if(c.skill>=0&&framevr::aimrules::AlwaysHomes(c.skill)&&HandOffUnit(c)){g_note.by=c.skill==107?"unit (Charge always goes to the aimed monster)":"unit (Guided Arrow always homes)";cast.directed=false;}
@@ -11538,20 +11575,14 @@ bool OutlineWanted() {
 // Landing circles (same pass): while any ground skill's circle is showing.
 bool RingWanted() {
     {
-        namespace ga=framevr::gripaim;
-        const auto now=GetTickCount64();
-        const unsigned held=ga::Active(ga::held.load(),ga::updated.load(),now);
         float L[3];AcquireSRWLockShared(&g_lookLock);memcpy(L,g_lookAt,sizeof L);ReleaseSRWLockShared(&g_lookLock);
         const float px=(L[0]-L[1]*framevr::coordinates::GroundShear)*.5f;
         const float py=(L[2]-L[1]*framevr::coordinates::GroundShear)*.5f;
-        for(int h=0;h<2;++h){
-            const int mark=h?framevr::telegraph::GripLeftMark:framevr::telegraph::GripRightMark;
-            float o[3],d[3],dx=0,dy=0;
-            if(g_enabled.load()&&g_inWorld.load()&&!gamestate::MenuOpen()&&(held&(1u<<h))&&
-               aimtargets::FreeAimRay(h,false,o,d,false)&&ga::Delta({o[0],o[1],o[2]},{d[0],d[1],d[2]},L[1],px,py,dx,dy))
-                framevr::telegraph::Current().Place(px+dx,py+dy,now,250,5,.65f,0,0,0,mark);
-            else framevr::telegraph::Current().ClearSkill(mark);
-        }
+        float x=0,y=0;
+        if(TeleportGripPoint(px,py,x,y))
+            framevr::telegraph::Current().Place(x,y,GetTickCount64(),250,5,1.2f,0,0,0,framevr::telegraph::GripRightMark);
+        else framevr::telegraph::Current().ClearSkill(framevr::telegraph::GripRightMark);
+        framevr::telegraph::Current().ClearSkill(framevr::telegraph::GripLeftMark);
     }
     const bool tacticalActive = companionai::IsTacticalCommandsEnabled() &&
         (companionai::GetActiveTacticalOrder().type == framevr::companionai::TacticalOrderType::MoveAndHold);
@@ -12825,7 +12856,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                 if (draw.on && mark.sequence != anchored[k]) { anchored[k] = mark.sequence; floorY[k] = sv[0].hero[1]; }
                 // xyz: centre relative to the hero; w: alpha (0 = not drawn)
                 const float ring[4] = {mark.x * 2.0f + floorY[k] * shear - sv[0].hero[0], floorY[k] - sv[0].hero[1],
-                                       mark.y * 2.0f + floorY[k] * shear - sv[0].hero[2], draw.on ? draw.alpha * (framevr::telegraph::GripMark(mark.skill) ? .3f : 1.f) : 0.0f};
+                                       mark.y * 2.0f + floorY[k] * shear - sv[0].hero[2], draw.on ? draw.alpha * (framevr::telegraph::GripMark(mark.skill) ? .9f : 1.f) : 0.0f};
                 char n[16];
                 snprintf(n, sizeof n, "RingPos%d", k); SetFloats(rt, n, ring, 4);
                 snprintf(n, sizeof n, "RingFill%d", k); SetFloat(rt, n, draw.fill);
@@ -12840,7 +12871,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                 // Teleport's sigil (D2R_DepthFog.fx TeleportSigil)
                 const bool teleport = mark.skill == TeleportMark;
                 // an aimed throw's (TossMark): the same sigil in its skill's color, without the pillar
-                const bool sigil = teleport || framevr::telegraph::TossSigil(mark.skill);
+                const bool sigil = teleport || framevr::telegraph::TossSigil(mark.skill) || framevr::telegraph::GripMark(mark.skill);
                 const float dir[4] = {mark.dirX, mark.dirY, mark.halfLength * 2.0f, sigil ? 1.0f : 0.0f};
                 if (teleport && draw.on && tele[3] <= 0.0f) { tele[0] = ring[0]; tele[1] = ring[1]; tele[2] = ring[2]; tele[3] = ring[3]; }
                 snprintf(n, sizeof n, "RingDir%d", k); SetFloats(rt, n, dir, 4);

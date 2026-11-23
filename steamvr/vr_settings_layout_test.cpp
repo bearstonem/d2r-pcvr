@@ -42,6 +42,7 @@ static const GoldenRow Golden[]={
     {"gameplay.skill_gestures",View::Combat,1,content::RowKind::Toggle,"Skills on your moves",0,0},
     {"interactions.weapon_skill_indicators",View::Combat,1,content::RowKind::Toggle,"Skill icons on weapons",0,0},
     {"gameplay.throw_lift_deg",View::Combat,1,content::RowKind::Stepper,"Thrown weapon lift",0,1},
+    {"gameplay.teleport_skill_aiming",View::Combat,1,content::RowKind::Choice,"Teleport skill aiming",3,0},
     {"gameplay.spell_lock",View::Targeting,0,content::RowKind::Choice,"Skills go to the aimed monster",4,0},
     {"gameplay.projectile_aim_assist",View::Targeting,0,content::RowKind::Choice,"Spell aim assist",3,0},
     {"gameplay.planar_spell_aim",View::Targeting,1,content::RowKind::Toggle,"Keep spell shots level",0,0},
@@ -76,7 +77,7 @@ static const GoldenRow Golden[]={
     {"turn.snap",View::Moving,0,content::RowKind::Stepper,"Snap turn angle",0,0},
     {"turn.speed",View::Moving,0,content::RowKind::Slider,"Smooth turn speed",0,0},
     {"gameplay.run_speed_pct",View::Moving,1,content::RowKind::Slider,"Movement speed",0,12},   // main's #308: Walk, Base run, Run 10..90%, Full run
-    {"gameplay.grip_aim_indicator",View::Moving,2,content::RowKind::Choice,"Grip aim indicator",4,0},
+
     {"interactions.seated",View::Body,0,content::RowKind::Toggle,"Seated play",0,0},
     {"gameplay.room_steps",View::Body,0,content::RowKind::Toggle,"Room follows you",0,0},   // drawn inside Seated play's row (2026-11-08)
     {"calibration.version",View::Body,0,content::RowKind::Button,"Height and arm span",0,0},
@@ -267,7 +268,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==131,"131 settings including Grip aim indicator");   // + Controller menu size, Ally health bars (#519)   // + Enemy activation distance (#576)   // + seven Effects rows (#582)   // + Map grab hint (grab_hint.h)   // + Floating map background   // + Props have weight (2026-11-12)   // + Weapons hit walls (2026-11-12)   // + Sticks stay right-handed (2026-11-11)   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
+        Check(tables.rowCount==131,"131 settings including Teleport skill aiming");   // + Controller menu size, Ally health bars (#519)   // + Enemy activation distance (#576)   // + seven Effects rows (#582)   // + Map grab hint (grab_hint.h)   // + Floating map background   // + Props have weight (2026-11-12)   // + Weapons hit walls (2026-11-12)   // + Sticks stay right-handed (2026-11-11)   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};

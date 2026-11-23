@@ -295,7 +295,7 @@ inline constexpr ContentSection SectionTable[]={
     {View::Shield,"Bash and block"},{View::Shield,"Fit on the arm"},
     {View::Monsters,"Offline difficulty"},{View::Monsters,"Mercenary"},{View::Monsters,"Summons"},
     {View::Physics,"Props"},{View::Physics,"Monsters and townsfolk"},{View::Physics,"Struck monsters"},
-    {View::Moving,"Turning"},{View::Moving,"Speed"},{View::Moving,"Teleport aiming"},
+    {View::Moving,"Turning"},{View::Moving,"Speed"},
     {View::Body,"Play space"},{View::Body,"Potion belt"},
     {View::Hands,"Hands and buttons"},
     {View::Vibration,"Strength"},
@@ -326,8 +326,8 @@ inline constexpr Option SpellLockSpellsOnly[]={
     {1,"On","Spells go to the monster you aim at."},
 };
 inline constexpr Option GripAimOptions[]={
-    {0,"Off","No grip aiming marker"},{1,"Left","Left grip only"},
-    {2,"Right","Right grip only"},{3,"Both","Each grip shows its target"}};
+    {0,"Off","Keep existing teleport behavior"},{1,"Left grip","Aim Teleport with the left grip held"},
+    {2,"Right grip","Aim Teleport with the right grip held"}};
 inline constexpr Option AimAssistOptions[]={
     {0,"Off","Spells fly exactly where your hand aims."},
     {1,"Light","A launch within 4\xc2\xb0 of a monster turns toward it."},
@@ -490,10 +490,13 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.skill_gestures",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Toggle,.label="Skills on your moves",
      .help="A trigger skill powers your real move: melee skills on a landed strike, Smite on a bash, arrow skills on a release. Off, every swing is plain."},
     {.id="interactions.weapon_skill_indicators",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Toggle,.label="Skill icons on weapons",
-     .help="Shows each trigger skill's icon and name beside the weapon that casts it. Turn it On while you learn your setup."},
+     .help="Shows each trigger skill's icon and name beside the weapon that casts it. Turn it On while you learn your setup.",.beside=true,.besideLabel="Weapon icons"},
     {.id="gameplay.throw_lift_deg",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Stepper,.label="Thrown weapon lift",
      .help="Your hand dips as you let go. This lifts javelins, knives, axes and thrown potions above that path. Minus lowers them; Off follows your hand.",
      .format={.unit=Degrees,.sign=true},FRAMEVR_NAMES(OffAtZero),.classes=Amazon|Barbarian|Assassin|WithThrown},
+    {.id="gameplay.teleport_skill_aiming",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Choice,.label="Teleport skill aiming",
+     .help="Hold the selected grip and cast Teleport to land at the marker. Off keeps existing casting. Blocked terrain can prevent landing.",
+     FRAMEVR_OPTIONS(GripAimOptions)},
     // Targeting: Target selection
     {.id="gameplay.spell_lock",.page=View::Targeting,.section="Target selection",.kind=RowKind::Choice,.label="Skills go to the aimed monster",
      .help="Casts go to the monster your hand points at, else the other hand's, else the one you look at, and stay on it until you let go.",
@@ -604,9 +607,7 @@ inline constexpr Override Overrides[]={
      .help="Walk, or run from Base run (your class's run, no speed bonus) up to Full run (default: your gear's and skills' speed). Movement skills keep their own speed.",
      FRAMEVR_NAMES(RunSpeedNames)},
     // Body: Play space
-    {.id="gameplay.grip_aim_indicator",.page=View::Moving,.section="Teleport aiming",.kind=RowKind::Choice,.label="Grip aim indicator",
-     .help="Hold a grip to preview the aimed floor destination. Uses teleport range; blocked terrain can prevent landing.",
-     FRAMEVR_OPTIONS(GripAimOptions)},
+
     {.id="interactions.seated",.page=View::Body,.section="Play space",.kind=RowKind::Toggle,.label="Seated play",
      .help="Raises the potion belt so you can reach it sitting down. Your body measurements still come from standing."},
     // Room follows you (room_steps.h; Discord, 2026-11-04: "my character's feet stay anchored near the calibration

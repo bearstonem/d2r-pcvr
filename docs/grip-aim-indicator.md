@@ -1,13 +1,17 @@
-# Grip aim indicator
+# Teleport skill aiming
 
-VR Settings > Comfort > Moving > Grip aim indicator offers Off (default), Left,
-Right, or Both. Hold the selected grip to show a small, faint violet floor ring;
-release it to hide the ring. Menus, unavailable tracking and stale input suppress it.
+VR Settings > Gameplay > Combat > Skills and throws > Teleport skill aiming:
+Off (default), Left grip, or Right grip. Hold the selected physical grip and cast
+Teleport to land at the bright violet marker. Point farther down for a nearer
+landing. Level/upward pointing uses maximum range. Release hides the marker.
 
-The preview uses the same free-aim ray selection and range-limited floor calculation
-as ordinary point-aimed teleport casts. It does not change casting or check terrain
-collision. The native game can reject blocked destinations. Motion-gesture teleport
-continues to use its separate arc preview.
+Off preserves existing teleport behavior and does not calculate this destination.
+The selected controller pointer is used directly, without staff, arm or gaze
+fallback. The shared destination feeds the native cast and controller command as
+an absolute point, independent of general spell-lock options. Other skills retain
+their existing behavior. Menus, tracking loss and stale input disable this aim.
+Blocked terrain can still cause the game to reject a landing.
 
-Validation: standalone grip-aim-test, settings tests and production syntax checks.
-Headset appearance and landing comparison still require an offline game test.
+The marker uses a larger, brighter sigil without a vertical pillar. Automated tests
+cover selection, expiry, near/far points, command propagation and disabled/non-teleport
+fallback. Headset appearance and actual landing require offline verification.
