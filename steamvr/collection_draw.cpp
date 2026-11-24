@@ -750,7 +750,8 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
     // The item in the hand, at the laser, over everything (as the game draws a carried item):
     // at the size it has in the stash (an inventory cell is 57 UI pixels; the icons are the
     // game's own art at 98 per cell), centred on the pointer.
-    if (!carried.key.empty() && carried.x >= 0 && icons) {
+    // (x, y may lie off the canvas: an item held over the stash's tab bar reaches down onto it.)
+    if (!carried.key.empty() && icons) {
         if (const IconPixels* icon = icons(carried.key); icon != nullptr && icon->rgba != nullptr) {
             const float s = Md(57.f / 98.f);
             const float w = float(icon->width) * s, h = float(icon->height) * s;

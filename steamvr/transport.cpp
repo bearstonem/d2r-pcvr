@@ -767,6 +767,10 @@ struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_F
 // The stash's tab bar with Collection as the active tab (collection_art.h, cut from the owner's
 // shot as the mock-up did), in the UI image's format, laid over the bar while the page is shown.
 struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};bool tried=false;} collectionTabsUpload;
+// The same bar with the hand's item painted on it, where the laser holds it over or near the bar
+// (the bar's art otherwise covers the game's own item there). Rebuilt when the item or its spot moves.
+struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;std::string key;int x=-1,y=-1;bool ready=false;} collectionTabsCarriedUpload;
+float collectionCarriedBarU=-1,collectionCarriedBarV=-1;   // the laser in the UI image (0..1) while an item is held by the bar; -1: none
 // The inventory cells an item passes through on its way in or out of the collection: drawn
 // empty over the UI image while it does (owner 2026-11-21: the item flashed there). Packed
 // x | y<<4 | w<<8 | h<<12 (cells), and until when (GetTickCount64).
@@ -4074,6 +4078,21 @@ void CollectionPointer(bool grip) {
     // the page there - MenuPointer).
     collectionCarried.key=canvasX>=0&&collectionDocked&&collectionInUiShown?collection::CarriedIconKey():std::string();
     collectionCarried.x=canvasX;collectionCarried.y=canvasY;
+    // Held by the tab bar (on it, or close enough for the item to reach it): the bar's art takes the
+    // item painted on it (CopyCollectionIntoUi), and the page the part reaching down onto it -
+    // canvas coordinates off the page's top or sides, which only the carried item uses.
+    collectionCarriedBarU=collectionCarriedBarV=-1;
+    if(collectionDocked&&collectionInUiShown&&pointerHit&&!keyboardPointer&&gamestate::CursorItemHeld()&&uiCursorV<CollectionPageTop) {
+        using namespace collection::art;
+        constexpr float reach=130.f;   // shot pixels: half a 4-cell item at the stash's scale, and some
+        const float sx=uiCursorU*float(ShotWidth),sy=uiCursorV*float(ShotHeight);
+        if(sx>=float(TabsX)-reach&&sx<=float(TabsX+TabsWidth)+reach&&sy>=float(TabsY)-reach) {
+            collectionCarriedBarU=uiCursorU;collectionCarriedBarV=uiCursorV;
+            collectionCarried.key=collection::CarriedIconKey();
+            collectionCarried.x=(uiCursorU-CollectionPageLeft)/(CollectionPageRight-CollectionPageLeft)*collection::panel::CanvasWidth;
+            collectionCarried.y=(uiCursorV-CollectionPageTop)/(CollectionPageBottom-CollectionPageTop)*collection::panel::CanvasHeight;
+        }
+    }
     collectionTriggerWas=collectionTriggerDown;
     collection::TabSetHover(collectionHover);   // the picture lights what the laser is over
     // The pointed slot's card: ask the UI thread for the game's own item text
@@ -8464,7 +8483,60 @@ bool CopyCollectionIntoUi(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,u
         } else {t.upload.Reset();Say("Frame collection: no upload buffer for the tab bar");}
     }
     if(t.upload&&w==uint32_t(collection::art::ShotWidth)&&h==uint32_t(collection::art::ShotHeight)) {
-        D3D12_TEXTURE_COPY_LOCATION tabsFrom{};tabsFrom.pResource=t.upload.Get();tabsFrom.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;tabsFrom.PlacedFootprint=t.footprint;
+        ID3D12Resource* tabsSource=t.upload.Get();
+        if(collectionCarriedBarU>=0&&!collectionCarried.key.empty()) {   // the hand's item on the bar
+            auto& c=collectionTabsCarriedUpload;
+            using namespace collection::art;
+            const int px=int(collectionCarriedBarU*float(ShotWidth)+.5f)-TabsX,py=int(collectionCarriedBarV*float(ShotHeight)+.5f)-TabsY;
+            if(!c.upload) {
+                D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
+                D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;
+                bd.Width=t.footprint.Offset+UINT64(t.footprint.Footprint.RowPitch)*UINT64(TabsHeight);
+                bd.Height=bd.DepthOrArraySize=bd.MipLevels=1;bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+                if(FAILED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&c.upload)))) {
+                    c.upload.Reset();static bool told=false;if(!told){told=true;Say("Frame collection: no upload buffer for the tab bar with the hand's item");}
+                }
+            }
+            if(c.upload&&(c.key!=collectionCarried.key||c.x!=px||c.y!=py)) {   // rebuilt only when the item or its spot moves
+                c.ready=false;
+                const auto icon=interaction::icons::Get(collectionCarried.key);
+                std::vector<uint8_t> art(Tabs,Tabs+sizeof Tabs);   // straight RGBA, TabsWidth a row
+                if(icon&&!icon->rgba.empty()&&icon->width>0&&icon->height>0) {
+                    // the stash's scale: an inventory cell is 57 UI pixels, the icons 98 a cell (collection_draw.cpp)
+                    const float s=57.f/98.f,iw=float(icon->width)*s,ih=float(icon->height)*s;
+                    const float left=float(px)-iw*.5f,top=float(py)-ih*.5f;
+                    const int x0=std::max(0,int(std::floor(left))),x1=std::min(TabsWidth,int(std::ceil(left+iw)));
+                    const int y0=std::max(0,int(std::floor(top))),y1=std::min(TabsHeight,int(std::ceil(top+ih)));
+                    const int W=int(icon->width),H=int(icon->height);const uint8_t* src=icon->rgba.data();
+                    for(int y=y0;y<y1;++y)for(int x=x0;x<x1;++x) {
+                        // the icon pixels under this bar pixel, averaged (a box: the icon is ~1.7x larger)
+                        const int sx0=std::clamp(int((float(x)-left)/s),0,W-1),sx1=std::clamp(int((float(x+1)-left)/s),sx0+1,W);
+                        const int sy0=std::clamp(int((float(y)-top)/s),0,H-1),sy1=std::clamp(int((float(y+1)-top)/s),sy0+1,H);
+                        float a=0,c3[3]={0,0,0};int n=0;
+                        for(int v=sy0;v<sy1;++v)for(int u=sx0;u<sx1;++u,++n) {
+                            const uint8_t* q=src+(size_t(v)*size_t(W)+size_t(u))*4;const float qa=q[3]/255.f;
+                            a+=qa;for(int k=0;k<3;++k)c3[k]+=q[k]*qa;
+                        }
+                        if(n==0||a<=0)continue;
+                        uint8_t* d=art.data()+(size_t(y)*size_t(TabsWidth)+size_t(x))*4;
+                        const float ia=a/float(n),da=d[3]/255.f,oa=ia+da*(1-ia);
+                        if(oa<=0)continue;
+                        for(int k=0;k<3;++k)d[k]=uint8_t(std::clamp((c3[k]/a*ia+d[k]*da*(1-ia))/oa,0.f,255.f)+.5f);
+                        d[3]=uint8_t(std::clamp(oa*255.f+.5f,0.f,255.f));
+                    }
+                }
+                const auto half=collection::uiimage::Convert(art,TabsWidth,TabsWidth,TabsHeight,TabsWidth,TabsHeight);
+                uint8_t* mapped=nullptr;const D3D12_RANGE none{0,0};
+                if(!half.empty()&&SUCCEEDED(c.upload->Map(0,&none,reinterpret_cast<void**>(&mapped)))&&mapped) {
+                    for(int y=0;y<TabsHeight;++y)std::memcpy(mapped+t.footprint.Offset+size_t(y)*t.footprint.Footprint.RowPitch,
+                                                            reinterpret_cast<const uint8_t*>(half.data())+size_t(y)*TabsWidth*8,size_t(TabsWidth)*8);
+                    c.upload->Unmap(0,nullptr);
+                    c.key=collectionCarried.key;c.x=px;c.y=py;c.ready=icon!=nullptr;
+                }
+            }
+            if(c.upload&&c.ready)tabsSource=c.upload.Get();
+        }
+        D3D12_TEXTURE_COPY_LOCATION tabsFrom{};tabsFrom.pResource=tabsSource;tabsFrom.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;tabsFrom.PlacedFootprint=t.footprint;
         list->CopyTextureRegion(&to,UINT(collection::art::TabsX),UINT(collection::art::TabsY),0,&tabsFrom,nullptr);
     } else {
         static bool told=false;
