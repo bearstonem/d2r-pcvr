@@ -1909,6 +1909,30 @@ code review; the gain has not been measured in a headset. The 2026-11-09 16:27
 session before them logged look-at 6-14.6 and bodies 5-8.4 ms a second in
 fights, with a 38-53 ms longest pair in every ten-second window.
 
+### Draw-thread pose time in the Rocky Waste, November 23
+
+Two menu-free captures followed the same offline Paladin in the Players 7
+Rocky Waste. Each captured 360 native stereo pairs with SteamVR/OpenXR
+2.18.4, 3072-square eyes, NVIDIA Medium frame generation at 50%, all-thread
+hook counters enabled and GPU queries off. The player moved or turned in
+both captures.
+
+| Per capture unless stated | First | Second |
+| --- | ---: | ---: |
+| Mod pose calls on the draw thread | 3 | 23 |
+| Of those, calls inside either eye pass | 0 | 0 |
+| Mod pose calls on the other 16 threads | 255,794 | 268,362 |
+| Mod pose time on the draw thread, ms/pair | Rounded to 0.000 | 0.002 |
+| Mod pose time summed across other threads, ms/pair | 2.897 | 3.693 |
+| Both eye passes, elapsed ms/pair | 21.29 | 26.39 |
+
+Direct skeleton pose work accounted for very little draw-thread time.
+Worker calls ran concurrently, and the capture did not measure whether
+the renderer waited for their completion. The draw thread's guarded memory
+reads across all callers averaged 1,136 and 1,012 calls per pair, taking
+an estimated 0.708 and 0.644 ms per pair. The profiler groups these reads
+together, so identifying the callers requires separate attribution.
+
 ### 2026-11-10: fewer guarded reads and less waiting on locks
 
 Built from a count of the reads in the code; **the gain has not been measured in

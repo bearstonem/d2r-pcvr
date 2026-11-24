@@ -81,9 +81,16 @@ def skeleton_report(text, seq, draw_thread, scopes, hooks):
 
     def describe(group):
         calls = sum(r[1] for r in group)
+        ms = sum(r[3] for r in group)
         if any(r[1] and not r[2] for r in group):
-            return f'timing unavailable, {calls/latest:.1f} calls/pair'
-        return f'{sum(r[3] for r in group):.3f} ms/pair, {calls/latest:.1f} calls/pair'
+            timing = 'timing unavailable'
+        elif calls and not ms:
+            timing = 'time rounded to zero in the log'
+        else:
+            timing = f'{ms:.3f} ms/pair'
+        rate = calls / latest
+        rate_text = f'{rate:.3f}' if 0 < rate < .1 else f'{rate:.1f}'
+        return f'{timing}, {rate_text} calls/pair ({calls:,} total)'
 
     direct = [rows[draw_thread]] if draw_thread in rows else []
     others = [row for tid, row in rows.items() if tid != draw_thread]
