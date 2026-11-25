@@ -1690,10 +1690,35 @@ struct Builder {
         if(hint.empty())hint=std::string("Now: ")+ValueOf(r,v,c);
         Add(Role::PopoverHint,{card.x+PopPad,card.y+card.h-PopPad-hintH,card.w-2*PopPad,hintH},{},k,0,hint);
     }
+    void Voice(){
+        const auto& v=m.voice;
+        auto button=[&](Rect r,Hit h,const std::string& text){Add(Role::Chip,r,h,NoHelp,Enabled,text);};
+        button({328,100,278,64},{Kind::VoiceEdit,5},v.mode==0?"Recognition: Off":v.mode==1?"Recognition: Test":"Recognition: Cast");
+        button({618,100,630,64},{Kind::VoiceEdit,6},"Mic: "+v.microphones[size_t(std::clamp(v.microphone+1,0,int(v.microphones.size())-1))]);
+        button({328,180,64,64},{Kind::VoiceEdit,0,-1},"<");
+        Add(Role::Readout,{404,180,768,64},{},NoHelp,0,"Phrase "+std::to_string(v.slot+1)+" / 6: "+v.bindings[size_t(v.slot)].phrase);
+        button({1184,180,64,64},{Kind::VoiceEdit,0,1},">");
+        button({328,260,64,64},{Kind::VoiceEdit,4,-1},"<");
+        Add(Role::Readout,{404,260,768,64},{},NoHelp,0,"Action: "+v.SkillName());
+        button({1184,260,64,64},{Kind::VoiceEdit,4,1},">");
+        const char* rows[]={"qwertyuiop","asdfghjkl","zxcvbnm"};
+        for(int r=0;r<3;++r)for(int c=0;rows[r][c];++c)
+            button({328+c*90+r*20,344+r*76,78,64},{Kind::VoiceEdit,1,rows[r][c]},std::string(1,rows[r][c]));
+        button({328,580,250,64},{Kind::VoiceEdit,1,' '},"Space");
+        button({590,580,250,64},{Kind::VoiceEdit,2},"Backspace");
+        button({852,580,250,64},{Kind::VoiceEdit,3},"Clear phrase");
+        button({328,666,350,64},{Kind::VoiceSave},v.dirty?"Save voice changes":"Save / retry recognition");
+        if(in.card!=NoHelp||m.confirmClose||m.Dirty())Card(738);
+        else {
+            Add(Role::Readout,{328,748,920,100},{},NoHelp,0,v.status);
+            Add(Role::Readout,{328,852,920,64},{},NoHelp,0,"Use spoken English words. Test recognizes without casting.");
+        }
+    }
     void Build(){
         out.view=m.view;
         if(in.calibration.active){Calibration();return;}
         Rail();Band();
+        if(m.view==View::Voice){Voice();Footer();Flags();return;}
         int y=ViewTop;
         switch(m.view){
             case View::Presets:y=Presets();break;

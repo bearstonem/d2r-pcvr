@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include <cstddef>
+#include <string>
 #include "voice_commands.h"
 namespace framevr::voice {
 inline constexpr uint32_t Magic=0x564f4931;
@@ -22,11 +23,13 @@ class Bridge {
 public:
     ~Bridge(){Close();}
     void Close(){if(data)UnmapViewOfFile(data);if(mapping)CloseHandle(mapping);if(mutex)CloseHandle(mutex);data=nullptr;mapping=mutex=nullptr;}
-    bool Open(bool create){
+    bool Open(bool create,DWORD game=0){
         if(data)return true;
-        mutex=CreateMutexW(nullptr,FALSE,L"Local\\D2RVRVoicePrototypeMutex1");
-        mapping=create?CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,sizeof(Shared),L"Local\\D2RVRVoicePrototype1"):
-            OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,L"Local\\D2RVRVoicePrototype1");
+        const auto suffix=game?L"-game-"+std::to_wstring(game):std::wstring{};
+        const auto mappingName=L"Local\\D2RVRVoicePrototype1"+suffix,mutexName=L"Local\\D2RVRVoicePrototypeMutex1"+suffix;
+        mutex=CreateMutexW(nullptr,FALSE,mutexName.c_str());
+        mapping=create?CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,sizeof(Shared),mappingName.c_str()):
+            OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,mappingName.c_str());
         if(mapping)data=(Shared*)MapViewOfFile(mapping,FILE_MAP_ALL_ACCESS,0,0,sizeof(Shared));
         if(!data||!mutex){Close();return false;}
         return true;

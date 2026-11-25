@@ -1,5 +1,5 @@
 """Download pinned local speech runtime/model; no game build or installation."""
-import hashlib, pathlib, urllib.request, zipfile
+import argparse, hashlib, pathlib, urllib.request, zipfile
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEST = ROOT / "build-frame" / "voice-recognition"
 CACHE = ROOT / "deps" / "voice-recognition"
@@ -40,4 +40,9 @@ def setup():
                 path.parent.mkdir(parents=True, exist_ok=True)
                 if not path.exists() or path.stat().st_size != info.file_size: path.write_bytes(z.read(info))
     print("Speech runtime ready:", DEST)
-if __name__ == "__main__": setup()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--destination", type=pathlib.Path)
+    args = parser.parse_args()
+    if args.destination: DEST = args.destination
+    setup()

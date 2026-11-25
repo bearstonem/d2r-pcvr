@@ -488,17 +488,21 @@ add_dependencies(vr-settings-preview release-notes-generated)
 target_include_directories(vr-settings-preview PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(vr-settings-preview PRIVATE user32 gdi32 d2d1 dwrite windowscodecs ole32 framevr-runtime)
 
-# Speaker-independent desktop speech UI; runtime/model fetched separately by setup_voice_recognition.py.
+# Speech recognition is built and staged with the game, controlled by VR Settings > Gameplay > Voice.
 if(CMAKE_HOST_WIN32)
   find_program(VOICE_CSC csc.exe PATHS "$ENV{WINDIR}/Microsoft.NET/Framework64/v4.0.30319" NO_DEFAULT_PATH)
   if(VOICE_CSC)
     file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/voice_recognition.cs" VOICE_SOURCE)
-    file(TO_NATIVE_PATH "${CMAKE_CURRENT_BINARY_DIR}/voice-recognition.exe" VOICE_OUTPUT)
-    add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/voice-recognition.exe"
+    file(TO_NATIVE_PATH "${CMAKE_CURRENT_BINARY_DIR}/voice/voice-recognition.exe" VOICE_OUTPUT)
+    add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/voice/voice-recognition.exe"
+      COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/setup_voice_recognition.py" --destination "${CMAKE_CURRENT_BINARY_DIR}/voice"
       COMMAND "${VOICE_CSC}" /nologo /target:winexe /platform:x64 /optimize+
       /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll
-      "/out:${VOICE_OUTPUT}" "${VOICE_SOURCE}" DEPENDS voice_recognition.cs VERBATIM)
-    add_custom_target(voice-recognition DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/voice-recognition.exe")
+      "/out:${VOICE_OUTPUT}" "${VOICE_SOURCE}" DEPENDS voice_recognition.cs setup_voice_recognition.py VERBATIM)
+    add_custom_target(voice-recognition ALL DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/voice/voice-recognition.exe")
+    add_dependencies(d2rl-pcvr voice-recognition)
+  else()
+    message(FATAL_ERROR "The .NET Framework C# compiler is required for integrated voice recognition")
   endif()
 endif()
 add_executable(voice-commands-test voice_commands_test.cpp)
@@ -770,3 +774,20 @@ add_executable(multiplayer-fields-test multiplayer_fields_test.cpp)
 target_include_directories(multiplayer-fields-test PRIVATE ${D2RL_SDK}/include)
 target_compile_options(multiplayer-fields-test PRIVATE -UNDEBUG)
 add_test(NAME multiplayer-fields-test COMMAND multiplayer-fields-test)
+
+target_link_libraries(d2rl-pcvr PRIVATE winmm)
+
+add_executable(voice-integration-test voice_integration_test.cpp)
+set_target_properties(voice-integration-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/voice-test")
+target_link_libraries(voice-integration-test PRIVATE winmm)
+if(MSVC)
+  target_compile_options(voice-integration-test PRIVATE /UNDEBUG)
+else()
+  target_compile_options(voice-integration-test PRIVATE -UNDEBUG)
+endif()
+add_test(NAME voice-integration-test COMMAND voice-integration-test)
+add_test(NAME voice-payload-test COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/voice_payload_test.py")
+
+if(CMAKE_HOST_WIN32)
+  add_test(NAME voice-embedded-test COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/voice_embedded_test.py" "${CMAKE_CURRENT_BINARY_DIR}/voice/voice-recognition.exe")
+endif()

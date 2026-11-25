@@ -70,6 +70,7 @@
 #include "arcane_decay.h"
 #include "glyph_cast.h"
 #include "voice_bridge.h"
+#include "voice_runtime.h"
 #include "glyph_trail.h"
 #include "skill_cooldowns.h"
 #include "spell_motion.h"
@@ -323,7 +324,7 @@ bool arcaneAtlasPending=false,arcaneImageReady=false;
 glyphcast::Stroke glyphStroke;
 int glyphHand=-1;   // the hand drawing the stroke (right = 0), latched as it begins: each hand casts its own set
 glyphcast::Cast glyphCast;
-voice::Bridge voiceBridge;voice::Gate voiceGate;
+voice::Bridge voiceBridge;voice::Gate voiceGate;voice::Runtime voiceRuntime;
 uint64_t voiceOpenAt=0,voiceCatalogAt=0;
 glyphtrail::Painter glyphPainter(ForAtlas(glyphtrail::Painter::Incremental(),glyphtrail::Size,glyphtrail::Size));
 uint64_t glyphStrokeId=0,glyphPaintKey=0,glyphShownStroke=0;
@@ -3334,6 +3335,8 @@ bool MonoAudioOn(ULONGLONG now) {
 // (Feel it, Calibrate body, Set eye height), the rest go to layout::Press.
 // how: forwarded to CloseSettings for its log line only ("B").
 void SettingsPress(const settings::Hit& hit,uint64_t ms,const char* how=nullptr) {
+    if(hit.kind==settings::Kind::VoiceEdit){if(settingsModel.voice.Edit(hit.index,hit.delta))++settingsModel.revision;return;}
+    if(hit.kind==settings::Kind::VoiceSave){voiceBridge.Open(true,GetCurrentProcessId());voiceRuntime.Save(settingsModel.voice);++settingsModel.revision;return;}
     if(hit.kind==settings::Kind::Recenter){ResetHeight();MotionPulse(UiRole(1),haptics::Category::Interaction,.4f,35000000);return;}
     if(hit.kind==settings::Kind::Calibrate){if(settingsModel.CanCalibrate())OpenBodyCalibration();return;}
     if(hit.kind==settings::Kind::TestHaptics){
@@ -3360,6 +3363,8 @@ void SettingsPress(const settings::Hit& hit,uint64_t ms,const char* how=nullptr)
 }
 void SettingsPointer(bool grip) {
     if(!settingsModel.open)return;
+    voiceBridge.Open(true,GetCurrentProcessId());
+    if(voiceRuntime.Poll(settingsModel.voice))++settingsModel.revision;
     const bool monoAudio=MonoAudioOn(GetTickCount64());
     settingsModel.Observe(vrsettings::Read());settingsHover={};pointerVisible=pointerHit=false;
     if(!settingsModel.open){CloseSettings();return;}   // Apply and close: the save landed
@@ -5639,11 +5644,12 @@ void Input() {
         Say(line);
         return !refused;
     };
-    // Opt-in desktop voice prototype. No microphone or worker lives in the game.
+    // In-game Voice settings control an isolated, automatically launched recognizer.
     // Consume commands once, then use the same checked native dispatch as glyphs.
     {
         const auto at=GetTickCount64();
-        if(at>=voiceOpenAt){voiceBridge.Open(false);voiceOpenAt=at+1000;}
+        if(voiceRuntime.Poll(settingsModel.voice))++settingsModel.revision;
+        if(at>=voiceOpenAt){voiceBridge.Open(false,GetCurrentProcessId());voiceOpenAt=at+1000;}
         const bool allowed=quickFresh&&motionInput.active&&gameplayChain&&focused&&offlinedifficulty::ClientMode()==0&&
             !panelMode&&!spatialMode&&!settingsOwned&&!interactionOutput.wheel&&!interactionOutput.settings&&
             !interactionOutput.block&&!glyphCast.Busy()&&!glyphStroke.Drawing()&&!glyphPressed&&
@@ -5664,6 +5670,11 @@ void Input() {
                     if(interaction::HasSummonArmy(quickSnapshot))for(int id=commander::SkillPhalanxDef;id<=commander::SkillFallOut&&shared.count<140;++id){
                         auto& entry=shared.skills[shared.count++];entry.id=id;std::snprintf(entry.name,sizeof entry.name,"%s",commander::CommanderSkillName(id));
                     }
+                }
+                if(quickFresh&&shared.count){
+                    std::vector<voice::Choice> choices{{-1,"Unassigned"}};
+                    for(unsigned i=0;i<shared.count;++i)choices.push_back({shared.skills[i].id,shared.skills[i].name});
+                    settingsModel.voice.choices=std::move(choices);
                 }
                 voiceCatalogAt=at+500;
             }
@@ -9331,6 +9342,7 @@ bool Projection(float out[16],float nearWorld,int eye,bool stale) {
 void Shutdown(bool preserveResolution) {
     std::lock_guard lock(mutex);
     hapticPulses.Stop();
+    voiceRuntime.Close();
     voiceBridge.With([](voice::Shared& s){s.ready=false;s.session=0;s.command={};});voiceBridge.Close();voiceGate={};voiceOpenAt=voiceCatalogAt=0;
     // Keep the HUD hidden through an intentional eye-target/session rebuild.
     if(!preserveResolution)hud::NativeSession(false);
