@@ -193,6 +193,14 @@ bool MotionLanding(int skill,float& x,float& y,int* landed=nullptr);   // landed
 // The walk stick as walking reads it (the view's frame: x right, y ahead; after Walk direction's turn), while it is
 // pushed past the game's dead zone in world play; false at rest. Whirlwind aims along it (whirl_steer.h).
 bool WhirlStick(float& x,float& y);
+// Whirlwind on (whirl_on.h): while it is on, which turn-on it is (vrcam keeps each one's way), the next whirl's length
+// in cells, and the walk stick as WhirlStick has it when pushed; false while off. The hero's cell (heroX, heroY) is
+// noted for the ground he covers.
+struct WhirlOnSteer {uint32_t activation=0;float cells=0;bool pushed=false;float stickX=0,stickY=0;};
+bool WhirlOnNow(WhirlOnSteer& out,float heroX,float heroY);
+// The game took a Whirlwind command of that turn-on (its own command check passed), the hero at this cell and the
+// whirl `cells` long: counted, and the speed whirls go measured from it (whirlon::Chain).
+void WhirlOnTook(uint32_t activation,float heroX,float heroY,float cells);
 bool AimRulesDirected();
 bool MeleeSample(uint32_t poseStamp,melee::Sample& sample,int hand=0);
 // The posed melee capsule (world metres) that also pushes dropped bottles:

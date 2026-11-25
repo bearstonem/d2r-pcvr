@@ -3183,6 +3183,69 @@ every one, saying which; abandoned calls with their angles), `Frame heavens aim:
 (per call: handed or the game's pick) and `Frame spell motion:` (per cast, or why
 it was not). The skill picker tags it GESTURE ("Both grips, raise, drop").
 
+### Barbarian Whirlwind on
+
+Owner, 2026-11-25: "we should be able to walk with whirlwind on ... it should be on
+for a while so we can ... walk around with it on and then we can cast it again after
+that ... it should definitely be controllable by us". The T (both arms held straight
+out to the sides a moment, both grips held) or a press of a hand button that holds
+Whirlwind turns **Whirlwind on** (`steamvr/whirl_on.h`). While it is on the hero
+whirls on, and the walk stick steers him: each whirl heads where the stick pushes,
+the way a walk would go (Walk direction and Left-handed apply, and the turn stick and
+turning your body turn it, as they turn walking). With the stick at rest he keeps the
+way the last whirl went, as a desktop player holding the button with the mouse still
+does; the first whirl with the stick at rest goes where you look. A wall in the way
+stops him until the stick turns him; a whirl that cannot start costs no mana.
+
+How long: 5 s at Whirlwind level 1, a tenth of a second more each level, at most 8 s
+(level 31): 6.9 s with 20 points, 7.4-7.9 s with the +5 to +10 skills of endgame gear.
+The level is the game's own, +skills counted (the skill catalog's level plus bonus, as
+the game's mana and damage take it); unread, 5 s. There is no setting.
+
+It goes off when its time runs out; on the T again (let the arms down first) or its
+button pressed again; on another cast (a button, a glyph, another motion), a trigger
+attack or Interact; when the mana left is short of one whirl (once the whirl under way
+ends: its hits may leech it back); in town, with a menu or wheel open, on death or on
+leaving the game. Held, its button works as it always did: Whirlwind stays on while it
+is held, past its time too, and letting go after holding it 0.4 s or more turns it
+off; a quicker tap leaves it on for its time. Then it can be turned on again. The
+controllers pulse as it goes on and tick as it goes off. Physical swings and shield
+bashes wait while it is on (the whirls hit, with both weapons dual wielding, as the
+game's own Whirlwind does); they work again as it ends.
+
+How: a whirl cannot turn once begun - the game makes the hero uninterruptable from a
+whirl's start until he reaches its spot and refuses every command meanwhile
+(`whirl_steer.h`). So the mod holds Whirlwind's button for the game (its hand slot,
+else the right trigger's spare record with Whirlwind put on it, as glyph casting does)
+and the game's own repeat starts the next whirl the moment one ends; each whirl is
+aimed where the stick points as it starts (vrcam `WhirlSteerAim`). Every whirl is a
+native Whirlwind: its mana, hits, attack rate and sound are the game's, and nothing of
+the game's state is written. Each whirl lasts about half a second of whirling at the
+speed whirls go, at least 8 cells and at most 12, so a push of the stick turns him
+within about half a second. The speed is measured as he whirls (the cells between two
+whirls' starts over the time between them) and kept for the next time; it starts at
+13.4 cells/s.
+
+Mana: one whirl costs (25 + level - 1) / 2 (`skills.txt`: mana 25, lvlmana 1,
+manashift 7), 12.5 at level 1, 22 at 20, 27 at 30, however far it goes. Whirls went
+13.4 cells/s with a shield and 23-25 cells/s dual wielding (Frenzy's speed) in the
+owner's 2026-11-12 and 2026-11-25 sessions; the game's own figure with no speed bonus
+is 9.4. Mana a second is speed / length x a whirl's: against 10-cell whirls (the
+mod's whirls before, a cursor some 10 cells away on desktop) it is at most 1.25x (8
+cells, at 16 cells/s or slower), 1.0x at 20 cells/s and 0.83x at 24 (12 cells).
+Shorter whirls would turn sooner and cost more: 6 cells would be 1.67x.
+
+Log: one line as it goes on and one as it goes off, nothing per whirl:
+`Frame whirlwind on: by the T|its button, Whirlwind level N - on N s ...; whirls through
+its hand slot N|the right trigger's record[, put on it first], each N cells (whirl speed
+N cells/s, until measured|as measured), ...; N mana a whirl, mana N of N` and
+`Frame whirlwind off: <why>, after N of N s (on by ...); N whirls, about N mana (N each;
+mana A -> B), N cells covered; whirl speed N cells/s (measured|...), the next whirls N
+cells`. A turn-on refused says `Frame whirlwind: not turned on by ...: <why>`. Tests:
+`whirl-on-test` (its time, a whirl's mana and length, counting whirls and their speed,
+every start and stop), `whirl-steer-test` (the stick's way, as walked), and
+`motions-barbarian-test` (the T).
+
 ### Glyph casting
 
 A hand button bound to **Draw glyph** (the hand wheel's button picker) draws: while it is
@@ -3331,10 +3394,8 @@ there.
   sides then up past the head, fast (arms only, so seated too); Leap Attack, the same swing from both
   arms pulled well back (30 cm behind the eyes), at the monster that way; Find Item, the right hand
   held out at the corpse a moment, then snatched back to the shoulder; Whirlwind, both arms held
-  straight out to the sides (a T) a moment, whirling 10 cells ahead, or 10 cells where the walk stick
-  points if it is pushed as the T casts: once for a T, the arms let down before the next (a whirl
-  cannot turn once begun; held, Whirlwind's button chains whirls, each toward the stick as it starts
-  and each at its own mana: `whirl_steer.h`); Find Potion, Find Item's snatch by the left hand; Grim Ward, the right hand held out at the
+  straight out to the sides (a T) a moment: Whirlwind on for a few seconds, the walk stick steering,
+  and the arms let down and a T again turns it off (Barbarian Whirlwind on, above); Find Potion, Find Item's snatch by the left hand; Grim Ward, the right hand held out at the
   corpse a moment, then driven straight down; Taunt, both hands held out in front a moment, then pulled in
   to the chest, at the highlighted monster.
 - Necromancer: Bone Armor, both fists crossed on the chest, held; Raise Skeleton, both arms swept up
