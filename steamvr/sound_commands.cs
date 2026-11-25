@@ -49,7 +49,7 @@ public static class SoundFeatures {
     }
     public static int Match(double[][] sound,List<double[][]>[] profiles,int tolerance,out double best,out bool ambiguous){
         double threshold=new[]{.12,.19,.27}[Math.Max(0,Math.Min(2,tolerance))];int winner=-1;best=2;double second=2;
-        for(int i=0;i<profiles.Length;i++){if(profiles[i].Count<3)continue;var distances=profiles[i].Select(p=>Distance(sound,p)).OrderBy(x=>x).ToArray();double d=(distances[0]+distances[1])*.5;
+        for(int i=0;i<profiles.Length;i++){if(profiles[i].Count==0)continue;var distances=profiles[i].Select(p=>Distance(sound,p)).OrderBy(x=>x).ToArray();double d=(distances[0]+distances[Math.Min(1,distances.Length-1)])*.5;
             if(d<best){second=best;best=d;winner=i;}else second=Math.Min(second,d);
         }
         ambiguous=winner>=0&&(second-best<.035||best>second*.82);
@@ -75,7 +75,9 @@ public static class SoundStore {
     public static List<double[][]>[] Load(string directory){var result=new List<double[][]>[6];for(int slot=0;slot<6;slot++){result[slot]=new List<double[][]>();for(int sample=0;sample<3;sample++){string path=FileName(directory,slot,sample);if(System.IO.File.Exists(path))result[slot].Add(SoundFeatures.Extract(Read(path)));}}return result;}
 }
 public static class RecordedSounds {
-    public static int Run(int pid){
+    public static int Run(int pid,Func<int,ISoundInput> capture=null,Action<string> playback=null){
+        if(capture==null)capture=id=>new Microphone(id);
+        if(playback==null)playback=file=>{using(var player=new SoundPlayer(file)){player.Load();player.PlaySync();}};
         using(var parent=System.Diagnostics.Process.GetProcessById(pid))
         using(var map=MemoryMappedFile.OpenExisting(@"Local\D2RVRVoiceIntegrated"+pid))
         using(var view=map.CreateViewAccessor(0,8192))
@@ -83,10 +85,12 @@ public static class RecordedSounds {
         using(var bridge=new GameBridge("-game-"+pid)){
             Action<Action> locked=delegate(Action action){bool held=false;try{try{held=mutex.WaitOne(0);}catch(AbandonedMutexException){held=true;}if(held)action();}finally{if(held)mutex.ReleaseMutex();}};
             Action<string> report=delegate(string text){byte[] bytes=Encoding.UTF8.GetBytes(text);locked(delegate{byte[] line=new byte[240];Buffer.BlockCopy(bytes,0,line,0,Math.Min(239,bytes.Length));view.WriteArray(16,line,0,line.Length);});};
-            uint generation=0,mode=0;Microphone mic=null;SoundConfig config=null;List<double[][]>[] profiles=null;var segment=new SoundSegmenter();ulong started=0,lastAudio=0,lastSent=0,lastAck=0,session=0,meterAt=0,heardAt=0;bool wasAllowed=false;
+            uint resultSerial=0;
+            Action<string,int,double> resultReport=delegate(string text,int slot,double distance){locked(delegate{view.Write(7696,slot);view.Write(7700,++resultSerial);view.Write(7704,(float)distance);byte[] line=new byte[240];byte[] bytes=Encoding.UTF8.GetBytes(text);Buffer.BlockCopy(bytes,0,line,0,Math.Min(239,bytes.Length));view.WriteArray(7708,line,0,line.Length);view.WriteArray(16,line,0,line.Length);});};
+            uint generation=0,mode=0;int lastRecognized=-1;ISoundInput mic=null;SoundConfig config=null;List<double[][]>[] profiles=null;var segment=new SoundSegmenter();ulong started=0,lastAudio=0,lastSent=0,lastAck=0,session=0,meterAt=0,heardAt=0;bool wasAllowed=false;
             try{while(!parent.HasExited){
                 uint incoming=0,nextMode=0;bool exit=false;string json=null;
-                locked(delegate{exit=view.ReadUInt32(12)!=0;incoming=view.ReadUInt32(0);nextMode=view.ReadUInt32(4);uint n=view.ReadUInt32(8);if(incoming!=generation&&n>0&&n<7936){byte[] data=new byte[n];view.ReadArray(256,data,0,data.Length);json=Encoding.UTF8.GetString(data);}});
+                locked(delegate{exit=view.ReadUInt32(12)!=0;incoming=view.ReadUInt32(0);nextMode=view.ReadUInt32(4);uint n=view.ReadUInt32(8);if(incoming!=generation&&n>0&&n<7424){byte[] data=new byte[n];view.ReadArray(256,data,0,data.Length);json=Encoding.UTF8.GetString(data);}});
                 if(exit)break;
                 if(incoming!=0&&incoming!=generation&&json!=null){
                     generation=incoming;mode=nextMode;bridge.Tick(false);if(mic!=null)mic.Dispose();mic=null;segment.Reset();wasAllowed=false;
@@ -94,35 +98,37 @@ public static class RecordedSounds {
                         if(config==null||config.Bindings==null||config.Bindings.Count!=6||String.IsNullOrEmpty(config.Storage))throw new Exception("Invalid sound configuration");
                         string file=SoundStore.FileName(config.Storage,config.Slot,config.Sample);
                         if(mode==0)report("Recorded sound recognition off");
-                        else if(mode==4){report("Playing sample - casting paused");using(var player=new SoundPlayer(file)){player.Load();player.PlaySync();}mode=0;report("Preview finished. Select Test or Cast and save to listen.");}
+                        else if(mode==4){report("Playing sample - casting paused");playback(file);mode=0;report("Preview finished. Select Test or Cast and save to listen.");}
                         else if(mode==5){if(System.IO.File.Exists(file))System.IO.File.Delete(file);mode=0;report("Sample deleted. Record a replacement.");}
                         else {
                             if(mode!=3)profiles=SoundStore.Load(config.Storage);
-                            if(mode!=3&&!profiles.Any(p=>p.Count>=3))throw new Exception("Record three examples of a sound first.");
-                            mic=new Microphone(config.Microphone);started=lastAudio=Native.GetTickCount64();
+                            if(mode!=3&&!profiles.Any(p=>p.Count>=1))throw new Exception("Record at least one sample of a sound first.");
+                            mic=capture(config.Microphone);started=lastAudio=Native.GetTickCount64();
                             report(mode==3?"Recording: make your sound, then pause (10 seconds to start)":mode==1?"Test listening - no casts":"Listening - close settings to cast");heardAt=started;
                         }
-                    }catch(Exception e){mode=0;report(e.Message);}
+                    }catch(Exception e){mode=0;resultReport(e.Message,-1,2);}
                 }
                 bridge.Tick(mode==2&&mic!=null);
+                locked(delegate{view.Write(7680,0x534e4432u);view.Write(7684,mic!=null?mode:0u);view.Write(7688,mic!=null?(uint)segment.Level:0u);view.Write(7692,mic!=null&&segment.Started?1u:0u);view.Write(7952,Native.GetTickCount64());});
                 if(mic==null){Thread.Sleep(50);continue;}
                 try{ulong now=Native.GetTickCount64();if(mode==3&&now-started>14000)throw new Exception("Recording timed out. Press Record and try again.");
                     byte[] bytes=mic.Read();if(bytes==null){if(now-lastAudio>3000)throw new Exception("Microphone stopped. Check Virtual Desktop forwarding.");Thread.Sleep(5);continue;}lastAudio=now;
                     bool allowed=mode!=2||bridge.Ready;
-                    if(!allowed){segment.Reset();wasAllowed=false;if(now-meterAt>1000){report("Casting paused - close menus, focus game, free controls");meterAt=now;}continue;}
-                    if(!wasAllowed||session!=bridge.Session){segment.Reset();wasAllowed=true;session=bridge.Session;}
+                    if(allowed!=wasAllowed||session!=bridge.Session){segment.Reset();wasAllowed=allowed;session=bridge.Session;}
+                    if(!allowed&&now-meterAt>1000){report("Casting paused - validation still listens");meterAt=now;}
                     byte[] sound=segment.Feed(bytes);
-                    if(now-meterAt>500&&now-heardAt>3500){report((mode==3?"Recording":mode==1?"Testing":"Listening")+" - mic level "+segment.Level+"%");meterAt=now;}
-                    if(sound!=null){heardAt=now;if(sound.Length==0){report("Sound too long. Use a short command under 3 seconds.");continue;}
-                        double[][] feature;try{feature=SoundFeatures.Extract(sound);}catch(Exception e){report(e.Message);continue;}
+                    if(now-meterAt>500&&now-heardAt>3500){report((mode==3?"Recording":mode==1?"Testing":!bridge.Ready?"Validating (casts blocked)":"Listening")+" - mic level "+segment.Level+"%");meterAt=now;}
+                    if(sound!=null){heardAt=now;if(sound.Length==0){resultReport("Sound too long. Use a short command under 3 seconds.",-1,2);continue;}
+                        double[][] feature;try{feature=SoundFeatures.Extract(sound);}catch(Exception e){resultReport(e.Message,-1,2);continue;}
                         if(mode==3){SoundStore.Save(SoundStore.FileName(config.Storage,config.Slot,config.Sample),sound);mic.Dispose();mic=null;mode=0;report("Saved sound "+(config.Slot+1)+", sample "+(config.Sample+1)+". Preview it or record another example.");continue;}
                         double distance;bool ambiguous;int slot=SoundFeatures.Match(feature,profiles,config.Tolerance,out distance,out ambiguous);
                         string result=slot<0?(ambiguous?"Ambiguous sound - no cast. Use more distinct commands.":"No sound matched. Try Test with a looser tolerance."):"Matched sound "+(slot+1)+" (distance "+distance.ToString("F2")+")";
-                        if(slot>=0&&mode==2){int skill=config.Bindings[slot].Skill;if(skill<0)result+=" - no skill assigned";else if(lastSent!=0&&now-lastSent<1500)result+=" - cooldown";else if(bridge.Send(skill,session,now)){lastSent=now;result+=" - sent";}else result+=" - game not ready";}
-                        report(result);
+                        if(slot>=0&&mode==2){int skill=config.Bindings[slot].Skill;if(!bridge.Ready)result+=" - casting blocked (settings / game busy)";else if(skill<0)result+=" - no skill assigned";else if(lastSent!=0&&now-lastSent<1500)result+=" - cooldown";else if(bridge.Send(skill,session,now)){lastSent=now;result+=" - sent";}else result+=" - game not ready";}
+                        if(slot>=0)lastRecognized=slot;
+                        resultReport(result,slot,distance);
                     }
-                    if(bridge.Ack!=0&&bridge.Ack!=lastAck){lastAck=bridge.Ack;report(bridge.Status);heardAt=now;}
-                }catch(Exception e){report(e.Message);mic.Dispose();mic=null;mode=0;bridge.Tick(false);}
+                    if(bridge.Ack!=0&&bridge.Ack!=lastAck){lastAck=bridge.Ack;resultReport("Sound "+(lastRecognized+1)+": "+bridge.Status,lastRecognized,0);heardAt=now;}
+                }catch(Exception e){resultReport(e.Message,-1,2);mic.Dispose();mic=null;mode=0;bridge.Tick(false);}
             }}finally{if(mic!=null)mic.Dispose();}
         }return 0;
     }
@@ -131,6 +137,43 @@ public static class RecordedSounds {
 public static class SoundTests {
     static byte[] Sound(int type,double speed=1,double gain=1,double pitch=1){int n=(int)(16000*1.0/speed);var bytes=new byte[n*2];for(int i=0;i<n;i++){double t=(double)i/16000,phase=(double)i/n;double f=type==0?(phase<.5?340:780):type==1?(phase<.4?1700:2400):3000;double envelope=Math.Min(1,Math.Min(phase*20,(1-phase)*20));double value=(Math.Sin(2*Math.PI*f*pitch*t)+.4*Math.Sin(2*Math.PI*f*2*pitch*t)+.2*Math.Sin(2*Math.PI*f*3*pitch*t))*.16*gain*envelope;short sample=(short)(value*32767);bytes[2*i]=(byte)sample;bytes[2*i+1]=(byte)(sample>>8);}return bytes;}
     static void Check(bool v,string message){if(!v)throw new Exception(message);}
+    sealed class Input:ISoundInput {
+        byte[] bytes;int offset;public Input(byte[] pcm){bytes=pcm;}
+        public byte[] Read(){Thread.Sleep(5);var block=new byte[1600];int count=Math.Min(block.Length,bytes.Length-offset);if(count>0){Buffer.BlockCopy(bytes,offset,block,0,count);offset+=count;}return block;}
+        public void Dispose(){}
+    }
+    static void Pipeline(){
+        int pid=System.Diagnostics.Process.GetCurrentProcess().Id;
+        string directory=Path.Combine(Path.GetTempPath(),"d2r-pipeline-"+Guid.NewGuid().ToString("N"));
+        string name=@"Local\D2RVRVoiceIntegrated"+pid;Exception failure=null;Thread worker=null;int played=0,opened=0;bool ready=true;
+        using(var mutex=new Mutex(false,name+"Mutex"))
+        using(var map=MemoryMappedFile.CreateOrOpen(name,8192))using(var view=map.CreateViewAccessor())
+        using(var gameMutex=new Mutex(false,@"Local\D2RVRVoicePrototypeMutex1-game-"+pid))
+        using(var gameMap=MemoryMappedFile.CreateOrOpen(@"Local\D2RVRVoicePrototype1-game-"+pid,14208))using(var game=gameMap.CreateViewAccessor()){
+            Action<Action> control=a=>{mutex.WaitOne();try{a();}finally{mutex.ReleaseMutex();}};
+            Action heartbeat=()=>{gameMutex.WaitOne();try{game.Write(0,0x564f4931u);game.Write(8,Native.GetTickCount64());game.Write(24,71UL);game.Write(33,(byte)(ready?1:0));}finally{gameMutex.ReleaseMutex();}};
+            Func<ulong> sequence=()=>{gameMutex.WaitOne();try{return game.ReadUInt64(14040);}finally{gameMutex.ReleaseMutex();}};
+            Func<string> status=()=>{string result="";control(()=>{byte[] data=new byte[240];view.ReadArray(16,data,0,240);int n=Array.IndexOf(data,(byte)0);result=Encoding.UTF8.GetString(data,0,n<0?240:n);});return result;};
+            uint generation=0;
+            Action<int,int> change=(mode,sample)=>{var config=new SoundConfig{Storage=directory,Slot=0,Sample=sample,Tolerance=1,Microphone=-1,Bindings=Enumerable.Range(0,6).Select(i=>new Binding{Skill=i==0?149:-1}).ToList()};byte[] json=Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(config));control(()=>{view.WriteArray(256,json,0,json.Length);view.Write(8,(uint)json.Length);view.Write(4,(uint)mode);view.Write(12,0u);view.Write(16,(byte)0);view.Write(0,++generation);});};
+            Action<string> expect=text=>{ulong end=Native.GetTickCount64()+6000;while(Native.GetTickCount64()<end){heartbeat();if(failure!=null)throw new Exception("Worker failed",failure);if(status().Contains(text))return;Thread.Sleep(5);}throw new Exception("Pipeline expected "+text+"; got "+status());};
+            try{
+                control(()=>{view.WriteArray(0,new byte[8192],0,8192);});heartbeat();
+                worker=new Thread(()=>{try{RecordedSounds.Run(pid,id=>{int n=Interlocked.Increment(ref opened);return new Input(Sound(0,n<=3?1:1.2,n<=3?1:.55,n<=3?1:1.04));},file=>{Check(SoundStore.Read(file).Length>6400,"Preview receives saved WAV");Interlocked.Increment(ref played);});}catch(Exception e){failure=e;}});worker.IsBackground=true;worker.Start();
+                for(int sample=0;sample<3;sample++){change(3,sample);expect("Saved sound 1, sample "+(sample+1));Check(File.Exists(SoundStore.FileName(directory,0,sample)),"Recording saved");Check(sequence()==0,"Recording never casts");}
+                change(4,0);expect("Preview finished");Check(played==1&&sequence()==0,"Preview never casts");
+                change(1,0);expect("Matched sound 1");Check(sequence()==0,"Test never casts");
+                control(()=>{Check(view.ReadUInt32(7680)==0x534e4432u&&view.ReadInt32(7696)==0&&view.ReadUInt32(7700)>0,"Live validation publishes persistent match telemetry");});
+                change(2,0);expect(" - sent");Check(sequence()!=0,"Match publishes native command");
+                gameMutex.WaitOne();try{Check(game.ReadInt32(14064)==149&&game.ReadUInt64(14056)==71,"Assigned skill and active session sent");}finally{gameMutex.ReleaseMutex();}
+                ulong sent=sequence();ready=false;heartbeat();change(2,0);expect("casting blocked");for(int i=0;i<80;i++){heartbeat();Thread.Sleep(5);}Check(sequence()==sent,"Busy game never casts");
+                change(0,0);expect("recognition off");Check(sequence()==sent,"Off never casts");
+            }finally{
+                control(()=>{view.Write(12,1u);});if(worker!=null)Check(worker.Join(5000),"Worker shuts down");
+                if(Directory.Exists(directory))Directory.Delete(directory,true);
+            }
+        }
+    }
     public static int Run(){try{
         var profiles=new List<double[][]>[6];for(int i=0;i<6;i++)profiles[i]=new List<double[][]>();
         for(int i=0;i<2;i++)foreach(double pitch in new[]{.98,1.0,1.02})profiles[i].Add(SoundFeatures.Extract(Sound(i,1,1,pitch)));
@@ -140,6 +183,8 @@ public static class SoundTests {
             Check(match==i,"Natural timing / gain / pitch variation: "+i+" -> "+match+" score "+score);
         }
         Check(SoundFeatures.Match(SoundFeatures.Extract(Sound(2)),profiles,0,out score,out ambiguous)<0,"Unrelated sound rejected");
+        var single=new List<double[][]>[6];for(int i=0;i<6;i++)single[i]=new List<double[][]>();single[0].Add(profiles[0][1]);
+        Check(SoundFeatures.Match(SoundFeatures.Extract(Sound(0,1.2,.6,1.04)),single,1,out score,out ambiguous)==0,"A single recording can recognize a varied repetition");
         profiles[2]=profiles[0].ToList();Check(SoundFeatures.Match(SoundFeatures.Extract(Sound(0)),profiles,2,out score,out ambiguous)<0&&ambiguous,"Duplicate sounds reject as ambiguous even at Loose tolerance");
         var segment=new SoundSegmenter();byte[] clip=Sound(0);byte[] recognized=null;
         for(int i=0;i<clip.Length;i+=1600){var block=clip.Skip(i).Take(1600).ToArray();var result=segment.Feed(block);if(result!=null)recognized=result;}
@@ -148,6 +193,8 @@ public static class SoundTests {
         segment.Reset();for(int i=0;i<100;i++){Check(segment.Feed(new byte[1600])==null,"Silence never triggers");}
         segment.Reset();byte[] longResult=null;for(int i=0;i<100;i++){var result=segment.Feed(clip.Skip(8000).Take(1600).ToArray());if(result!=null)longResult=result;}for(int i=0;i<10;i++){var result=segment.Feed(new byte[1600]);if(result!=null)longResult=result;}Check(longResult!=null&&longResult.Length==0,"Overlong audio discarded, not matched as a fragment");
         string directory=Path.Combine(Path.GetTempPath(),"d2r-sound-test-"+Guid.NewGuid().ToString("N"));try{string file=SoundStore.FileName(directory,0,0);SoundStore.Save(file,clip);Check(SoundStore.Read(file).SequenceEqual(clip),"Playback WAV preserves recording");SoundStore.Save(file,Sound(1));Check(SoundStore.Read(file).SequenceEqual(Sound(1)),"Re-record replaces previous sample atomically");}finally{if(Directory.Exists(directory))Directory.Delete(directory,true);}
+        Pipeline();
+        Console.WriteLine("Recording-to-cast pipeline, test/playback suppression and busy-game rejection passed");
         Console.WriteLine("Recorded sound timing/gain/pitch tolerance, ambiguity, VAD, overlong rejection and WAV round-trip passed");return 0;
     }catch(Exception e){Console.Error.WriteLine(e);return 1;}}
 }

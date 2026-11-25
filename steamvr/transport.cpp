@@ -634,6 +634,19 @@ struct SettingsPainted {std::vector<uint8_t> pixels;settings::layout::Layout lay
 LatestWorker<SettingsPaintJob,SettingsPainted> settingsPainter([](const SettingsPaintJob& job) {
     const auto start=hookmetrics::Nanos();
     auto picture=settings::PaintPage(job.model,job.input);   // Width x Height straight RGBA and the layout it drew
+    if(picture.pixels.size()==size_t(settings::Width)*settings::Height*4)for(const auto& e:picture.layout.elements){
+        if(e.role!=settings::layout::Role::VoiceSkill||e.option<0)continue;
+        auto icon=interaction::icons::Get("s"+std::to_string(e.option));if(!icon||!icon->width||!icon->height)continue;
+        const int side=std::min(64,e.rect.h-8),left=e.rect.x+8,top=e.rect.y+(e.rect.h-side)/2;
+        for(int y=0;y<side;++y)for(int x=0;x<side;++x){
+            if(left+x<0||left+x>=settings::Width||top+y<0||top+y>=settings::Height)continue;
+            const auto* src=&icon->rgba[(size_t(y*icon->height/side)*icon->width+x*icon->width/side)*4];
+            auto* dst=&picture.pixels[(size_t(top+y)*settings::Width+left+x)*4];
+            const unsigned alpha=src[3],out=alpha+(unsigned(dst[3])*(255-alpha)+127)/255;
+            if(out)for(int c=0;c<3;++c)dst[c]=uint8_t((unsigned(src[c])*alpha+(unsigned(dst[c])*dst[3]*(255-alpha)+127)/255)/out);
+            dst[3]=uint8_t(out);
+        }
+    }
     return SettingsPainted{std::move(picture.pixels),std::move(picture.layout),double(hookmetrics::Nanos()-start)/1e6,std::move(picture.error)};
 });
 // What a picture shows. Everything that changes the look is compared as is
@@ -3335,7 +3348,9 @@ bool MonoAudioOn(ULONGLONG now) {
 // (Feel it, Calibrate body, Set eye height), the rest go to layout::Press.
 // how: forwarded to CloseSettings for its log line only ("B").
 void SettingsPress(const settings::Hit& hit,uint64_t ms,const char* how=nullptr) {
-    if(hit.kind==settings::Kind::VoiceEdit){if(settingsModel.voice.Edit(hit.index,hit.delta))++settingsModel.revision;return;}
+    if(hit.kind==settings::Kind::VoiceEdit){if(settingsModel.voice.Edit(hit.index,hit.delta)){
+        if(hit.index==5||hit.index==6||hit.index==8||hit.index==11){voiceBridge.Open(true,GetCurrentProcessId());voiceRuntime.Save(settingsModel.voice);}
+        ++settingsModel.revision;}return;}
     if(hit.kind==settings::Kind::VoiceSave){voiceBridge.Open(true,GetCurrentProcessId());voiceRuntime.Save(settingsModel.voice,unsigned(hit.delta));++settingsModel.revision;return;}
     if(hit.kind==settings::Kind::Recenter){ResetHeight();MotionPulse(UiRole(1),haptics::Category::Interaction,.4f,35000000);return;}
     if(hit.kind==settings::Kind::Calibrate){if(settingsModel.CanCalibrate())OpenBodyCalibration();return;}
@@ -3347,6 +3362,7 @@ void SettingsPress(const settings::Hit& hit,uint64_t ms,const char* how=nullptr)
         MotionPattern(category,haptics::Preview(category,hit.delta-1,settingsModel.Get()[settings::HapticShortMelee]>.5f),&levels);
         return;
     }
+    if(settingsModel.voice.picker&&hit.kind==settings::Kind::Close){settingsModel.voice.picker=false;++settingsModel.revision;return;}
     const int popoverBefore=settingsModel.popoverKey;
     const auto request=settings::layout::Press(settingsModel,hit,ms);
     if(settingsModel.popoverKey!=popoverBefore){   // Frame VR settings popover: each open and close, and why
@@ -3364,6 +3380,7 @@ void SettingsPress(const settings::Hit& hit,uint64_t ms,const char* how=nullptr)
 void SettingsPointer(bool grip) {
     if(!settingsModel.open)return;
     voiceBridge.Open(true,GetCurrentProcessId());
+    if(settingsModel.view==settings::View::Voice){static uint64_t iconsAt=0;auto revision=interaction::icons::Revision();if(revision!=iconsAt){iconsAt=revision;++settingsModel.revision;}}
     if(voiceRuntime.Poll(settingsModel.voice))++settingsModel.revision;
     const bool monoAudio=MonoAudioOn(GetTickCount64());
     settingsModel.Observe(vrsettings::Read());settingsHover={};pointerVisible=pointerHit=false;
@@ -5674,7 +5691,10 @@ void Input() {
                 if(quickFresh&&shared.count){
                     std::vector<voice::Choice> choices{{-1,"Unassigned"}};
                     for(unsigned i=0;i<shared.count;++i)choices.push_back({shared.skills[i].id,shared.skills[i].name});
-                    settingsModel.voice.choices=std::move(choices);
+                    const auto& previous=settingsModel.voice.choices;
+                    bool changed=previous.size()!=choices.size();
+                    if(!changed)for(size_t i=0;i<choices.size();++i)if(previous[i].id!=choices[i].id||previous[i].name!=choices[i].name){changed=true;break;}
+                    if(changed){settingsModel.voice.choices=std::move(choices);++settingsModel.revision;}
                 }
                 voiceCatalogAt=at+500;
             }

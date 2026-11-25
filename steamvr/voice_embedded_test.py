@@ -38,7 +38,7 @@ def main():
         change(1, 1)
         child = subprocess.Popen([str(exe), "--embedded", str(pid)], creationflags=subprocess.CREATE_NO_WINDOW)
         try:
-            expect("Record three examples")  # Missing samples fail BEFORE microphone construction.
+            expect("Record at least one sample")  # Missing samples fail BEFORE microphone construction.
             change(2, 0)
             expect("Recorded sound recognition off")
             change(3, 0, 1)

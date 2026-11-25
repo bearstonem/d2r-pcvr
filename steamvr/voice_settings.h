@@ -12,7 +12,10 @@ struct Editor {
     std::vector<Choice> choices{{-1,"Unassigned"}};
     std::vector<std::string> microphones{"Windows default"};
     std::array<unsigned,6> samples{};
-    int slot=0,sample=0,tolerance=1,microphone=-1,mode=0;bool loaded=false,dirty=false;
+    int slot=0,sample=0,tolerance=1,microphone=-1,mode=0,pickerPage=0,level=0,activeMode=0,matchedSlot=-1;bool picker=false,signal=false;
+    std::string lastResult="No sound detected yet";
+    unsigned resultSerial=0;
+    bool loaded=false,dirty=false;
     std::string status="Voice recognition off";
     bool Edit(int op,int value){
         auto& b=bindings[size_t(slot)];
@@ -22,10 +25,13 @@ struct Editor {
         case 2:if(!b.phrase.empty())b.phrase.pop_back();break;
         case 3:b.phrase.clear();break;
         case 4:{auto it=std::find_if(choices.begin(),choices.end(),[&](const Choice& c){return c.id==b.skill;});int n=it==choices.end()?0:int(it-choices.begin());n=(n+int(choices.size())+(value<0?-1:1))%int(choices.size());b.skill=choices[size_t(n)].id;break;}
-        case 5:mode=(mode+1)%3;break;
+        case 5:mode=std::clamp(value,0,2);break;
         case 6:microphone=(microphone+2)%int(microphones.size())-1;break;
         case 7:sample=(sample+3+(value<0?-1:1))%3;return true;
         case 8:tolerance=(tolerance+1)%3;break;
+        case 9:picker=!picker;pickerPage=0;return true;
+        case 10:pickerPage=std::clamp(pickerPage+(value<0?-1:1),0,std::max(0,(int(choices.size())-1)/8));return true;
+        case 11:if(value<0||value>=int(choices.size()))return false;b.skill=choices[size_t(value)].id;picker=false;break;
         default:return false;
         }
         dirty=true;return true;

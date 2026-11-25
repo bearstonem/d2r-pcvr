@@ -5,28 +5,25 @@ Open **VR Settings > Gameplay > Voice** in an offline game.
 
 1. Select the Quest / Virtual Desktop microphone and a **Sound** slot (1-6).
 2. Select **Sample 1**, press **Record / replace**, make your sound, then pause.
-   Wait for the saved message. Record natural repetitions into samples 2 and 3.
+   Wait for the saved message. One example is enough to start; optionally record natural repetitions into samples 2 and 3.
 3. **Play sample** plays the selected recording through the Windows default audio
    output (normally Virtual Desktop/headset). Recording/playback pauses casting.
    Record / replace overwrites only the selected sample; Delete sample removes it.
-4. Select a learned skill or available summon command using the **Action** arrows.
-5. Select **Test**, press **Save voice changes**, and repeat your sound. The page
-   reports the matched slot, rejection or ambiguity without casting anything.
-6. Choose **Strict**, **Balanced** (default), or **Loose** tolerance. Save after
-   changing tolerance or bindings. If Loose confuses two sounds, choose more
+4. Press **Choose skill** for a paged picker with game icons and skill names. Selecting a skill saves immediately.
+5. Press **Validate** and repeat your sound. It starts immediately. The microphone meter shows input activity and **Last detection** keeps the matched slot, rejection or ambiguity visible without casting.
+6. Choose **Strict**, **Balanced** (default), or **Loose** tolerance. Tolerance changes apply immediately. If Loose confuses two sounds, choose more
    distinct sounds and re-record. Test both desired sounds and unrelated speech.
-7. Select **Cast**, save, close settings, and repeat the sound to cast its skill.
-   Select **Off** and save to stop listening. Listening starts Off each game.
+7. Press **Cast**, close settings, and repeat the sound to cast its skill.
+   Press **Off** to stop listening immediately. While settings stay open, Cast still validates sounds but blocks spell execution. Listening starts Off each game.
 
 Sounds can be words, shouts or other vocal commands in any language. Nothing needs
-spelling or speech-to-text recognition. All three examples of a slot are required
-before it can match. You may record before assigning a skill; Test still reports
+spelling or speech-to-text recognition. A slot becomes recognizable after its first sample. Additional examples are optional. You may record before assigning a skill; Test still reports
 the sound, while Cast reports an unassigned slot without casting.
 
 Matching uses normalized mel-frequency cepstral features and dynamic time warping.
 This tolerates loudness and duration changes and some pitch/pronunciation variation;
 it does not require an identical waveform. Tolerance sets an acceptance distance,
-not a probability. A match must resemble at least two examples and beat other slots
+not a probability. With multiple samples, a match uses the best two examples; it must beat other slots
 by an ambiguity margin, even on Loose. Very similar commands may be indistinguishable.
 This is a personal sound matcher, not a universal model of what a shout means.
 

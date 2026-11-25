@@ -116,6 +116,7 @@ constexpr Rect MoreLink{890,BandY,190,BandH},MoreIcon{1022,BandY,64,BandH},MonoW
 
 // What an element is. The painter picks the look from the role and flags.
 enum class Role : uint8_t {
+    VoiceSkill, VoiceMeter,
     None,
     // rail and band
     Tab,            // a rail tab (Presets and the open group's pages): icon + name; hit Open;
@@ -1693,14 +1694,27 @@ struct Builder {
     void Voice(){
         const auto& v=m.voice;
         auto button=[&](Rect r,Hit h,const std::string& text){Add(Role::Chip,r,h,NoHelp,Enabled,text);};
-        button({328,100,278,64},{Kind::VoiceEdit,5},v.mode==0?"Recognition: Off":v.mode==1?"Recognition: Test":"Recognition: Cast");
-        button({618,100,630,64},{Kind::VoiceEdit,6},"Mic: "+v.microphones[size_t(std::clamp(v.microphone+1,0,int(v.microphones.size())-1))]);
+        if(v.picker){
+            Add(Role::Readout,{328,100,708,64},{},NoHelp,0,"Choose a skill for sound "+std::to_string(v.slot+1));
+            button({1060,100,188,64},{Kind::VoiceEdit,9},"Back");
+            int page=std::clamp(v.pickerPage,0,std::max(0,(int(v.choices.size())-1)/8));
+            for(int row=0;row<8;++row){int index=page*8+row;if(index>=int(v.choices.size()))break;const auto& choice=v.choices[size_t(index)];
+                auto& e=Add(Role::VoiceSkill,{328+(row%2)*466,184+(row/2)*116,454,100},{Kind::VoiceEdit,11,index},NoHelp,uint16_t(Enabled|(choice.id==v.bindings[size_t(v.slot)].skill?Selected:0)),choice.name);
+                e.option=choice.id;
+            }
+            button({328,672,250,64},{Kind::VoiceEdit,10,-1},"Previous");
+            Add(Role::Readout,{590,672,396,64},{},NoHelp,0,"Page "+std::to_string(page+1)+" / "+std::to_string((int(v.choices.size())+7)/8));
+            button({998,672,250,64},{Kind::VoiceEdit,10,1},"Next");
+            if(in.card!=NoHelp||m.confirmClose||m.Dirty())Card(748);
+            else Add(Role::Readout,{328,768,920,100},{},NoHelp,0,"Learned skills and available summon commands. Selection saves immediately.");
+            return;
+        }
+        for(int mode=0;mode<3;++mode)Add(Role::Chip,{328+mode*142,100,130,64},{Kind::VoiceEdit,5,mode},NoHelp,uint16_t(Enabled|(v.mode==mode?Selected:0)),mode==0?"Off":mode==1?"Validate":"Cast");
+        button({760,100,488,64},{Kind::VoiceEdit,6},"Mic: "+v.microphones[size_t(std::clamp(v.microphone+1,0,int(v.microphones.size())-1))]);
         button({328,180,64,64},{Kind::VoiceEdit,0,-1},"<");
-        Add(Role::Readout,{404,180,768,64},{},NoHelp,0,"Sound "+std::to_string(v.slot+1)+" / 6 - "+std::to_string(int((v.samples[size_t(v.slot)]&1)!=0)+int((v.samples[size_t(v.slot)]&2)!=0)+int((v.samples[size_t(v.slot)]&4)!=0))+" of 3 examples recorded");
+        Add(Role::Readout,{404,180,768,64},{},NoHelp,0,"Sound "+std::to_string(v.slot+1)+" / 6 - "+std::to_string(int((v.samples[size_t(v.slot)]&1)!=0)+int((v.samples[size_t(v.slot)]&2)!=0)+int((v.samples[size_t(v.slot)]&4)!=0))+" examples recorded");
         button({1184,180,64,64},{Kind::VoiceEdit,0,1},">");
-        button({328,260,64,64},{Kind::VoiceEdit,4,-1},"<");
-        Add(Role::Readout,{404,260,768,64},{},NoHelp,0,"Action: "+v.SkillName());
-        button({1184,260,64,64},{Kind::VoiceEdit,4,1},">");
+        auto& selected=Add(Role::VoiceSkill,{328,260,920,64},{Kind::VoiceEdit,9},NoHelp,Enabled,"Choose skill: "+v.SkillName());selected.option=v.bindings[size_t(v.slot)].skill;
         button({328,344,64,64},{Kind::VoiceEdit,7,-1},"<");
         Add(Role::Readout,{404,344,768,64},{},NoHelp,0,"Sample "+std::to_string(v.sample+1)+" / 3"+((v.samples[size_t(v.slot)]&(1u<<v.sample))?" - recorded":" - empty"));
         button({1184,344,64,64},{Kind::VoiceEdit,7,1},">");
@@ -1708,12 +1722,13 @@ struct Builder {
         button({620,432,280,64},{Kind::VoiceSave,0,4},"Play sample");
         button({912,432,280,64},{Kind::VoiceSave,0,5},"Delete sample");
         button({328,520,500,64},{Kind::VoiceEdit,8},std::string("Tolerance: ")+(v.tolerance==0?"Strict":v.tolerance==1?"Balanced":"Loose"));
-        Add(Role::Readout,{328,596,920,48},{},NoHelp,0,"Record 3 natural repetitions. Pause after each sound.");
-        button({328,666,350,64},{Kind::VoiceSave},v.dirty?"Save voice changes":"Save / retry recognition");
+        Add(Role::Readout,{328,596,920,48},{},NoHelp,0,"Last detection: "+v.lastResult);
+        button({328,666,350,64},{Kind::VoiceSave},"Save / retry");
+        auto& meter=Add(Role::VoiceMeter,{700,666,548,64},{},NoHelp,0,std::string(v.activeMode?"Listening":"Microphone off")+" - "+std::to_string(v.level)+"%"+(v.signal?" - sound detected":""));meter.fill=v.level*.01f;
         if(in.card!=NoHelp||m.confirmClose||m.Dirty())Card(738);
         else {
-            Add(Role::Readout,{328,748,920,100},{},NoHelp,0,v.status);
-            Add(Role::Readout,{328,852,920,64},{},NoHelp,0,"Any words or shouts. Test matches sounds without casting.");
+            Add(Role::Readout,{328,748,920,64},{},NoHelp,0,v.status);
+            Add(Role::Readout,{328,828,920,80},{},NoHelp,0,"One sample works. Extra examples improve tolerance. Modes apply immediately.");
         }
     }
     void Build(){

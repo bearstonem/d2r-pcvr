@@ -7,7 +7,10 @@
 namespace framevr::voice {
 // A private control channel owned by this game process. The recognizer is isolated
 // from the rendering DLL; stopping it or a decoder failure cannot stall VR frames.
-struct Control {unsigned generation=0,mode=0,length=0,reserved=0;char status[240]{};char json[7936]{};};
+struct Telemetry {unsigned magic=0,mode=0,level=0,active=0;int matched=-1;unsigned serial=0;float distance=0;char result[240]{};unsigned padding=0;uint64_t at=0;char spare[232]{};};
+static_assert(sizeof(Telemetry)==512);
+struct Control {unsigned generation=0,mode=0,length=0,reserved=0;char status[240]{};char json[7424]{};Telemetry telemetry;};
+static_assert(offsetof(Control,telemetry)==7680 && offsetof(Telemetry,at)==272);
 static_assert(sizeof(Control)==8192);
 inline std::string Utf8(const std::wstring& w){int n=WideCharToMultiByte(CP_UTF8,0,w.data(),int(w.size()),nullptr,0,nullptr,nullptr);std::string s(size_t(n),'\0');WideCharToMultiByte(CP_UTF8,0,w.data(),int(w.size()),s.data(),n,nullptr,nullptr);return s;}
 inline std::string Quote(const std::string& s){std::string out="\"";for(unsigned char c:s){if(c=='"'||c=='\\')out+='\\';if(c>=32)out+=char(c);}return out+'"';}
@@ -64,10 +67,14 @@ public:
         }
         return true;
     }
-    bool Poll(Editor& e){Load(e);auto now=GetTickCount64();if(now<pollAt)return false;pollAt=now+500;std::string status;
-        With([&](Control& c){status.assign(c.status,strnlen(c.status,sizeof c.status));});
+    bool Poll(Editor& e){Load(e);auto now=GetTickCount64();if(now<pollAt)return false;pollAt=now+200;std::string status;bool changed=false;
+        With([&](Control& c){status.assign(c.status,strnlen(c.status,sizeof c.status));
+            const auto& t=c.telemetry;bool fresh=t.magic==0x534e4432&&now>=t.at&&now-t.at<1500;
+            int level=fresh?std::min(100u,t.level):0,mode=fresh?int(t.mode):0;bool signal=fresh&&t.active;
+            if(e.level!=level||e.activeMode!=mode||e.signal!=signal){e.level=level;e.activeMode=mode;e.signal=signal;changed=true;}
+            if(t.magic==0x534e4432&&e.resultSerial!=t.serial){e.resultSerial=t.serial;e.matchedSlot=t.matched;e.lastResult.assign(t.result,strnlen(t.result,sizeof t.result));changed=true;}
+        });
         if(process&&WaitForSingleObject(process,0)==WAIT_OBJECT_0){CloseHandle(process);process=nullptr;status="Recognition stopped. Save / retry to restart.";}
-        bool changed=false;
         for(int slot=0;slot<6;++slot){unsigned mask=0;for(int sample=0;sample<3;++sample){auto path=storage/(L"sound-"+std::to_wstring(slot+1)+L"-"+std::to_wstring(sample+1)+L".wav");if(GetFileAttributesW(path.c_str())!=INVALID_FILE_ATTRIBUTES)mask|=1u<<sample;}if(e.samples[size_t(slot)]!=mask){e.samples[size_t(slot)]=mask;changed=true;}}
         if(!status.empty()&&status!=e.status){e.status=status;return true;}return changed;
     }

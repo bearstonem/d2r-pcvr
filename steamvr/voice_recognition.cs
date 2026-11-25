@@ -186,7 +186,8 @@ public sealed class GameBridge:IDisposable {
 
 }
 
-public sealed class Microphone:IDisposable {
+public interface ISoundInput:IDisposable { byte[] Read(); }
+public sealed class Microphone:ISoundInput {
 
     [StructLayout(LayoutKind.Sequential,Pack=2)] struct Format {public ushort tag,channels;public uint rate,bytes;public ushort align,bits,extra;}
 
