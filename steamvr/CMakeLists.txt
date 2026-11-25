@@ -488,9 +488,19 @@ add_dependencies(vr-settings-preview release-notes-generated)
 target_include_directories(vr-settings-preview PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(vr-settings-preview PRIVATE user32 gdi32 d2d1 dwrite windowscodecs ole32 framevr-runtime)
 
-# Desktop-only experimental trainer; no microphone work in the game process.
-add_executable(voice-trainer voice_trainer.cpp)
-target_link_libraries(voice-trainer PRIVATE winmm framevr-runtime)
+# Speaker-independent desktop speech UI; runtime/model fetched separately by setup_voice_recognition.py.
+if(CMAKE_HOST_WIN32)
+  find_program(VOICE_CSC csc.exe PATHS "$ENV{WINDIR}/Microsoft.NET/Framework64/v4.0.30319" NO_DEFAULT_PATH)
+  if(VOICE_CSC)
+    file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/voice_recognition.cs" VOICE_SOURCE)
+    file(TO_NATIVE_PATH "${CMAKE_CURRENT_BINARY_DIR}/voice-recognition.exe" VOICE_OUTPUT)
+    add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/voice-recognition.exe"
+      COMMAND "${VOICE_CSC}" /nologo /target:winexe /platform:x64 /optimize+
+      /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll
+      "/out:${VOICE_OUTPUT}" "${VOICE_SOURCE}" DEPENDS voice_recognition.cs VERBATIM)
+    add_custom_target(voice-recognition DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/voice-recognition.exe")
+  endif()
+endif()
 add_executable(voice-commands-test voice_commands_test.cpp)
 add_test(NAME voice-commands-test COMMAND voice-commands-test)
 if(MSVC)

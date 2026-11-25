@@ -1,5 +1,6 @@
 #pragma once
 #include <windows.h>
+#include <cstddef>
 #include "voice_commands.h"
 namespace framevr::voice {
 inline constexpr uint32_t Magic=0x564f4931;
@@ -12,6 +13,9 @@ struct Shared {
     Command command;
     uint64_t ack=0;char status[128]{};
 };
+// Shared with the C# speech GUI; fail compilation if its wire offsets drift.
+static_assert(sizeof(Shared)==14208 && offsetof(Shared,skills)==40 && offsetof(Shared,command)==14040 &&
+    offsetof(Shared,ack)==14072 && offsetof(Shared,status)==14080 && offsetof(Shared,enabled)==32 && offsetof(Shared,count)==36);
 // Local-session mapping, guarded by an OS mutex. The game never waits for the helper.
 class Bridge {
     HANDLE mapping=nullptr,mutex=nullptr;Shared* data=nullptr;

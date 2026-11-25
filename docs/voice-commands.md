@@ -1,74 +1,77 @@
-# Local voice-command prototype
+# Local speech recognition and skill assignments
 
-This is an experimental **desktop console trainer**, not an in-headset settings
-page yet. It learns your sounds rather than spelling or language. The six labels
-are HUUUU, HAAAAA, ATTACK, FALL BACK, RRRRAAAAA and DIE; pronounce them however you
-like, consistently. Different sounds must be acoustically distinct.
+The old trained-sound matcher and console trainer have been replaced. No recordings,
+voice enrollment, preset shout slots or speaker training are required. Type phrases
+in the graphical window, choose actions, and speak them.
 
 ## Start
 
-1. Build/install the current game DLL with your usual test-current.ps1, then enter
-   an offline VR game. The trainer alone cannot add support to an old DLL.
-2. Enable microphone forwarding in Virtual Desktop and select that microphone
-   from the trainer's device list. Prefer headphones to reduce game-audio pickup.
-3. Run `steamvr/voice-trainer.ps1` in PowerShell. It builds **only the helper**, then
-   opens its console. Alternatively run the already built
-   `build-frame/voice-prototype/voice-trainer.exe`.
-4. `devices` lists microphones; `mic 2` selects device 2 for this run.
-5. `train 1`: say HUUUU three times with a pause of at least half a second between
-   examples. Recording ends automatically after the third. Repeat `train 2`
-   through `train 6`. Training a label again replaces its three samples.
-6. `test` recognizes without sending actions. Speak normally and try background
-   noises too. Press any key **in the trainer console** to stop. At least two
-   labels must have three examples each before recognition is enabled.
-7. `skills` lists your current character's learned skills and applicable army
-   commands. `assign 1 149` binds HUUUU to Battle Orders, for example; `assign 1 -1`
-   disables that action. `list` shows all assignments and trained sample counts.
-8. `live` enables actions for this listening session. Return focus to D2R before
-   shouting. The trainer shows recognition scores and game acceptance/refusal;
-   accepted skill presses also give a controller pulse. Return to the console and
-   press a key to stop. `quit` exits. Live mode is never saved or enabled at startup.
+Run `steamvr/setup-voice-recognition.ps1` to download the pinned Vosk runtime and
+English model, compile the **desktop helper only**, and open its window. Or run the
+already prepared `build-frame/voice-recognition/voice-recognition.exe`.
 
-Default assignments: ATTACK = Army: Spearhead Assault (3904), FALL BACK = Army:
-Regroup (3906). These need an available summon army; they are not generic mercenary
-orders. Other sounds start unassigned. Any learned, non-item skill listed by
-`skills` can be assigned to any sound. Item-charge skill owners are not supported
-by this first version. Skill availability, mana and cooldowns remain native.
+1. Select your microphone (Virtual Desktop's forwarded Quest microphone).
+2. Enter an offline VR game with the voice-enabled mod DLL. Click **Refresh skills**.
+3. Add rows: a phrase of your choice and the skill/army action to execute.
+4. Click **Save assignments**. There are no predefined phrases; up to 32 can be added.
+5. **Test recognition** shows recognized speech without casting.
+6. **Start casting**, then focus D2R. **Stop** closes the microphone and disables casts.
 
-## Tuning
+Example assignments, optional: “battle orders” to Battle Orders; “attack” to Army:
+Spearhead Assault; “fall back” to Army: Regroup. These army actions require summons;
+they are not generic mercenary orders. Only learned non-item skills are currently
+listed. Existing skill availability, mana and cooldown checks remain authoritative.
 
-`threshold 0.20` sets the maximum matching distance; smaller is stricter, larger
-accepts more variation (range .02-.5). `level 0.012` sets microphone activation RMS
-(range .001-.2); lower it if quiet speech never records, raise it for noisy rooms.
-Ambiguous matches are rejected even below the threshold. Similar vowel shouts
-may need different consonants or a more distinct rhythm. Recognition has not yet
-been validated against your voice or headset audio; the included tests use synthetic
-signals and check dispatch safeguards, not real-world recognition accuracy.
+The game bridge is compatible with the previous voice-enabled DLL. Replacing only
+the recognition helper does not require reinstalling that DLL. If voice support was
+never installed, build/install the mod with the usual test-current.ps1 first.
 
-## Behavior and privacy
+## Recognition
 
-The microphone opens only during train/test/live and closes on leaving that mode.
-The helper uses Windows waveform input; no network, cloud speech engine, raw-audio
-files or transcript is used. Acoustic templates and assignments are stored locally
-in `%LOCALAPPDATA%/D2R-PCVR/voice-prototype-v1.bin` and persist across branches/builds.
-Delete that file to reset your voice profile. Templates contain personal voice
-features and should not be published.
+Vosk recognizes speech using a pre-trained acoustic/language model. The supplied
+small English model works across speakers without user enrollment, but accuracy
+still depends on accent, microphone and background noise. Commands are constrained
+to the phrases you entered plus an unknown-word alternative. Only complete exact
+phrase matches above the confidence threshold can dispatch; partial hypotheses and
+unknown speech never dispatch. A word missing from the model vocabulary is reported
+before listening instead of silently dropped.
 
-Matching runs in the helper process. A local Windows-session shared-memory channel
-carries skill IDs, timestamps, session identity and game acknowledgments. There is
-no keyboard simulation. The game consumes a fresh request once and dispatches via
-its existing glyph/native casting path, or its army-command API. Requests expire
-in 400 ms; helper heartbeat expires in 500 ms; commands have a 1.5-second cooldown.
-Menus, death, unfocused game, multiplayer, stale snapshots and occupied controls
-reject requests instead of saving them for later. Normal gameplay has no microphone
-work when the helper is absent.
+Use ordinary spoken words. Strings such as “HUUUU” and “RRRRAAAAA” are not reliably
+recognizable words; entering an invented spelling does not teach a speech engine a
+new sound. Choose words the selected language model knows. For another language,
+download a compatible small/dynamic-grammar Vosk model and select its folder; use
+phrases in that language. This is speaker-independent, not language-independent.
 
-The voice matcher uses normalized log-frequency acoustic features and dynamic time
-warping over three personal templates per label. Long speech is discarded until
-silence; similar competing labels must have a clear score margin. This is a small
-personal-shout experiment, not general speech recognition or speaker authentication.
+A model folder switch does not retrain your voice. The first model load takes a few
+seconds. Start/stop and error feedback appear in the window. Confidence defaults to
+75%; increase it for stricter matching. Game audio can still be mistaken for speech,
+so headphones and recognition-only testing are recommended.
 
-Validation: voice-commands-test (acoustics, ambiguity, segmentation, stale/replayed
-commands, session mismatch and blocked-input discard), trainer standalone compilation
-and help smoke test, and transport.cpp production-flag syntax check. Game build,
-real microphone and headset testing are separate.
+## Privacy and safeguards
+
+After initial setup, speech processing is local. No speech is sent to a service,
+no raw audio is saved, and no personal voice template is created. Editable phrases,
+action IDs and device/model choices are saved in
+`%LOCALAPPDATA%/D2R-PCVR/voice-recognition.json`. The previous template file is not read.
+Live casting is never saved or enabled at startup.
+
+The helper feeds the existing native skill/army-command bridge, not keyboard input.
+It resets speech context when gameplay becomes unavailable; requests carry the
+current session and expire in 400 ms. Commands have a 1.5 s cooldown. The game blocks
+requests while unfocused, dead, in menus, multiplayer or occupied interactions.
+The helper cannot bypass native game skill rules.
+
+The Windows helper uses .NET Framework WinForms, native waveform microphone input,
+and Vosk's C API. The runtime/model downloads are version-pinned with SHA-256 checks.
+Third-party binaries and test audio stay under ignored build-frame/deps directories.
+
+## Checks
+
+`voice-commands-test` checks the native request gate. Compile voice_recognition.cs
+as a console executable and use `--test` for phrase validation, duplicate rejection,
+exact assignment and confidence gating. `--transcribe MODEL PCM_FILE phrase ...`
+exercises the actual recognizer with mono 16 kHz signed little-endian PCM audio.
+Real Quest microphone and in-game casting still require headset testing.
+
+Sources: https://alphacephei.com/vosk/models and
+https://github.com/alphacep/vosk-api/blob/v0.3.45/src/vosk_api.h
