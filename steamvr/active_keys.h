@@ -35,5 +35,12 @@ public:
     bool MaybeContains(uint64_t key) const {
         return (bits.load(std::memory_order_acquire)&(uint64_t(1)<<Bucket(key)))!=0;
     }
+    template<class KeyAt> bool MaybeContainsAny(uint32_t count, KeyAt keyAt) const {
+        const auto active = bits.load(std::memory_order_acquire);
+        if (!active) return false;
+        for (uint32_t i = 0; i < count; ++i)
+            if (active & (uint64_t(1) << Bucket(keyAt(i)))) return true;
+        return false;
+    }
 };
 }

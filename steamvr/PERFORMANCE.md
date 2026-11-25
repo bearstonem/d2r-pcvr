@@ -69,6 +69,83 @@ once (`b3Body_GetContactData`, one entry) and may set its mass data, and after
 the frame's steps what the blades touch is listed (8 entries each) for freezing. No
 allocation beyond the `pressed` list, which keeps its capacity.
 
+## Scene depth on the recording threads, November 22
+
+The Rocky Waste headset log shows the private 3072 × 3072 scene depth copy
+active. While tracking depth, the plugin checked every resource barrier under
+one mutex. Recording threads now read a shared mask once per batch. They take
+the mutex only if a resource might be tracked, then verify the device and
+resource and apply transitions in order. Binding a depth view also resolves
+its resource once for both the description and the tracker.
+
+A Windows CPU fixture replayed both barrier callbacks with four tracked
+depth resources. Every eighth four-resource batch contained a depth
+transition. Out of 256 batches, the old callback took the mutex 256 times and
+the new callback took it 84 times, including hash collisions. Both selected
+the same depth resource and state after each batch. The original headset log
+did not count barrier batches or time this callback individually.
+
+The follow-up headset run was slower. Both runs used an offline Paladin in
+the Players 7 Rocky Waste with 3072 × 3072 eyes, SteamVR/OpenXR 2.18.4 and
+NVIDIA Medium frame generation at 50% scale. Each mean below covers complete
+ten-second intervals within the area. Stage times are weighted by pair count.
+
+| Rocky Waste gameplay | Previous dev build | With the depth filter |
+| --- | ---: | ---: |
+| Native pairs measured | 5,952 | 4,518 |
+| Native stereo pairs per second | 39.7 | 34.7 |
+| Both eye passes, ms per pair | 20.85 | 23.90 |
+| Full cycle, ms per pair | 25.21 | 28.80 |
+| Pairs taking at least 30 ms | 17.5% | 39.8% |
+
+One interval in the new run included the exit menu. Excluding it gives
+34.1 native pairs per second over 4,100 pairs. The runs used different live
+encounters. Those two runs alone could not isolate the depth filter.
+
+The last complete town interval before the Rocky Waste measured 16.75 ms for
+both eyes on the previous build and 16.53 ms with the filter. The field routes
+differed. Of 480 camera samples in the new run's menu-free timing windows,
+11% had a sample in the earlier run within 10 game units and 15 degrees of
+horizontal view direction. With menus excluded, the two eye passes took
+3.57 ms longer. The logged effects and Present portions together accounted
+for 0.03 ms of that difference.
+
+To measure the filter within one encounter, configure a diagnostic build
+with `-DD2RVR_COMPARE_DEPTH_BARRIERS=ON` (default off). The two-eye renderer
+alternates blocks of 32 native pairs in always-lock, filtered, filtered,
+always-lock order. Both modes maintain the same depth table and use the same
+depth-view lookup. Each block's first four pairs allow the pipeline to settle.
+`Frame depth compare` reports the mean cycle and eye time for the remaining
+28 pairs and samples recording-thread callbacks at randomized intervals
+averaging one sample per 64.5 batches. The reported callback time includes
+lock waits and clock overhead. Use complete four-block groups inside one area
+with menus closed, and compare the two modes within each group.
+
+On November 23 the same offline Paladin ran this comparison in the Players 7
+Rocky Waste. With menus and transitions excluded, 74 complete four-block
+groups provided 4,144 native stereo pairs per mode.
+
+| Within the same encounter | Always lock | Filter enabled |
+| --- | ---: | ---: |
+| Samples taking the lock | 100% | 12.6% |
+| Mean sampled callback time, ns | 206 | 115 |
+| Mean time for both eyes, ms | 19.07 | 19.31 |
+| Mean full stereo cycle, ms | 23.53 | 23.79 |
+| Native stereo pairs per second | 42.51 | 42.03 |
+
+The filter saved about 0.019 ms of estimated recording-thread time per
+pair, summed across threads. It produced a shorter full cycle in 36 of
+74 groups. The median paired cycle difference was 0.07 ms slower, with the
+middle half of groups ranging from 0.95 ms faster to 1.26 ms slower. This
+run shows cheaper barrier callbacks and no consistent frame-rate gain. It
+did not reproduce the earlier 3.57 ms increase in eye time.
+
+The draw thread used a median 98% of one core over 21 complete field
+intervals. The mod's skeleton pose hook averaged 35,798 calls and 81,961
+guarded reads per second over 20 complete intervals. Its time summed
+across threads averaged 170 ms per second. The share of that work that
+holds up the draw thread remains to be measured.
+
 ## Frame generation's wait, November 10
 
 **On for every install since the headset run of November 11**: no key in the

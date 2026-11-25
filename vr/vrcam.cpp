@@ -140,6 +140,9 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "hand_role.h"
 #include "render_resolution.h"
 #include "scene_depth.h"
+#ifdef D2RVR_COMPARE_DEPTH_BARRIERS
+#include "depth_barrier_compare.h"
+#endif
 #include "light_bounds.h"
 #include "game_device_only.h"
 #include "menu_controls.h"
@@ -8186,6 +8189,9 @@ uintptr_t HookDrawGameScreen(int a) {
     if(lastEnd>0) {
         const double cycle=ended-lastEnd;
         maxPair=std::max(maxPair,cycle);
+#if defined(D2RVR_COMPARE_DEPTH_BARRIERS) && defined(D2RVR_NATIVE_OPENXR)
+        framevr::scenedepth::compare::FinishPair(cycle*.001,(t2-t0)*.001);
+#endif
 #ifdef D2RVR_NATIVE_OPENXR
         ++cycleBins[binOf(cycleEdges,cycle*.001)];
         ++workBins[binOf(workEdges,cycle*.001-xr.waitFrameMs)];
@@ -11881,9 +11887,10 @@ void OnBind(command_list* cl, uint32_t count, const resource_view* rtvs, resourc
     t_dsW = t_dsH = 0;
     if (dsv.handle) {
         device* dev = cl->get_device();
-        const resource_desc d = framevr::resources::Describe(dev,framevr::resources::Resolve(dev,dsv));
+        const resource depth = framevr::resources::Resolve(dev,dsv);
+        const resource_desc d = framevr::resources::Describe(dev,depth);
 #ifdef D2RVR_NATIVE_OPENXR
-        framevr::scenedepth::Observe(cl,count,rtvs,framevr::resources::Resolve(dev,dsv),d);
+        framevr::scenedepth::Observe(cl,count,rtvs,depth,d);
 #endif
         t_dsW = d.texture.width; t_dsH = d.texture.height;
     }
