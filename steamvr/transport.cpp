@@ -552,7 +552,7 @@ LatestWorker<allyhealth::List,AllyPainted> allyPainter([](const allyhealth::List
 bool companionAtlasPending=false,companionPaintValid=false;
 interaction::PaintContext companionPaintContext{};
 XrSwapchain compassChain=XR_NULL_HANDLE;
-compass::Heading wristHeading;
+compass::Heading wristHeading;float groundBearing=0;
 bool compassFrame=false,compassAtlasReady=false;
 // VR Settings, the quest card, the blood visor, the strain light and the bow
 // laser share one swapchain (panelatlas): each its region of sharedMaster, a
@@ -961,6 +961,7 @@ stickgestures::Gestures rightStickGestures;   // right stick up: run / walk (the
 MenuTriggerGate menuTriggerGate;
 PressEdge inventoryButton,menuButton;
 float lastRecenter=0;
+uint64_t mapTravelEpoch=0,mapTravelPlayer=0;math::Vec mapTravelOffset{};
 uint32_t width=0,height=0;
 resolution::Size recommendedResolution{},maximumResolution{};
 DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
@@ -996,7 +997,7 @@ constexpr uint32_t mapSide=512;
 // background below 100%, or its frame not fully shown, floating_map.h FrameStep): a second square on the map's surface,
 // panelatlas::Gap rows under the first, so no swapchain more and the wrist's own picture stays solid and framed.
 // mapCopyOwn: this frame's copy (mapEye.copied) has it.
-constexpr uint32_t mapCopyTop=mapSide+panelatlas::Gap,mapHeight=mapCopyTop+mapSide;
+constexpr uint32_t mapCopyTop=mapSide+panelatlas::Gap,mapGroundTop=2*mapCopyTop,mapHeight=mapGroundTop+mapSide;
 bool mapCopyOwn=false;
 // The map's surface is made the first time a map shows. With OFXR Bridge
 // loaded that failed in every session it was tried (frame log, 2026-10-23 to
@@ -4554,6 +4555,10 @@ void Input() {
             floatMapWrist.p,floatMapWrist.q,floatMapWristMs,interaction::WristMapSize,
             motionInput.grip[R],motionInput.grip[L],controls.rx,controls.ry,floatMapWant,floatMapPointed,floatMapFrame,
             +[](int h,float s){MotionPulse(UiRole(h,handrole::System::WristHud),haptics::Category::Interaction,s,25000000);},&Say};
+        const auto groundTime=GetTickCount64();
+        if(stageWorld.valid&&stageWorld.upm>0&&groundTime>=stageWorld.at&&groundTime-stageWorld.at<=250){
+            f.groundKnown=true;f.travelEpoch=mapTravelEpoch;f.feet=stageWorld.origin+math::Rotate(math::Conjugate(stageWorld.base),mapTravelOffset);f.feet.y-=stageWorld.eyeHeight/stageWorld.upm;
+        }
         floatmap::StepFrame(f);
     }
 
@@ -7623,7 +7628,7 @@ bool CopyMap(reshade::api::command_queue* rq) {
     }
     if(!mapBlit.Render(device.Get(),e.commands.Get(),src,e.images[e.index].texture,true,true,flags,float(wristHeading.bearing),1.f,
                        fullMap?1.f:std::min(mapZoom.Zoom(),mapzoom::Max),span,search.reach,search.right,search.down,nullptr,
-                       own?mapCopyTop:0,back,frame)) {
+                       own?mapCopyTop:0,back,frame,floatmap::Grounded()?mapGroundTop:0,groundBearing,fullMap?fullmap::Span(w,h,true,topDown,mapZoom.Zoom(),drawnZoom):0.f)) {
         e.commands->Close();return false;
     }
     if(FAILED(e.commands->Close()))return false;
@@ -8593,9 +8598,13 @@ void EndPair() {
     struct FloatMapDraw {decltype(motionQuad)* quad;XrCompositionLayerQuad* layer;};FloatMapDraw floatMapDraw{&motionQuad,&floatMapQuad};
     floatmap::DrawFrame({interactionVisible&&!interactionOutput.wheel,mapEye.copied,GetTickCount64(),&floatMapDraw,
         +[](void* c,math::Vec p,math::Quat q,float side){const auto& d=*static_cast<FloatMapDraw*>(c);
-            (*d.quad)(*d.layer,XrPose({p,q}),side,side,{{0,mapCopyOwn?int32_t(mapCopyTop):0},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);},&Say});
-    if(count&&layers[count-1]==reinterpret_cast<const XrCompositionLayerBaseHeader*>(&floatMapQuad)&&floatMapAnchor)
-        for(uint32_t i=0;i+1<count;++i)if(layers[i]==floatMapAnchor){std::rotate(layers.data()+i+1,layers.data()+count-1,layers.data()+count);break;}
+            const bool ground=floatmap::Grounded();
+            (*d.quad)(*d.layer,XrPose({p,q}),side,side,{{0,ground?int32_t(mapGroundTop):(mapCopyOwn?int32_t(mapCopyTop):0)},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);
+            if(ground)d.layer->layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;},&Say});
+    // Floor belongs directly above the scene and below every interaction overlay (including the belt).
+    const auto* placementAnchor=floatmap::Grounded()?layer:floatMapAnchor;
+    if(count&&layers[count-1]==reinterpret_cast<const XrCompositionLayerBaseHeader*>(&floatMapQuad)&&placementAnchor)
+        for(uint32_t i=0;i+1<count;++i)if(layers[i]==placementAnchor){std::rotate(layers.data()+i+1,layers.data()+count-1,layers.data()+count);break;}
     XrCompositionLayerQuad chatQuads[5]={{XR_TYPE_COMPOSITION_LAYER_QUAD},{XR_TYPE_COMPOSITION_LAYER_QUAD},{XR_TYPE_COMPOSITION_LAYER_QUAD},{XR_TYPE_COMPOSITION_LAYER_QUAD},{XR_TYPE_COMPOSITION_LAYER_QUAD}};
     if(layer&&chatShown&&chatImageReady&&sharedChain&&!settingsModel.open&&!bodyCalibration.Active()){
         const bool headLocked=chatModel.pinned&&!chatModel.dragging;
@@ -9302,6 +9311,7 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
     if(std::fabs(recenterYaw-lastRecenter)>.001f){origin=V(head.position);lastRecenter=recenterYaw;recentered=true;}
     const float upm=(scaleHeight>0?scaleHeight:eyeHeight)/std::max(userEyeHeight,.5f);
     const auto base=math::Yaw(bodyHeading-recenterYaw);
+    if(eye<0)groundBearing=mapNorth-(math::Heading(base)+floatmap::FloorYaw());
     if(eye<0)compassFrame=wristHeading.Update(gamestate::LocalPlayer(),motionHeadTracked,
         Q(head.orientation),bodyHeading-recenterYaw,mapNorth);
     if(eye<0) {   // Room-scale: a snap or smooth turn turns the room about your head (it swung you round the hero's spot)
@@ -9323,6 +9333,16 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
                   // and the game carrying him elsewhere (Leap's flight, Whirlwind) only as far as it pays your step off
                   // (Follow): followed whole, the origin flew off with him and the camera stayed behind until a reload.
         const math::Vec now{hero[0],hero[1],hero[2]};const double at=Milliseconds()/1000.0;
+        const auto player=gamestate::LocalPlayer();
+        if(player!=mapTravelPlayer||recentered){mapTravelPlayer=player;mapTravelOffset={};++mapTravelEpoch;}
+        else if(player&&roomHeroKnown&&at>roomHeroAt&&motionHeadTracked){
+            const math::Vec jump{now.x-roomHero.x,0,now.z-roomHero.z};
+            const float threshold=(at-roomHeroAt<.25?roomsteps::MaxHeroStep:3.f)*upm;
+            if(math::Dot(jump,jump)>threshold*threshold){
+                const auto delta=V(head.position)-origin;
+                mapTravelOffset=math::Rotate(base,{delta.x,0,delta.z});++mapTravelEpoch;
+            }
+        }
         if(roomHeroKnown&&at>roomHeroAt&&at-roomHeroAt<.25) {
             const math::Vec moved{now.x-roomHero.x,0,now.z-roomHero.z};
             const float metres=std::sqrt(moved.x*moved.x+moved.z*moved.z)/upm;
