@@ -427,7 +427,7 @@ inline bool PotionGone(const Snapshot& s,const Request& r) {
 // clockwise from the upper-right segment; center is weapon mode.
 constexpr float Pi=3.14159265358979323846f;
 constexpr float WheelPhase=Pi/8;
-enum class MenuPage { Spells, Equipment, Map, EditSlots, EditSkills, Developer, EditItems, Glyphs, Motions };
+enum class MenuPage { Spells, Map, EditSlots, EditSkills, Developer, EditItems, Glyphs, Motions };
 struct MenuBounds {
     float left,top,right,bottom;
     bool Contains(float u,float v) const {return u>left&&u<right&&v>top&&v<bottom;}
@@ -435,7 +435,7 @@ struct MenuBounds {
 constexpr int QuickUseCell=210,LeftStrikesCell=212;   // 211 was RUN / WALK, 213 the movement slider (now VR Settings > Comfort > Moving > Movement speed)
 constexpr double QuickEditHold=.65;
 constexpr MenuBounds QuickUseBounds{.025f,.025f,.255f,.18f};
-// Glyph casting (glyph_cast.h): the GLYPHS box, upper right on the Spells and Equipment pages and on the
+// Glyph casting (glyph_cast.h): the GLYPHS box, upper right on the Spells page and on the
 // GLYPHS page itself (where it goes back); the button picker's "Draw glyph" entry, no game skill.
 constexpr int GlyphsCell=214,GlyphDrawId=9000;
 constexpr MenuBounds GlyphsBounds{.745f,.025f,.975f,.18f};
@@ -455,7 +455,7 @@ inline bool GlyphFollows(const GlyphSets& sets,int hand,int shape){return hand==
 constexpr int GlyphIndex(int hand,int shape){return (hand==1?GlyphShapes:0)+shape;}   // BindGlyph's index: the left hand's shapes 8 on
 constexpr int GlyphHandCell=215;
 constexpr MenuBounds GlyphHandBounds{.025f,.025f,.255f,.18f};
-// Motions (spell_motion.h): the MOTIONS box, lower right on the Spells and Equipment pages of a hero with
+// Motions (spell_motion.h): the MOTIONS box, lower right on the Spells page of a hero with
 // motions (the left claw box's mirror: the Sorceress, the Paladin, the Druid), and the MOTIONS page's
 // cards, one per motion skill of the class (spellmotion::PageOf), two columns of seven: pressed, a card
 // turns its motion on or off.
@@ -473,7 +473,7 @@ inline MenuBounds MotionCardBounds(int card,int count=14){
 // Druid or dual wield: the left claw's or blade's strike skill, [gameplay] left_hand_strikes. Lower left,
 // above the ACTIVE line (y 637) and clear of the hand wheel's 216-degree label.
 constexpr MenuBounds LeftStrikesBounds{.025f,.72f,.235f,.82f};
-inline bool QuickControls(MenuPage page){return page==MenuPage::Spells||page==MenuPage::Equipment;}
+inline bool QuickControls(MenuPage page){return page==MenuPage::Spells;}
 constexpr int SkillCategoryCell(int category){return 220+category;}
 inline MenuBounds SkillCategoryBounds(int category){
     const float x=.05f+category*.184f;return {x,.205f,x+.174f,.29f};
@@ -513,6 +513,24 @@ inline MenuBounds FooterBounds(int index,MenuPage page,bool developer=false) {
 }
 inline int FooterCell(int index,MenuPage page) {
     constexpr int tabs[]={9,12,10,11,217,13};return Editing(page)?9+index:tabs[index];
+}
+// A footer cell's label, shared by every painter of this footer. The tabs, left to right: SPELLS (9), MAP (12),
+// VR SETTINGS (10), INVENTORY on a hand wheel or EDIT SKILLS on the combined one (11), CHAT (217) and, in
+// developer mode, DEV (13). SPELLS goes back to the spells page from any other and is lit on it, as MAP and DEV
+// are on theirs: the EQUIPMENT page it opened there is gone (owner, 2026-11-24; weapon sets swap at the shoulder,
+// potions come from the belt). The editors' three: BACK / DONE, or PREVIOUS / NEXT / BACK.
+inline const char* FooterLabel(int cell,int editor,bool handWheel) {
+    if(editor==1)return cell==9?"BACK":cell==11?"DONE":"";
+    if(editor>=2)return cell==9?"PREVIOUS":cell==10?"NEXT":cell==11?"BACK":"";
+    switch(cell){
+        case 9:return "SPELLS";case 12:return "MAP";case 10:return "VR SETTINGS";case 11:return handWheel?"INVENTORY":"EDIT SKILLS";
+        case 217:return "CHAT";case 13:return "DEV";
+    }
+    return "";
+}
+// The footer tab lit as the page shown: SPELLS on the spells page, MAP and DEV on theirs.
+inline bool FooterCurrent(int cell,MenuPage page) {
+    return (cell==9&&page==MenuPage::Spells)||(cell==12&&page==MenuPage::Map)||(cell==13&&page==MenuPage::Developer);
 }
 inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spells,int hand=-1,bool developer=false,int devPage=0,bool leftStrikes=false,bool motions=false,int motionCount=14) {
     if(!std::isfinite(u)||!std::isfinite(v)||u<0||u>1||v<0||v>1)return -1;
@@ -560,10 +578,9 @@ inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spe
     if(hand>=0&&page==MenuPage::Spells)return int(std::floor((a+Pi/5)/(2*Pi/5)))%5;
     if(previous>=0&&previous<8) {
         const float difference=std::remainder(a-WheelPhase-previous*Pi/4,2*Pi);
-        if(std::fabs(difference)<Pi/8+.035f)return page==MenuPage::Equipment&&previous==2?-1:previous;
+        if(std::fabs(difference)<Pi/8+.035f)return previous;
     }
-    const int cell=int(std::floor(a/(Pi/4)))%8;
-    return page==MenuPage::Equipment&&cell==2?-1:cell; // Journal is accessed through the native tabbed menu.
+    return int(std::floor(a/(Pi/4)))%8;
 }
 struct Config {
     float waistBelowEyes=.65f,beltForward=.26f,hipWidth=.28f;
@@ -617,7 +634,7 @@ struct Output {
     int devPage=0;
     SkillCue cue{},leftCue{};
     Owner owner[2]{Owner::Combat,Owner::Combat};
-    bool block=false,wheel=false,utility=false,map=false,stowed=false,wrist=false,cancelPending=false,critical=false,settings=false;
+    bool block=false,wheel=false,map=false,wrist=false,cancelPending=false,critical=false,settings=false;
     bool vitals=false,palm=false,navigation=false,navigationPalm=false;
     int wheelHand=-1;
     bool inventory=false,chat=false;
@@ -664,7 +681,7 @@ struct Output {
     cooldowns::Icons cooldowns{};
 };
 inline MenuPage Page(const Output& out) {
-    return out.developer?MenuPage::Developer:out.editor==3?MenuPage::EditItems:out.editor==2?MenuPage::EditSkills:out.editor?MenuPage::EditSlots:out.map?MenuPage::Map:out.motions?MenuPage::Motions:out.glyphs?MenuPage::Glyphs:out.utility?MenuPage::Equipment:MenuPage::Spells;
+    return out.developer?MenuPage::Developer:out.editor==3?MenuPage::EditItems:out.editor==2?MenuPage::EditSkills:out.editor?MenuPage::EditSlots:out.map?MenuPage::Map:out.motions?MenuPage::Motions:out.glyphs?MenuPage::Glyphs:MenuPage::Spells;
 }
 inline bool MenuMapWanted(const Input& in,const Output& out,uint64_t now) {
     return in.active&&out.wheel&&out.map&&!out.editor&&Fresh(in.snapshot,in.session,now);
@@ -682,7 +699,7 @@ class Engine {
     Config config{};
     uint64_t session=0,epoch=0,sequence=0;
     double lastTime=0,pendingAt=0,resultAt=0,criticalUntil=0,criticalAgain=0;
-    bool primed=false,triggerWas=false,gripWas[2]{},wheelLatch=false,utility=false,map=false,rearm=true,stowed=false;
+    bool primed=false,triggerWas=false,gripWas[2]{},wheelLatch=false,map=false,rearm=true;
     bool bottleTriggerWas[2]{};
     bool glyphs=false;   // the GLYPHS page
     bool motions=false;  // the MOTIONS page
@@ -717,17 +734,17 @@ class Engine {
     // The skill editor's tree filter, kept for this game (a game holds one character); filterClass
     // is a safety check only: another class shows All.
     int filter=skillcategories::All,filterClass=-1;
-    // Each wheel hand keeps its own page (Spells / Equipment / Map / Developer and its page) and
+    // Each wheel hand keeps its own page (Spells / Map / Glyphs / Motions / Developer and its page) and
     // tree filter, for this game: slot = wheelHand+1 (0: the combined wheel). pageHand is the slot
     // loaded into the fields above; a closed wheel (wheelHand -1) changes nothing.
-    struct HandMenu {bool utility=false,map=false,developer=false;int devPage=0,filter=skillcategories::All,filterClass=-1;bool glyphs=false,motions=false;int glyphHand=0;};
+    struct HandMenu {bool map=false,developer=false;int devPage=0,filter=skillcategories::All,filterClass=-1;bool glyphs=false,motions=false;int glyphHand=0;};
     std::array<HandMenu,3> handMenus{};
     int pageHand=-2;
     uint64_t joined=0;   // the last non-zero session (mapzoom::NewGame: a new one is a new game)
-    void StoreHand(){if(pageHand>=0&&pageHand<int(handMenus.size()))handMenus[pageHand]={utility,map,developer,devPage,filter,filterClass,glyphs,motions,glyphHand};}
+    void StoreHand(){if(pageHand>=0&&pageHand<int(handMenus.size()))handMenus[pageHand]={map,developer,devPage,filter,filterClass,glyphs,motions,glyphHand};}
     void LoadHand(int slot){
         pageHand=std::clamp(slot,0,int(handMenus.size())-1);const auto& h=handMenus[pageHand];
-        utility=h.utility;map=h.map;developer=h.developer;devPage=h.devPage;filter=h.filter;filterClass=h.filterClass;glyphs=h.glyphs;motions=h.motions;glyphHand=h.glyphHand;
+        map=h.map;developer=h.developer;devPage=h.devPage;filter=h.filter;filterClass=h.filterClass;glyphs=h.glyphs;motions=h.motions;glyphHand=h.glyphHand;
     }
     const Skill& Choice(int index)const{return choices[choiceIndices[index]];}
     void FilterSkills(int category) {
@@ -859,10 +876,10 @@ class Engine {
     }
 public:
     void Configure(Config c) {config=c;Reset();}
-    // Each hand's page (Map, Equipment, Developer and its page) and tree filter are kept through a close,
+    // Each hand's page (Map, Glyphs, Motions, Developer and its page) and tree filter are kept through a close,
     // a tracking or frame hiccup and character select; only a new game (Step) starts them over. Editors close.
     void Reset() {quickPressed=false;primed=false;rearm=true;wheelLatch=true;Drop();flight={};pending={};result=Result::None;criticalUntil=criticalAgain=0;editor=0;editSlot=-1;glyphEdit=-1;shoulderSwap.Reset();leatherReach.Reset();}
-    MenuPage Page() const {return developer?MenuPage::Developer:editor==3?MenuPage::EditItems:editor==2?MenuPage::EditSkills:editor?MenuPage::EditSlots:map?MenuPage::Map:motions?MenuPage::Motions:glyphs?MenuPage::Glyphs:utility?MenuPage::Equipment:MenuPage::Spells;}
+    MenuPage Page() const {return developer?MenuPage::Developer:editor==3?MenuPage::EditItems:editor==2?MenuPage::EditSkills:editor?MenuPage::EditSlots:map?MenuPage::Map:motions?MenuPage::Motions:glyphs?MenuPage::Glyphs:MenuPage::Spells;}
     int DeveloperPage() const {return devPage;}
     int TreeFilter() const {return filter;}        // the open hand's kept skill tree (All when none)
     int TreeFilterClass() const {return filterClass;}
@@ -913,14 +930,13 @@ public:
         if(!in.active||!in.tracked[0]||!in.tracked[1]||!std::isfinite(in.time)||
            !Valid(in.head)||!Valid(in.hand[0])||!Valid(in.hand[1])||!primed||session!=in.session||epoch!=in.epoch||dt<=0||dt>.15) {
             Reset();primed=in.active&&in.tracked[0]&&in.tracked[1]&&Valid(in.head)&&Valid(in.hand[0])&&Valid(in.hand[1])&&std::isfinite(in.time);
-            if(session!=in.session)stowed=false;
             // A new game (a new non-zero session; the counter only grows) starts every hand's menu over.
             // A 0 (leaving, the title, character select) or a blip back to the same value keeps them.
             if(mapzoom::NewGame(joined,in.session)){handMenus={};const int slot=pageHand;pageHand=-2;LoadHand(slot<0?0:slot);}
             session=in.session;epoch=in.epoch;lastTime=in.time;
             triggerWas=trigger;gripWas[0]=grips[0];gripWas[1]=grips[1];
             for(int h=0;h<2;++h)bottleTriggerWas[h]=bottleTriggers[h];
-            body=Valid(in.head)?UprightBody(in.head,body.q):Pose{};out.block=true;out.stowed=stowed;out.cancelPending=true;return out;
+            body=Valid(in.head)?UprightBody(in.head,body.q):Pose{};out.block=true;out.cancelPending=true;return out;
         }
         lastTime=in.time;
         const bool handChanged=in.wheelHand!=lastWheelHand;
@@ -942,7 +958,6 @@ public:
             if(in.reply.sequence==pending.sequence&&in.reply.session==session&&in.reply.result!=Result::Pending) {
                 result=in.reply.result;resultAt=in.time;out.feedback=(result==Result::Applied||result==Result::Dispatched||result==Result::DebugUpdated||result==Result::TurnsUpdated||result==Result::SharpUpdated||result==Result::FillUpdated||result==Result::RimsUpdated||result==Result::SkyRimsUpdated||result==Result::BodiesUpdated)?2:3;
                 out.feedbackHand=pendingHand;
-                if(result==Result::Applied&&pending.action==Action::Equip)stowed=false;
                 if(pending.action==Action::Potion)for(auto& bottle:bottles)
                     if(bottle.column>=0&&pending.item==bottle.held.item) {
                         bottle.consumed=result==Result::Applied;
@@ -999,7 +1014,7 @@ public:
         const auto reached=leatherReach.Step(sheet);out.block=out.block||reached.block;
         if(reached.open){out.inventory=true;out.feedback=1;out.feedbackHand=leather::Hand;}
         if(wheel) {
-            out.wheel=true;out.utility=utility;out.map=map;out.glyphs=glyphs;out.hover=in.hover;out.block=true;out.leftStrikes=in.leftStrikes;
+            out.wheel=true;out.map=map;out.glyphs=glyphs;out.hover=in.hover;out.block=true;out.leftStrikes=in.leftStrikes;
             owner[0]=owner[1]=Owner::Wheel;
             if((editor==1||editor==2)&&glyphEdit<0&&fresh&&in.snapshot.bindingBank!=editBank){editor=in.wheelHand>=0?0:1;editSlot=-1;editBank=in.snapshot.bindingBank;rearm=true;}
             // A hold edits; a short click uses on release. A lost ray/session
@@ -1033,7 +1048,7 @@ public:
                     out.feedbackHand=in.wheelHand>=0?1-in.wheelHand:0;rearm=true;
                 } else if(!editor&&in.hover==GlyphsCell&&(QuickControls(Page())||glyphs)) {
                     // Glyph casting's page, and back; it opens on the wheel's own hand's set.
-                    glyphs=!glyphs;utility=map=developer=motions=false;out.utility=out.map=false;out.glyphs=glyphs;glyphEdit=-1;
+                    glyphs=!glyphs;map=developer=motions=false;out.map=false;out.glyphs=glyphs;glyphEdit=-1;
                     if(glyphs)glyphHand=in.wheelHand==1?1:0;
                     out.feedback=1;out.feedbackHand=in.wheelHand>=0?1-in.wheelHand:0;rearm=true;
                 } else if(glyphs&&!editor&&in.hover==GlyphHandCell) {
@@ -1041,7 +1056,7 @@ public:
                     glyphHand=1-glyphHand;out.feedback=1;out.feedbackHand=in.wheelHand>=0?1-in.wheelHand:0;rearm=true;
                 } else if(!editor&&in.hover==MotionsCell&&QuickControls(Page())&&spellmotion::HasMotions(in.snapshot.skillClass)) {
                     // The MOTIONS page (back: SPELLS, the first footer tab).
-                    motions=true;glyphs=utility=map=developer=false;out.utility=out.map=false;glyphEdit=-1;
+                    motions=true;glyphs=map=developer=false;out.map=false;glyphEdit=-1;
                     out.feedback=1;out.feedbackHand=in.wheelHand>=0?1-in.wheelHand:0;rearm=true;
                 } else if(motions&&!editor&&in.hover>=MotionCardCell(0)&&in.hover<MotionCardCell(MotionCards)) {
                     // A card: its motion on or off (a local setting, saved by the transport).
@@ -1061,7 +1076,7 @@ public:
                     }
                     rearm=true;
                 } else if(!editor&&in.hover==13&&fresh&&in.snapshot.developer) {
-                    developer=!developer;devPage=std::clamp(devPage,0,dev::PageCount-1);utility=map=glyphs=motions=false;out.utility=out.map=false;rearm=true;   // its last page
+                    developer=!developer;devPage=std::clamp(devPage,0,dev::PageCount-1);map=glyphs=motions=false;out.map=false;rearm=true;   // its last page
                 } else if(developer&&in.hover>=DeveloperPageCell(0)&&in.hover<DeveloperPageCell(dev::PageCount)) {
                     if(fresh)devPage=in.hover-DeveloperPageCell(0);
                     out.hover=-1;rearm=true;
@@ -1111,39 +1126,22 @@ public:
                     else out.feedback=3;
                     rearm=true;
                 }
-                else if(in.wheelHand>=0&&!utility&&!map&&!glyphs&&!motions&&in.hover>=0&&in.hover<5&&fresh&&in.snapshot.bindingsEditable){
+                else if(in.wheelHand>=0&&!map&&!glyphs&&!motions&&in.hover>=0&&in.hover<5&&fresh&&in.snapshot.bindingsEditable){
                     editSlot=skills::HandSlot(in.wheelHand,in.hover);editPage=0;editBank=in.snapshot.bindingBank;previousBinding=in.snapshot.skills[editSlot];
                     OpenSkills(in.snapshot,true);rearm=true;
                 }
-                else if(in.hover==11){developer=glyphs=motions=false;editor=1;editBank=in.snapshot.bindingBank;editSlot=-1;map=false;out.map=false;utility=false;out.utility=false;rearm=true;}
+                else if(in.hover==11){developer=glyphs=motions=false;editor=1;editBank=in.snapshot.bindingBank;editSlot=-1;map=false;out.map=false;rearm=true;}
                 else if(in.hover==10){out.settings=true;out.wheel=false;wheelLatch=true;rearm=true;}
                 else if(in.hover==217){out.chat=true;out.wheel=true;rearm=true;}
-                else if(in.hover==12){developer=glyphs=motions=false;map=true;out.map=true;utility=false;out.utility=false;rearm=true;}
-                else if(in.hover==9){utility=(map||developer||glyphs||motions)?false:!utility;developer=glyphs=motions=false;out.utility=utility;map=false;out.map=false;rearm=true;}
-                else if(!map&&in.hover==8) {if(in.wheelHand<0)out.select=-1;stowed=false;wheelLatch=true;out.wheel=false;rearm=true;out.feedback=1;}
-                else if(!map&&in.hover>=0&&in.hover<8&&(in.wheelHand<0||utility)&&(!utility||in.hover!=2)) {
-                    if(!utility) {
-                        const auto& skill=in.snapshot.skills[in.hover];
-                        if(!fresh||!skill.known||skill.available) {
-                            out.select=in.hover;stowed=false;wheelLatch=true;out.wheel=false;out.feedback=1;
-                        } else out.feedback=3;
-                    } else if(in.hover<2) {if(fresh&&in.snapshot.equipmentKnown)request(Action::Equip,in.hover+1);else out.feedback=3;}
-                    else if(in.hover==3) {stowed=!stowed;out.feedback=1;}
-                    else {
-                        const int col=in.hover-4;const auto& b=in.snapshot.belt[col];
-                        if(fresh&&b.known&&b.count&&b.Next().handle)request(Action::Potion,col,b.Next(),b.revision);
-                        else out.feedback=3;
-                    }
-                    if(utility){wheelLatch=true;out.wheel=false;}
+                else if(in.hover==12){developer=glyphs=motions=false;map=true;out.map=true;rearm=true;}
+                else if(in.hover==9){developer=glyphs=motions=map=false;out.map=false;rearm=true;}   // SPELLS: back to the spells page; on it, it stays
+                else if(!map&&in.hover==8) {if(in.wheelHand<0)out.select=-1;wheelLatch=true;out.wheel=false;rearm=true;out.feedback=1;}
+                else if(!map&&in.hover>=0&&in.hover<8&&in.wheelHand<0) {
+                    const auto& skill=in.snapshot.skills[in.hover];
+                    if(!fresh||!skill.known||skill.available) {
+                        out.select=in.hover;wheelLatch=true;out.wheel=false;out.feedback=1;
+                    } else out.feedback=3;
                     rearm=true;
-                }
-            }
-            const int pointerHand=in.wheelHand>=0?1-in.wheelHand:0;
-            if(!editor&&!map&&utility&&!rearm&&!flight.active&&edges[pointerHand]&&in.hover>=4&&in.hover<8) {
-                const auto& b=in.snapshot.belt[in.hover-4];
-                if(fresh&&b.known&&b.count&&b.Next().handle) {
-                    Grab(pointerHand,in.hover-4,b,now);
-                    owner[pointerHand]=Owner::Bottle;wheelLatch=true;out.wheel=false;out.feedback=1;out.feedbackHand=pointerHand;
                 }
             }
         } else {quickPressed=false;if(!AnyBottle()&&holster<0)owner[0]=owner[1]=Owner::Combat;}
@@ -1248,14 +1246,14 @@ public:
                 }
             }
         }
-        out.developer=developer;out.devPage=devPage;out.stowed=stowed;out.result=result;
+        out.developer=developer;out.devPage=devPage;out.result=result;
         out.editor=editor;out.editSlot=editSlot;out.editPage=editPage;out.editPages=std::max(1,(choiceCount+7)/8);
         if(editor==3)for(int i=0;i<8&&editPage*8+i<choiceCount;++i){out.itemOptions[i]=itemChoices[editPage*8+i];++out.editCount;}
         out.editCategory=editCategory;out.editClass=editClass;out.editCategoryCounts=categoryCounts;
         out.glyphs=out.wheel&&glyphs;out.glyphHand=glyphHand;out.glyphEdit=glyphEdit;out.glyphDraw=in.glyphDraw;out.glyphSkills=in.glyphSkills;   // the page as the clicks left it
         out.motions=out.wheel&&motions;out.motionsBox=spellmotion::HasMotions(in.snapshot.skillClass);out.motionsOff=in.motionsOff;
         if(editor==2)for(int i=0;i<8&&editPage*8+i<choiceCount;++i){out.editOptions[i]=Choice(editPage*8+i);++out.editCount;}
-        out.block=out.block||rearm||stowed||pending.action!=Action::None;
+        out.block=out.block||rearm||pending.action!=Action::None;
         for(int h=0;h<2;++h)out.owner[h]=rearm?Owner::Rearm:owner[h];
         return out;
     }

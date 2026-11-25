@@ -29,11 +29,11 @@ inline constexpr int TurnsSharpChoice=41;
 // And [stereo] turns_fill (fixed, as before).
 inline constexpr int TurnsFillChoice=42;
 inline constexpr int TorchChoice=43;
-// #292's gas and oil potions; on CHARACTER, EQUIPMENT being full.
+// #292's gas and oil potions; on HERO, GEAR being full.
 inline constexpr int ThrowingPotionsChoice=44;
-// And [stereo] turns_rims (moved with things, left with the sky); on CHARACTER too.
+// And [stereo] turns_rims (moved with things, left with the sky); on HERO too.
 inline constexpr int TurnsRimsChoice=45;
-// And [sky] cover_rims (on, off): the sky over that rim in the picture itself; on CHARACTER too.
+// And [sky] cover_rims (on, off): the sky over that rim in the picture itself; on HERO too.
 inline constexpr int SkyRimsChoice=46;
 // Pushable bodies (limb_tuning.h): one value each, stepped and saved to
 // [bodies] in the dev INI; the last puts them all back to their defaults.

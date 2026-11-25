@@ -195,11 +195,8 @@ stays with its hand: each hand's wheel opens from its own stick ([Sticks stay ri
 | Drink | Keep grip held, bring the bottle's opening to your mouth and tip nearly horizontal for 0.25 seconds; release to return an unused potion |
 | Drop the empty bottle | Open your hand after drinking: the bottle falls, bounces and rolls on the floor (visual only); hit it with your weapon or shield to knock it away |
 | Heal the mercenary | Toss a held Health, Rejuvenation, Antidote or Thawing bottle (release mid-swing, at least 1.4 m/s) so it lands within 4 m of your mercenary's feet (it walks on while the bottle flies). It shatters on landing (with bottle physics, where it first touches a wall, table, prop or the floor); a miss leaves the potion on the belt |
-| Quick potion | Left Y → **EQUIPMENT / BELT** → trigger a potion wedge; grip on a potion wedge instead grabs it into the right hand |
 | Swap weapon sets | Reach the swap hand over either shoulder and press its grip; the right hand, or the left with VR Settings > Controls > Hands > Left-handed on. Hip anchors are removed |
-| Seated weapon selection | Utility wheel → **Weapon I** or **Weapon II** |
 | Recalibrate body and eye height | Stand in a **T cross**, nothing pressed and no potion in hand, for 2 seconds: both controllers buzz while you hold it, then the calibration prompt opens ([BODY_CALIBRATION.md](BODY_CALIBRATION.md)). Not in Seated play. Vibration off: the prompt opening is the only cue |
-| Stow/draw | Utility wheel → **Stow weapons** / **Draw weapons**; native equipped stats stay unchanged |
 | Health/mana | Check the back of your left wrist, or choose **Palm** in **VR Settings > Interface > Wrist > Life and mana** and hold your left palm upward in front of you briefly. No button required; automatic alerts are off by default |
 | Show all nearby loot labels (Alt) | Hold the **right stick down** to hold the native Show Items action; let go to restore normal drop/hover labels. Push it **up** to toggle running / walking. Neither while you look at the wrist / palm map, or point the right controller at a floating map: they zoom it instead. Listed in **VR Settings > Guide** |
 | Explored minimap | Hold Left Y ? **MAP** in the bottom tabs; point right laser + trigger. **SPELLS** returns to skills; releasing Left Y closes the menu |
@@ -2662,7 +2659,7 @@ button opens a card of four switches, **Unique**, **Set**, **Rare** and
 Turn them all Off for no beams. A change takes effect within a quarter of a
 second of **Apply**.
 
-To try it: **DEV > Character > Loot beam test** puts one item of each kind in
+To try it: **DEV > HERO > Loot beam test** puts one item of each kind in
 the inventory (see DEVELOPMENT_SCENARIOS.md); drop them.
 
 `d2r_pcvr.ini`:
@@ -3192,8 +3189,8 @@ gives a hand button that record).
 
 Motions (`steamvr/spell_motion.h`; owner, 2026-11-03). With **Weapon skill gestures** on, every
 Sorceress spell that has a motion casts by it while both grips are held, both triggers free: no
-button or glyph needed. The wheel's MOTIONS page (the box at the lower right of the Spells and
-Equipment pages; each class with motions has its own, below) lists them with how to do each, and a press on one turns its
+button or glyph needed. The wheel's MOTIONS page (the box at the lower right of the Spells
+page; each class with motions has its own, below) lists them with how to do each, and a press on one turns its
 motion on or off (`[motions] off`, one bit each, `spellmotion::Bit`; 0, all on); a spell with no
 points shows dimmed. A motion that is off still casts from a button its spell is on. One watcher
 per motion that is on and learned, active only while both grips are held (held above 0.6, let go

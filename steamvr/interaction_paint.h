@@ -12,7 +12,7 @@ struct PaintContext {
     int hand=-1;
     int editor=0,slot=-1,page=0,count=0,bank=-1,category=0,skillClass=-1,leftStrikes=-1;
     std::array<int,skillcategories::Count> categoryCounts{};
-    bool utility=false,map=false,fresh=false,editable=false,equipmentKnown=false,beltKnown=false;
+    bool map=false,fresh=false,editable=false,equipmentKnown=false,beltKnown=false;
     bool glyphs=false;int glyphHand=0,glyphEdit=-1;std::array<int,2> glyphDraw{-1,-1};
     std::array<Skill,GlyphShapes> glyphSkills{};   // what each shape casts for the hand shown
     unsigned glyphFollows=0;                       // its shapes casting the right hand's (none of their own), one bit each
@@ -36,7 +36,7 @@ inline PaintContext Context(const Snapshot& s,const Output& o,bool fresh,const c
     PaintContext c;c.labels=labels;c.hand=o.wheelHand;c.session=s.session;c.activeSet=s.activeSet;c.editor=o.editor;c.slot=o.editSlot;
     c.developer=o.developer;c.devVisible=s.developer;c.devClass=s.devClass;c.devPage=o.devPage;
     c.category=o.editCategory;c.skillClass=o.editClass;c.categoryCounts=o.editCategoryCounts;
-    c.page=o.editPage;c.count=o.editCount;c.bank=s.bindingBank;c.utility=o.utility;c.map=o.map;c.fresh=fresh;
+    c.page=o.editPage;c.count=o.editCount;c.bank=s.bindingBank;c.map=o.map;c.fresh=fresh;
     c.editable=s.bindingsEditable;c.equipmentKnown=s.equipmentKnown;c.beltKnown=s.beltKnown;
     c.quick=s.quick;c.itemOptions=o.itemOptions;c.skills=s.skills;c.options=o.editOptions;c.sets=s.sets;c.belt=s.belt;c.cue=o.cue;c.leftCue=o.leftCue;c.location=s.location;c.companions=s.companions;c.effects=s.effects;c.leftStrikes=o.leftStrikes;c.cooldowns=o.cooldowns;
     c.glyphs=o.glyphs;c.glyphHand=o.glyphHand;c.glyphEdit=o.glyphEdit;c.glyphDraw=o.glyphDraw;

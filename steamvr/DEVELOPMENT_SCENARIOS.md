@@ -78,7 +78,7 @@ setup first. Return to normal play with the ordinary VR shortcut.
 
 Open either hand's wheel and choose **DEV**. Its tabs are grouped by purpose:
 
-- **Character:** level 10, 30, 60 and 90 presets; heal life/mana; unlock quests and
+- **HERO:** level 10, 30, 60 and 90 presets; heal life/mana; unlock quests and
   waypoints; a **Throwing potions** kit (one stack each of Rancid, Choking and
   Strangling Gas and Oil, Exploding and Fulminating Potion, to equip in the right
   hand and throw), **By turns rims**, **Sky over rims** and a **Loot beam test**
@@ -89,8 +89,8 @@ Open either hand's wheel and choose **DEV**. Its tabs are grouped by purpose:
   bolts, with arrows and bolts; #432) and a **Flails + steal** kit (The
   General's Tan Do Li Ga, a unique flail with 5% mana steal; Bloodrise, a unique
   mace with 5% life steal; a normal Flail and a Scourge) (all on this page as
-  Equipment is full).
-- **Equipment:** starter primary/alternate gear, class unique primary/alternate
+  GEAR is full).
+- **GEAR:** starter primary/alternate gear, class unique primary/alternate
   gear, crossbow + bolts, bow + arrows, a small shield, **Render debug draws**,
   **By turns own picture**, **By turns filter**, **By turns ghosts**, a **Throwing kit** and a **Potion kit** (four Super
   Healing, two Full Rejuvenation, two Antidote and two Thawing potions, normal
@@ -318,7 +318,7 @@ use its stairs to return outside. Inspect the stairwell and try selecting it
 with Interact while standing normally, then compare crouching and turning.
 Check entrances in both Kurast Bazaar and Upper Kurast. Console dispatch alone
 does not confirm arrival at a specific entrance or completion of a quest.
-**Equipment > Render debug draws** also enables a read-only, once-per-second
+**GEAR > Render debug draws** also enables a read-only, once-per-second
 `Frame entrance targeting` log with native target type/ID and eye height/pitch.
 It does not expand targeting, choose an exit or teleport on an interaction.
 

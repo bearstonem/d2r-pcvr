@@ -399,16 +399,16 @@ int main(int argc,char** argv) {
             for(int y=0;y<768;++y)std::memcpy(&gallery[(y*1536+hand*768)*4],&atlas[y*1024*4],768*4);
         }
         if(!SavePng(argv[1],gallery,1536,768))return 61;
-        puts("Both hand wheels painted with five button slots and utility access");return 0;
+        puts("Both hand wheels painted with five button slots and the footer");return 0;
     }
-    Output o;o.hover=1;o.wheel=true;o.utility=argc>2&&!wristCheck;
+    Output o;o.hover=1;o.wheel=true;
     // Match runtime: queue the snapshot as soon as it is known, before either
     // wheel page has ever been painted. Opening/toggling must not be necessary.
     icons::Prefetch(s);
     if(!icons::Wait(10000))return 20;
     const auto pixels=Paint(s,o,2);if(pixels.size()!=1024*1024*4)return 1;
     if(mapCheck) {
-        o.utility=false;o.hover=-1;const auto spells=Paint(s,o,2);
+        o.hover=-1;const auto spells=Paint(s,o,2);
         o.map=true;const auto map=Paint(s,o,2);
         // Moving the map must leave wrist vitals, belt, bottle and weapon cues unchanged.
         for(int y=0;y<1024;++y)for(int x=0;x<1024;++x)if(x>=768||y>=768)
@@ -434,7 +434,7 @@ int main(int argc,char** argv) {
         const int selectedIds[]={12,26,97,-1};
         const char* selectedNames[]={"Multiple Shot","Strafe","Smite","Basic Arrow"};
         const char* hints[]={"Draw & release","Volley active","Shield swing / thrust","Draw & release"};
-        o.utility=false;o.hover=1;
+        o.hover=1;
         for(int row=0;row<4;++row) {
             auto& cue=o.cue;cue={};cue.id=selectedIds[row];cue.slot=row==3?-1:2;cue.known=cue.available=cue.expanded=true;
             cue.busy=row==1;
@@ -476,7 +476,7 @@ int main(int argc,char** argv) {
         if(!painter.Start())return 30;
         LARGE_INTEGER frequency{};QueryPerformanceFrequency(&frequency);double paintTotal=0;
         for(int i=0;i<12;++i) {
-            s.health=100-i*8;s.mana=i*6;o.utility=i%2;o.hover=i%8;o.nearHolster=i%3-1;
+            s.health=100-i*8;s.mana=i*6;o.map=i%2;o.hover=i%8;o.nearHolster=i%3-1;
             LARGE_INTEGER start{},end{};QueryPerformanceCounter(&start);const auto expected=Paint(s,o,2);QueryPerformanceCounter(&end);
             paintTotal+=(end.QuadPart-start.QuadPart)*1000./frequency.QuadPart;
             auto request=painter.Submit({s,o,2});std::vector<uint8_t> actual;const auto until=GetTickCount64()+3000;
@@ -506,7 +506,7 @@ int main(int argc,char** argv) {
         std::copy_n(s.skills.begin(),7,s.catalog.begin());
         std::vector<uint8_t> gallery(3072*768*4);
         for(int page=0;page<4;++page) {
-            o.utility=false;o.editor=page?2:1;o.editSlot=page==2?framevr::skills::TriggerSlot(0):1;o.editCount=7;
+            o.editor=page?2:1;o.editSlot=page==2?framevr::skills::TriggerSlot(0):1;o.editCount=7;
             o.editClass=1;o.editCategoryCounts={7,2,1,1,3};
             std::copy_n(s.skills.begin(),o.editOptions.size(),o.editOptions.begin());o.hover=page?3:1;
             if(page>=2){auto& zeal=o.editOptions[2];zeal.id=framevr::strikeskills::Zeal;std::snprintf(zeal.name,sizeof zeal.name,"Zeal");o.hover=2;}
@@ -520,22 +520,20 @@ int main(int argc,char** argv) {
     if(wheelCheck) {
         if(argc<4||!icons::Get("s36")||!icons::Get(s.belt[0].Next())||!icons::Get(s.sets[0][0]))return 21;
         std::vector<uint8_t> gallery(1536*768*4);
-        for(int page=0;page<2;++page) {
-            o.utility=page;const auto atlas=Paint(s,o,2);
+        for(int page=0;page<2;++page) {   // the combined wheel's spells page, then the right hand's
+            o.wheelHand=page-1;const auto atlas=Paint(s,o,2);
             for(int y=0;y<768;++y)std::memcpy(&gallery[(y*1536+page*768)*4],&atlas[y*1024*4],768*4);
             if(atlas[3]!=0)return 22;
         }
-        const auto before=Paint(s,o,2);
+        o.wheelHand=-1;const auto before=Paint(s,o,2);
         s.belt[0].items[0]=s.belt[1].items[0];const auto after=Paint(s,o,2);
-        // A different actual item must update its wedge, not merely its count.
-        const float a=4*Pi/4+WheelPhase;
-        const int x=int(384+std::sin(a)*218),y=int(345.6f-std::cos(a)*218);
+        // A different actual item must update its belt tile (under the wheel), not merely its count.
         int changed=0;
-        for(int dy=-60;dy<30;++dy)for(int dx=-50;dx<50;++dx)
-            if(std::memcmp(&before[((y+dy)*1024+x+dx)*4],&after[((y+dy)*1024+x+dx)*4],4))++changed;
+        for(int y=774;y<940;++y)for(int x=18;x<110;++x)
+            if(std::memcmp(&before[(y*1024+x)*4],&after[(y*1024+x)*4],4))++changed;
         if(changed<100)return 23;
         if(!SavePng(argv[1],gallery,1536,768))return 24;
-        std::puts("Wheel artwork: native skills/items, changing slot contents, transparent frame and both pages passed");return 0;
+        std::puts("Wheel artwork: native skills/items, changing belt contents, transparent frame and both wheels passed");return 0;
     }
     if(wristCheck) {
         std::vector<uint8_t> gallery(512*1024*4);

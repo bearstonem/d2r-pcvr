@@ -16,7 +16,7 @@ latest deployment and evidence.
 | Spell wheel | Eight themed radial slots with native icons/localized names, persistent native bindings and VR quick-cast labels; all LT variants editable; selection trigger cannot cast | Headset shortcut validation; charge/readiness indicators; names for newer IDs can fall back to `Skill N` |
 | Potions | Original 3D models/textures for all 15 variants; nearest-slot grip grab, bottle-opening/tip dwell, quick-use alternative; exact item revalidation and confirmed removal | GPU stereo/asset and interaction checks pass; headset reach, mixed/refilled belt and refused consumption need verification. Uses its own depth buffer, without scene/arm occlusion |
 | Wrist | Live native health/mana in generated gothic glass orbs; back-of-left-wrist (-X grip) reveal, upright text, left-only tracking; brief low-health/low-mana cue | Native values, readability, thresholds and corrected watch gesture in headset |
-| Holsters | Configurable hip anchors and seated preset, grip-and-pull requests set I/II, waits for observed set; explicit stow/draw | Initial set inference, identical/empty sets; item labels currently use base codes, no silhouettes; no arbitrary inventory equips |
+| Holsters | Configurable hip anchors and seated preset, grip-and-pull requests set I/II, waits for observed set | Initial set inference, identical/empty sets; item labels currently use base codes, no silhouettes; no arbitrary inventory equips |
 | Journal | Quest UI-only copy, stereo scene behind it, left-hand placement, grip/release pinning, original page UV input; falls back to normal panel if capture unavailable | First headset verification of crop, native act tabs, close/reopen and tracking recovery; other pages and decorative geometry remain |
 | Casting | Equip/select, point right hand, press/hold trigger; directional casts follow the visible casting shaft (hand aim for other weapons), with native target snapping suppressed only during that cast; native spread/resources/effects | Teeth headset check pending. **Full 3D spell flight/contact and immediate accepted native spawn are not implemented.** Native animation and ground-plane flight remain |
 | Motion weapon skills (2026-10-11 source candidate) | Selected Amazon arrow skills use one draw/release per native cast/volley; Smite uses energetic left-shield contact when its native hook is identified; shield attachment follows the tracked wrist independently of the main weapon | Windows build and automated checks pass; installed for offline testing in both existing Steam/Battle.net VR copies on 2026-10-12. Headset validation pending. Special arrows retain native animation/ground-plane collision. Live Smite discovery, shield fit, resources/cadence and cancellation during wind-up need offline verification |
@@ -106,7 +106,8 @@ stay disabled until the object is released and the input is rearmed.
 Replace the current B/X/Y/RB text grid with a radial wheel for the same eight
 assigned native skills initially. Read actual assignments, names and icons;
 include item-granted skills/charges and refresh on weapon swaps. A center tile
-returns to weapon combat; a utility tab contains equipment and belt actions.
+returns to weapon combat. Weapon sets swap by the shoulder grip and potions are
+taken from the belt; the wheel has no equipment or belt page.
 Journal is accessed through the native tabbed game menu rather than the wheel.
 An unassigned/unknown slot must not display an invented spell or availability.
 
@@ -118,12 +119,12 @@ the existing stationary selection behavior; locomotion while selecting is a
 separate comfort option. Use a dead zone and hover hysteresis at wedge borders.
 
 The wheel and VR Settings reopen on the page they were closed on: the wheel's
-Spells, Equipment, Map or Developer page (and Developer's own page), and VR
+Spells, Map, Glyphs, Motions or Developer page (and Developer's own page), and VR
 Settings' page, What's new page and More page, however they were closed (Right B too). Each
 wheel hand keeps its own page and its own skill tree filter: the skill editor
 reopens on the tree last picked on that hand (on its first page; All when that
-tree has no skills now). The wheel's SPELLS button leaves the Map or Developer
-page. Skill, slot and item editors are never reopened. All of it is kept in
+tree has no skills now). The wheel's SPELLS button leaves the Map, Glyphs, Motions
+or Developer page. Skill, slot and item editors are never reopened. All of it is kept in
 memory only, for the game: leaving to character select keeps it, a new game
 (a new player session) starts every menu over, and a game restart starts over.
 
