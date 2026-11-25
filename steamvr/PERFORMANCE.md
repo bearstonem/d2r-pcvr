@@ -54,6 +54,72 @@ The newer session also spent less time in XR end (2.05 to 1.21 ms per pair).
 The encounters varied and the headset logs time the complete eye passes.
 Only the synthetic benchmark isolates the HUD callbacks' contribution.
 
+## Draw thread: props only on contact, November 24
+
+**Measured in the test only; not yet in a headset.** The owner asked to "only
+activate physics objects in the world when/if contacted". What ran for props
+nobody touched, before this change:
+
+- every prop the scan listed (the 160 nearest within 3 m) and every surface
+  under them became a static Box3D body as soon as it was listed, on the draw
+  thread, and was destroyed when it left reach. The world took no step with
+  nothing moving (November 10), so these bodies cost little per frame, but
+  making them did: entering an area, or walking among props;
+- while any prop was listed, each held weapon (hand, blade and motor joint
+  with weight on) was a body, placed every frame;
+- a bottle let go of kept the world stepping at 120 Hz for the 20 s it lay
+  there, asleep or not.
+
+Now a prop is data until a weapon, spell or moving thing reaches it, or
+something moving comes near it (see
+[Bodies only on contact](../docs/KNOCKABLE_PROPS.md#bodies-only-on-contact));
+at rest the weapons are poses, frozen props and surfaces let their bodies go,
+and sleeping bottles take no steps. `prop-rest-cost-test` builds a room with a
+prop every 30 cm on six tables and the floor (160 listed within 3 m: cups,
+plates, books, apples, pails), then times the draw thread's calls into the
+bottle and prop world (Release, -O3, the test machine, three runs each):
+
+| | before | after |
+| --- | --- | --- |
+| entering an area: 160 props listed | 1.44-1.58 ms (worst 2.4 ms) | 68-72 us (worst 124 us) |
+| the same 160 scanned again (twice a second, standing) | 9.5 us | 11.8-12.1 us |
+| walking among them: a scan (twice a second) | 150-154 us (worst 218 us) | 25-26 us (worst 33 us) |
+| walking, swinging over them: a frame | 1.82-1.88 us | 1.35-1.36 us |
+| standing, swinging over them: a frame | 1.70-1.76 us | 1.31 us |
+| a bottle let go of among them, its first 10 s: a frame | 12.9 us, 1198 steps | 3.7 us, 169 steps |
+| the same bottle with no props about | 11.4 us, 1198 steps | 2.1 us, 169 steps |
+
+The bodies made on contact cost what they did before once something moves:
+`prop-heft-test`'s twelve cups and three weapons stepping were 45.0/45.7 us
+a frame (weight on/off) before and 44.4/46.8 us after, the same within noise,
+and its whole table of knocks, masses, thuds and slips is identical.
+
+Still running for props nobody touches, unchanged here:
+
+- **The scan** (`vr/prop_scan.cpp`), on its own worker thread every half
+  second while physical melee is on: it reads the renderer's transform,
+  id and bounds storages. The field log of November 23 (Rocky Waste) gave
+  0.6-2.1 ms a scan; it does not touch the draw thread. It is how a prop
+  near the player is found at all.
+- **Wall cells** (`vr/wall_cells.cpp`) around the player while any prop is
+  listed, so walls are there before the first knock: one 32 x 32 sample on
+  the game thread every half second, 36-106 us each in that log (about
+  0.08 ms a second).
+- **Per frame** the weapons' sweeps are tested against every listed prop's
+  bounds (the 1.3 us above).
+- **Hanging fixtures** are the game's own partial-ragdoll physics; the mod
+  only stops the second eye of a pair from stepping them again
+  ([hanging fixtures](../docs/HANGING_FIXTURE_PHYSICS.md)), which saves work.
+  Nothing of the mod's runs for them while untouched. The monsters' bodies
+  (`limb_physics.cpp`) already made ragdolls only for a weapon within 0.6 m
+  and took no step without one.
+
+**What to read in the next log.** `Frame props: ten seconds: ...` now has
+`Box3D bodies most=N`: the most bodies the props and their surfaces held at
+once in those ten seconds. Standing or fighting among props without touching
+one, it should be 0; after a knock, a few, and 0 again ten seconds after
+everything is still.
+
 ## Draw thread: props with weight, November 12
 
 **Measured in the test only; not yet in a headset.** Props with weight

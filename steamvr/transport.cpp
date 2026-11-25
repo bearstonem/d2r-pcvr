@@ -3958,6 +3958,7 @@ void StepDroppedBottles() {
     droppedBottles->Heft(propHeft.load());
     droppedBottles->Weapons(HeldColliders());
     droppedBottles->Advance(in.time,in.stage.anchor);
+    propscan::CountBodies(droppedBottles->Bodies());   // props are bodies only on contact: the ten-second line says how many at most
     // Draw a thrown potion where this frame's steps left it.
     if(interactionOutput.flying&&interactionOutput.flightId&&droppedBottles->Tossed(thrown)&&thrown.id==interactionOutput.flightId&&!thrown.landed)
         interactionOutput.flight={in.stage.Room(thrown.p),math::Multiply(math::Conjugate(in.stage.base),thrown.q)};
