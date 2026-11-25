@@ -242,7 +242,7 @@ inline constexpr ContentPage PageTable[]={
     {View::Shield,"Shield",Group::Gameplay,Icon::Shield,"Bash, block and seat a shield on your arm.",true},
     {View::Monsters,"Monsters",Group::Gameplay,Icon::Survival,"How tough offline monsters are, your mercenary and your summons. Outline and health bars: Interface.",true},
     {View::Physics,"Physics",Group::Gameplay,Icon::World,"Things your hands and weapons can knock, roll and push.",true},
-    {View::Voice,"Voice",Group::Gameplay,Icon::Controls,"Local speech recognition. Assign your own words to skills. No voice training.",false},
+    {View::Voice,"Voice",Group::Gameplay,Icon::Controls,"Record your own sounds, preview samples and assign skills. Three examples allow natural variation.",false},
     {View::Moving,"Moving",Group::Comfort,Icon::Fast,"Turning and how fast you move.",true},
     {View::Body,"Body",Group::Comfort,Icon::Body,"Your height, arm span, play space and potion belt.",true},
     {View::Hands,"Hands",Group::Controls,Icon::Controls,"Your hands and controllers: which hand does what, and whose button names.",true},

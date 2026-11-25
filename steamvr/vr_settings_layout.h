@@ -1696,22 +1696,24 @@ struct Builder {
         button({328,100,278,64},{Kind::VoiceEdit,5},v.mode==0?"Recognition: Off":v.mode==1?"Recognition: Test":"Recognition: Cast");
         button({618,100,630,64},{Kind::VoiceEdit,6},"Mic: "+v.microphones[size_t(std::clamp(v.microphone+1,0,int(v.microphones.size())-1))]);
         button({328,180,64,64},{Kind::VoiceEdit,0,-1},"<");
-        Add(Role::Readout,{404,180,768,64},{},NoHelp,0,"Phrase "+std::to_string(v.slot+1)+" / 6: "+v.bindings[size_t(v.slot)].phrase);
+        Add(Role::Readout,{404,180,768,64},{},NoHelp,0,"Sound "+std::to_string(v.slot+1)+" / 6 - "+std::to_string(int((v.samples[size_t(v.slot)]&1)!=0)+int((v.samples[size_t(v.slot)]&2)!=0)+int((v.samples[size_t(v.slot)]&4)!=0))+" of 3 examples recorded");
         button({1184,180,64,64},{Kind::VoiceEdit,0,1},">");
         button({328,260,64,64},{Kind::VoiceEdit,4,-1},"<");
         Add(Role::Readout,{404,260,768,64},{},NoHelp,0,"Action: "+v.SkillName());
         button({1184,260,64,64},{Kind::VoiceEdit,4,1},">");
-        const char* rows[]={"qwertyuiop","asdfghjkl","zxcvbnm"};
-        for(int r=0;r<3;++r)for(int c=0;rows[r][c];++c)
-            button({328+c*90+r*20,344+r*76,78,64},{Kind::VoiceEdit,1,rows[r][c]},std::string(1,rows[r][c]));
-        button({328,580,250,64},{Kind::VoiceEdit,1,' '},"Space");
-        button({590,580,250,64},{Kind::VoiceEdit,2},"Backspace");
-        button({852,580,250,64},{Kind::VoiceEdit,3},"Clear phrase");
+        button({328,344,64,64},{Kind::VoiceEdit,7,-1},"<");
+        Add(Role::Readout,{404,344,768,64},{},NoHelp,0,"Sample "+std::to_string(v.sample+1)+" / 3"+((v.samples[size_t(v.slot)]&(1u<<v.sample))?" - recorded":" - empty"));
+        button({1184,344,64,64},{Kind::VoiceEdit,7,1},">");
+        button({328,432,280,64},{Kind::VoiceSave,0,3},"Record / replace");
+        button({620,432,280,64},{Kind::VoiceSave,0,4},"Play sample");
+        button({912,432,280,64},{Kind::VoiceSave,0,5},"Delete sample");
+        button({328,520,500,64},{Kind::VoiceEdit,8},std::string("Tolerance: ")+(v.tolerance==0?"Strict":v.tolerance==1?"Balanced":"Loose"));
+        Add(Role::Readout,{328,596,920,48},{},NoHelp,0,"Record 3 natural repetitions. Pause after each sound.");
         button({328,666,350,64},{Kind::VoiceSave},v.dirty?"Save voice changes":"Save / retry recognition");
         if(in.card!=NoHelp||m.confirmClose||m.Dirty())Card(738);
         else {
             Add(Role::Readout,{328,748,920,100},{},NoHelp,0,v.status);
-            Add(Role::Readout,{328,852,920,64},{},NoHelp,0,"Use spoken English words. Test recognizes without casting.");
+            Add(Role::Readout,{328,852,920,64},{},NoHelp,0,"Any words or shouts. Test matches sounds without casting.");
         }
     }
     void Build(){

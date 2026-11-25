@@ -439,7 +439,8 @@ public static class Program {
 
         }
 
-        if(args.Length==2&&args[0]=="--embedded")return Embedded.Run(int.Parse(args[1]));
+        if(args.Length==2&&args[0]=="--embedded")return RecordedSounds.Run(int.Parse(args[1]));
+        if(args.Length>0&&args[0]=="--sound-test")return SoundTests.Run();
         if(args.Length>0&&args[0]=="--test")return SelfTest();
 
         if(args.Length>0&&args[0]=="--transcribe")return Transcribe(args);

@@ -493,12 +493,13 @@ if(CMAKE_HOST_WIN32)
   find_program(VOICE_CSC csc.exe PATHS "$ENV{WINDIR}/Microsoft.NET/Framework64/v4.0.30319" NO_DEFAULT_PATH)
   if(VOICE_CSC)
     file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/voice_recognition.cs" VOICE_SOURCE)
+    file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/sound_commands.cs" SOUND_SOURCE)
     file(TO_NATIVE_PATH "${CMAKE_CURRENT_BINARY_DIR}/voice/voice-recognition.exe" VOICE_OUTPUT)
     add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/voice/voice-recognition.exe"
-      COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/setup_voice_recognition.py" --destination "${CMAKE_CURRENT_BINARY_DIR}/voice"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/voice"
       COMMAND "${VOICE_CSC}" /nologo /target:winexe /platform:x64 /optimize+
       /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll
-      "/out:${VOICE_OUTPUT}" "${VOICE_SOURCE}" DEPENDS voice_recognition.cs setup_voice_recognition.py VERBATIM)
+      "/out:${VOICE_OUTPUT}" "${VOICE_SOURCE}" "${SOUND_SOURCE}" DEPENDS voice_recognition.cs sound_commands.cs VERBATIM)
     add_custom_target(voice-recognition ALL DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/voice/voice-recognition.exe")
     add_dependencies(d2rl-pcvr voice-recognition)
   else()
@@ -790,4 +791,8 @@ add_test(NAME voice-payload-test COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURC
 
 if(CMAKE_HOST_WIN32)
   add_test(NAME voice-embedded-test COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/voice_embedded_test.py" "${CMAKE_CURRENT_BINARY_DIR}/voice/voice-recognition.exe")
+endif()
+
+if(CMAKE_HOST_WIN32)
+  add_test(NAME recorded-sound-matcher-test COMMAND "${CMAKE_CURRENT_BINARY_DIR}/voice/voice-recognition.exe" --sound-test)
 endif()

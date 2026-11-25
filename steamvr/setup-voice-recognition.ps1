@@ -7,6 +7,6 @@ $python = Join-Path $repo 'deps/python/python.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Speech runtime/model setup failed.' }
 $csc = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
 $exe = Join-Path $repo 'build-frame/voice-recognition/voice-recognition.exe'
-& $csc /nologo /target:winexe /platform:x64 /optimize+ /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll "/out:$exe" (Join-Path $PSScriptRoot 'voice_recognition.cs')
+& $csc /nologo /target:winexe /platform:x64 /optimize+ /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll "/out:$exe" (Join-Path $PSScriptRoot 'voice_recognition.cs') (Join-Path $PSScriptRoot 'sound_commands.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Speech UI compilation failed.' }
 if (!$NoLaunch) { & $exe }
