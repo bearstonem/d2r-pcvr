@@ -159,7 +159,7 @@ headset frame are drawn:
   `turns_keep_gap` pixels of parallax (48), within `turns_keep_reach` pixels
   of them (96). The pixel figures are of a 4096-wide eye.
   `turns_keep_own` (live; in developer mode also
-  DEV > Equipment > By turns own picture) is 3 for the effects (the
+  DEV > GEAR > By turns own picture) is 3 for the effects (the
   default), 1 round near things, 4 both, 2 wherever the own image shows the
   same surface and 0 for the drawn eye's picture wherever it reaches;
   `turns_from_drawn_eye=0` (live) keeps the other eye's own image alone.
@@ -184,7 +184,7 @@ headset frame are drawn:
   texels nearly always; read bilinear, a half-texel step averaged two and
   every other frame in each eye was softer than Both eyes. They are read
   Catmull-Rom instead (`[stereo] turns_sharp=1`, live; in developer mode also
-  DEV > Equipment > By turns filter), kept within the four nearest texels so
+  DEV > GEAR > By turns filter), kept within the four nearest texels so
   it adds no ring or halo: at half a texel, stripes 4 px apart keep about a
   third more contrast, and a texel's centre reads exactly that texel. On an
   RTX 5090 it costs no measurable GPU time (the eye not drawn 0.55 ms at
@@ -197,7 +197,7 @@ headset frame are drawn:
   nearer than the farther end of the strip along the row by more than 2 px of
   parallax, the picture beside that end goes there instead; where it shows
   what is behind, its own texture stays (`[stereo] turns_fill=1`, live; in
-  developer mode also DEV > Equipment > By turns ghosts; 0 as before). The
+  developer mode also DEV > GEAR > By turns ghosts; 0 as before). The
   ends are looked for up to 128 px of a 4096-wide eye either side. On an RTX
   5090 it adds 0.1 ms at 3072 square and 0.23 ms at 4096.
   The game's picture of anything against the sky (the void, depth 0) is
@@ -211,11 +211,11 @@ headset frame are drawn:
   depth the picture keeps to its depth. Within 2 px of something, a pixel of
   the sky now takes the nearest depth there in both eyes' depth before they
   move, so the rim goes with what it belongs to (`[stereo] turns_rims=1`,
-  live; in developer mode also DEV > Character > By turns rims; 0 as
+  live; in developer mode also DEV > HERO > By turns rims; 0 as
   before). The sky shader also paints the sky over that rim itself, in both
   stereo modes: a pixel with no depth beside at most two drawn ones (an
   edge, not a hole in far ground) that is dim gets the sky; a light one (a
-  glow's edge) is laid over it (`[sky] cover_rims=1`, live; DEV > Character
+  glow's edge) is laid over it (`[sky] cover_rims=1`, live; DEV > HERO
   > Sky over rims; 0 keeps the rim).
 
 By turns draws a pair on a snap turn, outside first person, in open menus,

@@ -144,7 +144,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
     auto paragraph=[&](const std::string& t,RECT r){wchar_t w[1024]{};MultiByteToWideChar(CP_UTF8,0,t.c_str(),-1,w,1024);DrawTextW(dc,w,-1,&r,DT_LEFT|DT_TOP|DT_WORDBREAK|DT_NOPREFIX);};
     auto polygon=[&](POINT* p,int n,COLORREF c){auto b=CreateSolidBrush(c);auto was=SelectObject(dc,b);auto pen=SelectObject(dc,GetStockObject(NULL_PEN));Polygon(dc,p,n);SelectObject(dc,pen);SelectObject(dc,was);DeleteObject(b);};
     const bool handWheel=o.wheelHand>=0;
-    const bool fiveSectors=handWheel&&!o.utility&&!o.glyphs;   // the GLYPHS page has eight shapes
+    const bool fiveSectors=handWheel&&!o.glyphs;   // the GLYPHS page has eight shapes
     auto wheelArt=fiveSectors?HandWheelArt():WheelArt();
     if(!wheelArt.empty()) {
         static const auto cells=[] {
@@ -159,8 +159,8 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         for(int y=0;y<768;++y)for(int x=0;x<768;++x) {
             auto* p=&wheelArt[(y*768+x)*4];
             const int cell=cells[fiveSectors?1:0][y*768+x];
-            const bool active=!o.editor&&!o.utility&&!o.glyphs&&cell==(fiveSectors?0:selection);
-            if(!o.developer&&!o.map&&o.editor<2&&p[3]&&cell>=0&&(!o.utility||cell!=2)&&(cell==o.hover||active)) {
+            const bool active=!o.editor&&!o.glyphs&&cell==(fiveSectors?0:selection);
+            if(!o.developer&&!o.map&&o.editor<2&&p[3]&&cell>=0&&(cell==o.hover||active)) {
                 const float amount=cell==o.hover?.26f:.13f;
                 const int gold[]={185,133,55};
                 for(int c=0;c<3;++c)p[c]=uint8_t(p[c]*(1-amount)+gold[c]*amount);
@@ -216,7 +216,6 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
     const int sectors=fiveSectors?5:8;
     for(int i=0;!o.developer&&!o.map&&!o.motions&&o.editor<2&&i<sectors;++i) {
         const int slot=fiveSectors?skills::HandSlot(o.wheelHand,i):i;
-        if(o.utility&&i==2)continue; // Native tabbed menu retains journal access.
         const float sector=2*Pi/sectors;
         const float angle=i*sector+(sectors==5?0:WheelPhase);
         const int x=int(384+std::sin(angle)*218),y=int(345.6f-std::cos(angle)*218)-(std::cos(angle)<-.5f?14:0);
@@ -227,7 +226,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             polygon(points,n,o.hover==i?RGB(100,76,40):RGB(32,29,26));
         }
         char label[120]{};RECT box{x-51,y-64,x+51,y+31};
-        if(o.glyphs&&!o.utility) {
+        if(o.glyphs) {
             // The GLYPHS page: each shape, drawn, and the skill drawing it with the hand shown casts.
             const auto shape=glyphs::Shape(i);
             const auto skill=GlyphSkill(s,GlyphCasts(o.glyphSkills,o.glyphHand,i));
@@ -250,56 +249,42 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             SelectObject(dc,previous);SetTextColor(dc,RGB(235,218,181));
             continue;
         }
-        if(!o.utility) {
-            box={x-37,y-43,x+37,y+28};
-            const auto& skill=s.skills[slot];
-            const bool draws=handWheel&&slot==o.glyphDraw[size_t(o.wheelHand)];   // this button draws this hand's glyphs (glyph_cast.h)
-            if(draws)glyph(glyphs::Shape::Star,{box.left+8,box.top+4,box.right-8,box.bottom-4},element(-1),3);
-            else if(skill.known&&skill.id>=0)icon(icons::Get("s"+std::to_string(skill.id)),box,skill.available);
-            if(draws)std::snprintf(label,sizeof label,"Draw glyph");
-            else if(o.editor)std::snprintf(label,sizeof label,"%d. %s",i+1,skill.known?skill.name:"Unknown");
-            else std::snprintf(label,sizeof label,"%s",skill.known?skill.name:"Unknown");
-            if(handWheel&&i==0&&skill.id<0&&!draws)std::snprintf(label,sizeof label,"Cast On Strike");
-            if(!o.editor&&(handWheel?i==0:i==selection)) {
-                const auto pen=CreatePen(PS_SOLID,3,RGB(230,190,96));
-                const auto oldPen=SelectObject(dc,pen),oldBrush=SelectObject(dc,GetStockObject(HOLLOW_BRUSH));
-                RoundRect(dc,box.left-5,box.top-5,box.right+5,box.bottom+5,10,10);
-                SelectObject(dc,oldBrush);SelectObject(dc,oldPen);DeleteObject(pen);
-                // the selected slot's tag: CAST ON STRIKE (a landed swing or shield bash casts it), GESTURE, PRIMARY
-                const auto& cue=o.wheelHand==1?o.leftCue:o.cue;
-                const bool strike=handWheel&&cue.gesture&&cue.strike;
-                const char* tag=handWheel?(strike?"CAST ON STRIKE":cue.gesture?"GESTURE":"PRIMARY"):"ACTIVE";
-                if(handWheel&&!cue.gesture)tag=nullptr;   // PRIMARY lives in the slot's header box
-                if(tag){
-                const auto prior=SelectObject(dc,shortcutFont);
-                const int half=std::max(34,(width(tag)+14)/2);   // one line, wider than the icon if the tag needs it
-                fill({x-half,y+64,x+half,y+80},RGB(100,74,29));   // above the trigger name
-                text(tag,{x-half,y+64,x+half,y+80});SelectObject(dc,prior);}
-            }
-        } else if(i<4) {
-            const char* utility[]={"Weapon I","Weapon II","",o.stowed?"Draw weapons":"Stow weapons"};
-            std::snprintf(label,sizeof label,"%s",utility[i]);
-            if(i<2&&s.equipmentKnown)pair(i,box);
-            else if(i==3&&s.equipmentKnown&&s.activeSet>=1&&s.activeSet<=2)pair(s.activeSet-1,box);
-        } else {
-            const auto& b=s.belt[i-4];
-            if(b.known&&b.count)icon(icons::Get(b.Next()),box);
-            std::snprintf(label,sizeof label,"%s%s%d",b.known?(b.count?PotionName(PotionType(b.Next().code)):"Empty"):"Unknown",b.known&&b.count?" x":"\nSlot ",b.known&&b.count?b.count:i-3);
+        box={x-37,y-43,x+37,y+28};
+        const auto& skill=s.skills[slot];
+        const bool draws=handWheel&&slot==o.glyphDraw[size_t(o.wheelHand)];   // this button draws this hand's glyphs (glyph_cast.h)
+        if(draws)glyph(glyphs::Shape::Star,{box.left+8,box.top+4,box.right-8,box.bottom-4},element(-1),3);
+        else if(skill.known&&skill.id>=0)icon(icons::Get("s"+std::to_string(skill.id)),box,skill.available);
+        if(draws)std::snprintf(label,sizeof label,"Draw glyph");
+        else if(o.editor)std::snprintf(label,sizeof label,"%d. %s",i+1,skill.known?skill.name:"Unknown");
+        else std::snprintf(label,sizeof label,"%s",skill.known?skill.name:"Unknown");
+        if(handWheel&&i==0&&skill.id<0&&!draws)std::snprintf(label,sizeof label,"Cast On Strike");
+        if(!o.editor&&(handWheel?i==0:i==selection)) {
+            const auto pen=CreatePen(PS_SOLID,3,RGB(230,190,96));
+            const auto oldPen=SelectObject(dc,pen),oldBrush=SelectObject(dc,GetStockObject(HOLLOW_BRUSH));
+            RoundRect(dc,box.left-5,box.top-5,box.right+5,box.bottom+5,10,10);
+            SelectObject(dc,oldBrush);SelectObject(dc,oldPen);DeleteObject(pen);
+            // the selected slot's tag: CAST ON STRIKE (a landed swing or shield bash casts it), GESTURE, PRIMARY
+            const auto& cue=o.wheelHand==1?o.leftCue:o.cue;
+            const bool strike=handWheel&&cue.gesture&&cue.strike;
+            const char* tag=handWheel?(strike?"CAST ON STRIKE":cue.gesture?"GESTURE":"PRIMARY"):"ACTIVE";
+            if(handWheel&&!cue.gesture)tag=nullptr;   // PRIMARY lives in the slot's header box
+            if(tag){
+            const auto prior=SelectObject(dc,shortcutFont);
+            const int half=std::max(34,(width(tag)+14)/2);   // one line, wider than the icon if the tag needs it
+            fill({x-half,y+64,x+half,y+80},RGB(100,74,29));   // above the trigger name
+            text(tag,{x-half,y+64,x+half,y+80});SelectObject(dc,prior);}
         }
-        SetTextColor(dc,(!o.utility&&s.skills[slot].known&&!s.skills[slot].available&&!(handWheel&&slot==o.glyphDraw[size_t(o.wheelHand)]))?RGB(148,137,117):RGB(235,218,181));
-        if(o.utility)text(label,{x-76,y+35,x+76,y+86});
-        if(!o.utility) {
-            auto previous=SelectObject(dc,skillFont);
-            text(label,{x-63,y+29,x+63,y+67});
-            fill({x-77,y-79,x+77,y-46},RGB(100,78,44));
-            fill({x-75,y-77,x+75,y-48},RGB(24,20,16));
-            SetTextColor(dc,RGB(235,205,151));
-            SelectObject(dc,shortcutFont);
-            text(handWheel?(i==0?"Primary":labels.Button(o.wheelHand,i).c_str()):handtext::Pad(skills::NativeLabel(i)).c_str(),{x-73,y-77,x+73,y-48});
-            SetTextColor(dc,RGB(206,191,159));
-            text(labels.Slot(slot).c_str(),handWheel&&i==0?RECT{x-85,y+84,x+85,y+104}:RECT{x-85,y+68,x+85,y+105});
-            SelectObject(dc,previous);
-        }
+        SetTextColor(dc,(s.skills[slot].known&&!s.skills[slot].available&&!(handWheel&&slot==o.glyphDraw[size_t(o.wheelHand)]))?RGB(148,137,117):RGB(235,218,181));
+        auto previous=SelectObject(dc,skillFont);
+        text(label,{x-63,y+29,x+63,y+67});
+        fill({x-77,y-79,x+77,y-46},RGB(100,78,44));
+        fill({x-75,y-77,x+75,y-48},RGB(24,20,16));
+        SetTextColor(dc,RGB(235,205,151));
+        SelectObject(dc,shortcutFont);
+        text(handWheel?(i==0?"Primary":labels.Button(o.wheelHand,i).c_str()):handtext::Pad(skills::NativeLabel(i)).c_str(),{x-73,y-77,x+73,y-48});
+        SetTextColor(dc,RGB(206,191,159));
+        text(labels.Slot(slot).c_str(),handWheel&&i==0?RECT{x-85,y+84,x+85,y+104}:RECT{x-85,y+68,x+85,y+105});
+        SelectObject(dc,previous);
     }
     SetTextColor(dc,RGB(235,218,181));
     if(wheelArt.empty()) {
@@ -520,11 +505,11 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             SetTextColor(dc,RGB(169,151,118));paragraph(cue,{x+(compact?68:76),y+(compact?25:28),right-8,bottom-1});
         }
         SetTextColor(dc,RGB(235,218,181));SelectObject(dc,font);
-    } else if(o.glyphs&&!o.utility) {
+    } else if(o.glyphs) {
         text(labels.Physical(o.glyphHand?1:0)?"LEFT HAND":"RIGHT HAND",{290,300,478,334});   // the set shown
         SelectObject(dc,shortcutFont);text("GLYPHS",{290,332,478,350});SelectObject(dc,font);
         text("CLOSE",{301,356,467,398});
-    } else if(handWheel&&!o.utility) {
+    } else if(handWheel) {
         text(labels.Physical(o.wheelHand?1:0)?"LEFT HAND":"RIGHT HAND",{290,305,478,345});
         text("CLOSE",{301,356,467,398});
     } else if(o.editor) {
@@ -597,7 +582,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
     // The skill pointed at and the slot it is (or would be) on: how it works there
     // (skill_usage.h), under the picker, the slot chooser and the hand wheel.
     const char* usage=[&]()->const char* {
-        if(o.developer||o.map||o.utility||o.glyphs||o.motions||o.editor>=2)return "";   // the picker shows a card instead
+        if(o.developer||o.map||o.glyphs||o.motions||o.editor>=2)return "";   // the picker shows a card instead
         if(o.hover<0||o.hover>=(handWheel?5:8))return "";
         const int slot=handWheel?skills::HandSlot(o.wheelHand,o.hover):o.hover;
         return s.skills[slot].known?handtext::T(skillusage::Line(s.skills[slot].id,slot)):"";
@@ -613,18 +598,17 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         if(usage[0]&&o.result!=Result::Pending&&o.result!=Result::Refused){SelectObject(dc,shortcutFont);text(usage,{35,639,733,678});SelectObject(dc,font);}
         else text(hint,{35,639,733,678});
     }
-    const char* footer[6]={(o.utility||o.map||o.developer||o.glyphs||o.motions)?"SPELLS":"EQUIPMENT","MAP","VR SETTINGS",handWheel?"INVENTORY":"EDIT SKILLS","CHAT","DEV"};
-    if(o.editor==1){footer[0]="BACK";footer[1]="";footer[2]="DONE";}
-    if(o.editor>=2){footer[0]="PREVIOUS";footer[1]="NEXT";footer[2]="BACK";}
+    // The footer (interactions.h FooterLabel): SPELLS lit on the spells page, as MAP and DEV are on theirs; CHAT only
+    // in a multiplayer game, the others closing up.
     fill({20,686,749,745},RGB(18,16,14));
     const auto page=Page(o);
-    for(int i=0;i<FooterCount(page,s.developer);++i) {
-        const auto bounds=FooterBounds(i,page,s.developer);const int cell=FooterCell(i,page);
+    for(int i=0;i<FooterCount(page,s.developer,s.multiplayer);++i) {
+        const auto bounds=FooterBounds(i,page,s.developer,s.multiplayer);const int cell=FooterCell(i,page,s.multiplayer);
         const RECT box{LONG(bounds.left*768),LONG(bounds.top*768),LONG(bounds.right*768),LONG(bounds.bottom*768)};
-        frame(box,o.hover==cell||(o.map&&cell==12)||(o.developer&&cell==13));
-        text(footer[i],{box.left+5,box.top+5,box.right-5,box.bottom-5});
+        frame(box,o.hover==cell||FooterCurrent(cell,page));
+        text(FooterLabel(cell,o.editor,handWheel),{box.left+5,box.top+5,box.right-5,box.bottom-5});
     }
-    if(o.glyphs&&!o.developer&&!o.editor&&!o.utility&&!o.map) {
+    if(o.glyphs&&!o.developer&&!o.editor&&!o.map) {
         const auto prior=SelectObject(dc,shortcutFont);SetTextColor(dc,RGB(232,196,119));
         text(handtext::T(o.glyphHand?"Point at a shape and press the trigger to choose the left hand's skill on it; dimmed: the right hand's.":
             "Point at a shape and press the trigger to choose the right hand's skill on it."),{38,639,730,662});
@@ -642,7 +626,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         text("Both grips never grab a potion, a holster or a shoulder; one alone still does.",{38,662,730,685});
         SelectObject(dc,prior);
     }
-    if(!o.developer&&!o.editor&&!o.utility&&!o.map&&!o.glyphs&&!o.motions) {
+    if(!o.developer&&!o.editor&&!o.map&&!o.glyphs&&!o.motions) {
         char active[120];if(handWheel)std::snprintf(active,sizeof active,"Other hand: point + trigger to assign. Click this stick to close.");
         else std::snprintf(active,sizeof active,"ACTIVE: %s",o.cue.known?o.cue.name:"Unknown skill");
         const auto prior=SelectObject(dc,skillFont);SetTextColor(dc,RGB(232,196,119));
@@ -761,7 +745,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         gauge(s.health,s.maxHealth,842,RGB(180,35,42),"Health");gauge(s.mana,s.maxMana,908,RGB(48,83,185),"Mana");
       } else text("Status unavailable",{530,800,1006,885});
     }
-    const char* status=o.result==Result::Pending?"Waiting for game...":o.result==Result::Applied?"Confirmed":o.result==Result::Refused?"Action not available":o.stowed?"Weapons stowed":"";
+    const char* status=o.result==Result::Pending?"Waiting for game...":o.result==Result::Applied?"Confirmed":o.result==Result::Refused?"Action not available":"";
     if(*status)text(status,{530,768,1006,798});
     // Keep XP beneath the orb labels, sharing their wrist atlas and repaint
     // cadence. It never needs a separate XR layer or a per-frame CPU upload.

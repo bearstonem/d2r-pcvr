@@ -116,7 +116,7 @@ int main(){
         s.Click(11);Check(s.out.editor==0&&s.out.glyphs&&s.out.request.action==Action::None,"BACK keeps the shape's skill");
         s.in.snapshot.bindingBank=16;s.Step();Check(s.out.glyphs,"a weapon swap leaves the page as it is");
         s.Click(4);s.in.snapshot.bindingBank=0;s.Step();Check(s.out.editor==2&&s.out.glyphEdit==4,"nor closes a shape's picker");
-        s.Click(11);s.Click(9);Check(!s.out.glyphs&&!s.out.utility&&Page(s.out)==MenuPage::Spells,"SPELLS leaves it");
+        s.Click(11);s.Click(9);Check(!s.out.glyphs&&Page(s.out)==MenuPage::Spells,"SPELLS leaves it");
         s.Click(GlyphsCell);s.Click(GlyphsCell);Check(!s.out.glyphs,"the box goes back too");
         auto c=Context(s.in.snapshot,s.out,true);auto changed=s.out;changed.glyphSkills[0][0]=99;
         Check(c!=Context(s.in.snapshot,changed,true),"a shape's skill repaints the page");

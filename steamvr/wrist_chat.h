@@ -20,6 +20,12 @@ inline bool LayoutClip(int l,int t,int r,int b,int w,int h,float safe,int sx,int
 inline bool Scissor(int l,int t,int r,int b,int w,int h,float safe){return LayoutClip(l,t,r,b,w,h,safe,SourceX,SourceY,SourceWidth,SourceHeight);}
 inline bool StockList(int l,int t,int r,int b,int w,int h,float safe){return LayoutClip(l,t,r,b,w,h,safe,40,910,1200,770);}
 inline bool UseHistory(bool surface,bool lastWasChat,bool spatial){return surface&&lastWasChat&&!spatial;}
+// The chat is for multiplayer games only (owner, 2026-11-24): a game (a local player) whose client mode, as the game's
+// own getter answers it (offlinedifficulty::ClientMode, verified by its bytes), is not 0, a local offline game; 5 and 7
+// are TCP/IP, hosted or joined through D2RLoader's multiplayer panel. Not verified yet (-1) counts as not. Without it
+// there is no CHAT tab (Snapshot::multiplayer) and the transport runs the chat as outside a game (session 0), so one
+// open, pinned or typing closes as the game stops being a multiplayer one.
+inline bool Available(bool inGame,int clientMode){return inGame&&clientMode>0;}
 // Keep the native history image on the HUD capture side, independent of the
 // XR surface also used by inventory and other menus. A missed draw is not a reset.
 struct HistoryFrame {

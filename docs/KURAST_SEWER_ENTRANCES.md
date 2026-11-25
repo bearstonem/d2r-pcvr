@@ -57,7 +57,7 @@ This presentation change does not issue actions or change the working A input.
 The read-only DEV trace records native and queried target pointers, type,
 class/ID, eye height above the player and view pitch. The trace itself does not
 alter selection or travel. The diagnostic uses existing
-**Equipment > Render debug draws** and starts Off each session.
+**GEAR > Render debug draws** and starts Off each session.
 
 DEV travel is grouped into Act I-II, Act III and Act IV-V. **Act III > Kurast
 Sewers** goes to level 92; take a stair exit outside to inspect its counterpart.
