@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 using namespace framevr;using namespace framevr::flail;
@@ -39,12 +40,13 @@ struct Run {
     Swing swing;Stats stats;World world;double time=0;
     std::vector<std::vector<Mat>> native,out;
     Mat item=Placed(Pitch(Pi/2),Far);   // the handle held out level, pointing ahead (+z), far from the world's origin
+    uint64_t frame=0;                   // the game frame posed for (0: not known)
     explicit Run(std::vector<std::vector<Mat>> n):native(std::move(n)){for(auto& c:native)out.emplace_back(c.size());world.unitsPerMetre=Units;}
     explicit Run(std::vector<Mat> one=Straight()):Run(std::vector<std::vector<Mat>>{std::move(one)}){}
     bool Pose(double dt=1/90.) {
         time+=dt;Bones b;b.chains=int(native.size());
         for(size_t c=0;c<native.size();++c){b.native[c]=native[c];b.out[c]=out[c];}
-        return swing.Pose(b,item,world,time,stats);
+        return swing.Pose(b,item,world,time,stats,frame);
     }
     void For(double seconds,double rate=90){for(double t=0;t<seconds-1e-9;t+=1/rate)Check(Pose(1/rate),"posed");}
     Vec Out(int c=0)const{return swing.Head(c)-swing.Top(c);}   // the top to the ball's centre, m
@@ -383,6 +385,44 @@ int main() {
             after.push_back(r.Out());
         }
         for(const Vec& v:after)Check(Length(v-after[2])<.04f,"the same swing at 45 to 144 Hz");
+    }
+    {   // Both eyes of a stereo pair are one game frame (the owner, 2026-11-25: "almost like their depth is off, or left and
+        // right eye is off"). The second eye's pose lays the very same bones, byte for byte, with no step - though the
+        // item's place it reads is a frame on, as the game's is. The next pair steps once, by the time between pairs: the
+        // chain swings exactly as it would with one pose a frame. Dual wield and Khalim's three chains alike.
+        for(int kind=0;kind<2;++kind) {
+            Run a=kind?Run(KhalimChains()):Run(),b=kind?Run(KhalimChains()):Run();   // a: two poses a pair; b: one a frame
+            const double pair=1/55.,between=.008;   // 55 pairs a second, the second eye 8 ms after the first
+            for(int k=1;k<=165;++k) {
+                const float x=.4f*std::sin(float(k)*.25f),y=.15f*std::cos(float(k)*.4f);
+                const Mat at=Placed(Pitch(Pi/2+.6f*std::sin(float(k)*.3f)),Far+Vec{x,y,0}*Units);
+                a.item=at;a.frame=uint64_t(k);
+                const unsigned steps=a.stats.steps;
+                Check(a.Pose(k>1?pair-between:pair),"the first eye posed");
+                Check(a.stats.steps==steps+(k>1?1u:0u),"the first eye of a pair steps once (the first pair hangs it)");
+                const auto first=a.out;
+                a.item=Placed(Pitch(Pi/2+.6f*std::sin(float(k+1)*.3f)),Far+Vec{x+.05f,y,0}*Units);   // the item read a frame on
+                Check(a.Pose(between),"the second eye posed");
+                Check(a.stats.steps==steps+(k>1?1u:0u),"the second eye does not step");
+                for(size_t c=0;c<a.out.size();++c)
+                    Check(std::memcmp(first[c].data(),a.out[c].data(),first[c].size()*sizeof(Mat))==0,"the second eye: the same bones, byte for byte");
+                b.item=at;b.frame=uint64_t(k);
+                Check(b.Pose(pair),"one pose a frame");
+                for(size_t c=0;c<a.out.size();++c)
+                    Check(std::memcmp(a.out[c].data(),b.out[c].data(),a.out[c].size()*sizeof(Mat))==0,"stepped by the time between pairs, not between eyes");
+            }
+            Check(a.stats.frames==165&&a.stats.again==165&&a.stats.steps==164&&b.stats.steps==164,"one step a pair, the other eye laid again");
+            Check(Near(a.stats.eyesApart,.05f,.001f),"how far the item read moved between the eyes is measured");
+            Check(a.stats.widest>20,"and it swung");
+        }
+        // Left to the game in the first eye: the second eye of the pair is too.
+        Run r;r.frame=1;r.For(.1);r.frame=2;
+        const auto laid=r.out;r.item=Placed(Pitch(Pi/2),Far,.001f);
+        Check(!r.Pose()&&r.stats.why==Why::Size,"the first eye: a shrunk item");
+        r.item=Placed(Pitch(Pi/2),Far);
+        Check(!r.Pose()&&r.stats.why==Why::Size,"the second eye: the game's pose too");
+        for(size_t i=0;i<laid[0].size();++i)Check(std::memcmp(&laid[0][i],&r.out[0][i],sizeof(Mat))==0,"out untouched");
+        r.frame=3;Check(r.Pose(),"the next frame: posed again");
     }
     {   // Left to the game, with the reason: an item hidden by shrinking, a broken or far-off matrix, bad bones, no world.
         Run r;r.For(1);

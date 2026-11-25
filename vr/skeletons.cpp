@@ -66,6 +66,7 @@
 #include "../steamvr/look_at.h"
 #include "wall_cells.h"
 namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();uint64_t LocalPlayer();uint32_t HandsKey();uint32_t WeaponSet();uint32_t Flails();}
+namespace gamedraw {bool Now(uint32_t* serial);}   // vrcam: the game draw being posed for (a stereo pair's two passes are one), false outside one
 #endif
 
 namespace skel {
@@ -4112,11 +4113,13 @@ void TellFlails(ULONGLONG now) {
     if(r.flails||r.notHeld||r.noWorld) {
         const auto& s=r.stats;
         const double seconds=double((idle?r.lastAt:now)-r.windowAt)/1000;
-        char line[700];
-        std::snprintf(line,sizeof line,"Frame flail chain: %.0f seconds: %u flail poses, %u laid (%u chains), %u steps; hung afresh %u (first %u, "
-            "new sizes %u, lost %u), carried %u (pauses %u, jumps %u, snap turns %u); left to the game %u (not ours %u, no world %u, "
+        char line[900];
+        std::snprintf(line,sizeof line,"Frame flail chain: %.0f seconds: %u flail poses, %u laid (%u chains); %u flail frames (a stereo pair one), "
+            "%u steps (%.2f a frame), %u laid again for the other eye (the item read moved up to %.1f cm between a frame's eyes); hung afresh %u "
+            "(first %u, new sizes %u, lost %u), carried %u (pauses %u, jumps %u, snap turns %u); left to the game %u (not ours %u, no world %u, "
             "unusable %u%s%s); the ball up to %.1f m/s about the hand, swung out up to %.0f deg from hanging, links within %.1f%% of length",
-            seconds,r.flails,s.poses,s.chains,s.steps,s.starts+s.resized+s.lost,s.starts,s.resized,s.lost,s.pauses+s.jumps+s.turns,s.pauses,s.jumps,
+            seconds,r.flails,s.poses,s.chains,s.frames,s.steps,s.frames?double(s.steps)/s.frames:0.0,s.again,s.eyesApart*100,
+            s.starts+s.resized+s.lost,s.starts,s.resized,s.lost,s.pauses+s.jumps+s.turns,s.pauses,s.jumps,
             s.turns,r.notHeld+r.noWorld+s.refused,r.notHeld,r.noWorld,s.refused,s.refused?": ":"",s.refused?framevr::flail::Text(s.why):"",
             s.fastest,s.widest,s.stretch*100);
         framevr::logging::Write(line);
@@ -4213,7 +4216,11 @@ void PoseFlailChain(Posed& p) {
     there.unitsPerMetre=world.unitsPerMetre;there.floor=world.floor;there.turn=world.turn;
     there.head={world.eyes[0],world.eyes[1],world.eyes[2]};
     fc::Stats stats;
-    const bool laid=held.swing->Pose(chains,item,there,time,stats);
+    // One step a game frame: both eyes of a stereo pair are posed inside one draw of the game (vrcam's GameDrawSpan), the
+    // second a pass later with the frame time held; it lays the first eye's very bones again (flail_chain.h Pose).
+    uint32_t serial=0;
+    const uint64_t frame=gamedraw::Now(&serial)?(uint64_t(serial)<<1|1u):0;
+    const bool laid=held.swing->Pose(chains,item,there,time,stats,frame);
     if(laid)
         for(int c=0;c<held.rig.chains;++c) {
             const fc::Chain& chain=held.rig.chain[size_t(c)];

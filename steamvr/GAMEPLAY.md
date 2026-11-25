@@ -1892,6 +1892,17 @@ of hanging straight. The ball's size comes from the game's models: its centre
 sits a fifth of the chain's length past the last joint, and its radius is the
 same.
 
+The chain steps once a game frame. Both eyes of a stereo pair are drawn from one
+game frame, and the game poses the item once in each eye's pass; the first
+pose steps the chain and lays its bones, the second lays the very same bones
+again (owner, 2026-11-25, of the chain stepped once an eye: "almost like their
+depth is off, or left and right eye is off"). The game's own record of the
+item's place is a frame behind at the first eye's pose and current at the
+second's; the bones are laid on the item, which both eyes draw in the same
+place, so both see one chain. The frame is vrcam's game draw (`gamedraw::Now`:
+the serial of the draw call that holds a pair's two passes, or the one pass
+when eyes go by turns).
+
 The game's rigs: Flail, Knout and Scourge share one skeleton (23 bones, one
 chain of 18); Khalim's Flail has three chains of 14 (51 bones), Khalim's Will
 three of 12 (45). A flail taken up hangs straight down at once. A snap turn
@@ -1904,9 +1915,12 @@ the chain it swings (`the held flail's rig - 1 chain(s) of 18 links (0.38 m to
 the last joint, ...)`), or why the game's animation keeps it (`- left to the
 game's animation: <reason>`); if a flail is in hand for 5 s and no posed
 skeleton was the player's own flail, one line why; and while a flail is posed,
-every ten seconds its poses, steps, fresh starts and carries, what was left to
-the game and why, the ball's fastest about the hand, its widest swing from
-hanging and the links' worst stretch. Fixtures: `flail-chain-test`.
+every ten seconds its poses, the game frames it was posed in, its steps (one a
+frame: `1.00 a frame`), the poses laid again for the other eye and how far the
+item's place as read moved between a frame's eyes, fresh starts and carries,
+what was left to the game and why, the ball's fastest about the hand, its
+widest swing from hanging and the links' worst stretch. Fixtures:
+`flail-chain-test`.
 
 ### Weapons collide
 

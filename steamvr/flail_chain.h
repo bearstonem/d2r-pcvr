@@ -159,17 +159,20 @@ inline const char* Text(Why why) {
 }
 struct Stats {
     unsigned poses=0,chains=0,steps=0;  // flail poses laid, chains laid, steps of the swing
+    unsigned frames=0,again=0;          // game frames laid (each its own), and poses that laid a frame's chain again (the other eye)
     unsigned starts=0,resized=0,lost=0; // hung afresh: the first, a new size or shape, a point lost (not finite)
     unsigned pauses=0,jumps=0,turns=0;  // carried on the item: a pause, a jump, a snap turn
     unsigned refused=0;Why why=Why::None;   // left to the game, and the last reason
     float fastest=0;                    // m/s: the ball's fastest about the handle
     float widest=0;                     // deg: its widest swing away from hanging straight down
     float stretch=0;                    // the links' worst length error after a step, a share of the link
+    float eyesApart=0;                  // m: the most the item's place as read moved between one frame's poses (the eyes)
     void Add(const Stats& s) {
-        poses+=s.poses;chains+=s.chains;steps+=s.steps;starts+=s.starts;resized+=s.resized;lost+=s.lost;
-        pauses+=s.pauses;jumps+=s.jumps;turns+=s.turns;
+        poses+=s.poses;chains+=s.chains;steps+=s.steps;frames+=s.frames;again+=s.again;
+        starts+=s.starts;resized+=s.resized;lost+=s.lost;pauses+=s.pauses;jumps+=s.jumps;turns+=s.turns;
         if(s.refused){refused+=s.refused;why=s.why;}
         fastest=std::max(fastest,s.fastest);widest=std::max(widest,s.widest);stretch=std::max(stretch,s.stretch);
+        eyesApart=std::max(eyesApart,s.eyesApart);
     }
 };
 // The world a pose is laid in.
@@ -258,7 +261,36 @@ public:
     // bones: the game's pose of each chain this call, and where to lay it; item: the item's space to the world's units
     // (as its transform's world matrix has it); world: the world's size, floor, the player's eyes and snap turns; time:
     // seconds, rising. False: no out is touched, the game's own pose stays, and stats.why says why.
-    bool Pose(const Bones& bones,const Mat& item,const World& world,double time,Stats& stats) {
+    //
+    // frame: the game frame this pose is drawn for, 0 not known. Both eyes of a stereo pair are one frame (the owner,
+    // 2026-11-25, of a chain stepped once an eye: "almost like their depth is off, or left and right eye is off"). The
+    // first pose of a frame steps the swing, by the time since the last frame's, and lays the bones; any other pose of
+    // that frame lays the very same bones again, byte for byte, with no step. The item's place as read can differ
+    // between them - the game updates it after the first eye's pose (vr/skeletons.cpp, the transform's +0x40) - but the
+    // bones are laid on the item, and both eyes draw the item alike: one chain in the world for both.
+    bool Pose(const Bones& bones,const Mat& item,const World& world,double time,Stats& stats,uint64_t frame=0) {
+        if(frame&&frame==laidFrame&&SameShape(bones)) {
+            ++stats.again;
+            const Vec moved=skel::bow::Position(item)-laidPlace;
+            if(Finite(moved)&&std::isfinite(world.unitsPerMetre)&&world.unitsPerMetre>0)
+                stats.eyesApart=std::max(stats.eyesApart,Length(moved)/world.unitsPerMetre);
+            if(!laidOk){++stats.refused;stats.why=laidWhy;return false;}
+            for(int c=0;c<bones.chains;++c)std::copy_n(laid[size_t(c)].begin(),bones.out[size_t(c)].size(),bones.out[size_t(c)].begin());
+            ++stats.poses;stats.chains+=unsigned(bones.chains);
+            return true;
+        }
+        const bool ok=PoseNow(bones,item,world,time,stats);
+        ++stats.frames;
+        laidFrame=frame;laidOk=ok;laidWhy=stats.why;laidPlace=skel::bow::Position(item);
+        laidChains=std::clamp(bones.chains,0,MaxChains);
+        for(int c=0;c<laidChains;++c) {
+            laidCount[size_t(c)]=bones.out[size_t(c)].size();
+            if(ok)std::copy_n(bones.out[size_t(c)].begin(),std::min<size_t>(laidCount[size_t(c)],MaxLinks),laid[size_t(c)].begin());
+        }
+        return ok;
+    }
+private:
+    bool PoseNow(const Bones& bones,const Mat& item,const World& world,double time,Stats& stats) {
         auto refuse=[&](Why why){++stats.refused;stats.why=why;seeded=false;return false;};
         if(bones.chains<1||bones.chains>MaxChains)return refuse(Why::Bones);
         for(int c=0;c<bones.chains;++c) {
@@ -351,7 +383,8 @@ public:
         ++stats.poses;stats.chains+=unsigned(chains);
         return true;
     }
-    void Forget(){seeded=false;}
+public:
+    void Forget(){seeded=false;laidFrame=0;}
     // For the tests and the log: the chains, a point of one (0 its top, Links(c) the ball's centre) in world metres
     // about the item's place, a link's length, the chain's length and the ball's radius (m), and the first bone's twist
     // about the chain from hanging straight (rad; NaN when the chain points up the handle and hanging says nothing).
@@ -387,6 +420,15 @@ private:
     std::array<Rope,MaxChains> rope{};
     Vec placed{},grip{},handleTop{},head{};   // the item's place (world units) and, about it, the last pose's grip, top and eyes (m)
     Mat lastInverse=skel::bow::Identity();
+    // The last frame laid (Pose's frame; 0 none): whether it was, why not, the item's place read then, and its bones.
+    uint64_t laidFrame=0;bool laidOk=false;Why laidWhy=Why::None;Vec laidPlace{};
+    int laidChains=0;std::array<size_t,MaxChains> laidCount{};
+    std::array<std::array<Mat,MaxLinks>,MaxChains> laid{};
+    bool SameShape(const Bones& bones)const {
+        if(bones.chains!=laidChains)return false;
+        for(int c=0;c<laidChains;++c)if(bones.out[size_t(c)].size()!=laidCount[size_t(c)]||laidCount[size_t(c)]>size_t(MaxLinks))return false;
+        return true;
+    }
     static bool Handed(const Mat& m) {return math::Dot(math::Cross(Row(m,0),Row(m,1)),Row(m,2))>=0;}
 
     // Hung afresh: straight down from each chain's top, still, then settled out of the handle, the head, the floor and
