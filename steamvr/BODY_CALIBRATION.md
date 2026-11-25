@@ -68,7 +68,24 @@ grip-to-grip span fits each character rig's upper/lower arm proportions, keeping
 hands and equipment at their authored size. Controller motion stays 1:1; saved
 calibration supersedes the legacy manual reach multiplier. Arm proportions are
 bounded to 0.65–1.6 of the rig's authored length. This measures controller reach,
-not full head-top height or fingertip wingspan.
+not full head-top height or fingertip wingspan. The span is taken as a person's
+shoulders and two arms: a rig with wider shoulders than a person's at its eye
+height (the Barbarian's) has its arms fitted from a person's, as a Druid form's are.
+
+The middle of the hero's palm, half way from the wrist to the middle finger's
+knuckle, sits on the controller's grip point, the wrist that far behind it. Some
+rigs (Amazon, Paladin, Druid) start each finger at its metacarpal; their knuckle
+is the finger's next joint. A T pose rarely measures a whole reach: the arms dip
+or bend, and the hero's shoulders do not lean forward with yours. When the
+controller is farther from the hero's shoulder than the fitted arm reaches, the
+arm is drawn longer along itself, no thicker, up to twice its length, so the hand
+stays on the controller (`[arms] stretch=1`; `0` leaves the hand short as before).
+`[arms] hand_along` moves the hand along itself on the controller, -5 to 5 cm, for
+a controller whose grip point sits elsewhere in the hand. Melee contact, the
+shield and what the hands hold follow the drawn hand. The log's `Frame hand
+reach:` lines give each character's fit once (the arm drawn and as built, the
+reach measured, the palm's offset), and every 10 seconds while an arm is drawn
+longer, how often, by how much and how far the hand would have been short.
 
 Measurements are saved atomically to the existing `d2r_pcvr.ini` on the settings
 thread, with the same original-config backup, conflict checks and save status as

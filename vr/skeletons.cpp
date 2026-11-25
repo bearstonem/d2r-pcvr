@@ -59,6 +59,7 @@
 #include "shield_pose.h"
 #include "hand_swap_pose.h"
 #include "held_pose.h"
+#include "hand_reach.h"
 #include "shield_steady.h"
 #include "dev_scenarios.h"
 #include "../steamvr/shield_surface.h"
@@ -559,6 +560,9 @@ struct Hero {
     int upr[2] = {-1, -1}, lwr[2] = {-1, -1}, hand[2] = {-1, -1};   // [0] right, [1] left
     // first knuckles: index, middle, pinky - they give the hand's own axes
     int ind[2] = {-1, -1}, mid[2] = {-1, -1}, pnk[2] = {-1, -1};
+    // the middle finger's knuckle itself (hand_reach.h Knuckle): mid where the finger starts there, the next
+    // joint where it starts at its metacarpal (amazon, paladin, druid). The palm's middle is half way to it.
+    int knuckle[2] = {-1, -1};
     int head = -1, spine = -1, pelvis = -1;
     int eyes[2] = {-1, -1};     // eyeball bones, where the rig has them
     // Where this hero's eyes are, standing (model space y): the camera's height
@@ -1293,6 +1297,7 @@ bool Learn(uintptr_t self, Hero* h) {
                 b = k[0];
             }
             if ((int)f.bones.size() > f.firstBend + 1) h->fingers[side].push_back(f);
+            if (root == h->mid[side]) h->knuckle[side] = f.bones[size_t(skel::reach::Knuckle(int(f.bones.size())))];
         }
     }
 
@@ -1478,7 +1483,9 @@ V3 RotOnly(V3 v, const Mat& R) {
 // forward has -Z up, X right, Y back. (+Y turned the hand round the hilt by
 // 180 degrees, knuckles at the face.) Children keep their local offsets, so the two
 // directions are fixed in the hand bone's frame whatever the animation does.
-struct Wrist { bool ok = false; V3 pLocal, kLocal; float det = 1.0f; V3 point, along; float reach = 0.0f; };
+// palm: wrist -> the palm's middle (half way to the middle knuckle, hand_reach.h) once the hand is turned, model units:
+// the controller's grip point is there, the wrist bone that far behind it.
+struct Wrist { bool ok = false; V3 pLocal, kLocal; float det = 1.0f; V3 point, along; float reach = 0.0f; V3 palm{}; };
 
 Wrist PlanWrist(const Hero& h, int side, const std::vector<Mat>& w, const Input& in, float c, float s) {
     Wrist r;
@@ -1497,6 +1504,14 @@ Wrist PlanWrist(const Hero& h, int side, const std::vector<Mat>& w, const Input&
     if (!held::Aim(in.rot[side], in.wristDeg, side, c, s, aimPoint, aimAlong)) return r;
     r.point = {aimPoint.x, aimPoint.y, aimPoint.z};
     r.along = {aimAlong.x, aimAlong.y, aimAlong.z};
+    {   // the palm's middle, in the bone's frame at unit axes, carried as Turn will turn the hand
+        const int kn = h.knuckle[side] >= 0 ? h.knuckle[side] : m;
+        const float axes = (Len({q[0], q[1], q[2]}) + Len({q[4], q[5], q[6]}) + Len({q[8], q[9], q[10]})) / 3.0f;
+        const V3 palmLocal = Scale(RotOnly(Scale(Sub(Pos(w[kn]), Pos(w[k])), 0.5f), inv), axes);
+        const held::V palm = skel::reach::Palm({r.pLocal.x, r.pLocal.y, r.pLocal.z}, {r.kLocal.x, r.kLocal.y, r.kLocal.z}, r.det,
+                                         {palmLocal.x, palmLocal.y, palmLocal.z}, aimPoint, aimAlong);
+        r.palm = {palm.x, palm.y, palm.z};
+    }
     r.ok = true;
     return r;
 }
@@ -1619,8 +1634,9 @@ Mat TurnAbout(V3 k, float deg) {
 // One arm's two-bone IK, the wrist to T: elbow down, a little out to its own
 // side and back - of the body as turned.
 // trackedShield / extend: beyond the arm's reach it lengthens (up to twice) so the hand stays on
-// the controller - the shield arm, and both arms of a grafted shapeshift form.
-void Reach(const Hero& h, int side, V3 T, bool turn, float c, float s, const std::vector<Mat>& baseW, std::vector<Mat>& newW, bool trackedShield=false, bool extend=false) {
+// the controller - the shield arm, and both arms of a grafted shapeshift form. stretched: how much
+// longer StretchArmBones already drew this arm (for the shield's line; it then has the length it needs).
+void Reach(const Hero& h, int side, V3 T, bool turn, float c, float s, const std::vector<Mat>& baseW, std::vector<Mat>& newW, bool trackedShield=false, bool extend=false, float stretched=1.0f) {
     const int u = h.upr[side], l = h.lwr[side], k = h.hand[side];
     const V3 S = Pos(newW[u]);
     float L1 = Len(Sub(Pos(newW[l]), S)), L2 = Len(Sub(Pos(newW[k]), Pos(newW[l])));
@@ -1659,12 +1675,76 @@ void Reach(const Hero& h, int side, V3 T, bool turn, float c, float s, const std
         static ULONGLONG reportAt=0;const auto now=GetTickCount64();
         if(now>=reportAt) {
             char line[180];snprintf(line,sizeof line,"Frame shield reach: extension=%.3f requested=%.3f wrist-error=%.4f model units",
-                reachScale,Len(Sub(requested,S)),Len(Sub(Pos(newW[k]),requested)));
+                reachScale*stretched,Len(Sub(requested,S)),Len(Sub(Pos(newW[k]),requested)));
             framevr::logging::Write(line);reportAt=now+5000;
         }
     }
 #endif
 }
+
+#ifdef D2RVR_NATIVE_OPENXR
+// One tracked arm drawn k times longer along itself, before its IK (hand_reach.h StretchArm): newW and the IK's
+// offsets (baseW) alike, so every later pass on this arm (Reach, a staff's second hand) keeps the length. The
+// hand, its fingers and what it holds keep their size; the arm keeps its thickness.
+bool StretchArmBones(const Hero& h, int side, float k, std::vector<Mat>& newW, std::vector<Mat>& baseW) {
+    const int u = h.upr[side], l = h.lwr[side], w = h.hand[side], n = h.count;
+    if (u < 0 || l < 0 || w < 0 || (int)newW.size() != n || (int)baseW.size() != n) return false;
+    // 1 the upper arm, 2 the forearm, 3 carried whole (the wrist; shield_attach on the left forearm), 4 under one of
+    // those (left to its own re-derivation). Bones come after their parents in every hero rig.
+    std::vector<signed char> segment(n, 0);
+    for (int i = 0; i < n; ++i) {
+        const int p = h.parent[i];
+        if (i == u) segment[i] = 1;
+        else if (p >= 0 && p < i && segment[p])
+            segment[i] = i == l ? 2 : segment[p] >= 3 ? 4 : i == w || (i == h.shieldAttach && segment[p] == 2) ? 3 : segment[p];
+    }
+    if (segment[l] != 2 || segment[w] != 3) return false;
+    std::vector<signed char> arm(segment);
+    for (auto& b : arm) if (b == 4) b = 0;
+    const auto before = newW;
+    if (!reach::StretchArm(newW[0].m, arm.data(), n, u, l, w, k)) return false;
+    std::vector<char> whole(n, 0);
+    int first = n;
+    for (int i = 0; i < n; ++i) if (segment[i] == 3) { whole[i] = 1; first = std::min(first, i); }
+    Propagate(h, before, newW, whole, first);   // fingers, what the hand holds: as they were on it
+    for (int i = 0; i < n; ++i) if (segment[i]) baseW[i] = newW[i];
+    return true;
+}
+// The arms' ten-second account (hand_reach.h Tally): merged from each pose, one line while an arm was drawn
+// longer or a hand was left short of its controller, nothing otherwise.
+SRWLOCK g_reachLock = SRWLOCK_INIT;
+reach::Tally g_reachTally[2];
+ULONGLONG g_reachSince = 0;
+void ReportReach(const reach::Tally (&pose)[2], bool stretchOn) {
+    if (!pose[0].poses && !pose[1].poses) return;
+    const ULONGLONG now = GetTickCount64();
+    reach::Tally done[2];
+    bool report = false;
+    AcquireSRWLockExclusive(&g_reachLock);
+    g_reachTally[0].Merge(pose[0]); g_reachTally[1].Merge(pose[1]);
+    if (!g_reachSince) g_reachSince = now;
+    if (now - g_reachSince >= 10000) {
+        report = g_reachTally[0].Matters() || g_reachTally[1].Matters();
+        done[0] = g_reachTally[0]; done[1] = g_reachTally[1];
+        g_reachTally[0] = g_reachTally[1] = reach::Tally{};
+        g_reachSince = now;
+    }
+    ReleaseSRWLockExclusive(&g_reachLock);
+    if (!report) return;
+    auto arm = [&](const reach::Tally& t, char* out, size_t size) {
+        if (!t.stretched) { snprintf(out, size, "in reach in all %u poses", t.poses); return; }
+        snprintf(out, size, "%s in %u of %u poses (%.2fx on average, %.2fx most; without it the hand stops up to %.1f cm short of the controller)",
+                 stretchOn ? "drawn longer" : "too short", t.stretched, t.poses, t.Mean(), t.most, t.wouldMissCm);
+    };
+    char right[220], left[220];
+    arm(done[0], right, sizeof right); arm(done[1], left, sizeof left);
+    char line[600];
+    snprintf(line, sizeof line, "Frame hand reach: last 10 s: right arm %s; left arm %s; hands left short of their controllers in %u poses (%.1f cm most)%s",
+             right, left, done[0].shortPoses + done[1].shortPoses, std::max(done[0].shortCm, done[1].shortCm),
+             stretchOn ? "" : " - [arms] stretch=0");
+    framevr::logging::Write(line);
+}
+#endif
 
 // a's rotation part turned toward b's by t (rows blended, made square again,
 // each keeping a's length and handedness); a's position.
@@ -2121,16 +2201,26 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
 #ifdef D2RVR_DEVELOPER
     if(graft&&!trackedNeckApplied)++g_formLoose;   // drawn at its rest place, not under the eyes
 #endif
+    // The palm's middle as built: half way from the wrist to the middle knuckle (hand_reach.h), model units.
+    auto bindPalm=[&](int side){
+        const int kn=h.knuckle[side]>=0?h.knuckle[side]:h.mid[side];
+        return kn>=0&&h.hand[side]>=0?.5f*Len(Sub(Pos(h.bind[kn]),Pos(h.bind[h.hand[side]]))):0.f;
+    };
+    // The T pose's span is a person's shoulders and two arms: the arms reach as far as the player's own from a
+    // person's shoulders where the rig's are wider (a grafted form's, the barbarian's 0.27 of his eye height
+    // against 0.24): fitted from his own, his arms came out 6% shorter than any other class's.
+    const float fitShoulders=h.bindOk&&h.upr[0]>=0&&h.upr[1]>=0?
+        framevr::shapeshift::ArmFitShoulders(Len(Sub(Pos(h.bind[h.upr[0]]),Pos(h.bind[h.upr[1]]))),h.eyeY*unitScale):0.f;
+    float fitScale[2]={1.f,1.f};
     if(in.mode==2&&in.armSpanM>0&&h.bindOk&&h.upr[0]>=0&&h.upr[1]>=0){
-        float shoulderWidth=Len(Sub(Pos(h.bind[h.upr[0]]),Pos(h.bind[h.upr[1]])));
-        // a grafted form's arms reach as far as the player's own, from a person's shoulders
-        if(graft)shoulderWidth=framevr::shapeshift::ArmFitShoulders(shoulderWidth,h.eyeY*unitScale);
+        const float shoulderWidth=fitShoulders;
         for(int side=0;side<2;++side){
             const int u=h.upr[side],l=h.lwr[side],k=h.hand[side];
             if(u<0||l<0||k<0)continue;
             const float length=Len(Sub(Pos(h.bind[l]),Pos(h.bind[u])))+Len(Sub(Pos(h.bind[k]),Pos(h.bind[l])));
-            const float palm=h.mid[side]>=0?.5f*Len(Sub(Pos(h.bind[h.mid[side]]),Pos(h.bind[k]))):0;
+            const float palm=bindPalm(side);
             const float scale=framevr::body::ArmScale(h.eyeY,in.userHeadM,in.armSpanM,shoulderWidth,length,palm,graft?.5f:.65f,unitScale);
+            fitScale[side]=scale;
             const auto before=newW;const V3 shoulder=Pos(newW[u]);
             std::vector<char> subtree(n,0);subtree[u]=1;
             for(int i=u;i<n;++i){
@@ -2143,8 +2233,44 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
             std::vector<char> handTree(n,0);handTree[k]=1;Propagate(h,before,newW,handTree,k);
         }
     }
+    // Hands on the controllers: model units per metre as ControllerPoint hangs them, and whether an arm too short
+    // for its controller is drawn longer (hand_reach.h; [arms] stretch) - only with the body under the eyes, where
+    // a reach is a reach; a grafted form's arms keep their own extension (Reach).
+    const float handsUpm=framevr::body::UnitsPerMetre(h.eyeY>0?h.eyeY:(in.haveEye?in.eyeModel[1]:h.head>=0?Pos(newW[h.head]).y:0.f),
+                                                      in.userHeadM,in.scale);
+    bool stretchArms=false;
+#ifdef D2RVR_NATIVE_OPENXR
+    stretchArms=in.armStretch&&in.mode==2&&!graft&&trackedNeckApplied;
+    if(in.mode==2&&!h.form&&h.bindOk&&h.upr[0]>=0&&h.lwr[0]>=0&&h.hand[0]>=0&&handsUpm>0) {
+        // Once per character, calibration or setting: what the right arm was fitted to (the left is its mirror image).
+        static uintptr_t toldSkel=0;static float toldSpan=-1,toldEye=-1,toldAlong=-99;static int toldStretch=-1;
+        if(toldSkel!=h.skel||fabsf(toldSpan-in.armSpanM)>1e-4f||fabsf(toldEye-in.userHeadM)>1e-4f||
+           fabsf(toldAlong-in.handAlongM)>1e-4f||toldStretch!=int(in.armStretch)) {
+            toldSkel=h.skel;toldSpan=in.armSpanM;toldEye=in.userHeadM;toldAlong=in.handAlongM;toldStretch=int(in.armStretch);
+            const int u=h.upr[0],l=h.lwr[0],k=h.hand[0];
+            const float built=Len(Sub(Pos(h.bind[l]),Pos(h.bind[u])))+Len(Sub(Pos(h.bind[k]),Pos(h.bind[l])));
+            int joints=0,at=0;
+            for(const auto& f:h.fingers[0])if(!f.bones.empty()&&f.bones[0]==h.mid[0]){
+                joints=int(f.bones.size());for(int j=0;j<joints;++j)if(f.bones[size_t(j)]==h.knuckle[0])at=j+1;
+            }
+            char fitted[160];
+            if(in.armSpanM>0)snprintf(fitted,sizeof fitted,"fitted %.3fx to a %.3f m span at %.3f m eyes, shoulder to grip %.3f m measured",
+                fitScale[0],in.armSpanM,in.userHeadM,in.armSpanM*.5f-fitShoulders*.5f/handsUpm);
+            else snprintf(fitted,sizeof fitted,"as built (no body calibration), eyes %.3f m",in.userHeadM);
+            char line[420];snprintf(line,sizeof line,"Frame hand reach: %s rig: arms %s; shoulder to wrist %.3f m drawn (%.3f m as built, shoulders %.3f m apart); "
+                "the palm's middle %.1f cm before the wrist (middle knuckle: finger joint %d of %d), on the grip%s%.1f cm; stretch %s",
+                h.cls>=0&&h.cls<8?kHeroClasses[h.cls]:"unknown",fitted,built*fitScale[0]/handsUpm,built/handsUpm,fitShoulders/handsUpm,
+                bindPalm(0)/handsUpm*100.f,at,joints,in.handAlongM!=0?" moved along the hand ":" ",in.handAlongM*100.f,
+                in.armStretch?"on: an arm short of its controller is drawn longer, up to 2x ([arms] stretch=1)":"off: an arm short of its controller leaves the hand short ([arms] stretch=0)");
+            framevr::logging::Write(line);
+        }
+    }
+#endif
     // The animation after the turn and proportion fit: the IK's local offsets.
     std::vector<Mat> baseW = newW;   // (the mirror world's while left-handed play is in it, below)
+#ifdef D2RVR_NATIVE_OPENXR
+    reach::Tally reachTally[2];   // this pose's, for the ten-second line (ReportReach)
+#endif
 
     // Model space: y up, faces +z, its left is +x. The two arms' subtrees are
     // disjoint, and each pass re-derives only its own side.
@@ -2159,9 +2285,20 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
         } else if (in.mode == 2 && (in.handsValid & (1u << side)) && h.head >= 0) {
             V3 T = ControllerPoint(h, side, in, newW, c, s);
             const Wrist wr = PlanWrist(h, side, baseW, in, c, s);
-            // The grip point is the middle of the palm; the wrist bone is half a hand behind it.
-            if (wr.ok) T = Sub(T, Scale(wr.point, 0.5f * wr.reach));
-            Reach(h, side, T, turn, c, s, baseW, newW, side==offArm&&in.leftShield, graft);
+            // The grip point is the middle of the palm; the wrist bone sits that far behind it ([arms] hand_along
+            // moves the hand along itself, toward the fingers).
+            if (wr.ok) T = Sub(Add(T, Scale(wr.point, in.handAlongM * handsUpm)), wr.palm);
+            float stretched = 1.0f;
+#ifdef D2RVR_NATIVE_OPENXR
+            const V3 S = Pos(newW[u]);
+            const float arm = Len(Sub(Pos(newW[l]), S)) + Len(Sub(Pos(newW[k]), Pos(newW[l]))), distance = Len(Sub(T, S));
+            if (stretchArms && (stretched = reach::Stretch(distance, arm)) > 1.0f && !StretchArmBones(h, side, stretched, newW, baseW))
+                stretched = 1.0f;
+#endif
+            Reach(h, side, T, turn, c, s, baseW, newW, side==offArm&&in.leftShield, graft, stretched);
+#ifdef D2RVR_NATIVE_OPENXR
+            if (!graft && trackedNeckApplied) reachTally[side].Add(distance, arm, handsUpm, Len(Sub(Pos(newW[k]), T)) / handsUpm * 100.0f);
+#endif
             if (wr.ok) {
                 ApplyWrist(newW[k], wr);
                 std::vector<char> fromK(n, 0); fromK[k] = 1;
@@ -2179,6 +2316,9 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
             AimChain(h, u, l, k, E, T, baseW, newW);
         }
     }
+#ifdef D2RVR_NATIVE_OPENXR
+    ReportReach(reachTally, in.armStretch);
+#endif
 
     // Left-handed play, phase 3 (hand_swap_pose.h, MIRROR WORLD): from here to the end of the staff's
     // block the weapon code runs as written - right hand holds, left hand supports - on the reflection
