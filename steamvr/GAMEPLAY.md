@@ -1862,15 +1862,51 @@ Log: `Frame flail reach:` as a hand takes a flail up or puts it away.
 game's flail models carry a chain of bones from the top of the handle to the
 ball, which the game moves with each class's own animation of it; with the arm
 on a controller that pose stayed fixed in the hand whichever way it turned. In
-first person the chain now hangs from the handle under the ball's weight and
-swings with the hand: a rope of the chain's joints and the ball, stepped in the
-world and laid back on the item's own bones (`flail_chain.h`; `vr/skeletons.cpp`
-PoseFlailChain), as the bow's string is. Only the player's own held flail is
-moved. A snap turn carries the chain along as it hangs; a teleport, a load or a
-pause of over 0.1 s starts it again from the game's pose; the ball rests on the
-floor. `0` leaves the game's own animation. Log: `Frame flail chain:` the setting,
-the rig once it is laid (1 chain of 18 links for a Flail, 3 of 14 for Khalim's),
-and a ten-second line of poses, steps, fresh starts and the ball's fastest.
+first person the chain hangs from the handle and swings with the hand
+(`flail_chain.h`; `vr/skeletons.cpp` PoseFlailChain), laid back on the item's
+own bones after the game poses them, as the bow's string is. Only the player's
+own held flail is moved; each hand's flail swings on its own.
+
+The first version (2026-11-19) never moved a chain in the game (owner,
+2026-11-24: "Flail Weapons are not flailing around"). It found the rig, but
+read the item's place through the bow's matrix check, which refuses any number
+over 10000; the game's world coordinates are larger than that nearly
+everywhere (that session stood at 10305, 10403), so every pose was left to the
+game (`unusable` in the ten-second line). The item's place is now read as it
+is, and the chain is simulated about the item's own place, so it keeps its
+precision anywhere in the world.
+
+The chain is its joints and the ball's centre, under gravity, the ball 25
+times a link's weight (a steel ball of about a kilogram on 40 g links), in
+substeps of about 2 ms. Every substep the links are pulled exactly back to
+length by one solve of the whole chain at once, weighted by mass: the ball's
+weight swings the chain and pulls it straight behind it, and the light links
+ripple and fold when it comes back toward the hand. A link bends on the next by
+up to 60 deg (the ball on the last one by 90 deg). The chain stays out of the
+handle, the player's head (13 cm about the eyes, smaller with the hand at the
+face), the floor and, with Khalim's three chains, the other balls. A swing
+about the hand halves in about two seconds. Each bone is turned to its link
+from its last pose, so nothing flips as the chain passes where the game's pose
+had it pointing the other way; its twist about the chain is held within 60 deg
+of hanging straight. The ball's size comes from the game's models: its centre
+sits a fifth of the chain's length past the last joint, and its radius is the
+same.
+
+The game's rigs: Flail, Knout and Scourge share one skeleton (23 bones, one
+chain of 18); Khalim's Flail has three chains of 14 (51 bones), Khalim's Will
+three of 12 (45). A flail taken up hangs straight down at once. A snap turn
+carries the chain along as it hangs and swings; a teleport, a load or a pause
+of over 0.1 s carries it on the item as it was; another item or size hangs it
+afresh. `0` leaves the game's own animation.
+
+Log: `Frame flail chain:` the setting; once for each held flail, its rig and
+the chain it swings (`the held flail's rig - 1 chain(s) of 18 links (0.38 m to
+the last joint, ...)`), or why the game's animation keeps it (`- left to the
+game's animation: <reason>`); if a flail is in hand for 5 s and no posed
+skeleton was the player's own flail, one line why; and while a flail is posed,
+every ten seconds its poses, steps, fresh starts and carries, what was left to
+the game and why, the ball's fastest about the hand, its widest swing from
+hanging and the links' worst stretch. Fixtures: `flail-chain-test`.
 
 ### Weapons collide
 

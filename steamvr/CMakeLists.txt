@@ -324,7 +324,7 @@ add_executable(hit-reactions-test hit_reactions_test.cpp)   # Hit reactions: a s
 add_executable(held-collision-test held_collision_test.cpp)   # Held items collide: closest points, the push, its cap and ease, the split, the clank, exclusions
 add_executable(held-world-test held_world_test.cpp)   # Held items meet the world: the hands' frame, wall cells and the floor, slides, corners, the cap, no trap, cost
 add_executable(weapon-reach-test weapon_reach_test.cpp)   # Melee contact by weapon kind; a flail reaches its head, each hand by its own item
-add_executable(flail-chain-test flail_chain_test.cpp)   # A flail's chain swings: its bones by name, hanging and swinging, fresh starts, snap turns, the floor
+add_executable(flail-chain-test flail_chain_test.cpp)   # A flail's chain swings: the five flails' rigs, far from the world's origin, hanging, a swing's lag and overshoot, long runs, head, handle, floor, twist
 add_executable(walk-direction-test walk_direction_test.cpp)   # Walk direction: the stick turned to where the left controller points
 add_executable(whirl-steer-test whirl_steer_test.cpp)   # Whirlwind aimed along the walk stick: its dead zone, the way as walked, the T's spot
 add_executable(room-scale-test room_scale_test.cpp)   # room-scale: a turn pivots at the head
