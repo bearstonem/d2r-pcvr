@@ -361,6 +361,15 @@ Known diagnostic lessons:
   `Frame shield reach` logs extension and wrist error in model units. The
   geometry fixtures do not replace headset checks of reach, arm skin, wrist
   rotation and Smite. Leave stored body calibration intact during installation.
+- Every controller-tracked arm now stretches that way (`vr/hand_reach.h`, along
+  the arm, no thicker; `[arms] stretch`), and the palm's middle, not the
+  wrist-to-first-finger-joint midpoint, is the grip point. The shield arm's
+  `Frame shield reach` extension still logs the whole factor. The shield arm's
+  5 s samples were the evidence (1.10-1.35 in every sample of a Paladin
+  session): the other hand stopped short by the same. Read `Frame hand reach:`
+  (one fit line per character, a 10 s line while an arm stretches) before
+  judging hand placement; melee contact follows the drawn weapon, not the raw
+  controller, so it moved with the hand.
 
 ## End-of-session record
 

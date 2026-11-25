@@ -33,6 +33,8 @@ struct Input {
     float scale = 1.0f;         // arm reach on top of the hero/user height ratio
     float userHeadM = 1.7f;     // the user's head above the floor
     float armSpanM = 0;        // calibrated grip-to-grip T-pose span; zero keeps authored proportions
+    bool armStretch = true;     // [arms] stretch: an arm too short for its controller is drawn longer (vr/hand_reach.h)
+    float handAlongM = 0;       // [arms] hand_along: the hand moved along itself on its controller, + toward the fingers (m)
     // Druid shapeshift form the player is in (framevr::shapeshift: 1 Werewolf, 2 Werebear,
     // from states 139/140), and [shapeshift] wolf_height / bear_height as fractions.
     int shapeForm = 0;

@@ -521,6 +521,8 @@ struct Settings {
     std::atomic<int>   facingSource{1};     // [hands] facing_source: 1 the hero's TransformComponent (structural), 0 the memory search
     std::atomic<float> facingHoldMs{4000.0f};   // [hands] facing_hold_ms: the last facing kept this long while none reads
     std::atomic<float> handUp{0.0f}, handFwd{0.0f}, handSide{0.0f};   // cm, both hands
+    std::atomic<bool>  armStretch{true};    // [arms] stretch: an arm too short for its controller is drawn longer (vr/hand_reach.h)
+    std::atomic<float> handAlongCm{0.0f};   // [arms] hand_along: the hand moved along itself on its controller, cm, + toward the fingers
     std::atomic<float> handsFollowCam{1.0f}; // [arms] follow_camera: 1 = hands hang off the camera, 0 = off the eye point ([camera] distance not applied)
     std::atomic<int>   bowMode{4};          // attack aim: 0 off, 1 stick while held (ignored), 2 shift+click (flips the UI to mouse), 3 turn first, then A, 4 the game's target vector turned to the hand
     std::atomic<float> turnMs{80.0f};
@@ -2021,6 +2023,8 @@ void LoadSettings() {
     g_set.handUp.store(std::clamp(IniF(L"arms", L"up", 0.0f), -50.0f, 50.0f));
     g_set.handFwd.store(std::clamp(IniF(L"arms", L"forward", 0.0f), -50.0f, 50.0f));
     g_set.handSide.store(std::clamp(IniF(L"arms", L"side", 0.0f), -50.0f, 50.0f));
+    g_set.armStretch.store(IniB(L"arms", L"stretch", true));
+    g_set.handAlongCm.store(std::clamp(IniF(L"arms", L"hand_along", 0.0f), -5.0f, 5.0f));
     g_set.handsFollowCam.store(std::clamp(IniF(L"arms", L"follow_camera", 100.0f), 0.0f, 100.0f) / 100.0f);
     g_set.bowMode.store(std::clamp((int)IniF(L"bow", L"mode", 4.0f), 0, 4));
     g_set.turnMs.store(std::clamp(IniF(L"bow", L"turn_ms", 80.0f), 20.0f, 400.0f));
@@ -10107,6 +10111,8 @@ void PushArms() {
     in.handOffset[0] = g_set.handSide.load() * 0.01f;
     in.handOffset[1] = g_set.handUp.load() * 0.01f;
     in.handOffset[2] = -g_set.handFwd.load() * 0.01f;
+    in.armStretch = g_set.armStretch.load();
+    in.handAlongM = g_set.handAlongCm.load() * 0.01f;
     bool eyeOk = false;
     in.haveYaw = on && (in.mode == 2 || in.bodyTurn > 0) && CameraYawInModel(&yaw, in.eyeModel, &eyeOk);
     in.haveEye = in.haveYaw && eyeOk;
