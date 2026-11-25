@@ -3348,9 +3348,7 @@ bool MonoAudioOn(ULONGLONG now) {
 // (Feel it, Calibrate body, Set eye height), the rest go to layout::Press.
 // how: forwarded to CloseSettings for its log line only ("B").
 void SettingsPress(const settings::Hit& hit,uint64_t ms,const char* how=nullptr) {
-    if(hit.kind==settings::Kind::VoiceEdit){if(settingsModel.voice.Edit(hit.index,hit.delta)){
-        if(hit.index==5||hit.index==6||hit.index==8||hit.index==11){voiceBridge.Open(true,GetCurrentProcessId());voiceRuntime.Save(settingsModel.voice);}
-        ++settingsModel.revision;}return;}
+    if(hit.kind==settings::Kind::VoiceEdit){if(settingsModel.voice.Edit(hit.index,hit.delta))++settingsModel.revision;return;}
     if(hit.kind==settings::Kind::VoiceSave){voiceBridge.Open(true,GetCurrentProcessId());voiceRuntime.Save(settingsModel.voice,unsigned(hit.delta));++settingsModel.revision;return;}
     if(hit.kind==settings::Kind::Recenter){ResetHeight();MotionPulse(UiRole(1),haptics::Category::Interaction,.4f,35000000);return;}
     if(hit.kind==settings::Kind::Calibrate){if(settingsModel.CanCalibrate())OpenBodyCalibration();return;}
@@ -3363,6 +3361,7 @@ void SettingsPress(const settings::Hit& hit,uint64_t ms,const char* how=nullptr)
         return;
     }
     if(settingsModel.voice.picker&&hit.kind==settings::Kind::Close){settingsModel.voice.picker=false;++settingsModel.revision;return;}
+    if(hit.kind==settings::Kind::Close&&settingsModel.voice.dirty){settingsModel.view=settings::View::Voice;settingsModel.voice.status="Unsaved voice changes. Save or Discard before closing.";++settingsModel.revision;return;}
     const int popoverBefore=settingsModel.popoverKey;
     const auto request=settings::layout::Press(settingsModel,hit,ms);
     if(settingsModel.popoverKey!=popoverBefore){   // Frame VR settings popover: each open and close, and why
@@ -5666,8 +5665,9 @@ void Input() {
     {
         const auto at=GetTickCount64();
         if(voiceRuntime.Poll(settingsModel.voice))++settingsModel.revision;
+        voiceRuntime.Sync(settingsModel.voice,settingsModel.open&&settingsModel.view==settings::View::Voice);
         if(at>=voiceOpenAt){voiceBridge.Open(false,GetCurrentProcessId());voiceOpenAt=at+1000;}
-        const bool allowed=quickFresh&&motionInput.active&&gameplayChain&&focused&&offlinedifficulty::ClientMode()==0&&
+        const bool allowed=settingsModel.voice.savedMode==2&&quickFresh&&motionInput.active&&gameplayChain&&focused&&offlinedifficulty::ClientMode()==0&&
             !panelMode&&!spatialMode&&!settingsOwned&&!interactionOutput.wheel&&!interactionOutput.settings&&
             !interactionOutput.block&&!glyphCast.Busy()&&!glyphStroke.Drawing()&&!glyphPressed&&
             interactionOutput.owner[0]==interaction::Owner::Combat&&interactionOutput.owner[1]==interaction::Owner::Combat&&
@@ -5702,7 +5702,7 @@ void Input() {
             helperReady=shared.enabled&&at>=shared.helperAt&&at-shared.helperAt<500;
         });
         const bool fresh=command.sequence&&command.sequence!=voiceGate.seen;
-        const bool accepted=voiceGate.Take(command,interactionInput.session,at,allowed&&helperReady);
+        const bool accepted=voiceGate.Take(command,interactionInput.session,at,allowed&&helperReady&&settingsModel.voice.AllowsCast(command.skill));
         if(fresh){
             const char* status="Dropped: game busy, inactive or command expired";
             const auto known=interaction::GlyphSkill(quickSnapshot,command.skill);

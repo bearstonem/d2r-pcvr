@@ -85,7 +85,7 @@ public static class RecordedSounds {
         using(var bridge=new GameBridge("-game-"+pid)){
             Action<Action> locked=delegate(Action action){bool held=false;try{try{held=mutex.WaitOne(0);}catch(AbandonedMutexException){held=true;}if(held)action();}finally{if(held)mutex.ReleaseMutex();}};
             Action<string> report=delegate(string text){byte[] bytes=Encoding.UTF8.GetBytes(text);locked(delegate{byte[] line=new byte[240];Buffer.BlockCopy(bytes,0,line,0,Math.Min(239,bytes.Length));view.WriteArray(16,line,0,line.Length);});};
-            uint resultSerial=0;
+            uint resultSerial=0,completed=0;Action finished=()=>locked(()=>view.Write(7948,++completed));
             Action<string,int,double> resultReport=delegate(string text,int slot,double distance){locked(delegate{view.Write(7696,slot);view.Write(7700,++resultSerial);view.Write(7704,(float)distance);byte[] line=new byte[240];byte[] bytes=Encoding.UTF8.GetBytes(text);Buffer.BlockCopy(bytes,0,line,0,Math.Min(239,bytes.Length));view.WriteArray(7708,line,0,line.Length);view.WriteArray(16,line,0,line.Length);});};
             uint generation=0,mode=0;int lastRecognized=-1;ISoundInput mic=null;SoundConfig config=null;List<double[][]>[] profiles=null;var segment=new SoundSegmenter();ulong started=0,lastAudio=0,lastSent=0,lastAck=0,session=0,meterAt=0,heardAt=0;bool wasAllowed=false;
             try{while(!parent.HasExited){
@@ -98,15 +98,15 @@ public static class RecordedSounds {
                         if(config==null||config.Bindings==null||config.Bindings.Count!=6||String.IsNullOrEmpty(config.Storage))throw new Exception("Invalid sound configuration");
                         string file=SoundStore.FileName(config.Storage,config.Slot,config.Sample);
                         if(mode==0)report("Recorded sound recognition off");
-                        else if(mode==4){report("Playing sample - casting paused");playback(file);mode=0;report("Preview finished. Select Test or Cast and save to listen.");}
-                        else if(mode==5){if(System.IO.File.Exists(file))System.IO.File.Delete(file);mode=0;report("Sample deleted. Record a replacement.");}
+                        else if(mode==4){report("Playing sample - casting paused");playback(file);mode=0;report("Preview finished.");finished();}
+                        else if(mode==5){if(System.IO.File.Exists(file))System.IO.File.Delete(file);mode=0;report("Sample deleted. Record a replacement.");finished();}
                         else {
                             if(mode!=3)profiles=SoundStore.Load(config.Storage);
                             if(mode!=3&&!profiles.Any(p=>p.Count>=1))throw new Exception("Record at least one sample of a sound first.");
                             mic=capture(config.Microphone);started=lastAudio=Native.GetTickCount64();
-                            report(mode==3?"Recording: make your sound, then pause (10 seconds to start)":mode==1?"Test listening - no casts":"Listening - close settings to cast");heardAt=started;
+                            report(mode==3?"Recording: make your sound, then pause (10 seconds to start)":mode==1?"Validating automatically - no casts":"Listening - close settings to cast");heardAt=started;
                         }
-                    }catch(Exception e){mode=0;resultReport(e.Message,-1,2);}
+                    }catch(Exception e){if(mode>=3)finished();mode=0;resultReport(e.Message,-1,2);}
                 }
                 bridge.Tick(mode==2&&mic!=null);
                 locked(delegate{view.Write(7680,0x534e4432u);view.Write(7684,mic!=null?mode:0u);view.Write(7688,mic!=null?(uint)segment.Level:0u);view.Write(7692,mic!=null&&segment.Started?1u:0u);view.Write(7952,Native.GetTickCount64());});
@@ -120,15 +120,15 @@ public static class RecordedSounds {
                     if(now-meterAt>500&&now-heardAt>3500){report((mode==3?"Recording":mode==1?"Testing":!bridge.Ready?"Validating (casts blocked)":"Listening")+" - mic level "+segment.Level+"%");meterAt=now;}
                     if(sound!=null){heardAt=now;if(sound.Length==0){resultReport("Sound too long. Use a short command under 3 seconds.",-1,2);continue;}
                         double[][] feature;try{feature=SoundFeatures.Extract(sound);}catch(Exception e){resultReport(e.Message,-1,2);continue;}
-                        if(mode==3){SoundStore.Save(SoundStore.FileName(config.Storage,config.Slot,config.Sample),sound);mic.Dispose();mic=null;mode=0;report("Saved sound "+(config.Slot+1)+", sample "+(config.Sample+1)+". Preview it or record another example.");continue;}
+                        if(mode==3){SoundStore.Save(SoundStore.FileName(config.Storage,config.Slot,config.Sample),sound);mic.Dispose();mic=null;mode=0;report("Saved sound "+(config.Slot+1)+", sample "+(config.Sample+1)+". Preview it or record another example.");finished();continue;}
                         double distance;bool ambiguous;int slot=SoundFeatures.Match(feature,profiles,config.Tolerance,out distance,out ambiguous);
-                        string result=slot<0?(ambiguous?"Ambiguous sound - no cast. Use more distinct commands.":"No sound matched. Try Test with a looser tolerance."):"Matched sound "+(slot+1)+" (distance "+distance.ToString("F2")+")";
+                        string result=slot<0?(ambiguous?"Ambiguous sound - no cast. Use more distinct commands.":"No sound matched. Adjust sensitivity or add an example."):"Matched sound "+(slot+1)+" (distance "+distance.ToString("F2")+")";
                         if(slot>=0&&mode==2){int skill=config.Bindings[slot].Skill;if(!bridge.Ready)result+=" - casting blocked (settings / game busy)";else if(skill<0)result+=" - no skill assigned";else if(lastSent!=0&&now-lastSent<1500)result+=" - cooldown";else if(bridge.Send(skill,session,now)){lastSent=now;result+=" - sent";}else result+=" - game not ready";}
                         if(slot>=0)lastRecognized=slot;
                         resultReport(result,slot,distance);
                     }
                     if(bridge.Ack!=0&&bridge.Ack!=lastAck){lastAck=bridge.Ack;resultReport("Sound "+(lastRecognized+1)+": "+bridge.Status,lastRecognized,0);heardAt=now;}
-                }catch(Exception e){resultReport(e.Message,-1,2);mic.Dispose();mic=null;mode=0;bridge.Tick(false);}
+                }catch(Exception e){resultReport(e.Message,-1,2);mic.Dispose();mic=null;if(mode>=3)finished();mode=0;bridge.Tick(false);}
             }}finally{if(mic!=null)mic.Dispose();}
         }return 0;
     }
@@ -145,7 +145,7 @@ public static class SoundTests {
     static void Pipeline(){
         int pid=System.Diagnostics.Process.GetCurrentProcess().Id;
         string directory=Path.Combine(Path.GetTempPath(),"d2r-pipeline-"+Guid.NewGuid().ToString("N"));
-        string name=@"Local\D2RVRVoiceIntegrated"+pid;Exception failure=null;Thread worker=null;int played=0,opened=0;bool ready=true;
+        string name=@"Local\D2RVRVoiceIntegrated"+pid;Exception failure=null;Thread worker=null;int played=0,opened=0,selectedSlot=0;bool ready=true;
         using(var mutex=new Mutex(false,name+"Mutex"))
         using(var map=MemoryMappedFile.CreateOrOpen(name,8192))using(var view=map.CreateViewAccessor())
         using(var gameMutex=new Mutex(false,@"Local\D2RVRVoicePrototypeMutex1-game-"+pid))
@@ -155,7 +155,7 @@ public static class SoundTests {
             Func<ulong> sequence=()=>{gameMutex.WaitOne();try{return game.ReadUInt64(14040);}finally{gameMutex.ReleaseMutex();}};
             Func<string> status=()=>{string result="";control(()=>{byte[] data=new byte[240];view.ReadArray(16,data,0,240);int n=Array.IndexOf(data,(byte)0);result=Encoding.UTF8.GetString(data,0,n<0?240:n);});return result;};
             uint generation=0;
-            Action<int,int> change=(mode,sample)=>{var config=new SoundConfig{Storage=directory,Slot=0,Sample=sample,Tolerance=1,Microphone=-1,Bindings=Enumerable.Range(0,6).Select(i=>new Binding{Skill=i==0?149:-1}).ToList()};byte[] json=Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(config));control(()=>{view.WriteArray(256,json,0,json.Length);view.Write(8,(uint)json.Length);view.Write(4,(uint)mode);view.Write(12,0u);view.Write(16,(byte)0);view.Write(0,++generation);});};
+            Action<int,int> change=(mode,sample)=>{var config=new SoundConfig{Storage=directory,Slot=selectedSlot,Sample=sample,Tolerance=1,Microphone=-1,Bindings=Enumerable.Range(0,6).Select(i=>new Binding{Skill=149+i}).ToList()};byte[] json=Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(config));control(()=>{view.WriteArray(256,json,0,json.Length);view.Write(8,(uint)json.Length);view.Write(4,(uint)mode);view.Write(12,0u);view.Write(16,(byte)0);view.Write(0,++generation);});};
             Action<string> expect=text=>{ulong end=Native.GetTickCount64()+6000;while(Native.GetTickCount64()<end){heartbeat();if(failure!=null)throw new Exception("Worker failed",failure);if(status().Contains(text))return;Thread.Sleep(5);}throw new Exception("Pipeline expected "+text+"; got "+status());};
             try{
                 control(()=>{view.WriteArray(0,new byte[8192],0,8192);});heartbeat();
@@ -168,6 +168,13 @@ public static class SoundTests {
                 gameMutex.WaitOne();try{Check(game.ReadInt32(14064)==149&&game.ReadUInt64(14056)==71,"Assigned skill and active session sent");}finally{gameMutex.ReleaseMutex();}
                 ulong sent=sequence();ready=false;heartbeat();change(2,0);expect("casting blocked");for(int i=0;i<80;i++){heartbeat();Thread.Sleep(5);}Check(sequence()==sent,"Busy game never casts");
                 change(0,0);expect("recognition off");Check(sequence()==sent,"Off never casts");
+                // Exercise the last binding through the same live worker, not just its array index.
+                for(int sample=0;sample<3;++sample)File.Delete(SoundStore.FileName(directory,0,sample));
+                selectedSlot=5;change(3,0);expect("Saved sound 6, sample 1");
+                change(1,0);expect("Matched sound 6");Check(sequence()==sent,"Sixth binding validates without casting");
+                ready=true;heartbeat();Thread.Sleep(1600);change(2,0);expect(" - sent");
+                gameMutex.WaitOne();try{Check(game.ReadInt32(14064)==154,"Sixth binding sends exactly its assigned skill");}finally{gameMutex.ReleaseMutex();}
+                change(0,0);expect("recognition off");
             }finally{
                 control(()=>{view.Write(12,1u);});if(worker!=null)Check(worker.Join(5000),"Worker shuts down");
                 if(Directory.Exists(directory))Directory.Delete(directory,true);

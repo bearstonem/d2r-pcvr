@@ -156,6 +156,7 @@ void Draw(Painter& p,const Layout& l,bool monoAudio){
                     if(w>40)p.Pill({x,top+2,w,34},row->sub,Color::Quiet);
                 }
                 break;}
+            case Role::VoiceSaveButton:p.Button(r,e.text,Icon::Check,s,Plate::Primary,30.f);p.DrainBar({r.x+8,r.y+r.h-6,r.w-16,5},1,e.Has(layout::Changed)?Color::Warn:Color::Gold);break;
             case Role::VoiceSkill:p.Socket(r,"",s);p.TextFit(e.text,TextStyle::Value,{r.x+88,r.y+8,r.w-100,r.h-16},Color::Text,Align::Leading,true);break;
             case Role::VoiceMeter:p.ReadoutBox(r);p.TextFit(e.text,TextStyle::Readout,{r.x+12,r.y,r.w-24,r.h-14},Color::Text);p.DrainBar({r.x+12,r.y+r.h-10,r.w-24,6},e.fill,Color::Magic);break;
             case Role::Chip:p.Socket(r,e.text,s);break;
@@ -274,6 +275,7 @@ std::vector<std::string> FitProblems(const layout::Layout& l){
                 const Element* row=i>0&&l.elements[i-1].role==Role::Row?&l.elements[i-1]:nullptr;
                 if(e.Has(Recommended)&&row&&!row->sub.empty()&&label+(e.Has(layout::Changed)?10.f:16.f)+w.Width(row->sub,TextStyle::Small)+28>r.w+.5f)fail(e,"recommended pill",row->sub);
                 break;}
+            case Role::VoiceSaveButton:shrinks(e,e.text,TextStyle::Strong,r,false,"voice save");break;
             case Role::VoiceSkill:shrinks(e,e.text,TextStyle::Value,{r.x+88,r.y+8,r.w-100,r.h-16},true,"skill choice");break;
             case Role::VoiceMeter:shrinks(e,e.text,TextStyle::Readout,{r.x+12,r.y,r.w-24,r.h-14},false,"microphone meter");break;
             case Role::Chip:line(e,e.text,e.Has(Selected)?TextStyle::Strong:TextStyle::Value,r.w-16,"chip");break;
