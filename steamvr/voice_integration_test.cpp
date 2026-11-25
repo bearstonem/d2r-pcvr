@@ -45,6 +45,11 @@ int main(){
     ++control->telemetry.padding;flow.Poll(draft);assert(flow.Sync(draft,true)&&control->mode==1);
     assert(flow.Sync(draft,false)&&control->mode==2); // Closing restores On, not Off.
     draft.Edit(5,0);assert(flow.Save(draft)&&control->mode==0);
+    // A failed action publication must not latch recording and block page sync.
+    voice::Runtime missingHelper;voice::Editor missing;missingHelper.Load(missing);
+    assert(!missingHelper.Save(missing,3));
+    assert(!missingHelper.Sync(missing,true));
+    missingHelper.Close();
     UnmapViewOfFile(control);CloseHandle(mapping);flow.Close();
     std::puts("Six saved bindings, unsaved isolation, automatic validation, recording and saved On resume passed");
     std::puts("VR recorded sound controls, action assignment, hit targets and saved tolerance round-trip passed");

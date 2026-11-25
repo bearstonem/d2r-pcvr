@@ -16,7 +16,7 @@ inline std::string Utf8(const std::wstring& w){int n=WideCharToMultiByte(CP_UTF8
 inline std::string Quote(const std::string& s){std::string out="\"";for(unsigned char c:s){if(c=='"'||c=='\\')out+='\\';if(c>=32)out+=char(c);}return out+'"';}
 class Runtime {
     HANDLE map=nullptr,mutex=nullptr,process=nullptr;Control* control=nullptr;
-    std::filesystem::path directory,file,storage;ULONGLONG pollAt=0;unsigned generation=0,completed=0;bool pageOpen=false,actionPending=false,launch=true;std::string published;
+    std::filesystem::path directory,file,storage;ULONGLONG pollAt=0,retryAt=0;unsigned generation=0,completed=0;bool pageOpen=false,actionPending=false,launch=true;std::string published;
     template<class F> bool With(F f){if(!control)return false;DWORD result=WaitForSingleObject(mutex,0);if(result!=WAIT_OBJECT_0&&result!=WAIT_ABANDONED)return false;f(*control);ReleaseMutex(mutex);return true;}
 public:
     explicit Runtime(bool startProcess=true):launch(startProcess){}
@@ -36,7 +36,7 @@ public:
     }
     bool Save(Editor& e,unsigned command=0){
         Load(e);
-        if(command){published.clear();actionPending=true;return Publish(e,command,true);}
+        if(command){published.clear();actionPending=Publish(e,command,true);return actionPending;}
         auto temp=file;temp+=L".tmp";
         bool saved=WritePrivateProfileStringW(L"voice",L"microphone",std::to_wstring(e.microphone).c_str(),temp.c_str())!=0;
         for(int i=0;i<6;++i){auto section=L"phrase"+std::to_wstring(i+1);auto& b=e.bindings[size_t(i)];std::wstring text(b.phrase.begin(),b.phrase.end());saved=WritePrivateProfileStringW(section.c_str(),L"text",text.c_str(),temp.c_str())&&saved;saved=WritePrivateProfileStringW(section.c_str(),L"skill",std::to_wstring(b.skill).c_str(),temp.c_str())&&saved;}
@@ -58,19 +58,20 @@ public:
         auto json="{\"Storage\":"+Quote(Utf8(storage.wstring()))+",\"Slot\":"+std::to_string(e.slot)+",\"Sample\":"+std::to_string(e.sample)+",\"Tolerance\":"+std::to_string(draft?e.tolerance:e.savedTolerance)+",\"Microphone\":"+std::to_string(draft?e.microphone:e.savedMicrophone)+",\"Bindings\":["+bindings+"]}";
         const auto signature=std::to_string(mode)+json;
         if(signature==published)return true;
+        if(mode&&launch&&!process&&GetTickCount64()<retryAt)return false;
         if(json.size()>=sizeof(Control::json)){e.status="Voice configuration is too long";return false;}
         if(!With([&](Control& c){std::memcpy(c.json,json.c_str(),json.size()+1);c.length=unsigned(json.size());c.mode=mode;c.reserved=0;c.status[0]=0;c.generation=++generation;})){e.status="Recognition busy; press Save again";return false;}
-        published=signature;e.status=mode?"Starting local recognition...":"Voice recognition off";
+        e.status=mode?"Starting local recognition...":"Voice recognition off";
         if(process&&WaitForSingleObject(process,0)==WAIT_OBJECT_0){CloseHandle(process);process=nullptr;}
         if(mode&&!process){
-            if(!launch)return true;
+            if(!launch){published=signature;return true;}
             auto exe=directory/L"voice-recognition.exe";
             std::wstring command=L"\""+exe.wstring()+L"\" --embedded "+std::to_wstring(GetCurrentProcessId());
             STARTUPINFOW si{};si.cb=sizeof si;si.dwFlags=STARTF_USESHOWWINDOW;si.wShowWindow=SW_HIDE;PROCESS_INFORMATION pi{};
-            if(!CreateProcessW(exe.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,directory.c_str(),&si,&pi)){e.status="Speech files missing: rebuild and install this branch";return false;}
+            if(!CreateProcessW(exe.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,directory.c_str(),&si,&pi)){retryAt=GetTickCount64()+2000;e.status="Cannot start voice helper. Check installation / antivirus.";return false;}
             process=pi.hProcess;CloseHandle(pi.hThread);
         }
-        return true;
+        published=signature;return true;
     }
     bool Poll(Editor& e){Load(e);auto now=GetTickCount64();if(now<pollAt)return false;pollAt=now+200;std::string status;bool changed=false;
         With([&](Control& c){status.assign(c.status,strnlen(c.status,sizeof c.status));

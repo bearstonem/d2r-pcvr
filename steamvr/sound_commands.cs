@@ -85,7 +85,7 @@ public static class RecordedSounds {
         using(var bridge=new GameBridge("-game-"+pid)){
             Action<Action> locked=delegate(Action action){bool held=false;try{try{held=mutex.WaitOne(0);}catch(AbandonedMutexException){held=true;}if(held)action();}finally{if(held)mutex.ReleaseMutex();}};
             Action<string> report=delegate(string text){byte[] bytes=Encoding.UTF8.GetBytes(text);locked(delegate{byte[] line=new byte[240];Buffer.BlockCopy(bytes,0,line,0,Math.Min(239,bytes.Length));view.WriteArray(16,line,0,line.Length);});};
-            uint resultSerial=0,completed=0;Action finished=()=>locked(()=>view.Write(7948,++completed));
+            uint resultSerial=0,completed=0;Action finished=()=>{++completed;};
             Action<string,int,double> resultReport=delegate(string text,int slot,double distance){locked(delegate{view.Write(7696,slot);view.Write(7700,++resultSerial);view.Write(7704,(float)distance);byte[] line=new byte[240];byte[] bytes=Encoding.UTF8.GetBytes(text);Buffer.BlockCopy(bytes,0,line,0,Math.Min(239,bytes.Length));view.WriteArray(7708,line,0,line.Length);view.WriteArray(16,line,0,line.Length);});};
             uint generation=0,mode=0;int lastRecognized=-1;ISoundInput mic=null;SoundConfig config=null;List<double[][]>[] profiles=null;var segment=new SoundSegmenter();ulong started=0,lastAudio=0,lastSent=0,lastAck=0,session=0,meterAt=0,heardAt=0;bool wasAllowed=false;
             try{while(!parent.HasExited){
@@ -109,7 +109,7 @@ public static class RecordedSounds {
                     }catch(Exception e){if(mode>=3)finished();mode=0;resultReport(e.Message,-1,2);}
                 }
                 bridge.Tick(mode==2&&mic!=null);
-                locked(delegate{view.Write(7680,0x534e4432u);view.Write(7684,mic!=null?mode:0u);view.Write(7688,mic!=null?(uint)segment.Level:0u);view.Write(7692,mic!=null&&segment.Started?1u:0u);view.Write(7952,Native.GetTickCount64());});
+                locked(delegate{view.Write(7680,0x534e4432u);view.Write(7684,mic!=null?mode:0u);view.Write(7688,mic!=null?(uint)segment.Level:0u);view.Write(7692,mic!=null&&segment.Started?1u:0u);view.Write(7948,completed);view.Write(7952,Native.GetTickCount64());});
                 if(mic==null){Thread.Sleep(50);continue;}
                 try{ulong now=Native.GetTickCount64();if(mode==3&&now-started>14000)throw new Exception("Recording timed out. Press Record and try again.");
                     byte[] bytes=mic.Read();if(bytes==null){if(now-lastAudio>3000)throw new Exception("Microphone stopped. Check Virtual Desktop forwarding.");Thread.Sleep(5);continue;}lastAudio=now;
@@ -162,6 +162,10 @@ public static class SoundTests {
                 worker=new Thread(()=>{try{RecordedSounds.Run(pid,id=>{int n=Interlocked.Increment(ref opened);return new Input(Sound(0,n<=3?1:1.2,n<=3?1:.55,n<=3?1:1.04));},file=>{Check(SoundStore.Read(file).Length>6400,"Preview receives saved WAV");Interlocked.Increment(ref played);});}catch(Exception e){failure=e;}});worker.IsBackground=true;worker.Start();
                 for(int sample=0;sample<3;sample++){change(3,sample);expect("Saved sound 1, sample "+(sample+1));Check(File.Exists(SoundStore.FileName(directory,0,sample)),"Recording saved");Check(sequence()==0,"Recording never casts");}
                 change(4,0);expect("Preview finished");Check(played==1&&sequence()==0,"Preview never casts");
+                // Completion is durable telemetry, not a one-shot write that can be lost.
+                control(()=>view.Write(7948,0u));
+                Thread.Sleep(200);
+                control(()=>Check(view.ReadUInt32(7948)==4u,"Action completion is republished until observed"));
                 change(1,0);expect("Matched sound 1");Check(sequence()==0,"Test never casts");
                 control(()=>{Check(view.ReadUInt32(7680)==0x534e4432u&&view.ReadInt32(7696)==0&&view.ReadUInt32(7700)>0,"Live validation publishes persistent match telemetry");});
                 change(2,0);expect(" - sent");Check(sequence()!=0,"Match publishes native command");
