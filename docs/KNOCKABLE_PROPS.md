@@ -79,8 +79,10 @@ turns it off, live.
     height within 30 cm of each other join into one plate over the row, so
     books along a mantle fall at the row's edge.
   - **The floor.** A prop on the floor rests on the bottles' ground.
-- **Physics** (`steamvr/dropped_bottles.*`). Each prop is a static Box3D body
-  in the shape of its model's bounds, 2 mm (at most 5%) inside them so
+- **Physics** (`steamvr/dropped_bottles.*`). A prop nobody touches is only
+  data: where it is, its shape and its weight. It becomes a Box3D body (see
+  [Bodies only on contact](#bodies-only-on-contact)) in the shape of its
+  model's bounds, 2 mm (at most 5%) inside them so
   props packed together do not start overlapping. Vessels and plates are
   upright cylinders. Books, skulls, tools, pillows, cloths, sacks and
   furniture are boxes, and apples and potatoes are spheres. Its material sets
@@ -115,6 +117,53 @@ turns it off, live.
   that index, with the same parent, the same preset position and the matrix
   last put there. Otherwise it is dropped and the physics forgets it. One
   frame after the last move, the previous-frame slot is set to the final pose.
+
+## Bodies only on contact
+
+Status: candidate (2026-11-24); automated checks only, no headset test yet.
+The owner asked to "only activate physics objects in the world when/if
+contacted". Before, every prop the scan listed (the 160 nearest) and every
+surface under them was a static Box3D body from the moment it was listed,
+made on the draw thread as the scan found it. While any prop was listed the
+weapons were bodies placed every frame, and a bottle let go of kept the
+world stepping at 120 Hz for the 20 s it lay there. The world already took
+no step with nothing moving. Now:
+
+- **Listed, not made.** A scan adds a prop as data: no body, no shape. The
+  surfaces under props are listed the same way.
+- **Made on contact.** A weapon's sweep about to reach a frozen prop (Wake,
+  as before) makes its body and sets it going on that frame. So does a
+  spell's push, or a bottle or moving prop with momentum enough to move it.
+  The weapons' bodies are made on that frame too, where each was the frame
+  before and with the mass its swing has built up, so the steps sweep it on
+  exactly as if it had been there all along.
+- **Made where something moves near.** Before each step, a frozen prop or
+  surface that something moving (a bottle, the thrown one, a moving prop)
+  could meet in it gets a static body: within 15 cm plus twice the distance
+  that thing covers in a step. The body looks for what it touches as it is
+  made. A throw traced at release (traps, bombs, potions) makes the frozen
+  props and surfaces along its arc.
+- **Let go at rest.** Once nothing moves (every prop frozen, every bottle
+  asleep, nothing thrown), no step is taken, the weapons hold no bodies and
+  frozen props and surfaces let theirs go, but for those beside a bottle
+  lying there (taking a body away wakes whatever touches it). While things
+  move, a frozen one nothing moving has been near for 0.5 s lets its body go.
+- **Sleeping bottles.** A bottle that has come to rest (Box3D puts it to
+  sleep) no longer keeps the world stepping; a weapon about to reach it
+  wakes it.
+
+What players see and feel is meant to be unchanged; see
+[Verification](#verification) for how that is checked. What it saves on the
+draw thread, from `prop-rest-cost-test` (a room of props every 30 cm, the 160
+nearest listed; [PERFORMANCE.md](../steamvr/PERFORMANCE.md#draw-thread-props-only-on-contact-november-24)):
+entering an area with 160 props 1.5 ms (2.4 ms at worst) down to 0.07 ms;
+a scan while walking among them 150 us down to 26 us; a frame standing
+among them swinging 1.7 us down to 1.3 us; a bottle let go of 1198 world
+steps in its first 10 s down to 169.
+
+The ten-second log line now also says `Box3D bodies most=N`: the most bodies
+the props and their surfaces held at once. Standing among props without
+touching them it should be 0.
 
 ## Weight
 
@@ -240,7 +289,28 @@ for the world's 120 Hz steps, the test machine).
   with each knocked at most once (without the fixes they never settle);
 - with 12 moving, a weapon still sets a 13th going;
 - a cup on a plate gets no plane of its own, and falls to the floor once the
-  plate is gone.
+  plate is gone;
+- at rest, with a blade moving about near the cups: no step, no weapon body
+  and no prop body; a sweep through a cup sets it going on the same frame,
+  along the same path to the millimetre, as a world stepping every frame;
+- bodies only on contact against every prop a body from the start (as
+  before): a sword through a crowded table (12 knocked), two cups knocked off
+  the table's end (6 bodies at most of 19), a plate swept from under a cup and
+  a bottle let go of over the table land the same props in the same places
+  (0.0 mm); the bottle lies asleep on the table, the props beside it keep
+  their bodies and no step is taken; a bottle rolled at a 48 kg barrel
+  bounces off it the same way, the barrel unmoved; a throw traced at a vase
+  that has no body meets it at the same point, the vase's body made for it
+  and let go at the next rest. A spell bolt into the crowded table sets the
+  same nine props going and moves them alike at first (1.3 mm apart after
+  0.03 s); nine props tumbling together then end up to 0.8 m apart, less
+  than the same bolt made 0.01% stronger moves them (1.2 m), so that end is
+  compared with that;
+- every prop and surface has let its body go once all is at rest.
+
+`prop-rest-cost-test` prints what props nobody touches cost the draw thread
+(entering an area, scans standing and walking, frames swinging among them, a
+bottle let go of among them); it checks only that nothing was touched.
 
 `prop-heft-test`:
 - masses by kind and size: each of 17 kinds within what such a thing weighs,
@@ -292,3 +362,15 @@ tip or fall. A cup tapped or swung at still flies, with a light tick. A
 chair is shoved and knocked over but does not fly like a cup. Then switch
 Props have weight off in VR Settings and swing at the barrel again: it flies
 like a cup, as before.
+
+Bodies-on-contact headset check (offline character): in the Lut Gholein
+tavern, stand among the tables for ten seconds swinging near the cups
+without touching one; the `Frame props: ten seconds:` line should say
+`Box3D bodies most=0`. Then repeat the props checks above: tap a cup, swing
+through a plate stack, knock a plate out from under a cup, punch a vase and
+knock a barrel. Each should move, fall and land as before, with the same
+tick or thud, and the first touch should never pass through a prop. Let a
+bottle go over a table among cups: it should land on the table, not fall
+through it, and stay there; once it lies still, swing a sword through it:
+it should be pushed away on the first touch. Throw a trap or bomb past a
+vase standing on the floor: it should land at the vase, as before.

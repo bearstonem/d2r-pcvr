@@ -287,7 +287,7 @@ std::mutex poseMutex;
 props::Poses pending{};
 uint64_t applied=0; // the write pass only
 std::atomic<unsigned> scans{0},failed{0},seenProps{0},matchedProps{0},writes{0},settles{0},lost{0},boundsRefused{0},passes{0};
-std::atomic<unsigned> struckKnocks{0},chainedKnocks{0},mostSeen{0};
+std::atomic<unsigned> struckKnocks{0},chainedKnocks{0},mostSeen{0},mostBodies{0};
 std::atomic<unsigned> leftOut[4]{}; // the last scan's catalogued props in reach left out: unbounded, unrigid, size, beyond the nearest
 uint64_t reportedAt=0; // Report's caller only
 std::atomic<uint32_t> scanMicros{0};
@@ -432,19 +432,24 @@ void Transformed() {
     passing.store(false,std::memory_order_release);
 }
 void CountKnocks(unsigned byWeapons,unsigned byMovingThings) {struckKnocks+=byWeapons;chainedKnocks+=byMovingThings;}
+void CountBodies(unsigned propBodies) {
+    unsigned most=mostBodies.load(std::memory_order_relaxed);
+    while(propBodies>most&&!mostBodies.compare_exchange_weak(most,propBodies,std::memory_order_relaxed)) {}
+}
 void Report() {
     const auto now=GetTickCount64();
     if(reportedAt&&now>=reportedAt&&now-reportedAt<10000)return;
     reportedAt=now;
     const auto s=scans.exchange(0),x=failed.exchange(0),w=writes.exchange(0),t=settles.exchange(0),l=lost.exchange(0),
-        b=boundsRefused.exchange(0),p=passes.exchange(0),k=struckKnocks.exchange(0),c=chainedKnocks.exchange(0),most=mostSeen.exchange(0);
+        b=boundsRefused.exchange(0),p=passes.exchange(0),k=struckKnocks.exchange(0),c=chainedKnocks.exchange(0),most=mostSeen.exchange(0),
+        bodies=mostBodies.exchange(0);
     if(!s&&!x&&!w&&!l)return;
-    char line[560];
+    char line[600];
     std::snprintf(line,sizeof line,"Frame props: ten seconds: scans=%u failed=%u (last %.1f ms%s%s) props in reach now=%u most=%u, catalogued within 6 m=%u, "
         "left out now: no bounds=%u not rigid=%u size=%u beyond the nearest %u=%u; storages ids=%d bounds=%d; knocks by weapons=%u by moving things=%u; "
-        "write passes=%u moves=%u settles=%u lost=%u bounds refused=%u",
+        "Box3D bodies most=%u; write passes=%u moves=%u settles=%u lost=%u bounds refused=%u",
         s,x,scanMicros.load()/1000.,*lastWhy?", ":"",lastWhy,seenProps.load(),most,matchedProps.load(),leftOut[0].load(),leftOut[1].load(),leftOut[2].load(),
-        props::MaxSeen,leftOut[3].load(),idPool,boundsPool,k,c,p,w,t,l,b);
+        props::MaxSeen,leftOut[3].load(),idPool,boundsPool,k,c,bodies,p,w,t,l,b);
     logging::Write(line);
 }
 }
