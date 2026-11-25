@@ -71,6 +71,8 @@
 #include "../vr/ally_health_state.h"
 #include "arcane_decay.h"
 #include "glyph_cast.h"
+#include "voice_bridge.h"
+#include "voice_runtime.h"
 #include "glyph_trail.h"
 #include "skill_cooldowns.h"
 #include "spell_motion.h"
@@ -324,6 +326,8 @@ bool arcaneAtlasPending=false,arcaneImageReady=false;
 glyphcast::Stroke glyphStroke;
 int glyphHand=-1;   // the hand drawing the stroke (right = 0), latched as it begins: each hand casts its own set
 glyphcast::Cast glyphCast;
+voice::Bridge voiceBridge;voice::Gate voiceGate;voice::Runtime voiceRuntime;
+uint64_t voiceOpenAt=0,voiceCatalogAt=0;
 glyphtrail::Painter glyphPainter(ForAtlas(glyphtrail::Painter::Incremental(),glyphtrail::Size,glyphtrail::Size));
 uint64_t glyphStrokeId=0,glyphPaintKey=0,glyphShownStroke=0;
 double glyphBeganAt=0,glyphEndedAt=-1,glyphPaintAt=0;   // the stroke's start and end (recognised, refused or cancelled; -1 drawing or none)
@@ -652,6 +656,19 @@ struct SettingsPainted {std::vector<uint8_t> pixels;settings::layout::Layout lay
 LatestWorker<SettingsPaintJob,SettingsPainted> settingsPainter([](const SettingsPaintJob& job) {
     const auto start=hookmetrics::Nanos();
     auto picture=settings::PaintPage(job.model,job.input);   // Width x Height straight RGBA and the layout it drew
+    if(picture.pixels.size()==size_t(settings::Width)*settings::Height*4)for(const auto& e:picture.layout.elements){
+        if(e.role!=settings::layout::Role::VoiceSkill||e.option<0)continue;
+        auto icon=interaction::icons::Get("s"+std::to_string(e.option));if(!icon||!icon->width||!icon->height)continue;
+        const int side=std::min(64,e.rect.h-8),left=e.rect.x+8,top=e.rect.y+(e.rect.h-side)/2;
+        for(int y=0;y<side;++y)for(int x=0;x<side;++x){
+            if(left+x<0||left+x>=settings::Width||top+y<0||top+y>=settings::Height)continue;
+            const auto* src=&icon->rgba[(size_t(y*icon->height/side)*icon->width+x*icon->width/side)*4];
+            auto* dst=&picture.pixels[(size_t(top+y)*settings::Width+left+x)*4];
+            const unsigned alpha=src[3],out=alpha+(unsigned(dst[3])*(255-alpha)+127)/255;
+            if(out)for(int c=0;c<3;++c)dst[c]=uint8_t((unsigned(src[c])*alpha+(unsigned(dst[c])*dst[3]*(255-alpha)+127)/255)/out);
+            dst[3]=uint8_t(out);
+        }
+    }
     return SettingsPainted{std::move(picture.pixels),std::move(picture.layout),double(hookmetrics::Nanos()-start)/1e6,std::move(picture.error)};
 });
 // What a picture shows. Everything that changes the look is compared as is
@@ -3358,6 +3375,8 @@ bool MonoAudioOn(ULONGLONG now) {
 // (Feel it, Calibrate body, Set eye height), the rest go to layout::Press.
 // how: forwarded to CloseSettings for its log line only ("B").
 void SettingsPress(const settings::Hit& hit,uint64_t ms,const char* how=nullptr) {
+    if(hit.kind==settings::Kind::VoiceEdit){if(settingsModel.voice.Edit(hit.index,hit.delta))++settingsModel.revision;return;}
+    if(hit.kind==settings::Kind::VoiceSave){voiceBridge.Open(true,GetCurrentProcessId());voiceRuntime.Save(settingsModel.voice,unsigned(hit.delta));++settingsModel.revision;return;}
     if(hit.kind==settings::Kind::Recenter){ResetHeight();MotionPulse(UiRole(1),haptics::Category::Interaction,.4f,35000000);return;}
     if(hit.kind==settings::Kind::Calibrate){if(settingsModel.CanCalibrate())OpenBodyCalibration();return;}
     if(hit.kind==settings::Kind::TestHaptics){
@@ -3368,6 +3387,8 @@ void SettingsPress(const settings::Hit& hit,uint64_t ms,const char* how=nullptr)
         MotionPattern(category,haptics::Preview(category,hit.delta-1,settingsModel.Get()[settings::HapticShortMelee]>.5f),&levels);
         return;
     }
+    if(settingsModel.voice.picker&&hit.kind==settings::Kind::Close){settingsModel.voice.picker=false;++settingsModel.revision;return;}
+    if(hit.kind==settings::Kind::Close&&settingsModel.voice.dirty){settingsModel.view=settings::View::Voice;settingsModel.voice.status="Unsaved voice changes. Save or Discard before closing.";++settingsModel.revision;return;}
     const int popoverBefore=settingsModel.popoverKey;
     const auto request=settings::layout::Press(settingsModel,hit,ms);
     if(settingsModel.popoverKey!=popoverBefore){   // Frame VR settings popover: each open and close, and why
@@ -3384,6 +3405,9 @@ void SettingsPress(const settings::Hit& hit,uint64_t ms,const char* how=nullptr)
 }
 void SettingsPointer(bool grip) {
     if(!settingsModel.open)return;
+    voiceBridge.Open(true,GetCurrentProcessId());
+    if(settingsModel.view==settings::View::Voice){static uint64_t iconsAt=0;auto revision=interaction::icons::Revision();if(revision!=iconsAt){iconsAt=revision;++settingsModel.revision;}}
+    if(voiceRuntime.Poll(settingsModel.voice))++settingsModel.revision;
     const bool monoAudio=MonoAudioOn(GetTickCount64());
     settingsModel.Observe(vrsettings::Read());settingsHover={};pointerVisible=pointerHit=false;
     if(!settingsModel.open){CloseSettings();return;}   // Apply and close: the save landed
@@ -5677,6 +5701,77 @@ void Input() {
         Say(line);
         return !refused;
     };
+    // In-game Voice settings control an isolated, automatically launched recognizer.
+    // Consume commands once, then use the same checked native dispatch as glyphs.
+    {
+        const auto at=GetTickCount64();
+        if(voiceRuntime.Poll(settingsModel.voice))++settingsModel.revision;
+        voiceRuntime.Sync(settingsModel.voice,settingsModel.open&&settingsModel.view==settings::View::Voice);
+        if(at>=voiceOpenAt){voiceBridge.Open(false,GetCurrentProcessId());voiceOpenAt=at+1000;}
+        const bool allowed=settingsModel.voice.savedMode==2&&quickFresh&&motionInput.active&&gameplayChain&&focused&&offlinedifficulty::ClientMode()==0&&
+            !panelMode&&!spatialMode&&!settingsOwned&&!interactionOutput.wheel&&!interactionOutput.settings&&
+            !interactionOutput.block&&!glyphCast.Busy()&&!glyphStroke.Drawing()&&!glyphPressed&&
+            interactionOutput.owner[0]==interaction::Owner::Combat&&interactionOutput.owner[1]==interaction::Owner::Combat&&
+            !interactionOutput.Holding(0)&&!interactionOutput.Holding(1)&&!motionOutput.bowDrawing&&
+            motionOutput.skill<0&&!handInput.occupied&&handOutput.slot<0&&
+            quickSnapshot.vitalsKnown&&quickSnapshot.health>0;
+        voice::Command command;bool helperReady=false;
+        voiceBridge.With([&](voice::Shared& shared){
+            shared.gameAt=at;shared.session=interactionInput.session;shared.ready=allowed;
+            if(at>=voiceCatalogAt){
+                shared.count=0;
+                if(quickFresh){
+                    for(unsigned i=0;i<quickSnapshot.skillCount&&i<quickSnapshot.catalog.size()&&shared.count<140;++i){
+                        const auto& skill=quickSnapshot.catalog[i];if(!skill.known||skill.owner!=-1)continue;
+                        auto& entry=shared.skills[shared.count++];entry.id=skill.id;std::snprintf(entry.name,sizeof entry.name,"%s",skill.name);
+                    }
+                    if(interaction::HasSummonArmy(quickSnapshot))for(int id=commander::SkillPhalanxDef;id<=commander::SkillFallOut&&shared.count<140;++id){
+                        auto& entry=shared.skills[shared.count++];entry.id=id;std::snprintf(entry.name,sizeof entry.name,"%s",commander::CommanderSkillName(id));
+                    }
+                }
+                if(quickFresh&&shared.count){
+                    std::vector<voice::Choice> choices{{-1,"Unassigned"}};
+                    for(unsigned i=0;i<shared.count;++i)choices.push_back({shared.skills[i].id,shared.skills[i].name});
+                    const auto& previous=settingsModel.voice.choices;
+                    bool changed=previous.size()!=choices.size();
+                    if(!changed)for(size_t i=0;i<choices.size();++i)if(previous[i].id!=choices[i].id||previous[i].name!=choices[i].name){changed=true;break;}
+                    if(changed){settingsModel.voice.choices=std::move(choices);++settingsModel.revision;}
+                }
+                voiceCatalogAt=at+500;
+            }
+            command=shared.command;
+            helperReady=shared.enabled&&at>=shared.helperAt&&at-shared.helperAt<500;
+        });
+        const bool fresh=command.sequence&&command.sequence!=voiceGate.seen;
+        const bool accepted=voiceGate.Take(command,interactionInput.session,at,allowed&&helperReady&&settingsModel.voice.AllowsCast(command.skill));
+        if(fresh){
+            const char* status="Dropped: game busy, inactive or command expired";
+            const auto known=interaction::GlyphSkill(quickSnapshot,command.skill);
+            char recharging[64]{};
+            if(accepted){
+                const char* cooling=CooldownRefusal(cooldownsOn,quickSnapshot,command.skill,at,recharging);
+                if(!known.known||!known.available)status="Refused: skill not learned or unavailable";
+                else if(cooling)status="Refused: skill cooldown";
+                else if(commander::IsCommanderSkill(command.skill)){
+                    float x=0,y=0;resolveHandSubtile(0,x,y);
+                    status=interaction::HasSummonArmy(quickSnapshot)&&::companionai::ExecuteCommanderSkill(command.skill,x,y)?
+                        "Army command sent":"Refused: no available army";
+                }else{
+                    std::array<glyphcast::Slot,skills::Count> slots{};
+                    for(int i=0;i<skills::Count;++i){const auto& k=quickSnapshot.skills[i];slots[size_t(i)]={k.id,k.owner,k.known,k.available};}
+                    const bool record=quickSnapshot.glyphRecord>=0;
+                    const auto plan=glyphcast::Dispatch(command.skill,-1,slots,record?quickSnapshot.glyphSkill:-2,record?quickSnapshot.glyphOwner:-2);
+                    if(plan.how==glyphcast::How::Park&&(!record||!interactionstate::Park(interactionInput.session,command.skill,-1)))status="Refused: skill binding busy or unavailable";
+                    else{
+                        glyphCast.Begin(plan,command.skill,-1,motionNow);glyphPress={};glyphPress.skill=known;
+                        MotionPulse(0,haptics::Category::Spell,.5f,60000000);status="Skill press sent (native mana and skill checks apply)";
+                    }
+                }
+            }
+            char line[240];std::snprintf(line,sizeof line,"Frame voice: skill %d: %s",command.skill,status);Say(line);
+            voiceBridge.With([&](voice::Shared& shared){shared.ack=command.sequence;std::snprintf(shared.status,sizeof shared.status,"%s",status);});
+        }
+    }
     // Glyph casting (glyph_cast.h): while a hand's Draw glyph button is held its path is a stroke on
     // the upright plane facing the player; let go, it is recognised and the skill that hand has on that
     // shape (each hand its own set; a left shape with none, the right hand's: interaction::GlyphCasts) is
@@ -9428,6 +9523,8 @@ bool Projection(float out[16],float nearWorld,int eye,bool stale) {
 void Shutdown(bool preserveResolution) {
     std::lock_guard lock(mutex);
     hapticPulses.Stop();
+    voiceRuntime.Close();
+    voiceBridge.With([](voice::Shared& s){s.ready=false;s.session=0;s.command={};});voiceBridge.Close();voiceGate={};voiceOpenAt=voiceCatalogAt=0;
     // Keep the HUD hidden through an intentional eye-target/session rebuild.
     if(!preserveResolution)hud::NativeSession(false);
     if(!preserveResolution)resolution::Restore();

@@ -242,6 +242,7 @@ inline constexpr ContentPage PageTable[]={
     {View::Shield,"Shield",Group::Gameplay,Icon::Shield,"Bash, block and seat a shield on your arm.",true},
     {View::Monsters,"Monsters",Group::Gameplay,Icon::Survival,"How tough offline monsters are, your mercenary and your summons. Outline and health bars: Interface.",true},
     {View::Physics,"Physics",Group::Gameplay,Icon::World,"Things your hands and weapons can knock, roll and push.",true},
+    {View::Voice,"Voice",Group::Gameplay,Icon::Controls,"Record your own sounds, preview samples and assign skills. Three examples allow natural variation.",false},
     {View::Moving,"Moving",Group::Comfort,Icon::Fast,"Turning and how fast you move.",true},
     {View::Body,"Body",Group::Comfort,Icon::Body,"Your height, arm span, play space and potion belt.",true},
     {View::Hands,"Hands",Group::Controls,Icon::Controls,"Your hands and controllers: which hand does what, and whose button names.",true},
@@ -1513,7 +1514,7 @@ constexpr bool GroupsOk(){
         for(size_t j=0;j<i;++j)if(GroupTable[j].id==g.id)return false;
         int first=-1,end=-1;size_t pages=0;
         for(const auto& p:PageTable)if(p.group==g.id){
-            if(!p.settings||(end>=0&&int(p.id)!=end))return false;   // settings pages, one run
+            if((!p.settings&&p.id!=View::Voice)||(end>=0&&int(p.id)!=end))return false;   // settings pages, one run
             if(first<0)first=int(p.id);
             end=int(p.id)+1;++pages;
         }
@@ -1526,7 +1527,7 @@ constexpr bool GroupsOk(){
 }
 // Every settings page holds at least 3 settings, a side half or a filter switch included (More is only a safety net).
 constexpr bool PagesFilled(){
-    for(const auto& p:PageTable)if(p.settings&&p.id!=View::More){
+    for(const auto& p:PageTable)if(p.settings&&p.id!=View::More&&p.id!=View::Voice){
         int n=0;for(const auto& r:Overrides)if(r.page==p.id)++n;
         if(n<3)return false;
     }

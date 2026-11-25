@@ -197,3 +197,14 @@ FacadeGaikan / PlanetKiller, released under CC0:
 https://opengameart.org/content/pk-icicles . The accompanying generated frost
 texture and forearm adaptations contain no extracted game assets. See the
 asset README for the editable source and runtime format.
+
+## Optional local speech-recognition helper
+
+The desktop speech helper optionally downloads Vosk API 0.3.45 (Windows x64)
+and vosk-model-small-en-us-0.15 from their upstream distribution sites. Both are
+Apache-2.0 licensed; they are not committed to this repository. The upstream Vosk COPYING notice
+is downloaded and checksum-verified beside the helper; the model's README remains in its
+folder. See https://github.com/alphacep/vosk-api and
+https://alphacephei.com/vosk/models. Versions and SHA-256 hashes are pinned in
+steamvr/setup_voice_recognition.py. The runtime wheel includes its packaged native
+runtime dependencies; preserve its accompanying notices when redistributing.

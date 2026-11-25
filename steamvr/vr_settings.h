@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include "voice_settings.h"
 #include "far_objects.h"
 #include <algorithm>
 #include <cmath>
@@ -22,7 +23,7 @@ namespace framevr::settings {
 // vr_settings_content.h). Presets heads the rail; Guide and WhatsNew open from
 // the page band, not the rail; More (rows no override placed yet, the menu data
 // rules) too, and only while it has rows.
-enum class View : uint8_t { Presets, Combat, Targeting, Shield, Monsters, Physics, Moving, Body, Hands, Vibration, Wrist, Menus, Labels, Outlines, Warnings, Performance, Frames, Environment, Effects, Guide, WhatsNew, More, Count };
+enum class View : uint8_t { Presets, Combat, Targeting, Shield, Monsters, Physics, Voice, Moving, Body, Hands, Vibration, Wrist, Menus, Labels, Outlines, Warnings, Performance, Frames, Environment, Effects, Guide, WhatsNew, More, Count };
 // The rail's groups (content::Group, content::GroupTable) number below this, so the model
 // can remember a page per group and the help card has an id per group.
 constexpr int MaxRailGroups=8;
@@ -639,7 +640,7 @@ inline float LockStep(float value,int delta,const Context& c){
 //                first when fresh); the group of the page shown: nothing
 enum class Kind { None, Change, Apply, Close, Recenter, Calibrate, TestHaptics, NotesPage,
                   Open, Set, Undo, Default, Preset, ResetPage, UndoReset, ConfirmClose, KeepEditing, ApplyClose, Card,
-                  Popover, PopoverClose, OpenGroup };
+                  Popover, PopoverClose, OpenGroup, VoiceEdit, VoiceSave };
 // What's new pages its release lines (2026-10-23: a long list since the last
 // release): NotesPerPage a page, at most NotesMaxLines (release_notes.py
 // MAX_LINES). Previous / Next and the page number sit under the lines, shown
@@ -651,6 +652,7 @@ class Model {
     Values base=Defaults(),draft=base;
     uint64_t serial=0,pending=0;
 public:
+    voice::Editor voice;
     bool open=false,ready=false,offlineDifficultyAvailable=false;
     int notesPage=0,notesPages=1;   // What's new's page, of SetNotesPages
     int morePage=0;                 // the More view's page (8 rows a page; layout::Press turns it)
