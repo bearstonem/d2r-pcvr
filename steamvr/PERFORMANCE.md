@@ -16,6 +16,44 @@ reads fell from 723 to 402 per scan. Across 31 alternating batches of 20
 scans, median batch time per scan fell from 355 to 199 microseconds.
 In-game scan time and headset frame rate still need a matched run.
 
+## Map and chat draw callbacks, November 22
+
+In the Players 7 Rocky Waste headset run the two eye passes averaged 23.6 ms
+combined. Both passes call the HUD filter for ordinary world and interface
+draws. The filter now tracks which command lists have entered a map or chat
+scissor. Ordinary draws can return after one membership check. A possible
+match takes the HUD lock once and verifies the list and its region.
+
+A single-thread Windows fixture ran the old and new draw and scissor callbacks
+with a mock render-target bind. Each group included 80 world draws, 16 ordinary
+HUD draws, two map draws and two private chat draws, alternating indexed and
+non-indexed calls. Each sample timed 50,000 such groups including scissor
+changes. Median CPU time across nine samples per build was:
+
+| Map in the fixture | Before, µs per 100 draws | After, µs per 100 draws |
+| --- | ---: | ---: |
+| Corner | 1.39 | 0.48 |
+| Full | 1.68 | 0.51 |
+
+Both versions suppressed the same draws and selected the same chat history.
+
+Two headset sessions used the same offline Paladin in the Players 7 Rocky
+Waste, with SteamVR/OpenXR 2.18.4, 3072 × 3072 eyes and NVIDIA Medium frame
+generation at 50% scale. The comparison uses complete ten-second intervals
+wholly in the area. Stage times are weighted by native stereo pair count.
+
+| Rocky Waste gameplay | Before | With the HUD change |
+| --- | ---: | ---: |
+| Native pairs measured | 7,571 | 5,952 |
+| Both eye passes, ms per pair | 23.62 | 20.85 |
+| Full cycle, ms per pair | 29.08 | 25.21 |
+| Native stereo pairs per second | 34.4 | 39.7 |
+| Pairs taking at least 30 ms | 36.7% | 17.5% |
+
+The newer session also spent less time in XR end (2.05 to 1.21 ms per pair).
+The encounters varied and the headset logs time the complete eye passes.
+Only the synthetic benchmark isolates the HUD callbacks' contribution.
+
 ## Draw thread: props with weight, November 12
 
 **Measured in the test only; not yet in a headset.** Props with weight

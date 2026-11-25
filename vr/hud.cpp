@@ -150,20 +150,31 @@ bool g_mapDrawn = false;
 framevr::NativeMutex g_lock;
 // Lists that have the interface bound now: the view they draw it through, and
 // whether the map's draws are being sent to our own target right now.
-struct Drawing { resource_view layer{}; bool inMap = false; uint32_t w = 0, h = 0;
-                 bool inFull = false; bool inChat = false;bool privateChat=false;rect listBox{}; };   // private chat list has its own target
+struct Drawing {
+    resource_view layer{};
+    uint32_t w = 0, h = 0;
+    bool inMap = false, inFull = false, inChat = false, privateChat = false;
+    rect listBox{};
+    bool FiltersDraws() const { return inMap || inFull || inChat; }
+};
 std::unordered_map<command_list*, Drawing> g_drawing;
 framevr::ActiveKeys g_drawingKeys;
+// Draw callbacks only need lists that entered a map or chat scissor.
+framevr::ActiveKeys g_drawFilterKeys;
 // The command-list API serializes recording on any one list. Unrelated world
 // lists can reject a negative membership query without joining the HUD mutex.
 // A collision still takes the mutex and verifies the authoritative map.
 uint64_t ListKey(command_list* cl) {return reinterpret_cast<uintptr_t>(cl);}
-void Track(command_list* cl,const Drawing& drawing) { // g_lock held
-    auto [it,inserted]=g_drawing.insert_or_assign(cl,drawing);
+void Track(command_list* cl, resource_view layer, uint32_t w, uint32_t h) { // g_lock held
+    auto [it,inserted]=g_drawing.try_emplace(cl);
     if(inserted)g_drawingKeys.Add(ListKey(cl));
+    else if(it->second.FiltersDraws())g_drawFilterKeys.Remove(ListKey(cl));
+    it->second=Drawing{layer,w,h};
 }
 void Untrack(decltype(g_drawing)::iterator it) { // g_lock held
-    const auto key=ListKey(it->first);g_drawing.erase(it);g_drawingKeys.Remove(key);
+    const auto key=ListKey(it->first);
+    if(it->second.FiltersDraws())g_drawFilterKeys.Remove(key);
+    g_drawing.erase(it);g_drawingKeys.Remove(key);
 }
 struct DrawingLock {
     std::unique_lock<framevr::NativeMutex> lock{g_lock,std::defer_lock};
@@ -264,7 +275,7 @@ uint32_t g_mapScissorW = 0, g_mapScissorH = 0;
 
 // Map view = Full map (steamvr/wrist_full_map.h): set at each layer clear while the wrist
 // captures the full map. The draws under the full map's box (OnScissor) go to our map target,
-// never the eyes; any that could not (no target) are skipped (FullMapDraw).
+// never the eyes; any that could not (no target) are skipped (FilterHudDraw).
 std::atomic<bool> g_fullFrame{false};
 rect g_fullBox{};   // the box last seen and its layer size, under g_lock
 uint32_t g_fullBoxW = 0, g_fullBoxH = 0;
@@ -279,7 +290,7 @@ uint64_t g_fullAt = 0;
 // The full map's draws and passes, logged every 10 s while it is shown. Under g_lock.
 struct FullCounts { uint64_t sent = 0, skipped = 0; uint32_t drawn = 0, reused = 0; uint64_t since = 0, last = 0; } g_fullCounts;
 
-// ── The pieces handed to FlatVR ─────────────────────────────────────────────
+// â”€â”€ The pieces handed to FlatVR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 enum { kBar = 0, kMap = 1, kShares = 2 };
 // srv: the same texture for D2R_DepthFog.fx, which draws it back into the picture from above and behind
@@ -590,47 +601,36 @@ void OnBindPipeline(command_list* cl, pipeline_stage stages, pipeline pl) {
         ((stages & pipeline_stage::pixel_shader) != 0 || stages == pipeline_stage::all || stages == pipeline_stage::all_graphics))
         t_bound = BoundPipeline{cl, pl.handle};
 }
-// A draw into the redirected map with a text shader, on the top-down map: skipped.
-bool SkipMapName(command_list* cl) {
-    if (!g_topDownNames.load(std::memory_order_relaxed) || t_bound.cl != cl || !g_drawingKeys.MaybeContains(ListKey(cl))) return false;
+bool FilterHudDraw(command_list* cl) {
+    if (!g_drawFilterKeys.MaybeContains(ListKey(cl))) return false;
+    const bool full = g_fullFrame.load(std::memory_order_relaxed);
+    const bool hideNames = g_topDownNames.load(std::memory_order_relaxed) && t_bound.cl == cl;
+    const bool chat = chatWanted.load(std::memory_order_relaxed);
+    if (!full && !hideNames && !chat) return false;
     {
-        DrawingLock g;
-        auto it = g_drawing.find(cl);
-        if (it == g_drawing.end() || !it->second.inMap) return false;
+        DrawingLock lock;
+        const auto it = g_drawing.find(cl);
+        if (it == g_drawing.end()) return false;
+        const Drawing& d = it->second;
+        if (full && d.inFull) {
+            if (!d.inMap) { ++g_fullCounts.skipped; return true; }
+            ++g_fullCounts.sent;
+        }
+        // Publish only after a draw. The private list takes precedence over
+        // the short-lived stock notification within the same pass.
+        if (chat && d.inChat && (d.privateChat || !chatDrawn)) {
+            chatDrawn = true;
+            chatFromStock = !d.privateChat;
+            chatBox = d.listBox;
+        }
+        if (!hideNames || !d.inMap) return false;
     }
-    uint64_t ps = 0;
-    {
-        std::lock_guard g(g_pipeLock);
-        auto it = g_pixelShaders.find(t_bound.pipe);
-        if (it == g_pixelShaders.end()) return false;
-        ps = it->second;
-    }
-    return ps == kMapTextPsA || ps == kMapTextPsB;
+    std::lock_guard lock(g_pipeLock);
+    const auto it = g_pixelShaders.find(t_bound.pipe);
+    return it != g_pixelShaders.end() && (it->second == kMapTextPsA || it->second == kMapTextPsB);
 }
-// Map view = Full map: a draw under the full map's box that did not go to our map target is
-// skipped, so the wrist's full map never shows in the eyes - nor drawn again in a pass that
-// reuses the frame's first (g_fullReuse). Otherwise one relaxed load.
-bool FullMapDraw(command_list* cl) {
-    if (!g_fullFrame.load(std::memory_order_relaxed) || !g_drawingKeys.MaybeContains(ListKey(cl))) return false;
-    DrawingLock g;
-    auto it = g_drawing.find(cl);
-    if (it == g_drawing.end() || !it->second.inFull) return false;
-    if (it->second.inMap) { ++g_fullCounts.sent; return false; }
-    ++g_fullCounts.skipped;
-    return true;
-}
-// A list scissor can be emitted without any messages drawing inside it.
-// Do not publish that empty pass over the last good history image.
-void NoteChatDraw(command_list* cl){
-    if(!chatWanted.load(std::memory_order_relaxed)||!g_drawingKeys.MaybeContains(ListKey(cl)))return;
-    DrawingLock lock;auto i=g_drawing.find(cl);if(i==g_drawing.end()||!i->second.inChat)return;
-    const auto& d=i->second;
-        // The short-lived notification can draw before or after the complete native list.
-        if(!d.privateChat&&chatDrawn)return; // full list always wins within this pass
-                chatDrawn=true;chatFromStock=!d.privateChat;chatBox=d.listBox;
-}
-bool OnMapDraw(command_list* cl, uint32_t, uint32_t, uint32_t, uint32_t) { if(FullMapDraw(cl)||SkipMapName(cl))return true;NoteChatDraw(cl);return false; }
-bool OnMapDrawIndexed(command_list* cl, uint32_t, uint32_t, uint32_t, int32_t, uint32_t) { if(FullMapDraw(cl)||SkipMapName(cl))return true;NoteChatDraw(cl);return false; }
+bool OnMapDraw(command_list* cl, uint32_t, uint32_t, uint32_t, uint32_t) { return FilterHudDraw(cl); }
+bool OnMapDrawIndexed(command_list* cl, uint32_t, uint32_t, uint32_t, int32_t, uint32_t) { return FilterHudDraw(cl); }
 
 bool OnClear(command_list* cl, resource_view rtv, const float c[4], uint32_t, const rect*) {
     device* dev = cl->get_device();
@@ -676,16 +676,7 @@ bool OnClear(command_list* cl, resource_view rtv, const float c[4], uint32_t, co
 }
 
 // On the interface's list: the map's scissor sends the draws to our target, any other back to the layer.
-void OnScissor(command_list* cl, uint32_t, uint32_t count, const rect* rects) {
-    framevr::hookmetrics::Scope measured(framevr::hookmetrics::HudScissor);
-    const bool redirect = g_frameMap.load() == 1;   // else only seen: the labels keep the map flat
-    const bool fullFrame = g_fullFrame.load(std::memory_order_relaxed);   // Map view = Full map
-    if (count == 0 || (!redirect && !g_labels.load() && !fullFrame && !chatWanted.load()) || !g_drawingKeys.MaybeContains(ListKey(cl))) return;
-    DrawingLock g;
-    auto it = g_drawing.find(cl);
-    if (it == g_drawing.end()) return;
-    Drawing& d = it->second;
-    const auto& box=rects[0];
+void SetScissor(command_list* cl, Drawing& d, const rect& box, bool redirect, bool fullFrame) { // g_lock held
     const bool chatRoot=chatWanted&&chatRtv.handle&&framevr::wristchat::Scissor(box.left,box.top,box.right,box.bottom,d.w,d.h,g_uiScale.load());
     // Bounded evidence from the actual VR UI pass; no chat text or identifiers.
     if(chatWanted){
@@ -707,24 +698,38 @@ void OnScissor(command_list* cl, uint32_t, uint32_t count, const rect* rects) {
     if(d.inChat){Bind(cl,d.layer);d.inChat=false;}
 
     // Map view = Full map: the full map's box (the 16:9 band of the layer); its draws go to
-    // our target like the corner map's, or are skipped (FullMapDraw) when they cannot, or when
+    // our target like the corner map's, or are skipped (FilterHudDraw) when they cannot, or when
     // this pass reuses the frame's first full map.
-    const bool full = fullFrame && framevr::fullmap::IsFullBox(rects[0].left, rects[0].top, rects[0].right, rects[0].bottom, d.w, d.h);
+    const bool full = fullFrame && framevr::fullmap::IsFullBox(box.left, box.top, box.right, box.bottom, d.w, d.h);
     const bool toWrist = full && redirect && g_mapRtv.handle && !g_fullReuse;
     d.inFull = full;
-    if (full) { g_fullBox = rects[0]; g_fullBoxW = d.w; g_fullBoxH = d.h; if (toWrist) g_fullDrawn = true; }
-    const bool map = !full && IsMapScissor(rects[0], d.w, d.h);
-    if (map && (rects[0].left != g_mapScissor.left || rects[0].top != g_mapScissor.top ||
-                rects[0].right != g_mapScissor.right || rects[0].bottom != g_mapScissor.bottom)) {
+    if (full) { g_fullBox = box; g_fullBoxW = d.w; g_fullBoxH = d.h; if (toWrist) g_fullDrawn = true; }
+    const bool map = !full && IsMapScissor(box, d.w, d.h);
+    if (map && (box.left != g_mapScissor.left || box.top != g_mapScissor.top ||
+                box.right != g_mapScissor.right || box.bottom != g_mapScissor.bottom)) {
         char line[160];
-        snprintf(line, sizeof line, "hud: the map's box %d,%d - %d,%d on a %ux%u layer", rects[0].left, rects[0].top, rects[0].right, rects[0].bottom, d.w, d.h);
+        snprintf(line, sizeof line, "hud: the map's box %d,%d - %d,%d on a %ux%u layer", box.left, box.top, box.right, box.bottom, d.w, d.h);
         Log(line);
     }
-    if (map) { g_mapScissor = rects[0]; g_mapScissorW = d.w; g_mapScissorH = d.h; g_mapDrawn = true; }
+    if (map) { g_mapScissor = box; g_mapScissorW = d.w; g_mapScissorH = d.h; g_mapDrawn = true; }
     if (!redirect || !g_mapRtv.handle) return;
     const bool toMap = map || toWrist;
     if (toMap && !d.inMap) { Bind(cl, g_mapRtv); d.inMap = true; }
     else if (!toMap && d.inMap) { Bind(cl, d.layer); d.inMap = false; }
+}
+
+void OnScissor(command_list* cl, uint32_t, uint32_t count, const rect* rects) {
+    framevr::hookmetrics::Scope measured(framevr::hookmetrics::HudScissor);
+    const bool redirect = g_frameMap.load() == 1;   // else only seen: the labels keep the map flat
+    const bool fullFrame = g_fullFrame.load(std::memory_order_relaxed);   // Map view = Full map
+    if (count == 0 || (!redirect && !g_labels.load() && !fullFrame && !chatWanted.load()) || !g_drawingKeys.MaybeContains(ListKey(cl))) return;
+    DrawingLock g;
+    auto it = g_drawing.find(cl);
+    if (it == g_drawing.end()) return;
+    Drawing& d = it->second;
+    const bool wasFiltering = d.FiltersDraws();
+    SetScissor(cl, d, rects[0], redirect, fullFrame);
+    g_drawFilterKeys.Update(ListKey(cl), wasFiltering, d.FiltersDraws());
 }
 
 // The list leaves the interface for another target: the interface is drawn - empty it.
@@ -781,7 +786,7 @@ void OnBind(command_list* cl, uint32_t count, const resource_view* rtvs, resourc
                         // blocks over the heroes' faces, fixed to the eyes (owner 2026-11-07).
                         if(g_bandTop.load()>=0.0f&&g_boardClear.load())cl->clear_render_target_view(layerRtv,kEmpty);
                         Untrack(it);
-                        if(now.handle){const auto d=framevr::resources::Describe(dev,framevr::resources::Resolve(dev,now));Track(cl,Drawing{now,false,d.texture.width,d.texture.height});}
+                        if(now.handle){const auto d=framevr::resources::Describe(dev,framevr::resources::Resolve(dev,now));Track(cl,now,d.texture.width,d.texture.height);}
                         return;
                     }
                 }
@@ -816,7 +821,7 @@ void OnBind(command_list* cl, uint32_t count, const resource_view* rtvs, resourc
     }
     if (now.handle) {
         const resource_desc d = framevr::resources::Describe(dev,framevr::resources::Resolve(dev,now));
-        Track(cl,Drawing{now, false, d.texture.width, d.texture.height});
+        Track(cl,now,d.texture.width,d.texture.height);
     }
 }
 
