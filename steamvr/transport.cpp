@@ -127,6 +127,7 @@
 #include "wrist_chat.h"
 #include "wrist_chat_ui.h"
 #include "../vr/wrist_chat_native.h"
+#include "../vr/offline_difficulty.h"
 #include "native_panels.h"
 #include "cinema_screen.h"
 #include "npc_dialogue.h"
@@ -567,6 +568,7 @@ keyboard::Board chatBoard{};
 bool chatShown=false,chatKeyboard=false,chatConsumes=false,chatTrigger=false,chatGrip=false,chatCancelPending=false;
 bool chatAtlasPending=false,chatImageReady=false,chatNativeCaptured=false;
 int chatLit=-1;std::string chatPaintKey;wristchat::FirstHistory firstHistory;wristchat::Composer chatSubmit;bool chatSourceRequested=false;uint64_t chatPollAt=0,chatOpenUntil=0;
+bool chatAllowed=false;   // a multiplayer game this frame (ChatAllowed): the wheel's CHAT tab and the chat itself
 
 uint64_t settingsSession=0;
 // The redesign's pointing: the filter turns the laser and the right trigger
@@ -2575,8 +2577,24 @@ void CancelChatTyping(){
   else if(GetTickCount64()>=chatOpenUntil){chatCancelPending=false;chatOpenUntil=0;}
  }
 }
+// The wrist chat is for multiplayer games only (wristchat::Available): the game's own client mode, the getter verified
+// by its bytes that offline difficulty and Reset Skills & Stats also read (offlinedifficulty::ClientMode). It follows
+// the game live; a line at each change.
+bool ChatAllowed(){
+ const uint64_t local=gamestate::LocalPlayer();const int mode=offlinedifficulty::ClientMode();
+ const bool allowed=wristchat::Available(local!=0,mode);
+ static int said=-2;
+ if(const int state=local?mode:-2;state!=said){
+  said=state;
+  if(local){char line[160];std::snprintf(line,sizeof line,"Frame chat: client mode %d - %s",mode,allowed?"a multiplayer game: the wheel's CHAT tab and the chat":
+   mode<0?"not verified: no CHAT tab or chat":"not a multiplayer game: no CHAT tab or chat");Say(line);}
+ }
+ return allowed;
+}
 void ChatStep(){
- const auto now=GetTickCount64();const uint64_t local=gamestate::LocalPlayer();
+ // Not a multiplayer game: the chat runs as outside a game (session 0), so one open, pinned or typing closes below
+ // (CancelChatTyping, the model reset) and nothing is captured or shown.
+ const auto now=GetTickCount64();const uint64_t local=chatAllowed?gamestate::LocalPlayer():0;
  if(local!=chatModel.session){chatSourceRequested=false;chatPollAt=0;chatSubmit.Reset();CancelChatTyping();chatModel.Session(local);chatNativeCaptured=false;chatPaintKey.clear();}
  const bool focused=gameWindow&&GetForegroundWindow()==gameWindow;
  if(chatCancelPending&&focused)CancelChatTyping();
@@ -2987,7 +3005,7 @@ void MotionPointer() {
     const auto mid=ray+direction*(beamLength*.5f);
     beamPose=XrPose({mid,math::BeamOrientation(direction,V(head.position)-mid)});pointerVisible=true;
     if(pointerHit) {
-        motionInput.hover=interaction::WheelCell(hit.u,hit.v,interactionOutput.hover,interactions.Page(),hand,interactionInput.snapshot.developer,interactions.DeveloperPage(),interactionOutput.leftStrikes>=0,interactionOutput.motionsBox,spellmotion::PageOf(interactionInput.snapshot.skillClass).count);
+        motionInput.hover=interaction::WheelCell(hit.u,hit.v,interactionOutput.hover,interactions.Page(),hand,interactionInput.snapshot.developer,interactions.DeveloperPage(),interactionOutput.leftStrikes>=0,interactionOutput.motionsBox,spellmotion::PageOf(interactionInput.snapshot.skillClass).count,interactionInput.snapshot.multiplayer);
         dotPose=XrPose({hit.point+math::Rotate(pose.q,{0,0,.003f}),pose.q});
     }
 }
@@ -4622,6 +4640,7 @@ void Input() {
     interactionInput.at=GetTickCount64();interactionInput.epoch=meleeEpoch;interactionInput.active=motionInput.active;
     interactionInput.head={motionInput.head.p,motionInput.head.q};
     interactionInput.snapshot=bindingSnapshot;interactionInput.reply=interactionstate::Status();
+    chatAllowed=ChatAllowed();interactionInput.snapshot.multiplayer=chatAllowed;   // the CHAT tab: a multiplayer game only
     interactionInput.spell=motion.Selection()>=0;interactionInput.wheel=motionInput.palette;interactionInput.cancel=motionInput.cancel;
     interactionInput.quickCast=handOutput.slot>=0||handOutput.spells[0]>=0||handOutput.spells[1]>=0;
     interactionInput.wheelHand=handOutput.wheel;
@@ -5072,7 +5091,7 @@ void Input() {
             potions::AtMouth(hand.p,hand.q,interactionInput.head.p,interactionInput.head.q),interactionOutput.bottleEmpty);
         Say(line);potionReportAt=GetTickCount64()+2000;
     }
-    if(interactionOutput.chat&&!chatModel.tab){
+    if(interactionOutput.chat&&chatAllowed&&!chatModel.tab){
         CancelChatTyping();chatModel.Session(gamestate::LocalPlayer());chatModel.Open(interactionOutput.wheelHand>=0?interactionOutput.wheelHand:interactionInput.wristHand);
         chatStartRequested=chatModel.pinned;chatPaintKey.clear();chatImageReady=false;chatTrigger=chatGrip=true;
         interactionOutput.block=true;settingsOwned=true;interactionInput.active=motionInput.active=false;lootGate|=lootaim::GateSettings;
@@ -6266,7 +6285,9 @@ void Input() {
         const bool missingCompanions=snapshotFresh&&wriststatus::Rows(context.companions,context.effects)&&!companionPaintValid;
         if(visible&&(!interactionPaintValid||missingCompanions||key!=interactionPaintKey||context!=interactionPaintContext)) {
             if(now>=interactionPaintAt&&(!interactionPaintRequest||key!=interactionRequestedKey||context!=interactionRequestedContext)) {
-                interactionPaintRequest=interactionPainter.Submit({snapshotFresh?interactionInput.snapshot:interaction::Snapshot{},interactionOutput,motion.Selection(),controllerLabels});
+                auto paintSnapshot=snapshotFresh?interactionInput.snapshot:interaction::Snapshot{};
+                paintSnapshot.multiplayer=interactionInput.snapshot.multiplayer;   // the footer as the ray hits it: CHAT or not, stale or fresh
+                interactionPaintRequest=interactionPainter.Submit({paintSnapshot,interactionOutput,motion.Selection(),controllerLabels});
                 interactionRequestedKey=key;interactionRequestedContext=context;interactionPaintAt=now+100;
             }
             interaction::PaintedAtlas painted;

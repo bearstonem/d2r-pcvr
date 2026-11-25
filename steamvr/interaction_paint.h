@@ -5,7 +5,7 @@ namespace framevr::interaction {
 // Do not display/click obsolete skill contents while a new image is pending.
 // Hover-only changes can retain the previous image; the ray decides the cell.
 struct PaintContext {
-    bool developer=false,devVisible=false;
+    bool developer=false,devVisible=false,chatVisible=false;   // chatVisible: the footer's CHAT tab (a multiplayer game)
     int devClass=-1,devPage=0;
     uint64_t session=0;
     uint32_t activeSet=0;
@@ -34,7 +34,7 @@ struct PaintContext {
 };
 inline PaintContext Context(const Snapshot& s,const Output& o,bool fresh,const controllers::Labels& labels={}) {
     PaintContext c;c.labels=labels;c.hand=o.wheelHand;c.session=s.session;c.activeSet=s.activeSet;c.editor=o.editor;c.slot=o.editSlot;
-    c.developer=o.developer;c.devVisible=s.developer;c.devClass=s.devClass;c.devPage=o.devPage;
+    c.developer=o.developer;c.devVisible=s.developer;c.chatVisible=s.multiplayer;c.devClass=s.devClass;c.devPage=o.devPage;
     c.category=o.editCategory;c.skillClass=o.editClass;c.categoryCounts=o.editCategoryCounts;
     c.page=o.editPage;c.count=o.editCount;c.bank=s.bindingBank;c.map=o.map;c.fresh=fresh;
     c.editable=s.bindingsEditable;c.equipmentKnown=s.equipmentKnown;c.beltKnown=s.beltKnown;

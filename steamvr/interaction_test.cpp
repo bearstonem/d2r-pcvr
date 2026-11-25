@@ -244,8 +244,10 @@ int main(){
         Check(s.out.developer&&s.e.Page()==MenuPage::Developer,"a plain close keeps the developer page for the next open");
         s.in.cancel=true;s.Step();s.in.cancel=false;s.in.wheel=false;s.Step();s.in.wheel=true;s.Step();
         Check(!s.out.developer&&s.e.Page()==MenuPage::Spells,"the engine's cancel (no button sends it in game) leaves the developer page, as before");
-        const auto tab=FooterBounds(5,MenuPage::Spells,true);
-        Check(WheelCell((tab.left+tab.right)/2,.93f,-1,MenuPage::Spells,0,true)==13,"developer footer hit matches paint bounds");
+        for(bool chat:{false,true}) {   // DEV last: the fifth tab, the sixth with CHAT (a multiplayer game)
+            const auto tab=FooterBounds(chat?5:4,MenuPage::Spells,true,chat);
+            Check(WheelCell((tab.left+tab.right)/2,.93f,-1,MenuPage::Spells,0,true,0,false,false,14,chat)==13,"developer footer hit matches paint bounds");
+        }
         Check(WheelCell(.5f,.45f,-1,MenuPage::Developer,0,true)==-1,"no hidden center spell behind developer page");
         Check(WheelCell(.25f,.27f,-1,MenuPage::Developer,0,true)==DeveloperCell(framevr::dev::Level10Choice),"developer rows share painter hit boxes");
         Check(WheelCell(.25f,.27f,-1,MenuPage::Developer,0,false)==-1,"disabled developer page has no actions");
@@ -667,11 +669,41 @@ int main(){
         for(int i=0;i<8;++i){const float a=i*Pi/4+WheelPhase;
             Check(WheelCell(.5f+std::sin(a)*.28f,.45f-std::cos(a)*.28f,-1,MenuPage::Spells)==i,"the combined wheel's eight wedges, Journal's old one too");}
     }
-    for(int i=0;i<FooterCount(MenuPage::Spells);++i){
-        const auto b=FooterBounds(i,MenuPage::Spells);
-        Check(WheelCell((b.left+b.right)/2,.93f)==FooterCell(i,MenuPage::Spells),"all five tabs hit their painted bounds");
+    // CHAT (#598's wrist chat) only in a multiplayer game (owner, 2026-11-24), DEV only in developer mode: the row closes up,
+    // 4 tabs, 5 with either, 6 with both; the editors keep 3.
+    for(bool developer:{false,true})for(bool chat:{false,true}) {
+        const int tabs=FooterCount(MenuPage::Spells,developer,chat);
+        Check(tabs==4+int(developer)+int(chat),"4 tabs, 5 with CHAT or DEV, 6 with both");
+        for(auto page:{MenuPage::EditSlots,MenuPage::EditSkills,MenuPage::EditItems})Check(FooterCount(page,developer,chat)==3,"the editors keep 3 tabs");
+        bool hasChat=false,hasDev=false;
+        for(int i=0;i<tabs;++i) {
+            const auto b=FooterBounds(i,MenuPage::Spells,developer,chat);const int cell=FooterCell(i,MenuPage::Spells,chat);
+            Check(WheelCell((b.left+b.right)/2,.93f,-1,MenuPage::Spells,-1,developer,0,false,false,14,chat)==cell,"every tab hits its painted bounds");
+            Check(!i||b.left>FooterBounds(i-1,MenuPage::Spells,developer,chat).right,"the tabs in order, a gap between");
+            hasChat=hasChat||cell==217;hasDev=hasDev||cell==13;
+        }
+        Check(hasChat==chat&&hasDev==developer,"CHAT only in a multiplayer game, DEV only in developer mode");
+        Check(std::fabs(FooterBounds(0,MenuPage::Spells,developer,chat).left-.03f)<1e-5f&&std::fabs(FooterBounds(tabs-1,MenuPage::Spells,developer,chat).right-.97f)<1e-5f,
+              "the tabs fill the row: no hole where CHAT or DEV is not");
+        Check(FooterCell(0,MenuPage::Spells,chat)==9&&FooterCell(1,MenuPage::Spells,chat)==12&&FooterCell(2,MenuPage::Spells,chat)==10&&FooterCell(3,MenuPage::Spells,chat)==11,
+              "SPELLS, MAP, VR SETTINGS, INVENTORY keep their places and cells");
     }
-    Check(FooterCell(4,MenuPage::Spells)==217,"chat has its own tab without moving existing action IDs");
+    Check(FooterCell(4,MenuPage::Spells,true)==217&&FooterCell(5,MenuPage::Spells,true)==13&&FooterCell(4,MenuPage::Spells,false)==13,
+          "CHAT and DEV keep their own action IDs; without CHAT, DEV moves up a place");
+    {
+        const auto b=FooterBounds(4,MenuPage::Spells,false,true);const float u=(b.left+b.right)/2;
+        Check(WheelCell(u,.93f,-1,MenuPage::Spells,0,false,0,false,false,14,true)==217&&WheelCell(u,.93f,-1,MenuPage::Spells,0,false,0,false,false,14,false)!=217,
+              "the CHAT tab is there only while the game is a multiplayer one");
+        for(float x=.03f;x<.97f;x+=.005f)Check(WheelCell(x,.93f,-1,MenuPage::Spells,0,true,0,false,false,14,false)!=217,"no CHAT hit anywhere on a single-player footer");
+    }
+    {   // the engine: CHAT opens the chat in a multiplayer game only, and a change repaints the footer
+        Sim s;s.in.wheel=true;s.in.snapshot.multiplayer=true;s.Step();s.in.hover=217;s.in.trigger=1;
+        Check(s.Step().chat&&s.out.wheel&&s.out.request.action==Action::None,"a multiplayer game: CHAT opens the chat, the wheel stays open");
+        Sim offline;offline.in.wheel=true;offline.Step();offline.in.hover=217;offline.in.trigger=1;
+        Check(!offline.Step().chat&&offline.out.wheel&&offline.out.request.action==Action::None,"single-player or offline: even a stale CHAT hit opens nothing");
+        auto c=Context(s.in.snapshot,s.out,true);s.in.snapshot.multiplayer=false;
+        Check(c!=Context(s.in.snapshot,s.out,true),"leaving or joining a multiplayer game repaints the footer");
+    }
     Check(WheelCell(.5f,.57f)==-1,"dead zone cannot select");
     Check(WheelCell(FooterBounds(0,MenuPage::Spells).right+.005f,.94f)==-1&&WheelCell(.5f,.99f)==-1,"footer gap and outside frame cannot select");
     for(auto page:{MenuPage::EditSlots,MenuPage::EditSkills})

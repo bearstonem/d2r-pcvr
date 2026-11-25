@@ -20,6 +20,17 @@ int main(){
  assert(seed.Want(12,5000,true,false));assert(!seed.Want(12,16000,true,false));
  wristchat::Composer gate;assert(gate.Allow(1));gate.Submitted(100);assert(!gate.Allow(101));assert(gate.Allow(1100));gate.Reset();assert(gate.Allow(1));
  assert(!wristchat::UseHistory(true,false,false)&&wristchat::UseHistory(true,true,false)&&!wristchat::UseHistory(true,true,true));
+ // Multiplayer games only: a game, and its client mode verified and not 0 (offline); 5 and 7 are TCP/IP, hosted or joined.
+ assert(wristchat::Available(true,5)&&wristchat::Available(true,7));
+ assert(!wristchat::Available(true,0)&&!wristchat::Available(true,-1)); // single-player / offline, or not verified
+ assert(!wristchat::Available(false,5)&&!wristchat::Available(false,0)&&!wristchat::Available(false,-1)); // no game
+ {   // leaving one: the transport hands the model session 0, as a game's end does - open, pinned and typing all close
+  wristchat::Model left;left.Session(9);left.Open(1);left.Focus(true);assert(left.editing);
+  left.Detach();left.Open(0);left.Focus(true);assert(left.pinned&&left.editing&&left.CanType());
+  left.Session(0);assert(!left.open&&!left.pinned&&!left.editing&&!left.CanType());
+  assert(!left.NeedsSource(true,0)&&!left.OwnsWheel(true,0));left.Open(0);assert(!left.CanType()); // and nothing types without a game
+  wristchat::FirstHistory none;assert(!none.Want(0,100,true,false)); // nor is the history captured
+ }
  wristchat::Model m;m.Open(1);assert(!m.CanType());m.Session(1);m.Open(1);assert(m.open&&!m.editing);
  m.Focus(true);assert(m.editing);m.Detach();assert(m.pinned&&!m.editing&&!m.CanType());
  m.Open(0);assert(m.pinned&&m.CanType()&&m.hand==0); // selecting Chat must not redock a HUD copy
@@ -46,5 +57,5 @@ int main(){
  const floatmap::Pose head{{1,2,3},math::Yaw(.7f)},panel{{.2f,1.2f,-.5f},math::Yaw(-.1f)};
  const auto relative=floatmap::Relative(head,panel),restored=floatmap::Compose(head,relative);
  assert(math::Dot(restored.p-panel.p,restored.p-panel.p)<.00001f);
- puts("wrist chat: detached read-only, lifecycle, isolated capture, chat keyboard passed");
+ puts("wrist chat: detached read-only, lifecycle, isolated capture, chat keyboard, multiplayer only passed");
 }

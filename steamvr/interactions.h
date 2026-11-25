@@ -275,6 +275,9 @@ struct QuickInventory {
 struct Snapshot {
     QuickInventory quick;
     bool developer=false;
+    // A multiplayer game, hosted or joined (wristchat::Available; set by the transport each frame): the footer's CHAT
+    // tab and the wrist chat (#598). Single-player and offline games, and no game: false, and neither shows.
+    bool multiplayer=false;
     bool devDebugDraws=false;
     int devTurnsKeepOwn=0;   // [stereo] turns_keep_own as it stands (DEV switch): 0 off, 1 near things, 2 everywhere
     bool devTurnsSharp=false;   // [stereo] turns_sharp as it stands (DEV switch)
@@ -506,19 +509,23 @@ inline MenuBounds DeveloperBounds(int index) {
     return {x,y,x+.44f,y+.082f};
 }
 inline bool Editing(MenuPage page) {return page==MenuPage::EditSlots||page==MenuPage::EditSkills||page==MenuPage::EditItems;}
-inline int FooterCount(MenuPage page,bool developer=false) {return Editing(page)?3:developer?6:5;}
-inline MenuBounds FooterBounds(int index,MenuPage page,bool developer=false) {
-    const float step=.96f/FooterCount(page,developer),left=.03f+index*step;
+// The footer's tabs share the row evenly, so one left out leaves no hole: 4 (SPELLS, MAP, VR SETTINGS, INVENTORY /
+// EDIT SKILLS), CHAT only in a multiplayer game (chat: Snapshot::multiplayer) and DEV only in developer mode; the
+// editors have 3. Each tab keeps its cell (tabs[]): without CHAT, DEV moves up a place and keeps 13.
+inline int FooterCount(MenuPage page,bool developer=false,bool chat=false) {return Editing(page)?3:4+int(chat)+int(developer);}
+inline MenuBounds FooterBounds(int index,MenuPage page,bool developer=false,bool chat=false) {
+    const float step=.96f/FooterCount(page,developer,chat),left=.03f+index*step;
     return {left,.895f,left+step-.02f,.965f};
 }
-inline int FooterCell(int index,MenuPage page) {
-    constexpr int tabs[]={9,12,10,11,217,13};return Editing(page)?9+index:tabs[index];
+inline int FooterCell(int index,MenuPage page,bool chat=false) {
+    constexpr int tabs[]={9,12,10,11,217,13};
+    return Editing(page)?9+index:tabs[std::clamp(index+(!chat&&index>=4?1:0),0,5)];
 }
 // A footer cell's label, shared by every painter of this footer. The tabs, left to right: SPELLS (9), MAP (12),
-// VR SETTINGS (10), INVENTORY on a hand wheel or EDIT SKILLS on the combined one (11), CHAT (217) and, in
-// developer mode, DEV (13). SPELLS goes back to the spells page from any other and is lit on it, as MAP and DEV
-// are on theirs: the EQUIPMENT page it opened there is gone (owner, 2026-11-24; weapon sets swap at the shoulder,
-// potions come from the belt). The editors' three: BACK / DONE, or PREVIOUS / NEXT / BACK.
+// VR SETTINGS (10), INVENTORY on a hand wheel or EDIT SKILLS on the combined one (11), CHAT (217) in a
+// multiplayer game and, in developer mode, DEV (13). SPELLS goes back to the spells page from any other and is
+// lit on it, as MAP and DEV are on theirs: the EQUIPMENT page it opened there is gone (owner, 2026-11-24; weapon
+// sets swap at the shoulder, potions come from the belt). The editors' three: BACK / DONE, or PREVIOUS / NEXT / BACK.
 inline const char* FooterLabel(int cell,int editor,bool handWheel) {
     if(editor==1)return cell==9?"BACK":cell==11?"DONE":"";
     if(editor>=2)return cell==9?"PREVIOUS":cell==10?"NEXT":cell==11?"BACK":"";
@@ -532,9 +539,10 @@ inline const char* FooterLabel(int cell,int editor,bool handWheel) {
 inline bool FooterCurrent(int cell,MenuPage page) {
     return (cell==9&&page==MenuPage::Spells)||(cell==12&&page==MenuPage::Map)||(cell==13&&page==MenuPage::Developer);
 }
-inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spells,int hand=-1,bool developer=false,int devPage=0,bool leftStrikes=false,bool motions=false,int motionCount=14) {
+// chat: the CHAT tab is on the footer (Snapshot::multiplayer).
+inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spells,int hand=-1,bool developer=false,int devPage=0,bool leftStrikes=false,bool motions=false,int motionCount=14,bool chat=false) {
     if(!std::isfinite(u)||!std::isfinite(v)||u<0||u>1||v<0||v>1)return -1;
-    for(int i=0;i<FooterCount(page,developer);++i)if(FooterBounds(i,page,developer).Contains(u,v))return FooterCell(i,page);
+    for(int i=0;i<FooterCount(page,developer,chat);++i)if(FooterBounds(i,page,developer,chat).Contains(u,v))return FooterCell(i,page,chat);
     if(QuickControls(page)) {
         if(QuickUseBounds.Contains(u,v))return QuickUseCell;
         if(leftStrikes&&LeftStrikesBounds.Contains(u,v))return LeftStrikesCell;
@@ -1132,7 +1140,7 @@ public:
                 }
                 else if(in.hover==11){developer=glyphs=motions=false;editor=1;editBank=in.snapshot.bindingBank;editSlot=-1;map=false;out.map=false;rearm=true;}
                 else if(in.hover==10){out.settings=true;out.wheel=false;wheelLatch=true;rearm=true;}
-                else if(in.hover==217){out.chat=true;out.wheel=true;rearm=true;}
+                else if(in.hover==217&&in.snapshot.multiplayer){out.chat=true;out.wheel=true;rearm=true;}   // CHAT: a multiplayer game only
                 else if(in.hover==12){developer=glyphs=motions=false;map=true;out.map=true;rearm=true;}
                 else if(in.hover==9){developer=glyphs=motions=map=false;out.map=false;rearm=true;}   // SPELLS: back to the spells page; on it, it stays
                 else if(!map&&in.hover==8) {if(in.wheelHand<0)out.select=-1;wheelLatch=true;out.wheel=false;rearm=true;out.feedback=1;}

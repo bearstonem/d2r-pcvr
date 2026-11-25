@@ -16,6 +16,7 @@ using PlayersFn=int(*)(uintptr_t);
 using ModeFn=int(*)();
 PlayersFn original=nullptr;
 ModeFn mode=nullptr;
+std::atomic<ModeFn> verifiedMode{nullptr};   // the getter once its bytes are verified, for ClientMode
 std::atomic<int> wanted{0};
 std::atomic<unsigned> observed{0};
 bool installed=false,toldMissing=false;
@@ -45,8 +46,10 @@ void Configure(int players,bool vr) {
     }
 }
 void Install() {
-    if(installed)return;
     using namespace abi;
+    if(!verifiedMode.load(std::memory_order_acquire)&&d2rsig::Check(ModeRva,ModeSig,sizeof ModeSig))
+        verifiedMode.store(reinterpret_cast<ModeFn>(d2rsig::Addr(ModeRva)),std::memory_order_release);
+    if(installed)return;
     if(!d2rsig::Check(PlayersRva,PlayersSig,sizeof PlayersSig)||!d2rsig::Check(ModeRva,ModeSig,sizeof ModeSig)) {
         if(!toldMissing){toldMissing=true;framevr::logging::Write("Frame offline difficulty: native signatures unavailable; leaving scaling unchanged (will retry)");}
         return;
@@ -60,6 +63,7 @@ void Install() {
     }
 }
 bool Offline(){return mode&&mode()==0;}
+int ClientMode(){const auto get=verifiedMode.load(std::memory_order_acquire);return get?get():-1;}
 void Report() {
     static unsigned reported=0;
     const auto seen=observed.load();

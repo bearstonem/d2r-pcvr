@@ -598,11 +598,12 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         if(usage[0]&&o.result!=Result::Pending&&o.result!=Result::Refused){SelectObject(dc,shortcutFont);text(usage,{35,639,733,678});SelectObject(dc,font);}
         else text(hint,{35,639,733,678});
     }
-    // The footer (interactions.h FooterLabel): SPELLS lit on the spells page, as MAP and DEV are on theirs.
+    // The footer (interactions.h FooterLabel): SPELLS lit on the spells page, as MAP and DEV are on theirs; CHAT only
+    // in a multiplayer game, the others closing up.
     fill({20,686,749,745},RGB(18,16,14));
     const auto page=Page(o);
-    for(int i=0;i<FooterCount(page,s.developer);++i) {
-        const auto bounds=FooterBounds(i,page,s.developer);const int cell=FooterCell(i,page);
+    for(int i=0;i<FooterCount(page,s.developer,s.multiplayer);++i) {
+        const auto bounds=FooterBounds(i,page,s.developer,s.multiplayer);const int cell=FooterCell(i,page,s.multiplayer);
         const RECT box{LONG(bounds.left*768),LONG(bounds.top*768),LONG(bounds.right*768),LONG(bounds.bottom*768)};
         frame(box,o.hover==cell||FooterCurrent(cell,page));
         text(FooterLabel(cell,o.editor,handWheel),{box.left+5,box.top+5,box.right-5,box.bottom-5});
