@@ -109,6 +109,7 @@
 #include "../vr/companion_ai.h"
 #include "telegraph.h"
 #include "teleport_arc.h"
+#include "grip_aim.h"
 #include "tactical_chord.h"
 #include "../vr/target_lock.h" 
 #include "vr_settings_ui.h"
@@ -6535,6 +6536,13 @@ void Input() {
             walkLx=int16_t(std::clamp(x,-1.f,1.f)*32767);walkLy=int16_t(std::clamp(y,-1.f,1.f)*32767);
         }
     }
+    {
+        unsigned bits=0;
+        const int mode=int(vrsettings::Read().values[settings::TeleportSkillAiming]);
+        if(interactionInput.active&&!interactionOutput.block&&!interactionOutput.wheel&&!settingsOwned)
+            for(int h=0;h<2;++h)if(gripaim::Selected(mode,PhysicalHand(h))&&handAimTracked[h]&&motionInput.grip[h]>.6f)bits|=1u<<h;
+        gripaim::held.store(bits);gripaim::updated.store(GetTickCount64());
+    }
     // Whirlwind steers by this same stick (whirl_steer.h): the motions above read last frame's, vrcam's aim the newest.
     whirlStick={walkLx/32767.f,walkLy/32767.f,GetTickCount64()};
     {   // Room follows you (room_steps.h): toward the player's real step while the left stick is idle.
@@ -8805,7 +8813,7 @@ bool GameplayRay(float outOrigin[3],float outDirection[3]) {
 // Aim rules: each hand's own aim, in GameplayRay's frame (the head's turn
 // undone). The left hand holding a bow aims along the bow (the arrow is in
 // its model).
-bool HandAimRay(int hand,float outOrigin[3],float outDirection[3]) {
+bool HandAimRay(int hand,float outOrigin[3],float outDirection[3],bool pointerOnly) {
     std::lock_guard lock(mutex);
     // The campfire: the hand's own aim even with the menu's board up (the board takes the motion
     // layer off; without this the pointer at the heroes fell back to another hand source, off by a hero or three).
@@ -8813,7 +8821,7 @@ bool HandAimRay(int hand,float outOrigin[3],float outDirection[3]) {
     if(hand<0||hand>1||!motionControls.load()||(!campfire&&(!motionInput.active||GetTickCount64()-motionAt>150)))return false;
     math::Vec p,d;
     if(campfire){p=handAim[hand].p;d=math::Rotate(handAim[hand].q,{0,0,-1});}
-    else if(hand==1&&motionInput.weapon==gameplay::Weapon::Bow&&motionInput.tracked[1]){p=motionInput.hand[1].p;d=gameplay::BowForward(motionInput.hand[1]);}
+    else if(!pointerOnly&&hand==1&&motionInput.weapon==gameplay::Weapon::Bow&&motionInput.tracked[1]){p=motionInput.hand[1].p;d=gameplay::BowForward(motionInput.hand[1]);}
     else if(handAimTracked[hand]){p=handAim[hand].p;d=math::Rotate(handAim[hand].q,{0,0,-1});}
     else return false;
     const auto undo=math::Conjugate(math::Yaw(math::Heading(Q(head.orientation))));

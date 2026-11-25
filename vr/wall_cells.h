@@ -1,5 +1,6 @@
 #pragma once
 #include "../steamvr/dropped_bottles.h"
+#include "../steamvr/grip_aim.h"
 namespace D2RL {struct PluginContext;}
 // The game's wall cells around a point, for dropped bottles and held items. Native
 // room and collision calls run only on the game thread; other threads see copies.
@@ -13,5 +14,7 @@ bool Latest(framevr::bottles::Patch&); // the newest sample, if any
 // its own, so a rolling bottle and the hero never recentre each other's patch.
 void WantHeld(const framevr::bottles::WallRequest&,uint64_t now);
 bool LatestHeld(framevr::bottles::Patch&);
+// Called only by native skill/command hooks on the game thread.
+framevr::gripaim::LandingResult ResolveTeleportOnGameThread(uint64_t session,float px,float py,int x,int y);
 void Report();                          // ten-second log line when used
 }

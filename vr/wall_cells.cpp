@@ -124,6 +124,18 @@ void Want(const framevr::bottles::WallRequest& r,uint64_t now) {Ask(0,r,now);}
 bool Latest(framevr::bottles::Patch& out) {return Take(0,out);}
 void WantHeld(const framevr::bottles::WallRequest& r,uint64_t now) {Ask(1,r,now);}
 bool LatestHeld(framevr::bottles::Patch& out) {return Take(1,out);}
+framevr::gripaim::LandingResult ResolveTeleportOnGameThread(uint64_t session,float px,float py,int x,int y){
+    uintptr_t game=0,player=0;
+    if(!session||session!=gamestate::LocalPlayer()||!Verified()||!melee::LocalServer(game,player))return {};
+    const auto room=reinterpret_cast<uintptr_t(*)(uintptr_t)>(d2rsig::Addr(RoomRva))(player);
+    if(!room)return {};
+    return framevr::gripaim::Backtrack(px,py,float(x),float(y),[&](int cx,int cy){
+        const auto target=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(RoomPointRva))(room,cx,cy);
+        if(!target)return false;
+        // Size 2 checks the player's footprint, not just the marker's center.
+        return reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(MaskRva))(target,cx,cy,2,1)==0;
+    });
+}
 void Report() {
     const auto s=samples[0].exchange(0),h=samples[1].exchange(0),f=refused.exchange(0);
     const auto ticks=sampleTicks.exchange(0);
