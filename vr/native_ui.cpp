@@ -327,6 +327,14 @@ void Capture(framevr::interaction::Snapshot& s) {
     allyhealthstate::Capture(player,s.session,id);allyRead=true;
     s.devClass=framevr::dev::ExpansionClass(h[1],gamestate::DataBank());
     s.skillClass=h[1]<framevr::skillcategories::Classes.size()?int(h[1]):-1;
+    // Player-specific unit data starts with the bounded character save name.
+    // Only read after resolving and validating the local player above.
+    uintptr_t playerData=0;std::array<char,16> character{};
+    if(Read(player+0x10,playerData)&&Read(playerData,character)&&character[0]&&
+       std::find(character.begin(),character.end(),'\0')!=character.end()&&
+       std::all_of(character.begin(),std::find(character.begin(),character.end(),'\0'),[](unsigned char c){return c>=32&&c!=127;})) {
+        s.voiceCharacter=character;s.voiceBank=gamestate::DataBank();
+    }
     // The supported loader accessor reads this live, identity-checked UI player.
     // Copy its current table row/name on the UI thread every capture so warps,
     // loading gaps and language changes cannot reuse a previous area's label.

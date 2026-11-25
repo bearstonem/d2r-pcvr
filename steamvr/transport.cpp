@@ -5705,6 +5705,11 @@ void Input() {
     // Consume commands once, then use the same checked native dispatch as glyphs.
     {
         const auto at=GetTickCount64();
+        if(voiceRuntime.SelectCharacter(settingsModel.voice,quickFresh?quickSnapshot.voiceCharacter.data():"",
+                                       quickFresh?quickSnapshot.skillClass:-1,quickFresh?quickSnapshot.voiceBank:0)){
+            voiceCatalogAt=0;++settingsModel.revision;
+            voiceBridge.With([](voice::Shared& shared){shared.ready=false;shared.command={};});
+        }
         if(voiceRuntime.Poll(settingsModel.voice))++settingsModel.revision;
         voiceRuntime.Sync(settingsModel.voice,settingsModel.open&&settingsModel.view==settings::View::Voice);
         if(at>=voiceOpenAt){voiceBridge.Open(false,GetCurrentProcessId());voiceOpenAt=at+1000;}

@@ -1712,7 +1712,7 @@ struct Builder {
         for(int mode=0;mode<2;++mode)Add(Role::Chip,{328+mode*208,100,196,64},{Kind::VoiceEdit,5,mode?2:0},NoHelp,uint16_t(Enabled|(v.mode==(mode?2:0)?Selected:0)),mode?"Voice: On":"Voice: Off");
         button({760,100,488,64},{Kind::VoiceEdit,6},"Mic: "+v.microphones[size_t(std::clamp(v.microphone+1,0,int(v.microphones.size())-1))]);
         button({328,180,64,64},{Kind::VoiceEdit,0,-1},"<");
-        Add(Role::Readout,{404,180,768,64},{},NoHelp,0,"Sound "+std::to_string(v.slot+1)+" / 6 - "+std::to_string(int((v.samples[size_t(v.slot)]&1)!=0)+int((v.samples[size_t(v.slot)]&2)!=0)+int((v.samples[size_t(v.slot)]&4)!=0))+" examples recorded");
+        Add(Role::Readout,{404,180,768,64},{},NoHelp,0,(v.character.empty()?"No character":v.character)+" - Sound "+std::to_string(v.slot+1)+" / 6 - "+std::to_string(int((v.samples[size_t(v.slot)]&1)!=0)+int((v.samples[size_t(v.slot)]&2)!=0)+int((v.samples[size_t(v.slot)]&4)!=0))+" examples recorded");
         button({1184,180,64,64},{Kind::VoiceEdit,0,1},">");
         auto& selected=Add(Role::VoiceSkill,{328,260,920,64},{Kind::VoiceEdit,9},NoHelp,Enabled,"Choose skill: "+v.SkillName());selected.option=v.bindings[size_t(v.slot)].skill;
         button({328,344,64,64},{Kind::VoiceEdit,7,-1},"<");
@@ -1950,3 +1950,4 @@ inline Request Press(Model& model,const Hit& hit,uint64_t nowMs,const Tables& t=
     }
 }
 }
+

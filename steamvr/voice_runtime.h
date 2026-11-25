@@ -3,6 +3,7 @@
 #include <mmsystem.h>
 #include <filesystem>
 #include <cstring>
+#include <map>
 #include "voice_settings.h"
 namespace framevr::voice {
 // A private control channel owned by this game process. The recognizer is isolated
@@ -15,18 +16,40 @@ static_assert(sizeof(Control)==8192);
 inline std::string Utf8(const std::wstring& w){int n=WideCharToMultiByte(CP_UTF8,0,w.data(),int(w.size()),nullptr,0,nullptr,nullptr);std::string s(size_t(n),'\0');WideCharToMultiByte(CP_UTF8,0,w.data(),int(w.size()),s.data(),n,nullptr,nullptr);return s;}
 inline std::string Quote(const std::string& s){std::string out="\"";for(unsigned char c:s){if(c=='"'||c=='\\')out+='\\';if(c>=32)out+=char(c);}return out+'"';}
 class Runtime {
+    std::string profile;
+    std::map<std::string,Editor> drafts;
     HANDLE map=nullptr,mutex=nullptr,process=nullptr;Control* control=nullptr;
     std::filesystem::path directory,file,storage;ULONGLONG pollAt=0,retryAt=0;unsigned generation=0,completed=0;bool pageOpen=false,actionPending=false,launch=true;std::string published;
     template<class F> bool With(F f){if(!control)return false;DWORD result=WaitForSingleObject(mutex,0);if(result!=WAIT_OBJECT_0&&result!=WAIT_ABANDONED)return false;f(*control);ReleaseMutex(mutex);return true;}
 public:
     explicit Runtime(bool startProcess=true):launch(startProcess){}
+    bool SelectCharacter(Editor& e,const std::string& name,int characterClass,unsigned bank){
+        std::string key;
+        if(!name.empty()&&name.size()<16&&characterClass>=0){
+            key=std::to_string(bank)+"-"+std::to_string(characterClass)+"-";
+            constexpr char hex[]="0123456789abcdef";
+            for(unsigned char c:name){key+=hex[c>>4];key+=hex[c&15];}
+        }
+        if(key==profile)return false;
+        if(!profile.empty())drafts[profile]=e;
+        profile=key;e=Editor{};
+        if(auto it=drafts.find(key);it!=drafts.end())e=it->second;
+        e.character=name;e.loaded=false;
+        published.clear();actionPending=false;pollAt=0;
+        With([&](Control& c){c.mode=0;c.generation=++generation;c.telemetry={};completed=0;});
+        Load(e);return true;
+    }
     ~Runtime(){Close();}
     void Close(){With([](Control& c){c.mode=0;c.reserved=1;++c.generation;});if(control)UnmapViewOfFile(control);if(map)CloseHandle(map);if(mutex)CloseHandle(mutex);if(process)CloseHandle(process);map=mutex=process=nullptr;control=nullptr;}
     void Load(Editor& e){
         if(e.loaded)return;e.loaded=true;
         HMODULE module=nullptr;wchar_t path[32768]{};
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<LPCWSTR>(&Utf8),&module);
-        GetModuleFileNameW(module,path,32768);directory=std::filesystem::path(path).parent_path()/L"voice";file=directory.parent_path()/L"voice-assignments.ini";storage=directory.parent_path()/L"voice-samples";
+        GetModuleFileNameW(module,path,32768);directory=std::filesystem::path(path).parent_path()/L"voice";
+        auto root=directory.parent_path()/L"voice-profiles"/profile;
+        file=root/L"assignments.ini";storage=root/L"samples";
+        if(profile.empty()){e.status="Enter a character to configure voice commands";return;}
+        if(drafts.contains(profile)){auto name=e.character;e=drafts[profile];e.character=name;e.loaded=true;return;}
         for(UINT i=0;i<waveInGetNumDevs();++i){WAVEINCAPSW caps{};if(waveInGetDevCapsW(i,&caps,sizeof caps)==MMSYSERR_NOERROR)e.microphones.push_back(Utf8(caps.szPname));else e.microphones.push_back("Microphone "+std::to_string(i+1));}
         e.microphone=std::clamp(int(GetPrivateProfileIntW(L"voice",L"microphone",-1,file.c_str())),-1,int(e.microphones.size())-2);
         e.tolerance=std::clamp(int(GetPrivateProfileIntW(L"voice",L"tolerance",2,file.c_str())),0,2);
@@ -36,7 +59,10 @@ public:
     }
     bool Save(Editor& e,unsigned command=0){
         Load(e);
+        if(profile.empty()){e.status="Enter a character to configure voice commands";return false;}
         if(command){published.clear();actionPending=Publish(e,command,true);return actionPending;}
+        std::error_code error;std::filesystem::create_directories(file.parent_path(),error);
+        if(error){e.status="Could not create character voice profile";return false;}
         auto temp=file;temp+=L".tmp";
         bool saved=WritePrivateProfileStringW(L"voice",L"microphone",std::to_wstring(e.microphone).c_str(),temp.c_str())!=0;
         for(int i=0;i<6;++i){auto section=L"phrase"+std::to_wstring(i+1);auto& b=e.bindings[size_t(i)];std::wstring text(b.phrase.begin(),b.phrase.end());saved=WritePrivateProfileStringW(section.c_str(),L"text",text.c_str(),temp.c_str())&&saved;saved=WritePrivateProfileStringW(section.c_str(),L"skill",std::to_wstring(b.skill).c_str(),temp.c_str())&&saved;}
@@ -46,7 +72,7 @@ public:
         if(!saved||!MoveFileExW(temp.c_str(),file.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)){e.status="Could not save voice-assignments.ini";return false;}
         e.Commit();published.clear();actionPending=false;return Sync(e,pageOpen);
     }
-    bool Sync(Editor& e,bool settingsPage){Load(e);pageOpen=settingsPage;if(actionPending&&settingsPage)return true;if(!settingsPage)actionPending=false;return Publish(e,settingsPage?1u:unsigned(e.savedMode),settingsPage);}
+    bool Sync(Editor& e,bool settingsPage){Load(e);pageOpen=settingsPage;if(profile.empty())return Publish(e,0,false);if(actionPending&&settingsPage)return true;if(!settingsPage)actionPending=false;return Publish(e,settingsPage?1u:unsigned(e.savedMode),settingsPage);}
     bool Publish(Editor& e,unsigned mode,bool draft){
         std::string bindings;for(const auto& b:draft?e.bindings:e.savedBindings){if(!bindings.empty())bindings+=',';bindings+="{\"Phrase\":"+Quote(b.phrase)+",\"Skill\":"+std::to_string(b.skill)+"}";}
         if(!control){

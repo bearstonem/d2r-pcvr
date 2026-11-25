@@ -18,6 +18,7 @@ struct Editor {
     unsigned resultSerial=0;
     bool loaded=false,dirty=false;
     std::string status="Voice recognition off";
+    std::string character;
     bool Edit(int op,int value){
         auto& b=bindings[size_t(slot)];
         switch(op){

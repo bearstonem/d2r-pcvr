@@ -22,8 +22,12 @@ No separate app is needed. There are six independent sound-to-skill bindings.
   returns to validation, and leaving settings restores saved gameplay mode.
 
 Saved On/Off persists across launches; new installations default Off. Saved
-bindings, microphone and sensitivity are in voice-assignments.ini beside the
-plugin. Audio is local PCM WAV under voice-samples. No audio is uploaded or
+bindings, microphone, sensitivity and recordings are separate for each character
+under voice-profiles beside the plugin (name, class and game data bank).
+New characters start Off with empty bindings. The Voice page shows the character.
+Old global voice-assignments.ini and voice-samples remain untouched and are not
+automatically imported. Reconfigure each character once. Unsaved drafts stay with
+their character while the game is running. Audio is local PCM WAV. No audio is uploaded or
 included in builds, and installs preserve the samples.
 
 Matching uses the same normalized mel-cepstral features and dynamic time warping
@@ -40,3 +44,4 @@ Automated checks cover saved/draft separation, all six bindings, automatic
 validation, preservation of saved On across recording/playback/settings changes,
 worker recognition and command dispatch, timing/gain/pitch variation and rejection.
 Real headset reliability and actual skill execution still require gameplay testing.
+

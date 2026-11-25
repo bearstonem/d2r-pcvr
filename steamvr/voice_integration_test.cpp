@@ -20,8 +20,8 @@ int main(){
     assert(skills==3);
     assert(e.Edit(7,1)&&e.sample==1);assert(e.Edit(8,0)&&e.tolerance==0);
     // Standalone test executable lives in an isolated fixture directory.
-    voice::Runtime runtime;voice::Editor saved;runtime.Load(saved);saved.bindings=e.bindings;saved.tolerance=e.tolerance;assert(runtime.Save(saved));runtime.Close();
-    voice::Runtime reopened;voice::Editor restored;reopened.Load(restored);assert(restored.bindings[0].phrase=="battle orders"&&restored.bindings[0].skill==3906&&restored.mode==0&&restored.tolerance==0);
+    voice::Runtime runtime;voice::Editor saved;runtime.SelectCharacter(saved,"Fixture",4,0);runtime.Load(saved);saved.bindings=e.bindings;saved.tolerance=e.tolerance;assert(runtime.Save(saved));runtime.Close();
+    voice::Runtime reopened;voice::Editor restored;reopened.SelectCharacter(restored,"Fixture",4,0);reopened.Load(restored);assert(restored.bindings[0].phrase=="battle orders"&&restored.bindings[0].skill==3906&&restored.mode==0&&restored.tolerance==0);
     voice::Editor six;
     assert(six.tolerance==2); // High is the old Loose acceptance distance.
     for(int i=0;i<6;++i){assert(six.slot==i);six.bindings[size_t(i)].skill=149+i;assert(!six.AllowsCast(149+i));six.Edit(0,1);}assert(six.slot==0);
@@ -30,10 +30,10 @@ int main(){
     six.Edit(5,0);assert(six.dirty&&six.AllowsCast(149)); // Applied state stays explicit until Save.
     six.Edit(12,0);assert(!six.dirty&&six.mode==2&&six.AllowsCast(149));
     six.Edit(5,0);six.Commit();for(int i=0;i<6;++i)assert(!six.AllowsCast(149+i));
-    voice::Runtime sixRuntime;voice::Editor sixSaved;sixRuntime.Load(sixSaved);sixSaved.mode=0;sixSaved.bindings=six.bindings;assert(sixRuntime.Save(sixSaved));sixRuntime.Close();
-    voice::Runtime sixReload;voice::Editor sixRestored;sixReload.Load(sixRestored);for(int i=0;i<6;++i)assert(sixRestored.bindings[size_t(i)].skill==149+i);assert(sixRestored.mode==0);
+    voice::Runtime sixRuntime;voice::Editor sixSaved;sixRuntime.SelectCharacter(sixSaved,"Fixture",4,0);sixRuntime.Load(sixSaved);sixSaved.mode=0;sixSaved.bindings=six.bindings;assert(sixRuntime.Save(sixSaved));sixRuntime.Close();
+    voice::Runtime sixReload;voice::Editor sixRestored;sixReload.SelectCharacter(sixRestored,"Fixture",4,0);sixReload.Load(sixRestored);for(int i=0;i<6;++i)assert(sixRestored.bindings[size_t(i)].skill==149+i);assert(sixRestored.mode==0);
     // The controller restores the saved gameplay mode after settings and sample actions.
-    voice::Runtime flow(false);voice::Editor draft;flow.Load(draft);draft.mode=0;assert(flow.Save(draft));
+    voice::Runtime flow(false);voice::Editor draft;flow.SelectCharacter(draft,"Fixture",4,0);flow.Load(draft);draft.mode=0;assert(flow.Save(draft));
     assert(flow.Sync(draft,true));
     const auto mapName=L"Local\\D2RVRVoiceIntegrated"+std::to_wstring(GetCurrentProcessId());
     HANDLE mapping=OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,mapName.c_str());assert(mapping);
@@ -46,11 +46,32 @@ int main(){
     assert(flow.Sync(draft,false)&&control->mode==2); // Closing restores On, not Off.
     draft.Edit(5,0);assert(flow.Save(draft)&&control->mode==0);
     // A failed action publication must not latch recording and block page sync.
-    voice::Runtime missingHelper;voice::Editor missing;missingHelper.Load(missing);
+    voice::Runtime missingHelper;voice::Editor missing;missingHelper.SelectCharacter(missing,"Fixture",4,0);missingHelper.Load(missing);
     assert(!missingHelper.Save(missing,3));
     assert(!missingHelper.Sync(missing,true));
     missingHelper.Close();
     UnmapViewOfFile(control);CloseHandle(mapping);flow.Close();
+    const auto barb="Barb"+std::to_string(GetCurrentProcessId()),sorc="Sorc"+std::to_string(GetCurrentProcessId());
+    voice::Runtime profiles(false);voice::Editor character;
+    profiles.SelectCharacter(character,barb,4,0);
+    character.bindings[0].skill=149;character.mode=2;assert(profiles.Save(character));
+    profiles.SelectCharacter(character,sorc,1,0);
+    assert(character.savedMode==0&&character.bindings[0].skill==-1);
+    character.bindings[0].skill=54;assert(profiles.Save(character));
+    profiles.SelectCharacter(character,barb,4,0);
+    assert(character.savedMode==2&&character.bindings[0].skill==149);
+    character.Edit(5,0);assert(character.dirty);
+    profiles.SelectCharacter(character,sorc,1,0);
+    assert(character.bindings[0].skill==54&&!character.dirty);
+    profiles.SelectCharacter(character,barb,4,0);
+    assert(character.dirty&&character.mode==0&&character.savedMode==2);
+    profiles.SelectCharacter(character,"",-1,0);assert(!profiles.Save(character)&&!character.AllowsCast(149));
+    profiles.Close();
+    voice::Runtime restart(false);voice::Editor reload;
+    restart.SelectCharacter(reload,barb,4,0);assert(reload.savedMode==2&&reload.bindings[0].skill==149);
+    restart.SelectCharacter(reload,barb,4,1);assert(reload.savedMode==0&&reload.bindings[0].skill==-1);
     std::puts("Six saved bindings, unsaved isolation, automatic validation, recording and saved On resume passed");
     std::puts("VR recorded sound controls, action assignment, hit targets and saved tolerance round-trip passed");
 }
+
+
