@@ -194,13 +194,25 @@ bool MotionLanding(int skill,float& x,float& y,int* landed=nullptr);   // landed
 // pushed past the game's dead zone in world play; false at rest. Whirlwind aims along it (whirl_steer.h).
 bool WhirlStick(float& x,float& y);
 // Whirlwind on (whirl_on.h): while it is on, which turn-on it is (vrcam keeps each one's way), the next whirl's length
-// in cells, and the walk stick as WhirlStick has it when pushed; false while off. The hero's cell (heroX, heroY) is
-// noted for the ground he covers.
+// in cells, and the walk stick as WhirlStick has it when pushed; false while off. heroX, heroY: unused.
 struct WhirlOnSteer {uint32_t activation=0;float cells=0;bool pushed=false;float stickX=0,stickY=0;};
 bool WhirlOnNow(WhirlOnSteer& out,float heroX,float heroY);
 // The game took a Whirlwind command of that turn-on (its own command check passed), the hero at this cell and the
-// whirl `cells` long: counted, and the speed whirls go measured from it (whirlon::Chain).
+// whirl `cells` long: counted until the server's whirls are seen (whirlon::Chain).
 void WhirlOnTook(uint32_t activation,float heroX,float heroY,float cells);
+// Whirlwind on, a whirl under way on the server's hero (whirl_turn.h; vr/whirl_turn.cpp, on the server's thread at
+// each of his steps): which turn-on, the walk stick as WhirlOnNow has it, and whether it was let go after a push
+// (stop: the whirl ends short). His cell then is noted for the ground whirled, and started: this step begins a
+// whirl. False while off.
+struct WhirlOnTurn {uint32_t activation=0;bool pushed=false;float stickX=0,stickY=0;bool stop=false;};
+bool WhirlOnStep(WhirlOnTurn& out,float heroX,float heroY,bool started);
+// What turning a whirl under way did, for the off line: 0 the server's whirl turned, 1 ended short (let go),
+// 2 refused (laid back as it was), 3 the client's followed, 4 the client's could not.
+void WhirlOnTurned(uint32_t activation,int what);
+// Whirlwind on was turned on in this run of the game: vrcam installs the turning (whirlturnnative::Install) from
+// then on. Active: it is on now (no lock: the game's unit steps ask).
+bool WhirlOnUsed();
+bool WhirlOnActive();
 bool AimRulesDirected();
 bool MeleeSample(uint32_t poseStamp,melee::Sample& sample,int hand=0);
 // The posed melee capsule (world metres) that also pushes dropped bottles:

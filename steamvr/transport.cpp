@@ -369,6 +369,15 @@ uint32_t whirlActivation=0;
 uint64_t whirlHero=0;
 bool whirlParked=false;   // this turn-on's Whirlwind put on the right trigger's record (interactionstate::Park took it)
 struct WhirlRun {double from=0;float seconds=0,manaFrom=0;int level=0;bool manaKnown=false;} whirlRun;
+bool whirlStop=false;   // the stick let go after a push: the whirl under way ends short (whirl_turn.h)
+struct WhirlTurns {int turned=0,stopped=0,refused=0,followed=0,missed=0;} whirlTurns;   // this turn-on's, for its off line
+std::atomic<bool> whirlUsed{false},whirlActive{false};
+std::atomic<bool> whirlturnInstalled{false};   // the server's whirl steps reached WhirlOnStep (its hooks are in)
+// The game's server thread reports each step of a whirl (WhirlOnStep, WhirlOnTurned) under this lock alone, never the
+// transport's own: the chain, this turn-on's turns and the steering as the last input frame left it. Taken after
+// the transport's lock where both are held.
+std::mutex whirlStepMutex;
+struct WhirlSteerNow {uint32_t activation=0;bool on=false,pushed=false,stop=false;float stickX=0,stickY=0;uint64_t at=0;} whirlSteer;
 int whirlPlayerSlot=-1;   // this frame: the hand slot of a Whirlwind button the player holds, -1 none
 bool whirlOtherPress=false,whirlOtherWas=false,whirlOtherCast=false,whirlTee=false;
 // The setting holding which of a class's motions are off (spellmotion::PageOf), -1 for a class without.
@@ -5968,6 +5977,7 @@ void Input() {
     // vrcam where the walk stick points (WhirlSteerAim, WhirlOnNow). Physical swings wait: the whirls hit. One line
     // as it goes on, one as it goes off.
     {
+        std::lock_guard stepLock(whirlStepMutex);
         const uint64_t nowMs=GetTickCount64();
         const auto known=interaction::GlyphSkill(quickSnapshot,whirlon::Whirlwind);
         const bool record=quickSnapshot.glyphRecord>=0;
@@ -5984,6 +5994,9 @@ void Input() {
         in.manaKnown=quickFresh&&quickSnapshot.vitalsKnown;in.mana=quickSnapshot.mana;
         in.level=known.known?known.level:0;
         in.whirling=quickFresh&&quickSnapshot.actionKnown&&quickSnapshot.actionMode==18;   // the sequence mode (anim SQ)
+        float steerX=0,steerY=0;
+        in.pushed=motionInput.active&&WhirlStickNow(steerX,steerY);
+        in.taken=whirlChain.taken;
         {   // where a T's presses go: as a motion's cast (glyphcast::Dispatch)
             std::array<glyphcast::Slot,skills::Count> slots{};
             for(int i=0;i<skills::Count;++i){const auto& k=quickSnapshot.skills[i];slots[size_t(i)]={k.id,k.owner,k.known,k.available};}
@@ -5994,11 +6007,12 @@ void Input() {
         }
         in.recordHolds=quickFresh&&record&&quickSnapshot.glyphSkill==whirlon::Whirlwind&&quickSnapshot.glyphOwner==-1;
         const auto o=whirlMode.Step(in);
+        whirlStop=o.on&&o.stop;whirlActive.store(o.on);
         const char* by=o.by==whirlon::By::Motion?"the T":"its button";
         if(o.started) {
             if(!++whirlActivation)whirlActivation=1;
             if(whirlHero!=in.hero){whirlChain.Forget();whirlHero=in.hero;}
-            whirlChain.Begin();whirlParked=false;
+            whirlChain.Begin();whirlParked=false;whirlTurns={};whirlUsed.store(true);
             whirlRun={in.time,o.seconds,in.mana,in.level,in.manaKnown};
             for(int h=0;h<2;++h)MotionPulse(h,haptics::Category::Spell,.7f,70000000);
             const auto way=whirlMode.Way();
@@ -6009,7 +6023,7 @@ void Input() {
             if(in.level>0)std::snprintf(level,sizeof level,"Whirlwind level %d",in.level);else std::snprintf(level,sizeof level,"Whirlwind's level unread");
             char line[420];
             std::snprintf(line,sizeof line,"Frame whirlwind on: by %s, %s - on %.1f s (5 s + 0.1 s a level, at most 8); whirls through %s, "
-                "each %.0f cells (whirl speed %.1f cells/s, %s), steered by the walk stick, at rest the last way (the first where you face); "
+                "each %.0f cells (whirl speed %.1f cells/s, %s), steered by the walk stick as it goes, stopped when it is let go (the first where you face); "
                 "%.1f mana a whirl, mana %.0f of %.0f",by,level,o.seconds,through,whirlChain.Cells(),whirlChain.speed,
                 whirlChain.measured?"as measured":"until measured",whirlon::WhirlMana(in.level),in.mana,quickSnapshot.maxMana);
             Say(line);
@@ -6028,15 +6042,23 @@ void Input() {
         if(o.stopped!=whirlon::Why::None) {
             for(int h=0;h<2;++h)MotionPulse(h,haptics::Category::Interaction,.2f,40000000);
             const float cost=whirlon::WhirlMana(whirlRun.level);
+            whirlChain.Measure();
             char mana[80];
             if(whirlRun.manaKnown&&in.manaKnown)std::snprintf(mana,sizeof mana,"; mana %.0f -> %.0f",whirlRun.manaFrom,in.mana);else mana[0]=0;
-            char line[420];
-            std::snprintf(line,sizeof line,"Frame whirlwind off: %s, after %.1f of %.1f s (on by %s); %d whirls, about %.0f mana (%.1f each%s), "
-                "%.0f cells covered; whirl speed %.1f cells/s (%s), the next whirls %.0f cells",whirlon::Name(o.stopped),o.elapsed,whirlRun.seconds,by,
-                whirlChain.count,cost*float(whirlChain.count),cost,mana,whirlChain.moved,whirlChain.speed,
-                whirlChain.measured?"measured":"not measured: the default",whirlChain.Cells());
+            const auto& t=whirlTurns;
+            const bool turning=whirlturnInstalled.load();
+            char turns[200];
+            if(turning)std::snprintf(turns,sizeof turns,"; turned under way %d times, ended short by letting go %d, laid back %d; the client's followed %d, missed %d",
+                t.turned,t.stopped,t.refused,t.followed,t.missed);
+            else std::snprintf(turns,sizeof turns,"; no turning under way (its hooks not in)");
+            char line[700];
+            std::snprintf(line,sizeof line,"Frame whirlwind off: %s, after %.1f of %.1f s (on by %s); %d whirls%s, about %.0f mana (%.1f each%s), "
+                "%.0f cells whirled; whirl speed %.1f cells/s (%s), the next whirls %.0f cells%s",whirlon::Name(o.stopped),o.elapsed,whirlRun.seconds,by,
+                whirlChain.count,turning?" seen on the server":" (commands taken)",cost*float(whirlChain.count),cost,mana,whirlChain.moved,whirlChain.speed,
+                whirlChain.measured?"measured":"not measured: the default",whirlChain.Cells(),turns);
             Say(line);
         }
+        whirlSteer={whirlActivation,whirlMode.On()&&motionControls.load(),in.pushed,whirlStop&&!in.pushed,steerX,steerY,nowMs};
     }
     // No physical melee contacts while a Charge is in flight (Cal's
     // 2026-10-27 test: the punch that cast Charge landed a basic attack on a
@@ -8994,15 +9016,37 @@ bool WhirlStick(float& x,float& y) {
 bool WhirlOnNow(WhirlOnSteer& out,float heroX,float heroY) {
     std::lock_guard lock(mutex);
     if(!motionControls.load()||!whirlMode.On())return false;
+    std::lock_guard stepLock(whirlStepMutex);
     out.activation=whirlActivation;out.cells=whirlChain.Cells();
     out.pushed=motionInput.active&&WhirlStickNow(out.stickX,out.stickY);
-    whirlChain.Seen(heroX,heroY);
+    (void)heroX;(void)heroY;
     return true;
 }
 void WhirlOnTook(uint32_t activation,float heroX,float heroY,float cells) {
     std::lock_guard lock(mutex);
+    std::lock_guard stepLock(whirlStepMutex);
     if(activation==whirlActivation&&whirlMode.On())whirlChain.Took(Milliseconds()/1000.0,heroX,heroY,cells);
 }
+bool WhirlOnStep(WhirlOnTurn& out,float heroX,float heroY,bool started) {
+    std::lock_guard stepLock(whirlStepMutex);
+    whirlturnInstalled.store(true);
+    const auto& w=whirlSteer;
+    const uint64_t nowMs=GetTickCount64();
+    if(!w.on||nowMs<w.at||nowMs-w.at>250)return false;   // off, or the input frames stopped (a stick read then is stale)
+    const double now=Milliseconds()/1000.0;
+    if(started)whirlChain.Started(now);
+    whirlChain.Seen(now,heroX,heroY);
+    out.activation=w.activation;out.pushed=w.pushed;out.stickX=w.stickX;out.stickY=w.stickY;out.stop=w.stop;
+    return true;
+}
+void WhirlOnTurned(uint32_t activation,int what) {
+    std::lock_guard stepLock(whirlStepMutex);
+    if(activation!=whirlSteer.activation||!whirlSteer.on)return;
+    auto& t=whirlTurns;
+    switch(what){case 0:++t.turned;break;case 1:++t.stopped;break;case 2:++t.refused;break;case 3:++t.followed;break;default:++t.missed;break;}
+}
+bool WhirlOnUsed(){return whirlUsed.load();}
+bool WhirlOnActive(){return whirlActive.load(std::memory_order_relaxed);}
 int AimRulesSkill() {
     std::lock_guard lock(mutex);
     const auto* skill=CastSkillRow();return skill?skill->id:-1;
@@ -9414,6 +9458,7 @@ void Shutdown(bool preserveResolution) {
     glyphPress={};glyphRecordAt.store(0);
     motionLanding={};whirlStick={};teleportArc={};teleportarc::Current().Clear();
     if(whirlMode.On())Say("Frame whirlwind off: the VR session ended");
+    whirlActive.store(false);
     whirlMode.Reset();whirlPlayerSlot=-1;whirlOtherPress=whirlOtherWas=whirlOtherCast=whirlTee=false;
     if(teleportShown){telegraph::Current().ClearSkill(telegraph::TeleportMark);teleportShown=false;}
     spellTrigger=0;for(auto& e:spellFree)e.Reset();spellFreeAt=-1;spellGripSince=-1;spellGripCast=false;spellGripsArmed.store(false);spellGate.Reset();

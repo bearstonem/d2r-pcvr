@@ -3189,13 +3189,16 @@ Owner, 2026-11-25: "we should be able to walk with whirlwind on ... it should be
 for a while so we can ... walk around with it on and then we can cast it again after
 that ... it should definitely be controllable by us". The T (both arms held straight
 out to the sides a moment, both grips held) or a press of a hand button that holds
-Whirlwind turns **Whirlwind on** (`steamvr/whirl_on.h`). While it is on the hero
-whirls on, and the walk stick steers him: each whirl heads where the stick pushes,
-the way a walk would go (Walk direction and Left-handed apply, and the turn stick and
-turning your body turn it, as they turn walking). With the stick at rest he keeps the
-way the last whirl went, as a desktop player holding the button with the mouse still
-does; the first whirl with the stick at rest goes where you look. A wall in the way
-stops him until the stick turns him; a whirl that cannot start costs no mana.
+Whirlwind turns **Whirlwind on** (`steamvr/whirl_on.h`). While it is on, the walk
+stick moves the hero as it walks him, whirling: he whirls where the stick pushes and
+turns as it turns, even halfway through a whirl (Walk direction and Left-handed
+apply, and the turn stick and turning your body turn him, as they turn walking). Let
+go of the stick and he stops, as a walk stops; Whirlwind stays on for its time and a
+push whirls him on (owner, 2026-11-25: "We should have full movement, just like as
+we're walking, running around the map ... when we have whirlwind on, until we turn
+it off, or until it runs out"). Before any push, the first whirl goes where you look,
+so the T shows it is on. A wall in the way stops him until the stick turns him; a
+whirl that cannot start costs no mana.
 
 How long: 5 s at Whirlwind level 1, a tenth of a second more each level, at most 8 s
 (level 31): 6.9 s with 20 points, 7.4-7.9 s with the +5 to +10 skills of endgame gear.
@@ -3213,37 +3216,54 @@ controllers pulse as it goes on and tick as it goes off. Physical swings and shi
 bashes wait while it is on (the whirls hit, with both weapons dual wielding, as the
 game's own Whirlwind does); they work again as it ends.
 
-How: a whirl cannot turn once begun - the game makes the hero uninterruptable from a
-whirl's start until he reaches its spot and refuses every command meanwhile
-(`whirl_steer.h`). So the mod holds Whirlwind's button for the game (its hand slot,
-else the right trigger's spare record with Whirlwind put on it, as glyph casting does)
-and the game's own repeat starts the next whirl the moment one ends; each whirl is
-aimed where the stick points as it starts (vrcam `WhirlSteerAim`). Every whirl is a
-native Whirlwind: its mana, hits, attack rate and sound are the game's, and nothing of
-the game's state is written. Each whirl lasts about half a second of whirling at the
-speed whirls go, at least 8 cells and at most 12, so a push of the stick turns him
-within about half a second. The speed is measured as he whirls (the cells between two
-whirls' starts over the time between them) and kept for the next time; it starts at
-13.4 cells/s.
+How: the game makes the hero uninterruptable from a whirl's start until he reaches
+its spot and refuses every command meanwhile (`whirl_steer.h`). So the mod holds
+Whirlwind's button for the game while the stick is pushed (its hand slot, else the
+right trigger's spare record with Whirlwind put on it, as glyph casting does) and the
+game's own repeat starts the next whirl the moment one ends, each aimed where the
+stick points as it starts (vrcam `WhirlSteerAim`). A whirl under way is turned by
+laying its path anew (`whirl_turn.h`, `vr/whirl_turn_native.cpp`): the game steps
+the hero toward his path's current point and re-aims him after every step, so just
+before a step of the server's hero the mod lays a new end the way Whirlwind's own
+start lays the first (its collision mask, the target, the game's path compute), moves
+the footprint the start reserved at the end along with it, and the client's hero then
+takes the same end on his own thread. The new end keeps the ground the whirl had left
+(the same length, only the heading changes), at most every 0.08 s, for a turn of 5
+degrees or more; letting go after a push ends the whirl 1.5 cells on. A refused
+compute lays the old end again. Every whirl is a native Whirlwind: its mana, hits,
+attack rate and sound are the game's; of the game's state only the whirl's path and
+the end's footprint are written. The two hooks (the server's and the client's unit
+steps) go in the first time Whirlwind on is turned on, after 13 byte checks of the
+game's code; a build without them leaves whirls turning where the next starts.
+
+Each whirl lasts a second and a half of whirling at the speed whirls go, at least 24
+cells and at most 36 (owner, 2026-11-25: "Let's make each whirl three times as long";
+the first version's 8-12 cells ended its runs out of mana in 0.6-2.6 s). The speed is
+the ground whirled over the time whirling, measured on the server's hero and kept for
+the next time; it starts at 13.4 cells/s.
 
 Mana: one whirl costs (25 + level - 1) / 2 (`skills.txt`: mana 25, lvlmana 1,
 manashift 7), 12.5 at level 1, 22 at 20, 27 at 30, however far it goes. Whirls went
 13.4 cells/s with a shield and 23-25 cells/s dual wielding (Frenzy's speed) in the
 owner's 2026-11-12 and 2026-11-25 sessions; the game's own figure with no speed bonus
-is 9.4. Mana a second is speed / length x a whirl's: against 10-cell whirls (the
-mod's whirls before, a cursor some 10 cells away on desktop) it is at most 1.25x (8
-cells, at 16 cells/s or slower), 1.0x at 20 cells/s and 0.83x at 24 (12 cells).
-Shorter whirls would turn sooner and cost more: 6 cells would be 1.67x.
+is 9.4. Mana a second is speed / length x a whirl's: a third of the first version's
+(half-second whirls, 8-12 cells): at 14 cells/s, about 13 mana a second at level 20
+instead of 38, and a third as many short stops between whirls.
 
 Log: one line as it goes on and one as it goes off, nothing per whirl:
 `Frame whirlwind on: by the T|its button, Whirlwind level N - on N s ...; whirls through
 its hand slot N|the right trigger's record[, put on it first], each N cells (whirl speed
 N cells/s, until measured|as measured), ...; N mana a whirl, mana N of N` and
-`Frame whirlwind off: <why>, after N of N s (on by ...); N whirls, about N mana (N each;
-mana A -> B), N cells covered; whirl speed N cells/s (measured|...), the next whirls N
-cells`. A turn-on refused says `Frame whirlwind: not turned on by ...: <why>`. Tests:
-`whirl-on-test` (its time, a whirl's mana and length, counting whirls and their speed,
-every start and stop), `whirl-steer-test` (the stick's way, as walked), and
+`Frame whirlwind off: <why>, after N of N s (on by ...); N whirls seen on the server, about
+N mana (N each; mana A -> B), N cells whirled; whirl speed N cells/s (measured|...), the
+next whirls N cells; turned under way N times, ended short by letting go N, laid back N;
+the client's followed N, missed N`. The first 8 turns of each turn-on, and any refusal,
+are logged as `Frame whirlwind turn: server|client ...` with the old and new ends. The
+hooks say `Frame whirlwind turn: in - ...` or why not. A turn-on refused says
+`Frame whirlwind: not turned on by ...: <why>`. Tests: `whirl-on-test` (its time, a
+whirl's mana and length, counting whirls and their speed, every start and stop, the
+stick let go), `whirl-turn-test` (when and where a whirl under way turns, the client
+following), `whirl-steer-test` (the stick's way, as walked), and
 `motions-barbarian-test` (the T).
 
 ### Glyph casting

@@ -159,6 +159,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "offline_difficulty.h"
 #include "enemy_sight.h"
 #include "companion_ai.h"
+#include "whirl_turn_native.h"   // Whirlwind on: a whirl under way turned with the walk stick
 #include "projectiles.h"
 #include "combat.h"
 #include "interactionstate.h"
@@ -5276,6 +5277,13 @@ bool WhirlSteerAim(int skill,float playerX,float playerY,framevr::spellaim::Cast
     g_note.by="whirlwind on";g_note.distance=std::hypot(x-playerX,y-playerY);
     whirlonvr::g_aimed={on.activation,playerX,playerY,on.cells};
     return true;
+}
+// The walk stick (the view's frame) as a unit way on the grid now, as WhirlSteerAim takes it: a whirl under way
+// turns along it (vr/whirl_turn_native.cpp, on the game's server thread).
+bool WhirlGridWay(float stickX,float stickY,float& gx,float& gy) {
+    AcquireSRWLockShared(&g_stickLock);const StickFrame f=g_stickFrame;ReleaseSRWLockShared(&g_stickLock);
+    if(!f.valid)return false;
+    return framevr::whirlsteer::GridWay(stickX,stickY,{f.camR[0],f.camR[1],f.camR[2]},{f.camF[0],f.camF[1],f.camF[2]},gx,gy);
 }
 // Telemetry: "Frame aim cast:" - every cast the aim rules see, at most one line
 // per skill per 250 ms: the rule, the button, the target and where it came
@@ -13544,6 +13552,7 @@ DWORD WINAPI UpdateThread(void*) {
             companionai::Install();
             companionai::Tick(compFx, compFy);
             companionai::Report();
+            if (framevr::WhirlOnUsed()) whirlturnnative::Install();   // Whirlwind on turns under way from its first use
             roofcutaway::Tick();
             headskip::Install(g_set.platform.load() == 1 && g_inWorld.load() && d2rcam::InWorld());   // the helm out of the eye views
             headskip::Report();
@@ -13596,6 +13605,9 @@ DWORD WINAPI UpdateThread(void*) {
 }
 
 }  // namespace
+
+// The walk stick as a grid way now, for vr/whirl_turn_native.cpp (WhirlGridWay above, inside this file's own).
+bool WhirlGridWayNow(float stickX,float stickY,float& gx,float& gy) {return WhirlGridWay(stickX,stickY,gx,gy);}
 
 namespace gamedraw {
 // The game draw being posed for (vr/skeletons.cpp: a flail's chain steps once a game frame): its serial; false outside one.

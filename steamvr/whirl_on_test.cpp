@@ -1,5 +1,7 @@
 #include "whirl_on.h"
 #include "whirl_steer.h"
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -30,40 +32,70 @@ int main(){
         Check(Near(WhirlMana(1),12.5)&&Near(WhirlMana(20),22)&&Near(WhirlMana(30),27),"12.5 / 22 / 27 mana at levels 1 / 20 / 30");
         Check(Near(WhirlMana(0),12.5)&&Near(WhirlMana(-5),12.5),"a level unread counts as 1");
     }
-    {   // A whirl's length: half a second of the speed whirls go, 8 to 12 cells.
-        Check(Near(SegmentCells(DefaultSpeed),8)&&Near(SegmentCells(9.4f),8),"slow whirls: 8 cells");
-        Check(Near(SegmentCells(20),10)&&Near(SegmentCells(24),12)&&Near(SegmentCells(40),12),"20 cells/s: 10; 24 and faster: 12");
-        Check(Near(SegmentCells(NAN),8)&&Near(SegmentCells(-1),8)&&Near(SegmentCells(0),8),"no speed: the default's length");
-        // Mana a second against 10-cell whirls (speed / length): never a quarter more, less for fast whirlers.
+    {   // A whirl's length: a second and a half of the speed whirls go, 24 to 36 cells (three times the first 8-12).
+        Check(Near(SegmentCells(DefaultSpeed),24)&&Near(SegmentCells(9.4f),24),"slow whirls: 24 cells");
+        Check(Near(SegmentCells(20),30)&&Near(SegmentCells(24),36)&&Near(SegmentCells(40),36),"20 cells/s: 30; 24 and faster: 36");
+        Check(Near(SegmentCells(NAN),24)&&Near(SegmentCells(-1),24)&&Near(SegmentCells(0),24),"no speed: the default's length");
+        // Mana a second against the first version's whirls (half a second, 8 to 12 cells): a third at any speed.
         for(float s=5;s<=40;s+=.5f) {
-            const float ratio=(s/SegmentCells(s))/(s/10.f);
-            Check(ratio<=1.25f+1e-4f,"never more than 1.25x the mana a second of 10-cell whirls");
-            Check(SegmentCells(s)/s<=1.6f,"a turn waits at most one whirl: 1.6 s even at 5 cells/s");
+            const float first=std::clamp(s*.5f,8.f,12.f);
+            Check(Near((s/SegmentCells(s))/(s/first),1/3.,1e-4),"a third of the mana a second");
         }
-        Check(Near((24/SegmentCells(24))/(24/10.f),.8333,1e-3),"0.83x at 24 cells/s");
-        Check(SegmentCells(20)/20<=.5f+1e-4f&&SegmentCells(30)/30<=.5f,"from 16 cells/s a turn comes within half a second");
     }
-    {   // The chain: whirls as the game takes them, their speed and ground.
+    {   // The chain: whirls the server's hero began (else the commands taken), the ground whirled and its speed.
         Chain c;
-        Check(c.Took(10,100,100,8)&&c.count==1,"the first whirl counts");
-        Check(!c.Took(10.05,100.4,100,8)&&c.count==1,"its command again at once: the same whirl");
-        Check(!c.Took(10.3,104,100,8)&&c.count==1,"halfway to its spot: the same whirl (the game refuses that one)");
-        Check(c.Took(10.6,108,100,8)&&c.count==2&&c.measured&&Near(c.speed,13.333,1e-2),"at its spot: the next whirl, 8 cells in 0.6 s");
-        Check(Near(c.Cells(),8),"13.3 cells/s: the next whirl 8 cells");
-        Check(c.Took(10.95,116,100,8)&&Near(c.speed,.5*13.333+.5*22.857,1e-2),"faster whirls raise the speed, halfway each time");
-        Check(c.Took(11.3,124,100,c.Cells())&&c.Cells()>8,"and the whirls lengthen with it");
-        Chain b;b.Took(0,50,50,10);
-        Check(!b.Took(.5,52,50,10),"stopped short, but not yet twice its time: the same whirl");
-        Check(b.Took(1.6,52.5,50,10)&&b.count==2&&!b.measured&&Near(b.speed,DefaultSpeed),"cut short by a wall: counted later, no speed from it");
-        Chain j;j.Took(0,10,10,8);
-        Check(j.Took(.5,90,10,8)&&!j.measured,"a jump far past its length (a waypoint) sets no speed");
+        Check(!c.taken&&c.Took(10,100,100,24)&&c.count==1&&c.taken,"the first command counts, and a whirl is taken");
+        Check(!c.Took(10.05,100.4,100,24)&&c.count==1,"its command again at once: the same whirl");
+        Check(!c.Took(10.6,108,100,24)&&c.count==1,"a third of the way: the same whirl (the game refuses that one)");
+        Check(c.Took(11.8,124,100,24)&&c.count==2,"as far as its length: the next");
+        Check(!c.measured&&Near(c.speed,DefaultSpeed),"commands alone measure no speed");
+        c.Started(12);
+        Check(c.count==1,"the server's whirls seen: they are the count from then on");
+        Check(!c.Took(14,160,100,24)&&c.count==1,"commands no longer count");
+        c.Seen(12,100,100);c.Seen(12.04,100.6,100);c.Seen(12.08,101.2,100);   // 15 cells/s
+        for(int i=3;i<=25;++i)c.Seen(12+.04*i,100+.6f*i,100);
+        Check(Near(c.moved,15,1e-3),"the ground whirled: 15 cells in a second");
+        c.Seen(13.5,115,100);   // a pause between whirls: no ground, no time
+        c.Seen(13.54,115.6,100);
+        c.Started(13.5);
+        Check(c.count==2&&c.measured&&Near(c.speed,15,1e-2),"15 cells/s, the stop between whirls left out");
+        Check(Near(c.Cells(),24),"15 cells/s: the next whirl 24 cells");
+        Chain j;j.Seen(0,10,10);j.Seen(.04,90,10);
+        Check(Near(j.moved,0),"a jump far past a whirl (a waypoint) is no ground");
         Check(!j.Took(NAN,1,1,8)&&!j.Took(1,1,1,0),"nonsense is no whirl");
-        Chain s;s.Seen(0,0);s.Seen(3,4);s.Seen(6,8);s.Seen(206,8);s.Seen(206,11);
-        Check(Near(s.moved,13),"the ground covered, a jump of 200 cells left out");
-        s.speed=20;s.measured=true;s.Begin();
-        Check(s.count==0&&s.moved==0&&Near(s.speed,20),"a new turn-on keeps the speed");
+        Chain s;s.speed=20;s.measured=true;s.Begin();
+        Check(s.count==0&&s.moved==0&&!s.taken&&Near(s.speed,20),"a new turn-on keeps the speed");
         s.Forget();
         Check(Near(s.speed,DefaultSpeed)&&!s.measured,"another hero: the default again");
+    }
+    {   // The stick: whirls on while pushed, the first before any push; let go after a push, they stop.
+        Mode m;Input in=Live(0);in.motion=true;
+        auto o=m.Step(in);in.motion=false;
+        Check(o.started&&o.holdRecord&&!o.stop,"on at rest: the first whirl, where you face");
+        in.taken=true;in.time=.2;o=m.Step(in);
+        Check(o.on&&!o.holdRecord&&!o.stop,"its first whirl taken, the stick never pushed: no more, nothing to cut");
+        in.pushed=true;in.time=.3;o=m.Step(in);
+        Check(o.holdRecord&&!o.stop,"pushed: whirls on");
+        in.pushed=false;in.time=.38;o=m.Step(in);
+        Check(o.holdRecord&&!o.stop,"through the stick's centre (under 0.15 s): still whirling");
+        in.time=.46;o=m.Step(in);
+        Check(o.on&&!o.holdRecord&&o.stop,"let go: stops, the whirl under way ends short, still on");
+        in.time=2;o=m.Step(in);
+        Check(o.on&&o.stop&&!o.holdRecord,"standing, still on");
+        in.pushed=true;in.time=2.1;o=m.Step(in);
+        Check(o.holdRecord&&!o.stop,"pushed again: whirls again");
+        in.pushed=false;o=Run(m,in,2.12,7);
+        Check(o.stopped==Why::Time,"its time runs out as ever");
+    }
+    {   // Its button held: whirls on whatever the stick; let go after a hold, off.
+        Mode m;Input in=Live(0);in.press=Press::Slot;in.button=3;
+        auto o=m.Step(in);
+        in.taken=true;in.time=.3;o=m.Step(in);
+        Check(o.on&&o.holdSlot==3&&!o.stop,"held at rest: whirls on");
+        in.pushed=true;in.time=.35;o=m.Step(in);in.pushed=false;in.time=.6;o=m.Step(in);
+        Check(o.holdSlot==3&&!o.stop,"held: letting go of the stick does not stop it");
+        in.button=-1;in.time=.7;o=m.Step(in);
+        Check(o.stopped==Why::Released,"the button let go after a hold: off");
     }
     {   // On by the T: held on the right trigger's record, off when its time runs out (level 20: 6.9 s).
         Mode m;Input in=Live(0);in.motion=true;
