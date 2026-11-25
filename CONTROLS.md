@@ -257,8 +257,9 @@ stops at the shield on your other arm and slides along its face, and two weapons
 one in each hand, stop at each other. Your real hand cannot be stopped, so the
 hero's hand gives way instead, at most 60 cm, and eases back to your controller in
 about 0.1 s once they part; push further and they pass through. A strike clanks in
-both controllers (Melee hits strength), and a fast one plays the game's block
-clank. Bows, two-handed grips, throws, Druid forms and menus are left alone; an
+both controllers (Melee hits strength). Only a hard knock (3 m/s or more) also
+plays the game's block clank, at most every half second, so brushing the shield
+mid-swing stays quiet. Bows, two-handed grips, throws, Druid forms and menus are left alone; an
 Assassin's crossed claws rest against each other and still block.
 **Gameplay > Physics > Struck monsters** (both On by default) makes monsters answer
 your strokes. **Monsters stagger:** a long, committed stroke that lands on the beat

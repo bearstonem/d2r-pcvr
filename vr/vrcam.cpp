@@ -10193,13 +10193,14 @@ void PushArms() {
 }
 #ifdef D2RVR_NATIVE_OPENXR
 // Held items collide: a first touch that clanked, from the skeleton hook - a clank in both controllers, or in the one
-// whose item struck a wall or the floor (the input thread plays it), and, met fast enough, the game's metal sound at
-// the hero ([gameplay] held_collision_sound).
+// whose item struck a wall or the floor (the input thread plays it), and, on a hard knock of the two items (held::
+// KnockSoundSpeed, at most every KnockSoundGap) or the world met at SoundSpeed, the game's metal sound at the hero
+// ([gameplay] held_collision_sound).
 void HeldClankTick() {
-    float strength = 0, speed = 0; unsigned arms = 0;
-    if (!skel::TakeHeldClank(strength, speed, arms)) return;
+    float strength = 0; unsigned arms = 0; bool sound = false;
+    if (!skel::TakeHeldClank(strength, arms, sound)) return;
     framevr::HeldClank(strength, arms);
-    if (speed >= framevr::held::SoundSpeed) melee::QueueHeldClankSound();
+    if (sound) melee::QueueHeldClankSound();
 }
 #endif
 

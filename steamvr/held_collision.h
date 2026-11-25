@@ -36,7 +36,17 @@ constexpr float MinHalfThickness=.01f,MaxHalfThickness=.04f;   // m: a shield's 
 constexpr float GuessHalfRight=.17f,GuessHalfUp=.22f;
 constexpr float ClankSpeed=.5f;        // m/s closing at first touch: slower is a resting touch and stays silent
 constexpr float FullClankSpeed=3.f;    // m/s: the strongest clank
-constexpr float SoundSpeed=1.f;        // m/s: the game's metal sound too (it has one loudness)
+constexpr float SoundSpeed=1.f;        // m/s: the game's metal sound too (it has one loudness) - a wall or the floor (held_world.h)
+// m/s, s: your weapon on your shield or other weapon sounds only on a hard knock, and not again for a while (owner,
+// 2026-11-24: "reduce the times that it makes a sound ... it takes a certain force to hit each other before it makes
+// a sound"). It sounded from 1 m/s, so nearly every touch of a swing crossing the shield in a fight did (the 2026-11-17
+// ..23 sessions: 128 clanks of 203 touches, 1-5 every ten seconds). 3 m/s is the strongest clank's speed, above the
+// 2 m/s hand speed a stab or a shield bash needs to strike, and the middle of the 153 weapon-on-monster touches those
+// sessions logged (Frame bodies, Box3D's approach speed, 1 m/s and up: half at 3 or more). 0.5 s, about one swing
+// (the Paladin's 560 ms a landed hit there), keeps a weapon chattering on the face or a flurry to one sound. The
+// buzz is as it was: from ClankSpeed, at most every ClankGap.
+constexpr float KnockSoundSpeed=FullClankSpeed;
+constexpr double KnockSoundGap=.5;
 constexpr double ClankGap=.12;         // s: one clank at most this often
 constexpr double MaxStep=.25;          // s between two steps: longer starts afresh (a menu, a hitch)
 constexpr float SplitFloor=.15f;       // two weapons: each hand yields at least this share of the push
@@ -311,12 +321,14 @@ struct Output {
     bool touching=false;    // pushing apart this step
     float depth=0;          // the raw overlap being undone, metres
     bool clank=false;       // a first touch at ClankSpeed or more, and none within ClankGap
+    bool sound=false;       // that clank a hard knock: KnockSoundSpeed or more, and no sound within KnockSoundGap
     float strength=0,speed=0;   // its strength 0..1 and the closing speed, m/s
 };
 // For the log, since the last TakeStats.
 struct Stats {
     unsigned contacts[2]{};   // first touches: weapon-shield, weapon-weapon
-    unsigned capped=0,clanks=0,steps=0,acting=0;
+    unsigned capped=0,clanks=0,sounds=0,steps=0,acting=0;
+    float fastest=0;          // the fastest first touch's closing speed, m/s
     unsigned badShapes=0;     // steps a pair would have acted on but a blade or the box was not a usable shape
     float deepest=0;          // the deepest raw overlap pushed apart, metres
     float nearest=1e9f;       // the closest the two came while acting, metres (<= 0: touching), 1e9 = never acting
@@ -434,9 +446,11 @@ public:
                     (pointB-At(previousB,t))*float(1/dt);
                 const float closing=math::Dot(vb-va,normal);
                 share=ShareOf(va,vb,normal,g.pair);
-                out.speed=std::max(0.f,closing);
+                out.speed=std::max(0.f,closing);stats.fastest=std::max(stats.fastest,out.speed);
                 if(closing>=ClankSpeed&&in.time-lastClank>=ClankGap) {
                     out.clank=true;out.strength=ClankStrength(closing);lastClank=in.time;++stats.clanks;
+                    // The game's sound only with a hard knock's clank: a resting or sliding touch never clanks at all.
+                    if(closing>=KnockSoundSpeed&&in.time-lastSound>=KnockSoundGap){out.sound=true;lastSound=in.time;++stats.sounds;}
                 }
             }
         }
@@ -468,7 +482,7 @@ private:
     int face=2;float side=1;Vec stuck{};   // the face and side the blade is kept to (shield); the push's way (two weapons)
     float share=.5f;                        // two weapons: arm[0]'s share of the push
     Vec push[2]{};
-    bool primed=false,havePrevious=false;double last=0,lastClank=-1e9;
+    bool primed=false,havePrevious=false;double last=0,lastClank=-1e9,lastSound=-1e9;
     Capsule previousA{},previousB{};Plate previousPlate{};
     Stats stats{};
     void Remember(const Input& in){previousA=in.a;previousB=in.b;previousPlate=in.plate;havePrevious=true;}

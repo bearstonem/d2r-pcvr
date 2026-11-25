@@ -1958,10 +1958,30 @@ applies it.
   out with a 33 ms time constant (95% gone in 0.1 s), not a snap.
 - **Clank.** A first touch closing at 0.5 m/s or more clanks in both controllers:
   a sharp tap and a short ring, stronger up to 3 m/s, on the Melee hits strength.
-  A resting touch is silent; one clank at most every 0.12 s. At 1 m/s or more the
-  game also plays `[gameplay] held_collision_sound` at the hero (default 398,
-  block_weapon_1, the block's metal clank; 0 is silent) through the same path as the
-  block sound.
+  A resting touch is silent; one clank at most every 0.12 s.
+- **Sound: only a hard knock.** The game's `[gameplay] held_collision_sound` (default
+  398, block_weapon_1, the block's metal clank; 0 is silent) plays at the hero with
+  a clank of 3 m/s or more (`held::KnockSoundSpeed`, the strongest clank's speed), at
+  most once every 0.5 s (`held::KnockSoundGap`), through the same path as the block
+  sound. A resting, sliding or grinding touch never sounds, since it never clanks.
+  The solver decides it with the clank (`Output::sound`), so the fixtures check it.
+  - **Why (owner, 2026-11-24).** "Leave the weapon collision in but ... reduce the
+    times that it makes a sound ... it takes a certain force to hit each other
+    before it makes a sound." It played with every clank of 1 m/s or more. In the
+    owner's 15 dev sessions of 2026-11-17..23 (a Paladin's scepter and shield),
+    203 touches made 128 haptic clanks, 1-5 in every ten seconds of a fight. Each
+    one of 1 m/s or more also sounded; the log did not count those.
+  - **Why 3 m/s.** The logs counted clanks, not their speeds. The value comes
+    from what the melee code takes as a real strike: a stab or a shield bash needs
+    2 m/s of hand speed, and a blade's contact point moves faster than the hand. It
+    is also the middle of the 153 weapon-on-monster touches the same sessions
+    logged (`Frame bodies: pushed a monster (right hand, X m/s)`, Box3D's approach
+    speed, 1 m/s and up): half were 3 m/s or more. A swing that clips the shield
+    at full force still sounds; a brush does not.
+  - **Why 0.5 s.** About one swing: the Paladin's 560 ms per landed hit there. A
+    blade chattering on the face, or a flurry, makes one sound.
+  - **Unchanged.** The buzz, the push and the touch, and the walls' and the
+    floor's sound (still from 1 m/s, Weapons hit walls).
 - **What hits.** Melee contact, the shield guard and Smite, the Assassin's claw
   guard, the dropped bottles and small props, and the pushable bodies all read the
   drawn skeleton, so they all meet the corrected pose: what you see is what hits.
@@ -1984,7 +2004,9 @@ applies it.
   ...`, or `none, not colliding (<reasons>)`) when what the hands hold changes; and
   every ten seconds with touches, `Frame held collisions: N contacts
   (weapon-shield A, weapon-weapon B), deepest X cm, pushes capped C, haptic clanks
-  H; excluded: <reasons>`.
+  H, sounds S (a knock of 3.0 m/s, 0.5 s apart), fastest touch V m/s; ...;
+  excluded: <reasons>`. The fastest touch is the quickest first touch's closing
+  speed in those ten seconds, which is the evidence for tuning the knock.
 
 ### Weapons hit walls
 

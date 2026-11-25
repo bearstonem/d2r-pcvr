@@ -649,7 +649,8 @@ struct HeldItems {
 // The solver and what it gave this pose stamp (each stamp is posed more than once: once per eye).
 struct HeldStep {bool primed=false,stamped=false;uint32_t stamp=0;double time=0,clock=0;float push[2][3]{};};
 // arms: bit 0 the right controller, bit 1 the left (both for two items meeting; one for an item meeting the world).
-struct HeldClank {bool waiting=false;float strength=0,speed=0;unsigned arms=0;ULONGLONG at=0;};
+// sound: the game's metal sound too (two items: a hard knock, held::KnockSoundSpeed; the world: held::SoundSpeed).
+struct HeldClank {bool waiting=false;float strength=0;unsigned arms=0;bool sound=false;ULONGLONG at=0;};
 SRWLOCK g_heldLock=SRWLOCK_INIT;
 HeldItems g_heldItems;HeldStep g_heldStep;HeldClank g_heldClank;
 // A flail's chain swings (steamvr/flail_chain.h; [hands] flail_chain): the world as the hero's last pose placed him -
@@ -4460,15 +4461,17 @@ void HeldReport(const framevr::held::Gate& gate,const framevr::held::Reach& reac
     // Told while a pair is held too, touching or not (owner 2026-11-12: a Paladin's mace "just passes through" the
     // shield, and nothing was logged): what kept them apart is the question.
     if(s.contacts[0]||s.contacts[1]||gate.pair!=hc::Pair::None) {
-        char why[200];hc::Reasons(s.why,why,sizeof why);char line[640];
+        char why[200];hc::Reasons(s.why,why,sizeof why);char line[800];
         const HeldItems& items=g_heldItems;   // HeldCollide holds g_heldLock
         const float bladeLength=hc::BladeLength(gate.type[0]);   // the first item's (the one that yields)
         char nearest[32];
         if(s.nearest<1e8f)snprintf(nearest,sizeof nearest,"%.1f cm",s.nearest*100);else snprintf(nearest,sizeof nearest,"never measured");
         snprintf(line,sizeof line,"Frame held collisions: %u contacts (weapon-shield %u, weapon-weapon %u), deepest %.1f cm, pushes capped %u, "
-            "haptic clanks %u; ten seconds: %u steps, %u acting, %u with no usable shape, nearest %s; items %llu ms old: blade right=%d left=%d "
+            "haptic clanks %u, sounds %u (a knock of %.1f m/s, %.1f s apart), fastest touch %.1f m/s; ten seconds: %u steps, %u acting, %u with no "
+            "usable shape, nearest %s; items %llu ms old: blade right=%d left=%d "
             "(length %.2f m), shield=%d on arm %d (box %.1f x %.1f x %.1f cm half; 2 measured, 3 guessed), shield mesh capture reached 0x%x of 0x3fff; excluded: %s",
-            s.contacts[0]+s.contacts[1],s.contacts[0],s.contacts[1],s.deepest*100,s.capped,s.clanks,s.steps,s.acting,s.badShapes,nearest,
+            s.contacts[0]+s.contacts[1],s.contacts[0],s.contacts[1],s.deepest*100,s.capped,s.clanks,s.sounds,hc::KnockSoundSpeed,hc::KnockSoundGap,
+            s.fastest,s.steps,s.acting,s.badShapes,nearest,
             items.at?(unsigned long long)(now-items.at):0ull,int(items.blade[0]),int(items.blade[1]),bladeLength,items.shield,items.shieldArm,
             hc::Length(items.plate.right)*100,hc::Length(items.plate.up)*100,hc::Length(items.plate.out)*100,g_shieldStagesSeen.exchange(0),why);
         framevr::logging::Write(line);
@@ -4599,10 +4602,12 @@ void HeldCollide(Input& in,Posed& posed,const Hero& hero) {
             if(length>hc::Cap)push=push*(hc::Cap/length);   // the hand never drawn farther than Cap off its controller
             g_heldStep.push[arm][0]=push.x;g_heldStep.push[arm][1]=push.y;g_heldStep.push[arm][2]=push.z;
         }
-        // A clank: both hands when the two items met, the hand whose item struck the world when that did.
-        unsigned arms=out.clank?3u:0u;float strength=out.clank?out.strength:0.f,speed=out.clank?out.speed:0.f;
-        if(worldOut.clankArms){arms|=worldOut.clankArms;if(worldOut.strength>strength)strength=worldOut.strength;speed=std::max(speed,worldOut.speed);}
-        if(arms)g_heldClank={true,strength,speed,arms,now};
+        // A clank: both hands when the two items met, the hand whose item struck the world when that did. The sound only
+        // with the two items' hard knock (the solver's own rule and gap), or the world's from SoundSpeed; one not yet
+        // played is kept.
+        unsigned arms=out.clank?3u:0u;float strength=out.clank?out.strength:0.f;bool sound=out.sound;
+        if(worldOut.clankArms){arms|=worldOut.clankArms;if(worldOut.strength>strength)strength=worldOut.strength;sound=sound||worldOut.speed>=hc::SoundSpeed;}
+        if(arms)g_heldClank={true,strength,arms,sound||(g_heldClank.waiting&&g_heldClank.sound),now};
         HeldReport(gate,reach,now);
         LARGE_INTEGER done;QueryPerformanceCounter(&done);
         const uint64_t spent=uint64_t(done.QuadPart-counter.QuadPart);
@@ -5608,11 +5613,11 @@ bool ShieldWeapon(MeleeWeaponPose& out) {
     if(!at||GetTickCount64()-at>100||pose.heroGeneration!=HeroGen())return false;
     out=pose;return true;
 }
-bool TakeHeldClank(float& strength,float& speed,unsigned& arms) {
+bool TakeHeldClank(float& strength,unsigned& arms,bool& sound) {
     AcquireSRWLockExclusive(&g_heldLock);const HeldClank clank=g_heldClank;g_heldClank={};ReleaseSRWLockExclusive(&g_heldLock);
     const auto now=GetTickCount64();
     if(!clank.waiting||now<clank.at||now-clank.at>150)return false;
-    strength=clank.strength;speed=clank.speed;arms=clank.arms;return true;
+    strength=clank.strength;arms=clank.arms;sound=clank.sound;return true;
 }
 bool ClawGuardPose(framevr::guard::Pose& out,bool& crossed,float& apart) {
     AcquireSRWLockShared(&g_gunBoneLock);const auto claw=g_clawGuard;ReleaseSRWLockShared(&g_gunBoneLock);

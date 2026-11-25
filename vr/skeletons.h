@@ -270,10 +270,11 @@ bool CrossbowPose(framevr::crossbow::Pose& out);
 // Called after the game's complete attachment/world transform is evaluated.
 void CrossbowRendered(uint32_t entity,uintptr_t component,uintptr_t matrix);
 void ShieldRendered(uint32_t entity,uintptr_t component,uintptr_t matrix);
-// Held items collide: the last first touch that clanked, once - its strength 0..1, the closing speed (m/s) and the
-// controllers it is felt in (bit 0 right, bit 1 left: both when the two items met, one when an item struck the
-// world). False when none waits or it is older than 150 ms. Any thread.
-bool TakeHeldClank(float& strength,float& speed,unsigned& arms);
+// Held items collide: the last first touch that clanked, once - its strength 0..1, the controllers it is felt in
+// (bit 0 right, bit 1 left: both when the two items met, one when an item struck the world), and whether the game's
+// metal sound goes with it (the two items: a hard knock, held::KnockSoundSpeed, at most every held::KnockSoundGap;
+// the world: held::SoundSpeed). False when none waits or it is older than 150 ms. Any thread.
+bool TakeHeldClank(float& strength,unsigned& arms,bool& sound);
 #endif
 #endif
 // Where the game's own pose points the hero, in model space (deg, atan2 of each bone's z row):
