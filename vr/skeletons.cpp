@@ -66,6 +66,7 @@
 #include "../steamvr/look_at.h"
 #include "wall_cells.h"
 namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();uint64_t LocalPlayer();uint32_t HandsKey();uint32_t WeaponSet();uint32_t Flails();}
+namespace gamedraw {bool Now(uint32_t* serial);}   // vrcam: the game draw being posed for (a stereo pair's two passes are one), false outside one
 #endif
 
 namespace skel {
@@ -652,11 +653,17 @@ struct HeldClank {bool waiting=false;float strength=0,speed=0;unsigned arms=0;UL
 SRWLOCK g_heldLock=SRWLOCK_INIT;
 HeldItems g_heldItems;HeldStep g_heldStep;HeldClank g_heldClank;
 // A flail's chain swings (steamvr/flail_chain.h; [hands] flail_chain): the world as the hero's last pose placed him -
-// its units a metre, the ground's height (his model's origin) and the turn count (a snap turn) - for the chain's own
-// pose (PoseFlailChain). Under g_flailWorldLock.
-struct FlailWorld {float unitsPerMetre=0,floor=0;uint32_t turn=0,generation=0;ULONGLONG at=0;};
+// its units a metre, the ground's height (his model's origin), his eyes (the chain keeps out of his head) and the turn
+// count (a snap turn) - for the chain's own pose (PoseFlailChain). Under g_flailWorldLock.
+struct FlailWorld {float unitsPerMetre=0,floor=0;float eyes[3]={NAN,NAN,NAN};uint32_t turn=0,generation=0;ULONGLONG at=0;};
 SRWLOCK g_flailWorldLock=SRWLOCK_INIT;FlailWorld g_flailWorld;
 std::atomic<bool> g_flailLive{false};   // Input::flailChain, read without a lock: every skeleton's pose asks
+// What the skeleton hook met while a flail is in hand, for the line that says why no chain swings (WatchFlails): when a
+// posed skeleton was last the hero's held flail, how many skeletons had chain bones but no chain (and the last reason),
+// how many flail rigs were someone else's, and how many poses found no fresh world. Reset as a flail is taken up.
+std::atomic<ULONGLONG> g_flailHeldAt{0};
+std::atomic<unsigned> g_flailBroken{0},g_flailOthers{0},g_flailNoWorld{0};
+std::atomic<uint8_t> g_flailBrokenWhy{0};
 framevr::held::Solver g_heldSolver;
 // Held items meet the world (steamvr/held_world.h; VR Settings > Physics > Weapons hit walls): its solver, the walls
 // and floor gathered for its last step, and how long HeldCollide took (for the ten-second report). Under g_heldLock.
@@ -3250,7 +3257,9 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
             const V3 origin=Pos(world),axis=Norm({world.m[4],world.m[5],world.m[6]}),player=Pos(model);
             g.melee={{origin.x,origin.y,origin.z},{axis.x,axis.y,axis.z},{player.x,player.y,player.z},in.poseStamp,in.worldEpoch,HeroGen()};
             if(g_flailLive.load(std::memory_order_relaxed)) {   // a flail's chain swings in the world this pose places him in
-                const FlailWorld here{upm*Len({model.m[0],model.m[1],model.m[2]}),model.m[13],in.worldEpoch,HeroGen(),GetTickCount64()};
+                FlailWorld here{upm*Len({model.m[0],model.m[1],model.m[2]}),model.m[13],{},in.worldEpoch,HeroGen(),GetTickCount64()};
+                const V3 eyes=Pos(Mul(Mat{{1,0,0,0, 0,1,0,0, 0,0,1,0, head.x,head.y,head.z,1}},model));   // his eyes in the world
+                here.eyes[0]=eyes.x;here.eyes[1]=eyes.y;here.eyes[2]=eyes.z;
                 AcquireSRWLockExclusive(&g_flailWorldLock);g_flailWorld=here;ReleaseSRWLockExclusive(&g_flailWorldLock);
             }
             g.melee.weaponType=in.weaponType;
@@ -4080,33 +4089,42 @@ void PoseMotionBow(Posed& p) {
 #ifdef D2RVR_NATIVE_OPENXR
 // ---- A flail's chain swings (steamvr/flail_chain.h; [hands] flail_chain) ----
 // After the game has posed a held flail's own skeleton (its class's animation of the chain), the chain's bones are laid
-// where a rope of them hangs and swings from the handle in the world, as PoseMotionBow lays a bow's string. Only the
+// where the chain and ball hang and swing from the handle in the world, as PoseMotionBow lays a bow's string. Only the
 // local hero's held item (its transform's parent is his entity), only bones named as a flail's chain, and only while
-// a flail is in a hand in first person (g_flailLive); anything not usable leaves the game's own pose.
+// a flail is in a hand in first person (g_flailLive); anything not usable leaves the game's own pose, and says why once.
 struct FlailRig {
     uintptr_t bones=0;
     framevr::flail::Rig rig;
-    uint32_t entity=0;bool entityKnown=false,told=false;ULONGLONG lookupAt=0;
-    std::unique_ptr<std::array<framevr::flail::Swing,framevr::flail::MaxChains>> swing;   // a flail's only
+    uint32_t entity=0;bool entityKnown=false,toldLaid=false,toldLeft=false;ULONGLONG lookupAt=0,leftSince=0;
+    std::unique_ptr<framevr::flail::Swing> swing;   // a flail's only: its chains swing together (Khalim's balls meet)
 };
 SRWLOCK g_flailLock=SRWLOCK_INIT;   // the rigs, their swings and the report
 framevr::AgedCache<std::pair<uintptr_t,uintptr_t>,FlailRig,framevr::PairHash> g_flailRigs{Remembered,RememberedFor,SweepEvery};
-struct FlailReport {framevr::flail::Stats stats;unsigned chains=0,flails=0,notHeld=0,noWorld=0;ULONGLONG windowAt=0;};
+struct FlailReport {framevr::flail::Stats stats;unsigned flails=0,notHeld=0,noWorld=0;ULONGLONG windowAt=0,lastAt=0;};
 FlailReport g_flailReport;   // under g_flailLock
-// Ten seconds of the swing while a flail is out: how often it was laid and stepped, the fresh starts and why, the snap
-// turns carried, what was left to the game, and the ball's fastest.
+// Ten seconds of the swing while a flail is out (or up to its last pose, put away): how often it was laid and stepped,
+// hung afresh and carried and why, what was left to the game and why, the ball's fastest about the hand, its widest
+// swing from hanging straight, and the links' worst stretch. Nothing while no flail is posed.
 void TellFlails(ULONGLONG now) {
     FlailReport& r=g_flailReport;
-    if(!r.windowAt){r.windowAt=now;return;}
-    if(now-r.windowAt<10000)return;
-    const auto& s=r.stats;
-    char line[420];
-    std::snprintf(line,sizeof line,"Frame flail chain: ten seconds: %u flail poses, %u chains laid %u times, %u steps; fresh starts %u (first %u, "
-        "pauses %u, jumps %u, new sizes %u), snap turns carried %u; left to the game %u (not ours %u, no world %u, unusable %u); "
-        "the ball up to %.1f m/s",r.flails,r.chains,s.poses,s.steps,s.starts+s.pauses+s.jumps+s.resized,s.starts,s.pauses,s.jumps,s.resized,s.turns,
-        r.notHeld+r.noWorld+s.refused,r.notHeld,r.noWorld,s.refused,s.fastest);
-    framevr::logging::Write(line);
-    r={};r.windowAt=now;
+    if(!r.windowAt){r.windowAt=r.lastAt=now;return;}
+    const bool idle=now-r.lastAt>2000;
+    if(!idle&&now-r.windowAt<10000){r.lastAt=now;return;}
+    if(r.flails||r.notHeld||r.noWorld) {
+        const auto& s=r.stats;
+        const double seconds=double((idle?r.lastAt:now)-r.windowAt)/1000;
+        char line[900];
+        std::snprintf(line,sizeof line,"Frame flail chain: %.0f seconds: %u flail poses, %u laid (%u chains); %u flail frames (a stereo pair one), "
+            "%u steps (%.2f a frame), %u laid again for the other eye (the item read moved up to %.1f cm between a frame's eyes); hung afresh %u "
+            "(first %u, new sizes %u, lost %u), carried %u (pauses %u, jumps %u, snap turns %u); left to the game %u (not ours %u, no world %u, "
+            "unusable %u%s%s); the ball up to %.1f m/s about the hand, swung out up to %.0f deg from hanging, links within %.1f%% of length",
+            seconds,r.flails,s.poses,s.chains,s.frames,s.steps,s.frames?double(s.steps)/s.frames:0.0,s.again,s.eyesApart*100,
+            s.starts+s.resized+s.lost,s.starts,s.resized,s.lost,s.pauses+s.jumps+s.turns,s.pauses,s.jumps,
+            s.turns,r.notHeld+r.noWorld+s.refused,r.notHeld,r.noWorld,s.refused,s.refused?": ":"",s.refused?framevr::flail::Text(s.why):"",
+            s.fastest,s.widest,s.stretch*100);
+        framevr::logging::Write(line);
+    }
+    r={};r.windowAt=r.lastAt=now;
 }
 void PoseFlailChain(Posed& p) {
     namespace fc=framevr::flail;
@@ -4119,7 +4137,6 @@ void PoseFlailChain(Posed& p) {
     if(note&&note->notFlailAt&&note->flailSkeleton==skeleton&&note->flailBones==bones&&now-note->notFlailAt<NotedFor)return;
     AcquireSRWLockExclusive(&g_flailLock);
     struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&g_flailLock);}} unlock;
-    TellFlails(now);
     const auto key=std::make_pair(self,skeleton);
     FlailRig* rig=g_flailRigs.Find(key,now);
     if(!rig||rig->bones!=bones) {
@@ -4132,7 +4149,10 @@ void PoseFlailChain(Posed& p) {
             valid=Get(at,&boneName)&&Get(at+8,&parents[i])&&!(names[i]=Str(boneName)).empty();views[i]=names[i];
         }
         if(valid)learned.rig=fc::Find({views.data(),size_t(count)},{parents.data(),size_t(count)});
-        if(learned.rig.Valid())learned.swing=std::make_unique<std::array<fc::Swing,fc::MaxChains>>();
+        if(learned.rig.Valid())learned.swing=std::make_unique<fc::Swing>();
+        else if(learned.rig.why!=fc::RigWhy::NoLinks) {   // chain bones, but no chain the swing may move: for WatchFlails
+            g_flailBroken.fetch_add(1,std::memory_order_relaxed);g_flailBrokenWhy.store(uint8_t(learned.rig.why),std::memory_order_relaxed);
+        }
         framevr::CacheSweep swept;
         rig=&g_flailRigs.Put(key,std::move(learned),now,&swept);
         hookstats::Forgot(hookstats::FlailRigs,swept,now);
@@ -4142,6 +4162,7 @@ void PoseFlailChain(Posed& p) {
         if(note){note->flailSkeleton=skeleton;note->flailBones=bones;note->notFlailAt=now?now:1;}
         return;
     }
+    TellFlails(now);
     // The local hero's own held item only (a monster's or another player's flail has the same bones), and where the
     // game placed it in the world: its transform's world matrix, as the last evaluation left it.
     HeroXform hero;
@@ -4162,40 +4183,98 @@ void PoseFlailChain(Posed& p) {
            !Get(components+uintptr_t(index)*kTransformSize+0xC0,&parent)||parent!=hero.entity||
            !SafeCopy(&item,reinterpret_cast<const void*>(components+uintptr_t(index)*kTransformSize+0x40),sizeof item)) {
             // A monster's flail, another player's or one on the ground: this thread leaves it alone for NotedFor.
-            ++g_flailReport.notHeld;
+            ++g_flailReport.notHeld;g_flailOthers.fetch_add(1,std::memory_order_relaxed);
             if(note){note->flailSkeleton=skeleton;note->flailBones=bones;note->notFlailAt=now?now:1;}
             return;
         }
     }
+    g_flailHeldAt.store(now,std::memory_order_relaxed);
     FlailWorld world;
     AcquireSRWLockShared(&g_flailWorldLock);world=g_flailWorld;ReleaseSRWLockShared(&g_flailWorldLock);
-    if(!world.at||now<world.at||now-world.at>200||world.generation!=HeroGen()){++g_flailReport.noWorld;return;}
+    if(!world.at||now<world.at||now-world.at>200||world.generation!=HeroGen()) {
+        ++g_flailReport.noWorld;g_flailNoWorld.fetch_add(1,std::memory_order_relaxed);return;
+    }
     uintptr_t matrices=0;int worldCount=0;
     if(!Get(p.worldPose,&worldCount)||worldCount!=count||!Get(p.worldPose+4,&matrices)||!matrices)return;
     static LARGE_INTEGER frequency{};if(!frequency.QuadPart)QueryPerformanceFrequency(&frequency);
     LARGE_INTEGER counter;QueryPerformanceCounter(&counter);
     const double time=double(counter.QuadPart)/double(frequency.QuadPart);
     ++g_flailReport.flails;
+    // Every chain read first, then all swung together (Khalim's three balls keep apart), then all written.
+    std::array<std::array<fc::Mat,fc::MaxLinks>,fc::MaxChains> native,out;
+    fc::Bones chains;chains.chains=held.rig.chains;
     for(int c=0;c<held.rig.chains;++c) {
         const fc::Chain& chain=held.rig.chain[size_t(c)];
-        std::array<fc::Mat,fc::MaxLinks> native,out;bool read=true;
-        for(int k=0;k<chain.count&&read;++k)read=chain.bone[size_t(k)]<count&&
-            SafeCopy(&native[size_t(k)],reinterpret_cast<const void*>(matrices+uintptr_t(chain.bone[size_t(k)])*sizeof(fc::Mat)),sizeof(fc::Mat));
-        if(!read)continue;
-        fc::Stats stats;
-        if((*held.swing)[size_t(c)].Pose({native.data(),size_t(chain.count)},item,world.unitsPerMetre,world.floor,time,world.turn,
-                                          {out.data(),size_t(chain.count)},stats))
-            for(int k=0;k<chain.count;++k)
-                SafeWrite(reinterpret_cast<void*>(matrices+uintptr_t(chain.bone[size_t(k)])*sizeof(fc::Mat)),&out[size_t(k)],sizeof(fc::Mat));
-        g_flailReport.stats.Add(stats);++g_flailReport.chains;
+        for(int k=0;k<chain.count;++k)
+            if(chain.bone[size_t(k)]>=count||
+               !SafeCopy(&native[size_t(c)][size_t(k)],reinterpret_cast<const void*>(matrices+uintptr_t(chain.bone[size_t(k)])*sizeof(fc::Mat)),sizeof(fc::Mat)))
+                return;
+        chains.native[size_t(c)]={native[size_t(c)].data(),size_t(chain.count)};
+        chains.out[size_t(c)]={out[size_t(c)].data(),size_t(chain.count)};
     }
-    if(!held.told) {
-        held.told=true;
-        char line[240];
-        std::snprintf(line,sizeof line,"Frame flail chain: the held flail's rig - %d chain(s), %d links; its chain and ball hang from the handle and swing "
-            "with the hand ([hands] flail_chain=1; 0 leaves the game's animation)",held.rig.chains,held.rig.links);
+    fc::World there;
+    there.unitsPerMetre=world.unitsPerMetre;there.floor=world.floor;there.turn=world.turn;
+    there.head={world.eyes[0],world.eyes[1],world.eyes[2]};
+    fc::Stats stats;
+    // One step a game frame: both eyes of a stereo pair are posed inside one draw of the game (vrcam's GameDrawSpan), the
+    // second a pass later with the frame time held; it lays the first eye's very bones again (flail_chain.h Pose).
+    uint32_t serial=0;
+    const uint64_t frame=gamedraw::Now(&serial)?(uint64_t(serial)<<1|1u):0;
+    const bool laid=held.swing->Pose(chains,item,there,time,stats,frame);
+    if(laid)
+        for(int c=0;c<held.rig.chains;++c) {
+            const fc::Chain& chain=held.rig.chain[size_t(c)];
+            for(int k=0;k<chain.count;++k)
+                SafeWrite(reinterpret_cast<void*>(matrices+uintptr_t(chain.bone[size_t(k)])*sizeof(fc::Mat)),&out[size_t(c)][size_t(k)],sizeof(fc::Mat));
+        }
+    g_flailReport.stats.Add(stats);
+    // Once for each held flail: its rig and the chain it swings, or why the game's animation keeps it (once that has
+    // lasted a second, never laid: a flail just taken up may not be placed in its first frame).
+    if(!laid&&!held.toldLaid&&!held.leftSince)held.leftSince=now?now:1;
+    if(laid&&!held.toldLaid) {
+        held.toldLaid=true;
+        const fc::Swing& s=*held.swing;
+        char line[400];
+        std::snprintf(line,sizeof line,"Frame flail chain: the held flail's rig - %d chain(s) of %d links (%.2f m to the last joint, the ball %.2f m round "
+            "%.2f m on; the item at %.0f %.0f %.0f in the world); its chain and ball swing from the handle ([hands] flail_chain=1; 0 leaves the "
+            "game's animation)",held.rig.chains,held.rig.chain[0].count,s.ChainLength(0),s.BallSize(0),fc::BallReach*s.ChainLength(0),
+            item.m[12],item.m[13],item.m[14]);
+        framevr::logging::Write(line);
+    } else if(!laid&&!held.toldLeft&&!held.toldLaid&&now-held.leftSince>=1000) {
+        held.toldLeft=true;
+        char line[400];
+        std::snprintf(line,sizeof line,"Frame flail chain: the held flail's rig - %d chain(s), %d links - left to the game's animation: %s "
+            "(the item at %g %g %g in the world, %.2f units a metre)",held.rig.chains,held.rig.links,fc::Text(stats.why),item.m[12],item.m[13],
+            item.m[14],world.unitsPerMetre);
         framevr::logging::Write(line);
     }
+}
+// A flail in hand and, five seconds on, no posed skeleton was the hero's own held flail: one line why, each time one is
+// taken up. (Once one is found, PoseFlailChain says whether its chain swings.)
+void WatchFlails(bool live) {
+    static SRWLOCK lock=SRWLOCK_INIT;static bool was=false,told=false;static ULONGLONG since=0;
+    AcquireSRWLockExclusive(&lock);
+    struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&lock);}} unlock;
+    const ULONGLONG now=GetTickCount64();
+    if(live&&!was) {
+        since=now;told=false;
+        g_flailHeldAt.store(0);g_flailBroken.store(0);g_flailOthers.store(0);g_flailNoWorld.store(0);
+    }
+    was=live;
+    if(!live||told||now-since<5000)return;
+    told=true;
+    if(g_flailHeldAt.load()>=since)return;
+    const unsigned broken=g_flailBroken.load(),others=g_flailOthers.load(),noWorld=g_flailNoWorld.load();
+    char line[500];
+    if(!broken&&!others&&!noWorld)
+        std::snprintf(line,sizeof line,"Frame flail chain: a flail is in hand, but in 5 s no item skeleton with a flail's chain bones (chain_bnd_jnt_NN, "
+            "L_/C_/R_chain_NN) was posed - the game's animation moves its chain");
+    else
+        std::snprintf(line,sizeof line,"Frame flail chain: a flail is in hand, but in 5 s none of the posed flail skeletons was the hero's own - the "
+            "game's animation moves its chain: %u with chain bones but no chain (%s), %u flail rigs not held by him (their transform's parent is "
+            "not his entity), %u poses without his world",broken,broken?framevr::flail::Text(framevr::flail::RigWhy(g_flailBrokenWhy.load())):"none",
+            others,noWorld);
+    framevr::logging::Write(line);
 }
 #endif
 
@@ -5653,6 +5732,9 @@ void Set(const Input& in) {
     g_flailLive.store(in.flailChain, std::memory_order_relaxed);
 #endif
     ReleaseSRWLockExclusive(&g_inLock);
+#ifdef D2RVR_NATIVE_OPENXR
+    WatchFlails(in.flailChain);
+#endif
 }
 
 using ComputeFn = void (*)(uintptr_t self, float a, float b, bool c);

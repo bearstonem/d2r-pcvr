@@ -8007,6 +8007,12 @@ struct GameDrawSpan {
     explicit GameDrawSpan(bool o) : outer(o) { if (outer) { g_gameDrawSerial.fetch_add(1); g_inGameDraw.store(true); } }
     ~GameDrawSpan() { if (outer) g_inGameDraw.store(false); }
 };
+// The game draw now, for what is posed on the render workers inside it (vr/skeletons.cpp: a flail's chain steps once a
+// game frame and both eyes of a pair get the same chain): its serial, and false outside one.
+bool GameDrawNow(uint32_t* serial) {
+    *serial = g_gameDrawSerial.load(std::memory_order_relaxed);
+    return g_inGameDraw.load(std::memory_order_relaxed);
+}
 uintptr_t HookDrawGameScreen(int a) {
     static thread_local int depth = 0;
     const GameDrawSpan span(depth == 0);
@@ -13559,6 +13565,10 @@ DWORD WINAPI UpdateThread(void*) {
 
 }  // namespace
 
+namespace gamedraw {
+// The game draw being posed for (vr/skeletons.cpp: a flail's chain steps once a game frame): its serial; false outside one.
+bool Now(uint32_t* serial) {return GameDrawNow(serial);}
+}
 namespace monsterimmunity {
 bool ReadPosition(uint32_t id,float out[3]) {return worldobj::MonsterPosition(id,out);}
 }
