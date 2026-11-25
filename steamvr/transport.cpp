@@ -46,6 +46,8 @@
 #include "gameplay.h"
 #include "walk_direction.h"
 #include "whirl_steer.h"
+#include "whirl_on.h"
+#include "entry_facing.h"
 #include "room_scale.h"
 #include "room_steps.h"
 
@@ -358,6 +360,26 @@ spellmotion::Gate spellGate;   // every class's motions' gate: both grips held, 
 // last press (ms), live 150 ms on as CastingSkill; glyphRecordAt the same for the record, lock-free.
 struct GlyphPress {interaction::Skill skill{};bool record=false;math::Vec aim{};uint64_t at=0;} glyphPress;
 std::atomic<uint64_t> glyphRecordAt{0};
+// Whirlwind on (whirl_on.h): the mode, the whirls the game took of this turn-on (vrcam reports them: WhirlOnTook,
+// WhirlOnNow), which turn-on it is (vrcam keeps each one's way), and what its lines say. The player's Whirlwind
+// button and his other presses as he made them, before the mode presses its own; another motion or glyph cast.
+whirlon::Mode whirlMode;
+whirlon::Chain whirlChain;
+uint32_t whirlActivation=0;
+uint64_t whirlHero=0;
+bool whirlParked=false;   // this turn-on's Whirlwind put on the right trigger's record (interactionstate::Park took it)
+struct WhirlRun {double from=0;float seconds=0,manaFrom=0;int level=0;bool manaKnown=false;} whirlRun;
+bool whirlStop=false;   // the stick let go after a push: the whirl under way ends short (whirl_turn.h)
+struct WhirlTurns {int turned=0,stopped=0,refused=0,followed=0,missed=0;} whirlTurns;   // this turn-on's, for its off line
+std::atomic<bool> whirlUsed{false},whirlActive{false};
+std::atomic<bool> whirlturnInstalled{false};   // the server's whirl steps reached WhirlOnStep (its hooks are in)
+// The game's server thread reports each step of a whirl (WhirlOnStep, WhirlOnTurned) under this lock alone, never the
+// transport's own: the chain, this turn-on's turns and the steering as the last input frame left it. Taken after
+// the transport's lock where both are held.
+std::mutex whirlStepMutex;
+struct WhirlSteerNow {uint32_t activation=0;bool on=false,pushed=false,stop=false;float stickX=0,stickY=0;uint64_t at=0;} whirlSteer;
+int whirlPlayerSlot=-1;   // this frame: the hand slot of a Whirlwind button the player holds, -1 none
+bool whirlOtherPress=false,whirlOtherWas=false,whirlOtherCast=false,whirlTee=false;
 // The setting holding which of a class's motions are off (spellmotion::PageOf), -1 for a class without.
 int MotionsKey(int skillClass) {
     switch(skillClass) {
@@ -5491,6 +5513,19 @@ void Input() {
     motionOutput.shieldContact=motionInput.active&&!motionOutput.block&&!motionInput.quickCast&&motionInput.trigger<.2f&&
         motionInput.shieldEquipped&&gestureSettings[settings::SkillGestures]>.5f&&quickFresh&&shieldSkill.available&&shieldSkill.motion&&shieldSkill.id==weaponskills::Smite;
     if(motionOutput.skill>=0&&(!quickFresh||!quickSnapshot.skills[motionOutput.skill].available))motionOutput.skill=-1;
+    // Whirlwind on (whirl_on.h): the player's own presses this frame, before anything presses for him. A hand button
+    // holding Whirlwind is the mode's (taken from the game below, where the mode steps); any other skill, a trigger
+    // attack or Interact, newly pressed, turns it off.
+    {
+        const int slot=motionOutput.skill;
+        const bool whirl=motionControls.load()&&gameplayChain&&slot>=0&&slot<skills::Count&&quickFresh&&
+            quickSnapshot.skills[slot].known&&quickSnapshot.skills[slot].id==whirlon::Whirlwind;
+        whirlPlayerSlot=whirl?slot:-1;
+        if(whirl)motionOutput.skill=-1;   // never the game's own press: the mode presses it (or refuses it) below
+        const bool other=(slot>=0&&!whirl)||motionOutput.attack||handOutput.interact;
+        whirlOtherPress=other&&!whirlOtherWas;whirlOtherWas=other;
+        whirlOtherCast=whirlTee=false;
+    }
     // Bow skills leave the bow: the arrow is in the left hand's model, so the
     // target, the lock and the shot follow the bow whichever button casts. A
     // drawn string (or the shot just loosed) keeps its own line. Only with VR
@@ -5624,6 +5659,7 @@ void Input() {
             std::snprintf(line,sizeof line,"Frame spell motion: %s's motion done, not cast: %s",motionName(skill).c_str(),refused);
             MotionPulse(0,haptics::Category::Interaction,.25f,100000000);
         } else {
+            whirlOtherCast=whirlOtherCast||skill!=whirlon::Whirlwind;   // another motion's cast turns Whirlwind off (whirl_on.h)
             glyphCast.Begin(plan,skill,-1,motionNow);
             glyphPress={};glyphPress.skill=known;
             // its way, head-local as the motion saw it, to the room (level)
@@ -5704,6 +5740,7 @@ void Input() {
                     glyphs::Name(r.shape),known.name,skill,r.score,r.second,r.corners,stroke.seconds);
                 MotionPulse(hand,haptics::Category::Spell,.6f,60000000);
             } else {
+                whirlOtherCast=whirlOtherCast||skill!=whirlon::Whirlwind;   // a glyph's cast turns Whirlwind off (whirl_on.h)
                 glyphCast.Begin(plan,skill,-1,now);glyphLook=glyphtrail::ElementLook(skill);
                 glyphPress={};glyphPress.skill=known;
                 std::snprintf(line,sizeof line,"Frame glyph: %s hand, the %s -> %s (skill %d%s) via %s (score %.2f, next %.2f, corners %d, %.1f s, %s)",whose,
@@ -5818,12 +5855,6 @@ void Input() {
                 const int skill=spellmotion::CastSkillOf(skillOf[done],[&](int id){return interaction::GlyphSkill(quickSnapshot,id).known;});
                 const auto spot=arcKnown?spellmotion::Spot{-arcWay.z,arcWay.x}:spellmotion::PointSpot(donePoint,punchTuning);
                 if(doneLanding&&landKnown)doneAim={spot.right,0,-spot.ahead};
-                // Whirlwind's T with the walk stick pushed as it casts (whirl_steer.h): its whirl goes where that push
-                // would walk, at the T's own length, instead of straight ahead. Still one whirl a T: nothing more is
-                // pressed, and the game takes no new spot while it whirls.
-                float steerX=0,steerY=0;
-                const bool whirlSteered=doneMotion==spellmotion::Motion::Whirlwind&&doneLand==spellmotion::Land::Spot&&!doneLanding&&
-                    WhirlStickNow(steerX,steerY)&&whirlsteer::MotionSpot(steerX,steerY,spellmotion::barbarian::tuning.whirlAhead,doneSpot.ahead,doneSpot.right);
                 // A summon on a spot of its own: Decoy and the golems ahead (spellmotion::Engine::LandAt), the
                 // Valkyrie where the right hand points (LandPointed); its way toward it too.
                 float summonX=0,summonY=0;math::Vec pointed{};
@@ -5831,7 +5862,12 @@ void Input() {
                     doneLand==spellmotion::Land::Pointed&&PointedCell(summonX,summonY,pointed));
                 if(summonKnown)doneAim=doneLand==spellmotion::Land::Spot?math::Vec{doneSpot.right,0,-doneSpot.ahead}:pointed;
                 bool cast=false;
-                if(doneMotion==spellmotion::Motion::FistOfHeavens&&interaction::GlyphSkill(quickSnapshot,skill).available&&
+                if(doneMotion==spellmotion::Motion::Whirlwind) {
+                    // Whirlwind's T turns Whirlwind on, or off again (whirl_on.h; the mode steps below, after the glyphs):
+                    // no single whirl of its own. Every motion waits its second from now, as after a cast.
+                    spellFreeAt=motionNow;spellGripCast=true;whirlTee=true;
+                }
+                else if(doneMotion==spellmotion::Motion::FistOfHeavens&&interaction::GlyphSkill(quickSnapshot,skill).available&&
                    !(cooldownsOn&&cooldowns::Cooling(quickSnapshot.cooldowns,skill,GetTickCount64()))) {
                     // Fist of the Heavens' call: the monster the arm points at first (vrcam answers HeavensRequest), then
                     // the cast (below), at most HeavensWaitMs later. Every motion waits its second from now.
@@ -5851,10 +5887,7 @@ void Input() {
                     char line[200];
                     if(summonKnown) {
                         motionLanding={skill,summonX,summonY,GetTickCount64(),gamestate::LocalPlayer()};
-                        if(whirlSteered)
-                            std::snprintf(line,sizeof line,"Frame whirlwind: steered by the walk stick - the T's whirl goes %.0f cells where it points (%.0f ahead, %+.0f across; stick %.2f, %.2f; cell %.1f,%.1f)",
-                                std::hypot(doneSpot.ahead,doneSpot.right),doneSpot.ahead,doneSpot.right,steerX,steerY,summonX,summonY);
-                        else if(doneLand==spellmotion::Land::Spot)
+                        if(doneLand==spellmotion::Land::Spot)
                             std::snprintf(line,sizeof line,"Frame spell motion: %s on its spot, %.0f cells ahead, %+.0f across (cell %.1f,%.1f)",
                                 motionName(skill).c_str(),doneSpot.ahead,doneSpot.right,summonX,summonY);
                         else std::snprintf(line,sizeof line,"Frame spell motion: %s where the %s hand points (cell %.1f,%.1f)",motionName(skill).c_str(),handRoles.map.left?"left":"right",summonX,summonY);
@@ -5937,6 +5970,95 @@ void Input() {
             }
         }
         glyphTrailShown=trail&&glyphImageReady&&glyphPaintKey&&glyphShownStroke==glyphStrokeId;
+    }
+    // Whirlwind on (whirl_on.h): the T (whirlTee) or a press of a hand button holding Whirlwind turns it on for its
+    // time by its level. Meanwhile Whirlwind's button is held for the game - its hand slot, else the right trigger's
+    // record (glyph casting's, Whirlwind put on it first) - so the game's own repeat whirls on, each whirl aimed by
+    // vrcam where the walk stick points (WhirlSteerAim, WhirlOnNow). Physical swings wait: the whirls hit. One line
+    // as it goes on, one as it goes off.
+    {
+        std::lock_guard stepLock(whirlStepMutex);
+        const uint64_t nowMs=GetTickCount64();
+        const auto known=interaction::GlyphSkill(quickSnapshot,whirlon::Whirlwind);
+        const bool record=quickSnapshot.glyphRecord>=0;
+        whirlon::Input in;
+        in.time=motionInput.time;in.hero=interactionInput.session;
+        in.combat=motionControls.load()&&gameplayChain;
+        in.live=motionInput.active&&quickFresh;
+        in.motion=whirlTee;in.button=whirlPlayerSlot;in.other=whirlOtherPress||whirlOtherCast;
+        in.menu=panelMode||spatialMode||settingsOwned||settingsChord||interactionOutput.wheel||interactionOutput.settings||gamestate::MenuOpen();
+        in.town=quickFresh&&entryfacing::Town(quickSnapshot.location.level);
+        in.dead=quickFresh&&((quickSnapshot.vitalsKnown&&quickSnapshot.health<=0)||
+            (quickSnapshot.actionKnown&&(quickSnapshot.actionMode==0||quickSnapshot.actionMode==17)));   // modes death, dead
+        in.available=quickFresh&&known.known&&known.available;
+        in.manaKnown=quickFresh&&quickSnapshot.vitalsKnown;in.mana=quickSnapshot.mana;
+        in.level=known.known?known.level:0;
+        in.whirling=quickFresh&&quickSnapshot.actionKnown&&quickSnapshot.actionMode==18;   // the sequence mode (anim SQ)
+        float steerX=0,steerY=0;
+        in.pushed=motionInput.active&&WhirlStickNow(steerX,steerY);
+        in.taken=whirlChain.taken;
+        {   // where a T's presses go: as a motion's cast (glyphcast::Dispatch)
+            std::array<glyphcast::Slot,skills::Count> slots{};
+            for(int i=0;i<skills::Count;++i){const auto& k=quickSnapshot.skills[i];slots[size_t(i)]={k.id,k.owner,k.known,k.available};}
+            const auto plan=glyphcast::Dispatch(whirlon::Whirlwind,-1,slots,record?quickSnapshot.glyphSkill:-2,record?quickSnapshot.glyphOwner:-2);
+            in.press=plan.how==glyphcast::How::Slot?whirlon::Press::Slot:plan.how==glyphcast::How::Record?whirlon::Press::Record:
+                plan.how==glyphcast::How::Park&&record?whirlon::Press::Park:whirlon::Press::None;
+            in.slot=plan.slot;
+        }
+        in.recordHolds=quickFresh&&record&&quickSnapshot.glyphSkill==whirlon::Whirlwind&&quickSnapshot.glyphOwner==-1;
+        const auto o=whirlMode.Step(in);
+        whirlStop=o.on&&o.stop;whirlActive.store(o.on);
+        const char* by=o.by==whirlon::By::Motion?"the T":"its button";
+        if(o.started) {
+            if(!++whirlActivation)whirlActivation=1;
+            if(whirlHero!=in.hero){whirlChain.Forget();whirlHero=in.hero;}
+            whirlChain.Begin();whirlParked=false;whirlTurns={};whirlUsed.store(true);
+            whirlRun={in.time,o.seconds,in.mana,in.level,in.manaKnown};
+            for(int h=0;h<2;++h)MotionPulse(h,haptics::Category::Spell,.7f,70000000);
+            const auto way=whirlMode.Way();
+            char through[64];
+            if(way==whirlon::Press::Slot)std::snprintf(through,sizeof through,"its hand slot %d",o.holdSlot);
+            else std::snprintf(through,sizeof through,"the right trigger's record%s",way==whirlon::Press::Park?", put on it first":"");
+            char level[48];
+            if(in.level>0)std::snprintf(level,sizeof level,"Whirlwind level %d",in.level);else std::snprintf(level,sizeof level,"Whirlwind's level unread");
+            char line[420];
+            std::snprintf(line,sizeof line,"Frame whirlwind on: by %s, %s - on %.1f s (5 s + 0.1 s a level, at most 8); whirls through %s, "
+                "each %.0f cells (whirl speed %.1f cells/s, %s), steered by the walk stick as it goes, stopped when it is let go (the first where you face); "
+                "%.1f mana a whirl, mana %.0f of %.0f",by,level,o.seconds,through,whirlChain.Cells(),whirlChain.speed,
+                whirlChain.measured?"as measured":"until measured",whirlon::WhirlMana(in.level),in.mana,quickSnapshot.maxMana);
+            Say(line);
+        }
+        if(o.refused) {
+            MotionPulse(o.consume?skills::Hand(whirlPlayerSlot):0,haptics::Category::Interaction,.25f,60000000);
+            char line[200];std::snprintf(line,sizeof line,"Frame whirlwind: not turned on by %s: %s",whirlTee?"the T":"its button",o.refused);
+            Say(line);
+        }
+        if(o.park&&!whirlParked)whirlParked=interactionstate::Park(interactionInput.session,whirlon::Whirlwind,-1);
+        if(o.holdSlot>=0&&motionOutput.skill<0)motionOutput.skill=o.holdSlot;
+        if(o.holdRecord&&!glyphPressRt) {
+            glyphPressRt=true;glyphPress={};glyphPress.skill=known;glyphPress.record=true;glyphPress.at=nowMs;glyphRecordAt.store(nowMs);
+        }
+        if(o.on){motionOutput.meleeContact=false;motionOutput.shieldContact=false;}
+        if(o.stopped!=whirlon::Why::None) {
+            for(int h=0;h<2;++h)MotionPulse(h,haptics::Category::Interaction,.2f,40000000);
+            const float cost=whirlon::WhirlMana(whirlRun.level);
+            whirlChain.Measure();
+            char mana[80];
+            if(whirlRun.manaKnown&&in.manaKnown)std::snprintf(mana,sizeof mana,"; mana %.0f -> %.0f",whirlRun.manaFrom,in.mana);else mana[0]=0;
+            const auto& t=whirlTurns;
+            const bool turning=whirlturnInstalled.load();
+            char turns[200];
+            if(turning)std::snprintf(turns,sizeof turns,"; turned under way %d times, ended short by letting go %d, laid back %d; the client's followed %d, missed %d",
+                t.turned,t.stopped,t.refused,t.followed,t.missed);
+            else std::snprintf(turns,sizeof turns,"; no turning under way (its hooks not in)");
+            char line[700];
+            std::snprintf(line,sizeof line,"Frame whirlwind off: %s, after %.1f of %.1f s (on by %s); %d whirls%s, about %.0f mana (%.1f each%s), "
+                "%.0f cells whirled; whirl speed %.1f cells/s (%s), the next whirls %.0f cells%s",whirlon::Name(o.stopped),o.elapsed,whirlRun.seconds,by,
+                whirlChain.count,turning?" seen on the server":" (commands taken)",cost*float(whirlChain.count),cost,mana,whirlChain.moved,whirlChain.speed,
+                whirlChain.measured?"measured":"not measured: the default",whirlChain.Cells(),turns);
+            Say(line);
+        }
+        whirlSteer={whirlActivation,whirlMode.On()&&motionControls.load(),in.pushed,whirlStop&&!in.pushed,steerX,steerY,nowMs};
     }
     // No physical melee contacts while a Charge is in flight (Cal's
     // 2026-10-27 test: the punch that cast Charge landed a basic attack on a
@@ -8891,6 +9013,40 @@ bool WhirlStick(float& x,float& y) {
     std::lock_guard lock(mutex);
     return motionControls.load()&&motionInput.active&&WhirlStickNow(x,y);
 }
+bool WhirlOnNow(WhirlOnSteer& out,float heroX,float heroY) {
+    std::lock_guard lock(mutex);
+    if(!motionControls.load()||!whirlMode.On())return false;
+    std::lock_guard stepLock(whirlStepMutex);
+    out.activation=whirlActivation;out.cells=whirlChain.Cells();
+    out.pushed=motionInput.active&&WhirlStickNow(out.stickX,out.stickY);
+    (void)heroX;(void)heroY;
+    return true;
+}
+void WhirlOnTook(uint32_t activation,float heroX,float heroY,float cells) {
+    std::lock_guard lock(mutex);
+    std::lock_guard stepLock(whirlStepMutex);
+    if(activation==whirlActivation&&whirlMode.On())whirlChain.Took(Milliseconds()/1000.0,heroX,heroY,cells);
+}
+bool WhirlOnStep(WhirlOnTurn& out,float heroX,float heroY,bool started) {
+    std::lock_guard stepLock(whirlStepMutex);
+    whirlturnInstalled.store(true);
+    const auto& w=whirlSteer;
+    const uint64_t nowMs=GetTickCount64();
+    if(!w.on||nowMs<w.at||nowMs-w.at>250)return false;   // off, or the input frames stopped (a stick read then is stale)
+    const double now=Milliseconds()/1000.0;
+    if(started)whirlChain.Started(now);
+    whirlChain.Seen(now,heroX,heroY);
+    out.activation=w.activation;out.pushed=w.pushed;out.stickX=w.stickX;out.stickY=w.stickY;out.stop=w.stop;
+    return true;
+}
+void WhirlOnTurned(uint32_t activation,int what) {
+    std::lock_guard stepLock(whirlStepMutex);
+    if(activation!=whirlSteer.activation||!whirlSteer.on)return;
+    auto& t=whirlTurns;
+    switch(what){case 0:++t.turned;break;case 1:++t.stopped;break;case 2:++t.refused;break;case 3:++t.followed;break;default:++t.missed;break;}
+}
+bool WhirlOnUsed(){return whirlUsed.load();}
+bool WhirlOnActive(){return whirlActive.load(std::memory_order_relaxed);}
 int AimRulesSkill() {
     std::lock_guard lock(mutex);
     const auto* skill=CastSkillRow();return skill?skill->id:-1;
@@ -9301,6 +9457,9 @@ void Shutdown(bool preserveResolution) {
     glyphStroke={};glyphHand=-1;glyphCast={};glyphPaintKey=glyphShownStroke=0;glyphBeganAt=0;glyphEndedAt=-1;glyphPaintAt=0;glyphLook=glyphtrail::Look::Drawing;glyphPressRt=glyphTrailShown=false;glyphAtlasPending=glyphImageReady=false;
     glyphPress={};glyphRecordAt.store(0);
     motionLanding={};whirlStick={};teleportArc={};teleportarc::Current().Clear();
+    if(whirlMode.On())Say("Frame whirlwind off: the VR session ended");
+    whirlActive.store(false);
+    whirlMode.Reset();whirlPlayerSlot=-1;whirlOtherPress=whirlOtherWas=whirlOtherCast=whirlTee=false;
     if(teleportShown){telegraph::Current().ClearSkill(telegraph::TeleportMark);teleportShown=false;}
     spellTrigger=0;for(auto& e:spellFree)e.Reset();spellFreeAt=-1;spellGripSince=-1;spellGripCast=false;spellGripsArmed.store(false);spellGate.Reset();
     bowLaserHue=-1;bowLaserAtlasPending=bowLaserImageReady=false;

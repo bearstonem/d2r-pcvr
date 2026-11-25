@@ -12,7 +12,7 @@ enum class Use {
     Heading,  // projectiles and fans: toward the target, else the free aim
     Ground,   // a ground skill: on the target, else the free-aim floor; a landing circle
     Curse,    // centred on the target, else the free-aim floor; instant, no circle
-    Attack,   // Charge, Leap Attack, Dragon Flight, Whirlwind: the target, else the free-aim spot
+    Attack,   // Charge, Leap Attack, Dragon Flight, Whirlwind (in motion combat Whirlwind on aims it first: whirl_on.h): the target, else the free-aim spot
     Spot,     // Teleport, Leap, golems, Raise Skeleton: the free-aim spot, never the target
     CorpseAtTarget,   // Corpse Explosion, Poison Explosion: at the target, else the free-aim spot
 };

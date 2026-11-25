@@ -159,6 +159,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "offline_difficulty.h"
 #include "enemy_sight.h"
 #include "companion_ai.h"
+#include "whirl_turn_native.h"   // Whirlwind on: a whirl under way turned with the walk stick
 #include "projectiles.h"
 #include "combat.h"
 #include "interactionstate.h"
@@ -4548,6 +4549,16 @@ std::atomic<bool> g_spellCommandReady{false};
 // a cooldown, a held repeat) shows none (#160 review).
 struct LandingCircle {int skill=-1,x=0,y=0;float ax=0,ay=0;};
 thread_local LandingCircle g_landing;
+// Whirlwind on (whirl_on.h): its way, and its whirls on their way to the game's command check (WhirlSteerAim below).
+namespace whirlonvr {
+struct Way {uint32_t activation=0;float gx=0,gy=0;};
+SRWLOCK g_wayLock=SRWLOCK_INIT;
+Way g_way;   // this turn-on's last way on the grid
+// The whirl this thread's aim just chose (activation 0: none), and the command the game's check is judging
+// (HookMapClick hands it on; HookSpellCommand reports it taken: framevr::WhirlOnTook).
+struct Aimed {uint32_t activation=0;float heroX=0,heroY=0,cells=0;};
+thread_local Aimed g_aimed,g_command;
+}
 void ShowLandingCircle(const LandingCircle& c) {
     // For the skill's time (telegraph::ForSkill; Fire Blast's from its throw
     // distance, then re-timed by its own missiles in projectiles.cpp). A strip
@@ -4565,7 +4576,14 @@ int HookSpellCommand(framevr::spellaim::NativeCommand* command) {
     const bool changed=framevr::spellaim::ApplyCommand(g_spellCommand,*command);
     const int result=OrigSpellCommand(command);
     if(changed&&result&&g_landing.skill>=0){ShowLandingCircle(g_landing);g_landing={};}   // accepted (every logged VR cast: check 1)
-    if(changed) {
+    // Whirlwind on: a whirl the game's check took is counted and its speed measured; not told one by one.
+    const bool whirlOn=changed&&whirlonvr::g_command.activation!=0;
+    if(whirlOn&&result) {
+        const auto w=whirlonvr::g_command;
+        framevr::WhirlOnTook(w.activation,w.heroX,w.heroY,w.cells);
+    }
+    if(whirlOn)whirlonvr::g_command={};
+    else if(changed) {
         static std::atomic<ULONGLONG> reported{0};
         const auto now=GetTickCount64();auto before=reported.load();
         if(now-before>1000&&reported.compare_exchange_strong(before,now))
@@ -5232,28 +5250,40 @@ bool MotionAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& ca
     }
     return true;
 }
-// Whirlwind steered by the walk stick (whirl_steer.h): while the stick is pushed past its dead zone, a Whirlwind
-// cast from a button and each repeat of the held button go whirlsteer::Ahead cells where the same push would walk,
-// before the aimed monster and whatever the Aim options. At rest: false, and the cast aims as before. Nothing is
-// pressed here: the game's own commands carry the spot, and a whirl already under way keeps its own (the game
-// takes no new spot until it ends), so holding the button turns the chain from one whirl to the next. The T's
-// whirl takes its stick at the cast, in the transport (its landing, MotionAim above).
+// Whirlwind on (whirl_on.h, whirl_steer.h): while it is on, every Whirlwind command the game makes - its own repeat
+// of the button the transport holds for it - goes the next whirl's length (WhirlOnNow: half a second at the speed
+// whirls go, 8 to 12 cells) where the walk stick pushes, as walking takes it (Walk direction, Left-handed, the view's
+// turn), before the aimed monster and whatever the Aim options. With the stick at rest, the way this turn-on's last
+// whirl went; its first at rest, where you look. Nothing is pressed here and nothing logged per whirl (the
+// transport's on and off lines): the game's own commands carry the spot, and a whirl under way keeps its own (the
+// game takes no new spot until it ends), so the stick turns the chain from one whirl to the next. Off: false, and
+// the cast aims as any other.
 bool WhirlSteerAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& cast) {
     namespace ws=framevr::whirlsteer;
-    float sx=0,sy=0,gx=0,gy=0,x=0,y=0;
-    if(skill!=ws::Whirlwind||!g_spellAimReady.load()||!g_enabled.load()||gamestate::MenuOpen()||!framevr::WhirlStick(sx,sy))return false;
+    framevr::WhirlOnSteer on;
+    if(skill!=ws::Whirlwind||!g_spellAimReady.load()||!g_enabled.load()||gamestate::MenuOpen()||!framevr::WhirlOnNow(on,playerX,playerY))return false;
     AcquireSRWLockShared(&g_stickLock);const StickFrame f=g_stickFrame;ReleaseSRWLockShared(&g_stickLock);
-    if(!f.valid||!ws::GridWay(sx,sy,{f.camR[0],f.camR[1],f.camR[2]},{f.camF[0],f.camF[1],f.camF[2]},gx,gy)||
-       !ws::Spot(playerX,playerY,gx,gy,ws::Ahead,x,y))return false;
+    if(!f.valid)return false;
+    const framevr::math::Vec right{f.camR[0],f.camR[1],f.camR[2]},ahead{f.camF[0],f.camF[1],f.camF[2]};
+    float gx=0,gy=0,x=0,y=0;bool way=false;
+    AcquireSRWLockExclusive(&whirlonvr::g_wayLock);
+    auto& w=whirlonvr::g_way;
+    if(on.pushed&&ws::GridWay(on.stickX,on.stickY,right,ahead,gx,gy)){w={on.activation,gx,gy};way=true;}
+    else if(w.activation==on.activation){gx=w.gx;gy=w.gy;way=true;}
+    else if(ws::GridWay(0,1,right,ahead,gx,gy)){w={on.activation,gx,gy};way=true;}   // the first whirl at rest: where you look
+    ReleaseSRWLockExclusive(&whirlonvr::g_wayLock);
+    if(!way||!ws::Spot(playerX,playerY,gx,gy,on.cells,x,y))return false;
     cast.x=x;cast.y=y;cast.directed=cast.contactPoint=true;
-    g_note.by="walk stick";g_note.distance=std::hypot(x-playerX,y-playerY);
-    static ULONGLONG lastLog=0;
-    if(GetTickCount64()-lastLog>500) {
-        lastLog=GetTickCount64();
-        LogF("Frame whirlwind: steered by the walk stick - aimed %.1f cells where it points (stick %.2f, %.2f in the view; grid way %.2f, %.2f; hero at cell %.1f, %.1f)",
-             g_note.distance,sx,sy,gx,gy,playerX,playerY);
-    }
+    g_note.by="whirlwind on";g_note.distance=std::hypot(x-playerX,y-playerY);
+    whirlonvr::g_aimed={on.activation,playerX,playerY,on.cells};
     return true;
+}
+// The walk stick (the view's frame) as a unit way on the grid now, as WhirlSteerAim takes it: a whirl under way
+// turns along it (vr/whirl_turn_native.cpp, on the game's server thread).
+bool WhirlGridWay(float stickX,float stickY,float& gx,float& gy) {
+    AcquireSRWLockShared(&g_stickLock);const StickFrame f=g_stickFrame;ReleaseSRWLockShared(&g_stickLock);
+    if(!f.valid)return false;
+    return framevr::whirlsteer::GridWay(stickX,stickY,{f.camR[0],f.camR[1],f.camR[2]},{f.camF[0],f.camF[1],f.camF[2]},gx,gy);
 }
 // Telemetry: "Frame aim cast:" - every cast the aim rules see, at most one line
 // per skill per 250 ms: the rule, the button, the target and where it came
@@ -5279,23 +5309,24 @@ bool HandOffUnit(const aimtargets::Cast& c) {
     return false;
 }
 bool NativeSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast) {
-    g_note={};
+    g_note={};whirlonvr::g_aimed={};
     const auto c=aimtargets::Now();
     if(c.skill==132||c.skill==143) {   // Leap, Leap Attack: the view glides through the take-off; the room's follow holds
         leapglide::g_cast.store(GetTickCount64());
         framevr::HeroCarried(kCarriedTakeOffMs);
     }
-    // Teleport on its shown landing, a thrown trap or Whirlwind along the pushed walk stick first; then the aim
+    // Whirlwind on along the walk stick, Teleport on its shown landing or a thrown trap first; then the aim
     // rules only with this kind of cast's Aim option On; Off, as before them - except
     // Guided Arrow and Charge, handed the aimed monster whatever the option (aimrules::AlwaysHomes).
-    bool directed=MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast)||WhirlSteerAim(c.skill,playerX,playerY,cast);
+    bool directed=WhirlSteerAim(c.skill,playerX,playerY,cast)||MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast);
     if(!directed) {
         if(aimtargets::RulesOn(c))directed=NativeSpellAimDecide(playerX,playerY,cast);
         else if(c.skill>=0&&framevr::aimrules::AlwaysHomes(c.skill)&&HandOffUnit(c)){g_note.by=c.skill==107?"unit (Charge always goes to the aimed monster)":"unit (Guided Arrow always homes)";cast.directed=false;}
         else directed=UpstreamSpellAim(playerX,playerY,cast);
     }
     static ULONGLONG told=0;static int toldSkill=-2;
-    if(c.skill>=0&&(c.skill!=toldSkill||GetTickCount64()-told>250)) {
+    // Whirlwind on's whirls are not told one by one (its own on and off lines say what they did).
+    if(c.skill>=0&&!whirlonvr::g_aimed.activation&&(c.skill!=toldSkill||GetTickCount64()-told>250)) {
         told=GetTickCount64();toldSkill=c.skill;
         static const char* kRule[]={"native","heading","ground","curse","attack","spot","corpse"};
         const int rule=int(c.use);
@@ -5481,7 +5512,7 @@ void HookSpellResolve(uintptr_t manager,void* unit,bool assist,float* x,float* y
     // Every native branch ends here. In particular, a moving controller may
     // supply its own target without reaching our AttackPoint hook below.
     if(cast.directed)framevr::spellaim::Resolve(cast,playerX,playerY,*x,*y);
-    if(cast.directed) {
+    if(cast.directed&&!whirlonvr::g_aimed.activation) {   // Whirlwind on's whirls: not told one by one
         static std::atomic<ULONGLONG> reported{0};
         const auto now=GetTickCount64();auto before=reported.load();
         if(now-before>2000&&reported.compare_exchange_strong(before,now))
@@ -5680,7 +5711,7 @@ uint64_t HookAttackTarget(void* self, void* unit, float* dir, int* outX, int* ou
         if(SpellPlayerPosition(unit,px,py)&&NativeSpellAim(px,py,cast)&&
            framevr::spellaim::ControllerPoint(cast,px,py,*outX,*outY)) {
             static ULONGLONG told=0;
-            if(GetTickCount64()-told>2000) {
+            if(!whirlonvr::g_aimed.activation&&GetTickCount64()-told>2000) {
                 told=GetTickCount64();
                 LogF("Frame spell aim: controller cast %s %.3f %.3f",cast.contactPoint?"point":"direction",cast.x,cast.y);
             }
@@ -6796,8 +6827,9 @@ uint64_t HookMapClick(void* unit, int type, int x, int y, uint64_t flags) {
     struct CommandScope {
         framevr::spellaim::CommandAim previous=g_spellCommand;
         LandingCircle landing=g_landing;
-        CommandScope(){g_spellCommand={};g_landing={};}
-        ~CommandScope(){g_spellCommand=previous;g_landing=landing;}
+        whirlonvr::Aimed whirl=whirlonvr::g_command;
+        CommandScope(){g_spellCommand={};g_landing={};whirlonvr::g_command={};}
+        ~CommandScope(){g_spellCommand=previous;g_landing=landing;whirlonvr::g_command=whirl;}
     } scope;
     const auto caller=uintptr_t(_ReturnAddress());
     float px=0,py=0;int tx=0,ty=0;framevr::spellaim::Cast cast;
@@ -6806,6 +6838,7 @@ uint64_t HookMapClick(void* unit, int type, int x, int y, uint64_t flags) {
        SpellPlayerPosition(unit,px,py)&&NativeSpellAim(px,py,cast)&&
        framevr::spellaim::ControllerPoint(cast,px,py,tx,ty)) {
         g_spellCommand={reinterpret_cast<uintptr_t>(unit),tx,ty};
+        whirlonvr::g_command=whirlonvr::g_aimed;   // Whirlwind on's whirl, if it is one: counted once the game takes it
         x=tx;y=ty;
         // Every ground skill the mod places (VR Settings > Gameplay > Targeting > Ground skill aim
         // not Game's aim), Fire Blast included: a circle at the cast point, in the
@@ -13519,6 +13552,7 @@ DWORD WINAPI UpdateThread(void*) {
             companionai::Install();
             companionai::Tick(compFx, compFy);
             companionai::Report();
+            if (framevr::WhirlOnUsed()) whirlturnnative::Install();   // Whirlwind on turns under way from its first use
             roofcutaway::Tick();
             headskip::Install(g_set.platform.load() == 1 && g_inWorld.load() && d2rcam::InWorld());   // the helm out of the eye views
             headskip::Report();
@@ -13571,6 +13605,9 @@ DWORD WINAPI UpdateThread(void*) {
 }
 
 }  // namespace
+
+// The walk stick as a grid way now, for vr/whirl_turn_native.cpp (WhirlGridWay above, inside this file's own).
+bool WhirlGridWayNow(float stickX,float stickY,float& gx,float& gy) {return WhirlGridWay(stickX,stickY,gx,gy);}
 
 namespace gamedraw {
 // The game draw being posed for (vr/skeletons.cpp: a flail's chain steps once a game frame): its serial; false outside one.

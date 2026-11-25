@@ -1,5 +1,4 @@
 #include "whirl_steer.h"
-#include "spell_motion.h"
 #include <cstdio>
 #include <cstdlib>
 using namespace framevr;using namespace framevr::whirlsteer;using math::Vec;
@@ -15,10 +14,9 @@ int main(){
         Check(Pushed(.32f,0)&&Pushed(0,-.5f)&&Pushed(.25f,.25f)&&Pushed(1,1),"past it: pushed, any way");
         Check(!Pushed(NAN,.8f)&&!Pushed(.8f,INFINITY),"nonsense is at rest");
     }
-    {   // At rest, no way and no T spot: everything aims as before.
-        float gx=7,gy=7,ahead=7,right=7;
+    {   // At rest, no way: Whirlwind on keeps the last whirl's (whirl_on.h).
+        float gx=7,gy=7;
         Check(!GridWay(.1f,.2f,ViewRight(0),ViewAhead(0),gx,gy)&&gx==7&&gy==7,"a stick at rest gives no way, the outputs untouched");
-        Check(!MotionSpot(.1f,-.2f,10,ahead,right)&&ahead==7&&right==7,"nor a T spot: the T whirls straight ahead");
     }
     {   // Facing -z in the world: ahead goes -z (grid y down), right goes +x, back +z.
         float gx=0,gy=0;
@@ -42,32 +40,12 @@ int main(){
         float gx=0,gy=0;
         Check(GridWay(x,y,ViewRight(0),ViewAhead(0),gx,gy)&&Near(gx,-1)&&Near(gy,0),"pointing left, ahead whirls left");
     }
-    {   // The spot: Ahead cells from the hero along the way, inside the game's reach.
+    {   // The spot: cells from the hero along the way, inside the game's reach.
         float x=0,y=0;
-        Check(Spot(5000,4000,0,-1,Ahead,x,y)&&Near(x,5000)&&Near(y,3990),"10 cells along the way");
-        Check(Spot(5000,4000,.6f,.8f,Ahead,x,y)&&Near(std::hypot(x-5000,y-4000),10),"any way: the same 10 cells");
+        Check(Spot(5000,4000,0,-1,10,x,y)&&Near(x,5000)&&Near(y,3990),"10 cells along the way");
+        Check(Spot(5000,4000,.6f,.8f,8,x,y)&&Near(std::hypot(x-5000,y-4000),8),"any way: the length asked");
         Check(Spot(5000,4000,1,0,200,x,y)&&Near(x-5000,aimreach::GameCells),"never past the game's reach");
         Check(!Spot(5000,4000,NAN,0,10,x,y)&&!Spot(5000,4000,1,0,0,x,y)&&!Spot(NAN,4000,1,0,10,x,y),"nonsense or no length: no spot");
-    }
-    {   // A button's whirl is the T's length.
-        Check(Near(Ahead,spellmotion::barbarian::Tuning{}.whirlAhead),"Ahead is the T's whirlAhead");
-    }
-    {   // The T: the stick as it casts gives the way, at the T's own length, however far the stick is pushed.
-        float ahead=0,right=0;
-        Check(MotionSpot(0,1,10,ahead,right)&&Near(ahead,10)&&Near(right,0),"pushed ahead: straight ahead, as at rest");
-        Check(MotionSpot(.5f,0,10,ahead,right)&&Near(ahead,0)&&Near(right,10),"half pushed right: 10 cells to the right");
-        Check(MotionSpot(-.4f,-.4f,10,ahead,right)&&Near(ahead,-7.0711f)&&Near(right,-7.0711f),"back and left: 10 cells that way");
-        Check(!MotionSpot(1,0,0,ahead,right)&&!MotionSpot(1,0,NAN,ahead,right),"no length: no spot");
-    }
-    {   // The T and a button agree: the T's spot turned by the head's heading (the transport's SpotCell) points
-        // where a button's grid way does for the same stick and view.
-        for(int d=0;d<360;d+=30)for(int s=0;s<360;s+=45) {
-            const float h=d*3.1415927f/180,a=s*3.1415927f/180,x=std::sin(a),y=std::cos(a);
-            float ahead=0,right=0,gx=0,gy=0;
-            Check(MotionSpot(x,y,10,ahead,right)&&GridWay(x,y,ViewRight(h),ViewAhead(h),gx,gy),"both have a way");
-            const Vec t=math::Normalized(math::Rotate(math::Yaw(h),{right,0,-ahead}));
-            Check(Near(t.x,gx)&&Near(t.z,gy),"the T's whirl and a button's go the same way");
-        }
     }
     std::puts("whirl-steer-test: ok");
 }

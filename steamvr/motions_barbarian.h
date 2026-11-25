@@ -29,9 +29,9 @@
 // along the swing and lands on no spot: the aim rules hand the game the monster that way (aimrules::WantsUnit).
 //
 // Whirlwind is a T held a moment (owner, 2026-11-06: "Where you basically get on T-pose (Again like all other
-// motion controls with the grip buttons on each hand hold) Which then triggers whirlwind"); it whirls ahead,
-// where you face, or, with the walk stick pushed as it casts, where that push would walk (whirl_steer.h; the
-// transport turns the spot). Body calibration's own T (#423) is held with nothing pressed, so the two never meet.
+// motion controls with the grip buttons on each hand hold) Which then triggers whirlwind"). Since 2026-11-25 the T
+// turns Whirlwind on for a few seconds, the walk stick steering its whirls, and a T again turns it off (whirl_on.h):
+// it lands on no spot of its own. Body calibration's own T (#423) is held with nothing pressed, so the two never meet.
 //
 // Find Potion, Grim Ward and Taunt (owner, 2026-11-10: "Does Barbarian have any other skills that we can add as
 // motion gesture controls to it? Ones that make sense"): the three of his casts left that are not a weapon's
@@ -97,15 +97,13 @@ struct Tuning {
     float deepBehind=-.30f;double deepWindow=.8;
     // Whirlwind: a T - the hands at least tApart apart across (level), the right one tSide or more to the right of
     // the left, both between tLow and tHigh (the shoulders to the eyes) and within tLevel of each other, their
-    // middle within tDepth of the eyes - held tHold s; it whirls whirlAhead cells ahead (along the walk stick when
-    // it is pushed: whirlsteer::MotionSpot, the same length; a button's whirl too, whirlsteer::Ahead). The frame turns with the
+    // middle within tDepth of the eyes - held tHold s; it turns Whirlwind on or off (whirl_on.h). The frame turns with the
     // head, so each hand's own depth is not asked: a T held looking aside put one hand 46 cm behind the eyes and
     // the other 38 in front, and it was let go (owner, 2026-11-06). Howl's fling ends wide at eye level, much as
     // a T: Howl is watched first and casts on the fling, and every watcher then starts over, so a T is only one
     // held after it (a first rule refusing a T the hands were flung into from together also refused the owner's
     // T spread from the hands together, with Howl not cast).
     float tSide=.60f,tApart=1.0f,tLow=-.45f,tHigh=.10f,tLevel=.25f,tDepth=.30f;double tHold=.30;
-    float whirlAhead=10;
     float swingSpeed=1.5f;    // m/s: the leap's swing, each arm at its fastest
     // Leap lands leapAhead cells away the way the arms swung (straight ahead, where you face, if straight up).
     // Its way alone went nowhere: a placed skill takes a spot (the owner, 2026-11-05: "it goes to where the
@@ -149,7 +147,7 @@ inline const char* Cue(Motion m) {
     case Motion::BattleCry:return "both fists up by the shoulders, pulled down hard to the hips";
     case Motion::Leap:return "swing both arms down by your sides, then up past the head, fast, as for a jump";
     case Motion::LeapAttack:return "pull both arms far back behind you, then swing them up past the head, fast";
-    case Motion::Whirlwind:return "hold both arms out sideways, a T, a moment: whirl ahead or where the walk stick points";
+    case Motion::Whirlwind:return "hold both arms out sideways, a T, a moment: Whirlwind on, the walk stick steers";
     case Motion::FindItem:return "hold the right hand out at a corpse a moment, then snatch it back to the shoulder";
     case Motion::FindPotion:return "hold the left hand out at a corpse a moment, then snatch it back to the shoulder";
     case Motion::GrimWard:return "hold the right hand out at a corpse a moment, then drive the fist straight down";
@@ -344,7 +342,7 @@ inline bool Done(Engine& e,Motion m) {
         }
         if(!e.Held(tee(n),n.t,t.tHold))return false;
         e.spentPose=true;
-        e.Aim({0,0,-1});e.LandAt(t.whirlAhead,0);
+        e.Aim({0,0,-1});   // no spot: the T turns Whirlwind on or off, and the walk stick steers its whirls (whirl_on.h)
         return true;
     }
     case Motion::FindItem:case Motion::FindPotion: {
