@@ -5,6 +5,20 @@
 #include <string_view>
 
 namespace framevr::panels {
+// HealthBarWidget's textured fill calls 79EDD0 to clamp its rectangle. That
+// calls 846230 -> the canvas query (return 846239). World-anchored plates
+// can be below the HD menu band; only this bounds query needs full-eye size.
+inline thread_local bool monsterPlateDrawing=false;
+struct MonsterPlateScope {
+    bool previous=monsterPlateDrawing;
+    explicit MonsterPlateScope(bool stereo){monsterPlateDrawing=previous||stereo;}
+    ~MonsterPlateScope(){monsterPlateDrawing=previous;}
+    MonsterPlateScope(const MonsterPlateScope&)=delete;
+    MonsterPlateScope& operator=(const MonsterPlateScope&)=delete;
+};
+inline bool MonsterClipCaller(uintptr_t rva) {
+    return monsterPlateDrawing&&rva==0x846239;
+}
 // Audited native UI root, layout-global and cursor-scale consumers. The same
 // engine size query serves movies and other render paths; leave those alone.
 inline constexpr uintptr_t UiCanvasReturns[]={0x843ed5,0x844195,0x8453a9,0x846239,

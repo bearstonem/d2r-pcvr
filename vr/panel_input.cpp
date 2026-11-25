@@ -33,7 +33,8 @@ uintptr_t canvasImageBase=0;
 uint64_t OnCanvasSize(){
     const auto caller=reinterpret_cast<uintptr_t>(_ReturnAddress());
     const auto native=originalCanvasSize();
-    if(framevr::panels::CursorBoundsCaller(caller-canvasImageBase))return framevr::resolution::CursorSize(native);
+    if(framevr::panels::CursorBoundsCaller(caller-canvasImageBase)||
+       framevr::panels::MonsterClipCaller(caller-canvasImageBase))return framevr::resolution::CursorSize(native);
     return framevr::panels::UiCanvasCaller(caller-canvasImageBase)?framevr::resolution::UiSize(native):native;
 }
 void InstallCanvasSize() {

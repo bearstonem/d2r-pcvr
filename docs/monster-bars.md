@@ -37,6 +37,17 @@ Check a unique with several modifiers, an immune enemy, a demon and an undead,
 then change targets and move the head while damaging an enemy. Check the text
 for overlap and the red fill in both stereo modes.
 
+## Health fill clipping
+
+The native textured health fill clamps its rectangle through `0x79EDD0`,
+which asks `0x846230` for screen bounds. The canvas hook normally supplies
+the widescreen menu band there. During native stereo monster-panel drawing,
+that specific query now receives the full eye size instead. This keeps the
+red fill visible below the menu band when looking upward. The scope covers
+both immediate and deferred plate draws and restores the normal canvas
+afterward; font/layout queries retain their original sizing. Regression tests
+cover the lower-eye region and scope restoration. Headset verification is pending.
+
 ## Ini keys
 
 `[hud] monster_names`: 0 All, 1 Bosses and elites, 2 None. New installs ship
