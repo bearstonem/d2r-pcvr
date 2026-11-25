@@ -1,117 +1,201 @@
-# D2R VR Unleashed v0.3.35 - Windows preview
+# D2R VR Unleashed v0.3.36 - Windows preview
 
-This hotfix makes your summoned army fight in formation, keeps your view on your
-hero through Leap, and guards against a game crash in the Frozen Tundra.
-[v0.3.34](https://github.com/bearstonem/d2r-pcvr/releases/tag/v0.3.34-windows-preview)
-came out only a day earlier, so its notes are repeated in full below: solid
-weapons, props with weight, cinematics in VR and Commander of the Dead.
+This update puts the main menu's act scenes around you in 3D and brings
+multiplayer through D2RLoader, a Whirlwind you steer with the walk stick and
+flails that swing. It also has a long list of community contributions.
 
-## Fixed in this hotfix
+## Gameplay and combat
 
-- **Your army fights in formation:** in a Commander of the Dead formation, the
-  summons were walked back to their places several times a second, which
-  cancelled their attacks, so they hardly fought. They now fight monsters within
-  their formation's reach - close in for Phalanx Wall and Protective Ring, far
-  out for Spearhead Assault - and form up again when the fight is over. A new
-  order still sends them to their places first.
-- **Leap keeps your view on your hero:** with **Room follows you** on, a Leap or
-  Leap Attack could leave your view behind while the hero flew on: a broken
-  third-person view, sometimes outside the walls, until the game was reloaded.
-  The room now holds still while the game carries the hero, follows only moves
-  that bring him back to you, and puts itself back under you if you and the hero
-  are ever 1.5 m apart for 1.5 seconds.
-- **A crash in the Frozen Tundra:** the game's own effect code could crash when
-  a visual effect ended. The mod now skips the one call that crashed, after
-  checking that the game's code there is exactly what it expects; otherwise it
-  leaves the game as it is. `[game_patches] effect_listener_guard` (on).
+- **Whirlwind on (Barbarian):** do the T (both arms straight out to the sides a
+  moment, both grips held) or press a button that holds Whirlwind, and Whirlwind
+  stays on.
+  - It lasts 5 seconds at level 1 and a tenth of a second more each level,
+    +skills counted, up to 8 seconds.
+  - The walk stick moves the hero, whirling. He turns as the stick turns, even
+    halfway through a whirl, and stops when you let go.
+  - Before you push the stick, the first whirl goes where you look.
+  - It ends when its time runs out, when you do the T or press the button
+    again, or when you cast something else. Running low on mana, entering
+    town, opening a menu or dying also end it.
+  - Holding the button still chains whirls for as long as you hold it.
+- **Flails swing:** with a Flail, Knout, Scourge, Khalim's Flail or Khalim's Will,
+  the chain and ball hang from the handle and swing with your hand, the same in
+  both eyes. A flail's hit now reaches its head, 0.9 m from the grip.
+  `[hands] flail_chain` (on).
+- **Hands on the controllers:** after body calibration, the middle of the hero's
+  palm sits on your controller's grip. An arm too short to reach your hand is
+  drawn longer, up to twice its length, so the hero's hands stay on yours at
+  full reach. `[arms] stretch` (on); `[arms] hand_along` moves the hand along
+  itself (-5 to 5 cm).
+- **Multiplayer through D2RLoader (experimental) - contributed by
+  geekstreetstudios:** host or join TCP/IP games from D2RLoader's multiplayer
+  panel, with VR and desktop players together.
+  - A joining VR player's swings hit with their real controllers, and the host
+    works out the damage.
+  - Other VR players' heads, arms, hands and weapons move as theirs do.
+  - The desktop host doesn't need a headset.
+  - Your party's and your mercenary's health show beside the wrist map, over
+    their heads, or both: **Labels > Names and bars > Ally health bars**
+    (Both by default).
+  - Loot beams show for joining players too, and the multiplayer panel's boxes
+    take the VR keyboard.
+- **Game chat - contributed by geekstreetstudios:** in a multiplayer game,
+  either hand wheel's **CHAT** tab shows the game's own chat, so VR and desktop
+  players see the same conversation. Type with the VR keyboard, or pull the
+  panel out to keep a read-only copy in view.
+- **Enemies wake farther away - contributed by RobinHeggelund:** offline,
+  enemies and objects become active up to 5 room rings round you, so they stop
+  popping in close by. **Graphics > Performance > Draw distance > Enemy
+  activation distance** sets 1-8 rings, or 0 for the game's own. More rings
+  cost more performance.
+- **Suggested potions - contributed by ptkk73:** when no belt column holds a
+  healing, mana or rejuvenation potion but your inventory does, it shows in the
+  belt at half opacity. Drink it, or feed it to your mercenary, as usual.
+  Potions are also easier to grab, by the neck too.
+- **A potion in each hand - contributed by ptkk73:** both hands can take a
+  potion from the belt at once, for you or your mercenary.
+- **Warlock: Miasma Bolt leaves your hand,** as Fire Bolt does, and aims up and
+  down with your hand.
+- **Weapons collide, more quietly:** your weapon against your own shield or
+  your other weapon now clanks out loud only on a hard knock (3 m/s or more),
+  at most every half second. The controllers still feel every touch.
 
-## From v0.3.34
+## Controls and interface
 
-### Gameplay and combat
+- **The main menu in 3D - contributed by Kudlatytrue:** character select's act
+  scenes stand round you, as the campfire does:
+  - Act 1: the forest and the tower's ruins, with wisps.
+  - Act 2: the road and dunes under a burning sky.
+  - Act 3: Kurast Docks.
+  - Act 4: the River of Flame.
+  - Act 5: the frozen highlands.
 
-- **Weapons collide:** your weapon stops at the shield on your other arm and
-  slides along its face, and two weapons stop at each other. Your real hand
-  cannot be stopped, so the hero's hand gives way, up to 60 cm, then they pass
-  through. A strike clanks in the controller, and a fast one plays the block
-  sound. **Combat > Melee > Weapons collide** (on).
-- **Weapons hit walls:** a weapon or shield in either hand also stops at walls,
-  closed doors and the floor, and slides along them. Barrels and urns still
-  break. **Physics > Weapons hit walls** (on).
-- **Props have weight:** knockable props weigh what they look like - a cup
-  under 0.2 kg, a chair about 10 kg, a barrel or crate about 50 kg - and a hit
-  shares its momentum by weight. A tap sends a cup flying and leaves a barrel
-  standing; a full swing rocks it and a maul knocks it over. Heavy props thud in
-  the hand. **Physics > Props have weight** (on).
-- **Commander of the Dead - contributed by Mcklem:** the Necromancer's skeletons,
-  mages, golem and revives take orders - Phalanx Wall, Protective Ring, Marching
-  Escort, Spearhead Assault, Hold Ground, Regroup and Fall Out - set on glyphs or
-  the wheel like skills. Formations follow your body's facing, and the army walks
-  to its places.
-- **Your Defense eases guard strain:** blocking strains your guard by the
-  attacker's chance to hit you. With high Defense, a normal monster takes up to
-  35 blocks to break it instead of 10.
-- **Barbarian warcries cast at once:** bring your fist (or both) up to your mouth
-  and straight out; there is no pause at the mouth any more.
-- **Both grips held for a motion never pick up loot** beside you.
-- **Mercenary potion toss:** a bottle landing within 4 m of your mercenary
-  feeds it (was 1.5 m), so a walking mercenary still catches it.
-- **Left-handed:** the weapon stays in the left hand under a shield, and
-  **Hands > Sticks stay right-handed** keeps the left stick walking and the right
-  stick turning.
+  Each act has its own sky, and switching acts no longer stalls the game. The
+  installer builds the scenes from your own game. `[frontend] scene` (on).
+- **Your heroes in order:** the main menu lists the five heroes you played last
+  first, then the rest by name. The mod changes only the save files' dates,
+  never their contents. `[frontend] sort_characters` (on).
+- **Floor map - contributed by geekstreetstudios:** set **Menus > Controller
+  menus > Detached map** to **Floor**.
+  - Pull the wrist map off and let go at any height: it lies see-through on the
+    ground ahead of you and comes along as you walk.
+  - Turn your head and hold it there, and the map comes round to your new
+    heading.
+  - **Floor map width** and **Ground map distance** set its size and place.
+  - **HUD** stays the default.
+- **Floating map - contributed by beadlebytes:**
+  - **Interface > Wrist > Map background** lets the world show through the
+    pulled-off map (100%, solid, by default).
+  - Its border now shows only while you point at it or hold it.
+  - A grab hint shows that Right Grip pulls the map off your wrist:
+    **Map grab hint** (on).
+- **Area banner - contributed by ptkk73:** entering a new area shows its name
+  before your eyes, in the game's own font and language. In a terror zone it
+  also shows the terror level.
+- **Facing on arrival - contributed by ptkk73:** you face into a cave, dungeon
+  or new area with its entrance behind you. A town portal home leaves you facing
+  Cain, Fara or the traders, or in Harrogath the town itself.
+- **Town portal in front of you - contributed by ptkk73:** it opens ahead of
+  you, or at the nearest clear spot.
+- **Monster abilities - contributed by ptkk73:** a monster's label lists its
+  abilities and immunities, in the game's own words.
+- **The laser stays - contributed by ptkk73:** holding A or using an item in the
+  inventory no longer hides the laser.
+- **Hand wheel:** the EQUIPMENT page is gone, and Stow / draw weapons with it.
+  Swap weapon sets over your shoulder and drink at the belt. The CHAT tab shows
+  only in multiplayer games.
+- **Controller menu size - contributed by geekstreetstudios:** **Menus >
+  Controller menus > Controller menu size** (50-200%).
+- **Kick has an icon - contributed by beadlebytes,** in place of an empty plate.
 
-### Controls and interface
+## Visuals and stability
 
-- **Cinematics on a screen in the world:** the intro, the act videos and the
-  main menu's Cinematics play on a screen 6 m wide, 5 m ahead, that stays put
-  while you look round. In a game the headset used to show no picture during
-  them. `[cinema]` in `d2r_pcvr.ini` sets its size and distance.
-- **Campfire character creation, tuned - contributed by Kudlatytrue:** every
-  install now builds the tuned campfire scene (Harrogath round the fire, its
-  road and rocks), with a mountain panorama round it and snow now and then, and
-  it is on by default. The fire and the Hardcore box are easier to point at.
-- **Labels > Monster names:** choose **All**, **Bosses and elites** or **None**.
+- **Graphics > Effects - contributed by DevilInLaw:** hide armors and buffs that
+  block your view. They keep working while hidden.
+  - **Ice Armor:** Off, Original, or Icicles (new, the default).
+  - **Cyclone Armor:** Off, Original, or a white mist on your forearms.
+  - **Psychic Ward:** Off, Original, or a purple mist on your forearms.
+  - **Bone Armor:** Off or Bones.
+  - **Auras** and **shout buffs:** on or off, yours and your companions'
+    separately.
+  - **Assassin charges:** compact orbs on the forearm.
+- **Campfire 1.0 - contributed by Kudlatytrue:** a new mountain panorama made
+  from three photographs, and the game's wind gusts along the wall left of the
+  gate.
+- **Ceilings in Baal's and Mephisto's rooms:** the game-drawn ceiling now clears
+  the tallest pieces in these places:
+  - the Worldstone Keep's pillars and stairs;
+  - the Throne of Destruction;
+  - the Worldstone;
+  - Mephisto's compound in the Durance of Hate.
 
-### Visuals and stability
-
-- **Corpses stop looking at you:** dead monsters and townsfolk no longer turn
-  their heads to follow you.
-- **Valve Index controllers vibrate:** most vibrations were sent without a
-  frequency, which Index controllers do not play. They now play at 170 Hz on an
-  Index; other controllers are unchanged.
+  It used to sit at a raised hand's height there.
+- **Monster health bars - contributed by ptkk73:** the red of a monster's bar no
+  longer disappears at some viewing angles, which made the monster look out of
+  health.
+- **Less work each frame:** props nobody touches are no longer physics bodies,
+  and finding monsters to target takes less of the game's time.
 
 ## Updating
 
-Download **D2R-PCVR-Setup-0.3.35.exe** for graphical installation, or
+Download **D2R-PCVR-Setup-0.3.36.exe** for graphical installation, or
 **d2r-pcvr-windows.zip** for portable setup. Existing users should choose
 **Update / repair and keep calibration and video settings**.
 
-An update keeps your saved settings, so changed defaults reach new full
-installs only. To get v0.3.34's campfire scene and its mountain panorama after
-an update, set `enabled=1` and `panorama=1` under `[campfire]` in
-`d2r_pcvr.ini`. Weapons collide, Weapons hit walls, Props have weight and the
-crash guard are on after either kind of install.
+An update keeps your saved settings, so changed defaults reach new full installs
+only. New installs start with **Terrain draw distance** 4 (was 6) and **Fog
+distance** 400 (was 600).
+
+These new settings are on after either kind of install:
+- the 3D main menu (the installer builds its scenes from your game) and the
+  hero order;
+- Enemy activation distance 5;
+- the map grab hint;
+- the flail chain;
+- arms reaching your controllers;
+- Ice Armor's icicles.
+
+The campfire's new panorama also sits at the right height after an update.
 
 ## Verification and known issues
 
-Automated: the native Windows build and its 238 tests pass, with the release
+Automated: the native Windows build and its 299 tests pass, with the release
 notes, identity and installer staging checks.
 
-Headset (one PC, SteamVR): this hotfix's army and Leap fixes. A Necromancer's
-army of up to 12 broke off to fight in formation and formed up again. About 15
-Leaps and 8 Leap Attacks kept the view within 11 cm of the hero. From v0.3.34:
-Weapons collide with a mace and a shield on a Paladin, cinematics from the main
-menu, Commander of the Dead switching formations, and the tuned campfire scene.
+Tried in the headset (one PC, SteamVR, offline):
+- **Whirlwind on:** eight runs, steered by the walk stick through every turn.
+- **Flails:** the chain swinging in the game. The fix for the chain looking
+  different in each eye is confirmed in the log; how it looks has not been
+  reported yet.
+- **Hands on the controllers:** the arms reaching the controllers.
+- **Enemy activation distance:** enemies no longer popping in close.
+- **The 3D main menu:** switching act scenes, before the fix for its stall.
+- **From the logs:** untouched props with no physics bodies, no CHAT tab
+  offline, and the area banner and town portal running on Steam 3.4.95041.
 
-Not yet tried in a headset: the crash guard in the Frozen Tundra (the crash has
-not been reproduced here; the guard only acts when the game would have
-crashed), and from v0.3.34 Weapons hit walls, Props have weight, cinematics in
-a game, Defense and guard strain, the instant warcries, the Index fix on an
-Index, and the left-handed changes. Battle.net remains experimental.
+Contributors tried their own work in their headsets on v0.3.35-based builds:
+- multiplayer, with a desktop host and a VR client;
+- chat, with a VR host and a VR client;
+- the floor map, the floating map's background and grab hint, and Kick's icon;
+- suggested potions, monster abilities, the area banner, facing on arrival, the
+  town portal, the health bars and the laser fix;
+- Graphics > Effects;
+- Campfire 1.0.
 
-- **Weapons hit walls** uses the game's own wall map in cells of about 46 cm,
-  so a weapon can stop a little short of a drawn wall or a little inside it. The
-  floor is taken as flat, so stairs and slopes within reach are not followed.
-- **A shield whose shape could not be measured** collides as a 34 x 44 cm board.
+Not yet tried in a headset:
+- Miasma Bolt from the hand;
+- the new ceiling heights;
+- a hard knock's clank;
+- the fix for the act-switching stall;
+- multiplayer and chat on this release's combined build;
+- VR-with-VR multiplayer since the latest changes.
+
+Known issues:
+- **Multiplayer is experimental.** Let the first connection finish before you
+  swing, and restart both games between sessions.
+- **Battle.net remains experimental.**
+- **A Paladin's shield whose shape could not be measured:** a weapon can sink
+  40-60 cm into it before it is pushed back.
 - **Frame generation is experimental.** It uses a pre-release bridge. Expect
   artifacts around moving monsters and during fast head turns.
 - **Left-handed** is experimental.
@@ -121,10 +205,21 @@ Index, and the left-handed changes. Battle.net remains experimental.
 
 ## Special thanks
 
-Thanks to **Mcklem** for Commander of the Dead, to **Kudlatytrue** for the tuned
-campfire scene, its panorama and its snow, to the players who reported the Leap
-view and the Frozen Tundra crash with their logs, and to everyone testing,
-reporting bugs and helping improve the mod!
+Thanks to these contributors:
+- **Kudlatytrue** for the 3D main menu and Campfire 1.0;
+- **geekstreetstudios** for multiplayer, game chat and the floor map;
+- **ptkk73** for suggested potions, monster abilities, the area banner, facing
+  on arrival, the town portal in front, a potion in each hand, the health bar
+  and laser fixes;
+- **beadlebytes** for the floating map's background and grab hint, and Kick's
+  icon;
+- **DevilInLaw** for Graphics > Effects, the icicles, the forearm mists and the
+  charge orbs;
+- **RobinHeggelund** for the enemy activation distance.
+
+Thanks also to the players who reported Whirlwind's direction, the stiff flails,
+the Warlock's aim and the low ceilings in Baal's and Mephisto's rooms, and to
+everyone testing, reporting bugs and helping improve the mod!
 
 D2R VR Unleashed is a mod by **monkeylashes**, with contributions from the
 community. From v0.3.29 its source is under the Mozilla Public License 2.0;
@@ -132,38 +227,47 @@ releases up to 0.3.28 stay available under the MIT license.
 
 ## Downloads and links
 
-- [Windows installer, portable ZIP and checksums](https://github.com/bearstonem/d2r-pcvr/releases/tag/v0.3.35-windows-preview)
-- [Installation instructions](https://github.com/bearstonem/d2r-pcvr/blob/v0.3.35-windows-preview/INSTALL-WINDOWS.md)
-- [Controls](https://github.com/bearstonem/d2r-pcvr/blob/v0.3.35-windows-preview/CONTROLS.md)
-- [Full source comparison](https://github.com/bearstonem/d2r-pcvr/compare/v0.3.33-windows-preview...v0.3.35-windows-preview)
+- [Windows installer, portable ZIP and checksums](https://github.com/bearstonem/d2r-pcvr/releases/tag/v0.3.36-windows-preview)
+- [Installation instructions](https://github.com/bearstonem/d2r-pcvr/blob/v0.3.36-windows-preview/INSTALL-WINDOWS.md)
+- [Controls](https://github.com/bearstonem/d2r-pcvr/blob/v0.3.36-windows-preview/CONTROLS.md)
+- [Full source comparison](https://github.com/bearstonem/d2r-pcvr/compare/v0.3.35-windows-preview...v0.3.36-windows-preview)
 - [Project on GitHub](https://github.com/bearstonem/d2r-pcvr)
 - [Discord](https://discord.gg/DmbFfJAnnm)
 - [Support](https://ko-fi.com/bearstonem)
 
 <!-- PCVR_IN_HEADSET_NOTES
-release: v0.3.35-windows-preview
-credits: Mcklem, Kudlatytrue.
-- HOTFIX: your army fights in formation, then forms up again when the fight is over.
-- HOTFIX: Leap keeps your view on your hero (Room follows you).
-- HOTFIX: a game crash in the Frozen Tundra is guarded against.
-- WEAPONS COLLIDE: your weapon stops at your shield; two weapons stop at each other.
-- The hero's hand gives way up to 60 cm, then they pass through. Combat > Melee.
-- Weapons and shields stop at walls, closed doors and the floor. Physics > Weapons hit walls.
-- PROPS HAVE WEIGHT: a tap sends a cup flying; a barrel takes a full swing to rock.
-- A maul knocks a barrel over; heavy props thud in the hand. Physics > Props have weight.
-- COMMANDER OF THE DEAD: give your skeletons, mages and golem orders - by Mcklem.
-- Phalanx Wall, Protective Ring, Escort, Spearhead, Hold Ground, Regroup, Fall Out - by Mcklem.
-- Set the army's orders on glyphs or the wheel; the army walks to its places.
-- Your Defense eases guard strain: high Defense takes far more blocks to break.
-- Barbarian warcries cast at once: up to the mouth and straight out, no pause.
-- Holding both grips for a motion never picks up loot.
-- Mercenary potion toss: a bottle within 4 m of your mercenary feeds it.
-- Left-handed: the weapon stays in the left hand under a shield.
-- Hands > Sticks stay right-handed: left stick walks, right stick turns.
-- CINEMATICS play on a screen 6 m wide, 5 m ahead, that stays put as you look round.
-- Campfire character creation: the tuned scene for every install - by Kudlatytrue.
-- A mountain panorama round the campfire, and snow now and then - by Kudlatytrue.
-- Labels > Monster names: All, Bosses and elites, or None.
-- Corpses no longer turn their heads to follow you.
-- Valve Index controllers vibrate (pulses at 170 Hz on an Index).
+release: v0.3.36-windows-preview
+credits: Kudlatytrue, geekstreetstudios, ptkk73, beadlebytes, DevilInLaw, RobinHeggelund.
+- WHIRLWIND ON: do the T or press its button; Whirlwind stays on for 5 to 8 seconds.
+- While it is on, the walk stick steers each whirl, even halfway; let go to stop.
+- FLAILS SWING: the chain and ball swing with your hand; the hit reaches the head.
+- Hands on the controllers: the palm on the grip; arms reach your hands at full reach.
+- MULTIPLAYER (experimental): TCP/IP games through D2RLoader - by geekstreetstudios.
+- A joining VR player's swings hit with real controllers; VR players' arms show to others.
+- Party and mercenary health: Labels > Names and bars > Ally health bars.
+- GAME CHAT on the wheel's CHAT tab in multiplayer games - by geekstreetstudios.
+- Enemies wake up to 5 room rings out, so no close pop-in - by RobinHeggelund.
+- Set it: Graphics > Performance > Draw distance > Enemy activation distance.
+- Suggested potions: a missing type shows in the belt from your inventory - by ptkk73.
+- Potions are easier to grab, and each hand can take one at once - by ptkk73.
+- Warlock: Miasma Bolt leaves your hand and aims up and down.
+- Weapons collide: the clank sounds only on a hard knock; the hands still feel each touch.
+- MAIN MENU IN 3D: each act's scene and sky stand round you - by Kudlatytrue.
+- The main menu lists your 5 last played heroes first, then the rest by name.
+- FLOOR MAP: Menus > Controller menus > Detached map > Floor - by geekstreetstudios.
+- Floating map: a see-through background and a grab hint - by beadlebytes.
+- Area banner: a new area's name before your eyes, with the terror level - by ptkk73.
+- You face into a new area, and a town portal home faces the town - by ptkk73.
+- The town portal opens in front of you - by ptkk73.
+- Monster labels list abilities and immunities - by ptkk73.
+- The laser stays while you hold A or use an item in the inventory - by ptkk73.
+- Hand wheel: EQUIPMENT page removed; CHAT shows only in multiplayer games.
+- Controller menu size: Menus > Controller menus - by geekstreetstudios.
+- Kick has its own icon - by beadlebytes.
+- GRAPHICS > EFFECTS: hide armors, auras and shouts; they keep working - by DevilInLaw.
+- Ice Armor icicles, forearm mists for Cyclone Armor and Psychic Ward - by DevilInLaw.
+- Assassin charges as compact orbs on the forearm - by DevilInLaw.
+- Campfire 1.0: a new mountain panorama and wind gusts - by Kudlatytrue.
+- Ceilings clear the tallest pieces in Baal's and Mephisto's rooms.
+- Monster health bars keep their red at every viewing angle - by ptkk73.
 PCVR_IN_HEADSET_NOTES -->
