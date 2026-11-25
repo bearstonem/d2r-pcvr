@@ -25,8 +25,22 @@ public:
         const auto bucket=Bucket(key);assert(references[bucket]);
         if(--references[bucket]==0)bits.fetch_and(~(uint64_t(1)<<bucket),std::memory_order_release);
     }
+    // A scissor can switch between two regions that both need draw callbacks.
+    // Only entering or leaving the set changes this key's reference count.
+    void Update(uint64_t key, bool wasActive, bool isActive) {
+        if (wasActive == isActive) return;
+        if (isActive) Add(key);
+        else Remove(key);
+    }
     bool MaybeContains(uint64_t key) const {
         return (bits.load(std::memory_order_acquire)&(uint64_t(1)<<Bucket(key)))!=0;
+    }
+    template<class KeyAt> bool MaybeContainsAny(uint32_t count, KeyAt keyAt) const {
+        const auto active = bits.load(std::memory_order_acquire);
+        if (!active) return false;
+        for (uint32_t i = 0; i < count; ++i)
+            if (active & (uint64_t(1) << Bucket(keyAt(i)))) return true;
+        return false;
     }
 };
 }

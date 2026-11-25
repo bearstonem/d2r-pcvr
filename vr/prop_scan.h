@@ -16,6 +16,7 @@ bool Latest(framevr::props::Scan&);
 void Publish(const framevr::props::Poses&); // the XR thread: matrices for the moving props
 const char* KindName(uint16_t kind);        // "cup", for the log
 void CountKnocks(unsigned byWeapons,unsigned byMovingThings); // for the report
+void CountBodies(unsigned propBodies); // the XR thread, each frame: the most Box3D bodies the props held, for the report
 void Transformed(); // the renderer's transform hook, after each original call
 // The game-drawn ceiling's world updates (vr/engine_units.cpp) call the renderer's transform function
 // from outside its own pass: no props are written from those calls (the renderer's pass that frame

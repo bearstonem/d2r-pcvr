@@ -127,6 +127,7 @@
 #include "wrist_chat.h"
 #include "wrist_chat_ui.h"
 #include "../vr/wrist_chat_native.h"
+#include "../vr/offline_difficulty.h"
 #include "native_panels.h"
 #include "cinema_screen.h"
 #include "npc_dialogue.h"
@@ -567,6 +568,7 @@ keyboard::Board chatBoard{};
 bool chatShown=false,chatKeyboard=false,chatConsumes=false,chatTrigger=false,chatGrip=false,chatCancelPending=false;
 bool chatAtlasPending=false,chatImageReady=false,chatNativeCaptured=false;
 int chatLit=-1;std::string chatPaintKey;wristchat::FirstHistory firstHistory;wristchat::Composer chatSubmit;bool chatSourceRequested=false;uint64_t chatPollAt=0,chatOpenUntil=0;
+bool chatAllowed=false;   // a multiplayer game this frame (ChatAllowed): the wheel's CHAT tab and the chat itself
 
 uint64_t settingsSession=0;
 // The redesign's pointing: the filter turns the laser and the right trigger
@@ -2140,14 +2142,8 @@ std::vector<uint8_t> PaintGameplay() {
     HFONT font=CreateFontW(33,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Arial");
     auto oldFont=SelectObject(dc,font);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(225,235,240));
     auto label=[&](const wchar_t* text,RECT rect) {DrawTextW(dc,text,-1,&rect,DT_CENTER|DT_VCENTER|DT_SINGLELINE);};
-    label(L"SKILLS  /  EQUIPMENT  /  BELT",{0,0,1024,96});
-    const wchar_t* names[]={L"B",L"X",L"Y",L"RB",L"LT + B",L"LT + X",L"LT + Y",L"LT + RB",
-        L"Melee / Bow",L"Swap I / II",L"",L"",L"Belt 1",L"Belt 2",L"Belt 3",L"Belt 4"};
-    for(int i=0;i<16;++i) {
-        RECT cell{(i%4)*256+7,96+(i/4)*144+7,(i%4+1)*256-7,96+(i/4+1)*144-7};
-        fill(cell,i>=12?RGB(42,34,25):RGB(27,43,54));label(names[i],cell);
-    }
-    label(L"Trigger: select skill   /   Grip: take belt potion",{0,672,1024,768});
+    // (0,0)-(1024,768) held a SKILLS / EQUIPMENT / BELT reference card that no quad ever showed; it went with the
+    // wheel's EQUIPMENT page (2026-11-24). The parts of this image drawn are the sewer prompts and the arrow below.
     // Neutral bottle, labelled by belt column. Colour/type is deliberately not
     // guessed: the native game decides which item occupies that column.
     for(int i=0;i<4;++i) {
@@ -2581,8 +2577,24 @@ void CancelChatTyping(){
   else if(GetTickCount64()>=chatOpenUntil){chatCancelPending=false;chatOpenUntil=0;}
  }
 }
+// The wrist chat is for multiplayer games only (wristchat::Available): the game's own client mode, the getter verified
+// by its bytes that offline difficulty and Reset Skills & Stats also read (offlinedifficulty::ClientMode). It follows
+// the game live; a line at each change.
+bool ChatAllowed(){
+ const uint64_t local=gamestate::LocalPlayer();const int mode=offlinedifficulty::ClientMode();
+ const bool allowed=wristchat::Available(local!=0,mode);
+ static int said=-2;
+ if(const int state=local?mode:-2;state!=said){
+  said=state;
+  if(local){char line[160];std::snprintf(line,sizeof line,"Frame chat: client mode %d - %s",mode,allowed?"a multiplayer game: the wheel's CHAT tab and the chat":
+   mode<0?"not verified: no CHAT tab or chat":"not a multiplayer game: no CHAT tab or chat");Say(line);}
+ }
+ return allowed;
+}
 void ChatStep(){
- const auto now=GetTickCount64();const uint64_t local=gamestate::LocalPlayer();
+ // Not a multiplayer game: the chat runs as outside a game (session 0), so one open, pinned or typing closes below
+ // (CancelChatTyping, the model reset) and nothing is captured or shown.
+ const auto now=GetTickCount64();const uint64_t local=chatAllowed?gamestate::LocalPlayer():0;
  if(local!=chatModel.session){chatSourceRequested=false;chatPollAt=0;chatSubmit.Reset();CancelChatTyping();chatModel.Session(local);chatNativeCaptured=false;chatPaintKey.clear();}
  const bool focused=gameWindow&&GetForegroundWindow()==gameWindow;
  if(chatCancelPending&&focused)CancelChatTyping();
@@ -2993,7 +3005,7 @@ void MotionPointer() {
     const auto mid=ray+direction*(beamLength*.5f);
     beamPose=XrPose({mid,math::BeamOrientation(direction,V(head.position)-mid)});pointerVisible=true;
     if(pointerHit) {
-        motionInput.hover=interaction::WheelCell(hit.u,hit.v,interactionOutput.hover,interactions.Page(),hand,interactionInput.snapshot.developer,interactions.DeveloperPage(),interactionOutput.leftStrikes>=0,interactionOutput.motionsBox,spellmotion::PageOf(interactionInput.snapshot.skillClass).count);
+        motionInput.hover=interaction::WheelCell(hit.u,hit.v,interactionOutput.hover,interactions.Page(),hand,interactionInput.snapshot.developer,interactions.DeveloperPage(),interactionOutput.leftStrikes>=0,interactionOutput.motionsBox,spellmotion::PageOf(interactionInput.snapshot.skillClass).count,interactionInput.snapshot.multiplayer);
         dotPose=XrPose({hit.point+math::Rotate(pose.q,{0,0,.003f}),pose.q});
     }
 }
@@ -3958,6 +3970,7 @@ void StepDroppedBottles() {
     droppedBottles->Heft(propHeft.load());
     droppedBottles->Weapons(HeldColliders());
     droppedBottles->Advance(in.time,in.stage.anchor);
+    propscan::CountBodies(droppedBottles->Bodies());   // props are bodies only on contact: the ten-second line says how many at most
     // Draw a thrown potion where this frame's steps left it.
     if(interactionOutput.flying&&interactionOutput.flightId&&droppedBottles->Tossed(thrown)&&thrown.id==interactionOutput.flightId&&!thrown.landed)
         interactionOutput.flight={in.stage.Room(thrown.p),math::Multiply(math::Conjugate(in.stage.base),thrown.q)};
@@ -4628,6 +4641,7 @@ void Input() {
     interactionInput.at=GetTickCount64();interactionInput.epoch=meleeEpoch;interactionInput.active=motionInput.active;
     interactionInput.head={motionInput.head.p,motionInput.head.q};
     interactionInput.snapshot=bindingSnapshot;interactionInput.reply=interactionstate::Status();
+    chatAllowed=ChatAllowed();interactionInput.snapshot.multiplayer=chatAllowed;   // the CHAT tab: a multiplayer game only
     interactionInput.spell=motion.Selection()>=0;interactionInput.wheel=motionInput.palette;interactionInput.cancel=motionInput.cancel;
     interactionInput.quickCast=handOutput.slot>=0||handOutput.spells[0]>=0||handOutput.spells[1]>=0;
     interactionInput.wheelHand=handOutput.wheel;
@@ -4754,7 +4768,7 @@ void Input() {
            (interactions.Page()!=interaction::MenuPage::Spells||interactions.TreeFilter()!=skillcategories::All)){
             const auto page=interactions.Page();
             const char* name=page==interaction::MenuPage::Map?"Map":page==interaction::MenuPage::Developer?"Developer":
-                page==interaction::MenuPage::Equipment?"Equipment":page==interaction::MenuPage::Spells?"Spells":"editor";
+                page==interaction::MenuPage::Glyphs?"Glyphs":page==interaction::MenuPage::Motions?"Motions":page==interaction::MenuPage::Spells?"Spells":"editor";
             const char* hand=interactionOutput.wheelHand==0?"main":interactionOutput.wheelHand==1?"off":"both";
             if(!handRoles.map.left)hand=interactionOutput.wheelHand==0?"R":interactionOutput.wheelHand==1?"L":"both";   // right-handed: as it always logged
             char line[160];
@@ -5078,7 +5092,7 @@ void Input() {
             potions::AtMouth(hand.p,hand.q,interactionInput.head.p,interactionInput.head.q),interactionOutput.bottleEmpty);
         Say(line);potionReportAt=GetTickCount64()+2000;
     }
-    if(interactionOutput.chat&&!chatModel.tab){
+    if(interactionOutput.chat&&chatAllowed&&!chatModel.tab){
         CancelChatTyping();chatModel.Session(gamestate::LocalPlayer());chatModel.Open(interactionOutput.wheelHand>=0?interactionOutput.wheelHand:interactionInput.wristHand);
         chatStartRequested=chatModel.pinned;chatPaintKey.clear();chatImageReady=false;chatTrigger=chatGrip=true;
         interactionOutput.block=true;settingsOwned=true;interactionInput.active=motionInput.active=false;lootGate|=lootaim::GateSettings;
@@ -6111,7 +6125,7 @@ void Input() {
     panelinput::WorldInput(motionInput.active&&motionInput.tracked[0]&&motionInput.tracked[1]&&motionInput.aimTracked);
     if(!motionInput.active||motionOutput.block||!motionOutput.rayValid)handOutput.interact=false;
     if(motionInput.quickCast&&(motionOutput.block||!motionOutput.rayValid))handControls.Close();
-    const uint32_t hidden=interactionOutput.stowed?3u:(journalMode||leatherMode)?1u<<UiRole(leather::Hand,handrole::System::LeatherMenu):interactionOutput.BottleMask();
+    const uint32_t hidden=(journalMode||leatherMode)?1u<<UiRole(leather::Hand,handrole::System::LeatherMenu):interactionOutput.BottleMask();
     skel::SetInteractionHidden(hidden);
     potionScene=potions::MakeScene(interactionInput,interactionOutput);
     if(potionFlight.id&&potionFlight.shown)potions::AddThrown(potionScene,potionFlight.pose,potionFlight.code);   // #292
@@ -6138,7 +6152,7 @@ void Input() {
     elements::Input elementalInput;
     elementalInput.context={interactionInput.session,(meleeEpoch<<32)|bowWorldEpoch,motionInput.skillContext,motionInput.equipment};
     elementalInput.at=interactionInput.at;
-    elementalInput.active=motionInput.active&&!interactionOutput.wheel&&!interactionOutput.stowed&&!journalMode;
+    elementalInput.active=motionInput.active&&!interactionOutput.wheel&&!journalMode;
     elementalInput.head=interactionInput.head;
     for(int h=0;h<2;++h) {
         elementalInput.hands[h]=interactionInput.hand[h];elementalInput.tracked[h]=interactionInput.tracked[h];
@@ -6262,8 +6276,8 @@ void Input() {
             interaction::icons::Prefetch(interactionInput.snapshot);
             interactionPrefetchSession=interactionInput.session;interactionPrefetchRevision=interactionInput.snapshot.revision;
         }
-        const uint64_t key=(interaction::icons::Revision()*0x9e3779b97f4a7c15ull)^(uint64_t(interactionOutput.editor)<<60)^(uint64_t(interactionOutput.editSlot+1)<<56)^(uint64_t(interactionOutput.editPage)<<48)^(uint64_t(interactionInput.snapshot.revision)<<32)^(uint64_t(interactionOutput.utility)<<24)^(
-            uint64_t(interactionOutput.hover+1)<<16)^(uint64_t(motion.Selection()+1)<<8)^(uint64_t(interactionOutput.result)<<4)^uint64_t(interactionOutput.stowed)^(uint64_t(interactionOutput.map)<<1)^(uint64_t(interactionOutput.nearHolster+1)<<26)^(uint64_t(interactionOutput.bottle+1)<<28)^(uint64_t(interactionOutput.bottleEmpty)<<2)^(uint64_t(snapshotFresh)<<3)^(uint64_t(interactionOutput.BottleMask())<<20)^
+        const uint64_t key=(interaction::icons::Revision()*0x9e3779b97f4a7c15ull)^(uint64_t(interactionOutput.editor)<<60)^(uint64_t(interactionOutput.editSlot+1)<<56)^(uint64_t(interactionOutput.editPage)<<48)^(uint64_t(interactionInput.snapshot.revision)<<32)^(
+            uint64_t(interactionOutput.hover+1)<<16)^(uint64_t(motion.Selection()+1)<<8)^(uint64_t(interactionOutput.result)<<4)^(uint64_t(interactionOutput.map)<<1)^(uint64_t(interactionOutput.nearHolster+1)<<26)^(uint64_t(interactionOutput.bottle+1)<<28)^(uint64_t(interactionOutput.bottleEmpty)<<2)^(uint64_t(snapshotFresh)<<3)^(uint64_t(interactionOutput.BottleMask())<<20)^
             (uint64_t(interactionOutput.bottles[1].column+1)<<22)^(uint64_t(interactionOutput.bottles[1].empty)<<19);
         const auto now=GetTickCount64();
         const bool visible=leatherHudVitals||motionInput.active||interactionOutput.wheel||interactionOutput.wrist||interactionOutput.vitals||interactionOutput.critical||interactionOutput.bottle>=0||
@@ -6272,7 +6286,9 @@ void Input() {
         const bool missingCompanions=snapshotFresh&&wriststatus::Rows(context.companions,context.effects)&&!companionPaintValid;
         if(visible&&(!interactionPaintValid||missingCompanions||key!=interactionPaintKey||context!=interactionPaintContext)) {
             if(now>=interactionPaintAt&&(!interactionPaintRequest||key!=interactionRequestedKey||context!=interactionRequestedContext)) {
-                interactionPaintRequest=interactionPainter.Submit({snapshotFresh?interactionInput.snapshot:interaction::Snapshot{},interactionOutput,motion.Selection(),controllerLabels});
+                auto paintSnapshot=snapshotFresh?interactionInput.snapshot:interaction::Snapshot{};
+                paintSnapshot.multiplayer=interactionInput.snapshot.multiplayer;   // the footer as the ray hits it: CHAT or not, stale or fresh
+                interactionPaintRequest=interactionPainter.Submit({paintSnapshot,interactionOutput,motion.Selection(),controllerLabels});
                 interactionRequestedKey=key;interactionRequestedContext=context;interactionPaintAt=now+100;
             }
             interaction::PaintedAtlas painted;
@@ -6586,7 +6602,7 @@ void Input() {
     if(!dualBindings&&leftMenuButton.PlainPressed())a.held|=D2RVR_ACT_MAP;
 
     // Stick clicks toggle wheels here and retain native hold-to-sort in menus.
-    // Gameplay swaps remain shoulder or equipment-wheel actions.
+    // Gameplay swaps remain shoulder actions.
     if(motionControls.load()&&gameplayChain) {
         p.buttons=0;p.left_trigger=p.right_trigger=0;
         a.held&=~D2RVR_ACT_ATTACK;
@@ -8123,7 +8139,7 @@ void EndPair() {
     // is its anchor. Pointer, not index: blood, strain and Arcane Decay insert below the HUD later and shift indices.
     const XrCompositionLayerBaseHeader* floatMapAnchor=count?layers[count-1]:nullptr;
     const bool weaponSkillIndicators=vrsettings::Read().values[settings::WeaponSkillIndicators]>.5f;
-    if(weaponSkillIndicators&&gameplayVisible&&!interactionOutput.wheel&&!interactionOutput.stowed&&interactionOutput.bottle<0&&
+    if(weaponSkillIndicators&&gameplayVisible&&!interactionOutput.wheel&&interactionOutput.bottle<0&&
        interactionPaintValid&&interactionPaintContext.cue==interactionOutput.cue&&interactionChain) {
         const auto& cue=interactionOutput.cue;
         const int side=0;
@@ -8133,7 +8149,7 @@ void EndPair() {
         if(cue.expanded)motionQuad(activeSkill,pose,.24f,.18f,{{768,0},{256,192}},interactionChain);
         else motionQuad(activeSkill,pose,.075f,.075f,{{768,0},{96,96}},interactionChain);
     }
-    if(weaponSkillIndicators&&gameplayVisible&&!interactionOutput.wheel&&!interactionOutput.stowed&&interactionOutput.bottle<0&&
+    if(weaponSkillIndicators&&gameplayVisible&&!interactionOutput.wheel&&interactionOutput.bottle<0&&
        interactionPaintValid&&interactionPaintContext.leftCue==interactionOutput.leftCue&&interactionChain) {
         const auto& cue=interactionOutput.leftCue;
         if(cue.known&&cue.id>=0){

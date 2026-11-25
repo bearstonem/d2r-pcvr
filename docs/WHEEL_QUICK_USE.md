@@ -4,7 +4,7 @@ Candidate, headset testing pending. See [controls](../CONTROLS.md).
 
 ## Interaction
 
-A separate Quick Use box on both spell/equipment wheels shares an item-type
+A separate Quick Use box on each hand wheel's spells page shares an item-type
 assignment. A short trigger press uses on release; a 0.65 s hold opens an
 8-row paginated inventory picker. Empty-slot clicks also edit. Tracking loss,
 session changes, hand changes, a lost pointer and replaced/empty items cancel

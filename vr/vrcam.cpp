@@ -140,6 +140,9 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "hand_role.h"
 #include "render_resolution.h"
 #include "scene_depth.h"
+#ifdef D2RVR_COMPARE_DEPTH_BARRIERS
+#include "depth_barrier_compare.h"
+#endif
 #include "light_bounds.h"
 #include "game_device_only.h"
 #include "menu_controls.h"
@@ -8004,6 +8007,12 @@ struct GameDrawSpan {
     explicit GameDrawSpan(bool o) : outer(o) { if (outer) { g_gameDrawSerial.fetch_add(1); g_inGameDraw.store(true); } }
     ~GameDrawSpan() { if (outer) g_inGameDraw.store(false); }
 };
+// The game draw now, for what is posed on the render workers inside it (vr/skeletons.cpp: a flail's chain steps once a
+// game frame and both eyes of a pair get the same chain): its serial, and false outside one.
+bool GameDrawNow(uint32_t* serial) {
+    *serial = g_gameDrawSerial.load(std::memory_order_relaxed);
+    return g_inGameDraw.load(std::memory_order_relaxed);
+}
 uintptr_t HookDrawGameScreen(int a) {
     static thread_local int depth = 0;
     const GameDrawSpan span(depth == 0);
@@ -8186,6 +8195,9 @@ uintptr_t HookDrawGameScreen(int a) {
     if(lastEnd>0) {
         const double cycle=ended-lastEnd;
         maxPair=std::max(maxPair,cycle);
+#if defined(D2RVR_COMPARE_DEPTH_BARRIERS) && defined(D2RVR_NATIVE_OPENXR)
+        framevr::scenedepth::compare::FinishPair(cycle*.001,(t2-t0)*.001);
+#endif
 #ifdef D2RVR_NATIVE_OPENXR
         ++cycleBins[binOf(cycleEdges,cycle*.001)];
         ++workBins[binOf(workEdges,cycle*.001-xr.waitFrameMs)];
@@ -10181,13 +10193,14 @@ void PushArms() {
 }
 #ifdef D2RVR_NATIVE_OPENXR
 // Held items collide: a first touch that clanked, from the skeleton hook - a clank in both controllers, or in the one
-// whose item struck a wall or the floor (the input thread plays it), and, met fast enough, the game's metal sound at
-// the hero ([gameplay] held_collision_sound).
+// whose item struck a wall or the floor (the input thread plays it), and, on a hard knock of the two items (held::
+// KnockSoundSpeed, at most every KnockSoundGap) or the world met at SoundSpeed, the game's metal sound at the hero
+// ([gameplay] held_collision_sound).
 void HeldClankTick() {
-    float strength = 0, speed = 0; unsigned arms = 0;
-    if (!skel::TakeHeldClank(strength, speed, arms)) return;
+    float strength = 0; unsigned arms = 0; bool sound = false;
+    if (!skel::TakeHeldClank(strength, arms, sound)) return;
     framevr::HeldClank(strength, arms);
-    if (speed >= framevr::held::SoundSpeed) melee::QueueHeldClankSound();
+    if (sound) melee::QueueHeldClankSound();
 }
 #endif
 
@@ -11881,9 +11894,10 @@ void OnBind(command_list* cl, uint32_t count, const resource_view* rtvs, resourc
     t_dsW = t_dsH = 0;
     if (dsv.handle) {
         device* dev = cl->get_device();
-        const resource_desc d = framevr::resources::Describe(dev,framevr::resources::Resolve(dev,dsv));
+        const resource depth = framevr::resources::Resolve(dev,dsv);
+        const resource_desc d = framevr::resources::Describe(dev,depth);
 #ifdef D2RVR_NATIVE_OPENXR
-        framevr::scenedepth::Observe(cl,count,rtvs,framevr::resources::Resolve(dev,dsv),d);
+        framevr::scenedepth::Observe(cl,count,rtvs,depth,d);
 #endif
         t_dsW = d.texture.width; t_dsH = d.texture.height;
     }
@@ -13552,6 +13566,10 @@ DWORD WINAPI UpdateThread(void*) {
 
 }  // namespace
 
+namespace gamedraw {
+// The game draw being posed for (vr/skeletons.cpp: a flail's chain steps once a game frame): its serial; false outside one.
+bool Now(uint32_t* serial) {return GameDrawNow(serial);}
+}
 namespace monsterimmunity {
 bool ReadPosition(uint32_t id,float out[3]) {return worldobj::MonsterPosition(id,out);}
 }

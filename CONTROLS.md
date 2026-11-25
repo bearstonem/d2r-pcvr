@@ -7,7 +7,7 @@ use two tracked VR controllers; an Xbox controller is not required.
 published release. It is available to everyone and works offline.
 
 In [developer mode](steamvr/DEVELOPMENT_SCENARIOS.md), the hand-wheel **DEV** tab
-provides Character, Equipment and act-grouped travel tools. These test tools are
+provides **HERO**, **GEAR** and act-grouped travel tools. These test tools are
 hidden in ordinary play; launch with `--frame-vr --frame-dev` for isolated offline tests.
 
 ## Button names
@@ -132,7 +132,7 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Action | VR control |
 | --- | --- |
 | Walk / turn | Left stick / right stick sideways, including with a wheel open; snap by default, with optional smooth turning |
-| Open or close a hand wheel | Click that hand's thumbstick; it stays open without holding, and reopens on that hand's last page (Map or Equipment; **SPELLS** goes back), and its skill editor on the last tree you picked, until a new game |
+| Open or close a hand wheel | Click that hand's thumbstick; it stays open without holding, and reopens on that hand's last page (Map, Glyphs, Motions or DEV; **SPELLS** goes back), and its skill editor on the last tree you picked, until a new game |
 | Switch to the other wheel | Click the other thumbstick |
 | Assign a button | Opposite hand's laser + trigger: select a wedge, then a skill |
 | Cast a buff by drawing a glyph | Hold your **Draw glyph** button, draw a shape in the air and let go: the skill that hand has on that shape is cast. See [Glyph casting](#glyph-casting) |
@@ -145,6 +145,7 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Recalibrate body and eye height, no menu | Stand in a **T cross**, nothing pressed and no potion in hand, for 2 seconds: both controllers buzz lightly while you hold it (the buzz stopping means you left the pose and the 2 seconds start over), then the prompt opens; hold both triggers to save, Right B cancels. It applies as soon as it says Saved. Not in Seated play, with a menu open or a monster close (in a game you joined, monsters do not block it). With vibration off the prompt opening is the only cue. Turn it off: VR Settings > Comfort > Body > **T cross to calibrate** |
 | Explain a VR setting | Point the right-hand laser at its label or controls for about half a second. Help appears beside the panel and disappears when you point away; no click needed |
 | Minimap | Either wheel → MAP; movement remains available |
+| Chat (multiplayer games) | In a hosted or joined multiplayer game, either wheel → **CHAT** shows the game's chat on that wheel; point the other hand's laser at its input line and pull the trigger to type on the VR keyboard. Point at the panel and squeeze that hand's grip to take it off the wheel; it then stays in view while you play. Single-player and offline games have no CHAT tab (the other tabs close up), and leaving a multiplayer game closes the chat, typing included |
 | Zoom the minimap | Look at the wrist / palm map or the wheel's MAP tab and push the right stick up to zoom in, down to zoom out; down until it stops shows the whole map. While you look at it, right stick up / down does nothing else (no run / walk toggle, no loot labels); left / right still turns, except during a zoom push |
 | Floating map | Point the right controller at the raised wrist map (or roughly at it) and squeeze **Right Grip**: a copy of the map comes off the wrist in your hand. Move and turn it any way, push the right stick forward / back to send it out (up to 3 m) or pull it in, then let go: it stays there, facing you. While you hold it, the right stick does not turn you. Grab it again any time by pointing at it. Squeeze both grips (either order) while pointing at it and spread or close your hands to make it bigger or smaller. Let go of it next to the raised wrist map to put it away. It shows while you look toward it; Save and Exit or a new game puts it back on the wrist. With no copy out, pointing at the raised wrist map shows a small grab sign beside it and a glow on its border (**VR Settings > Interface > Wrist > Map grab hint**) |
 | Zoom a floating map | Point the right controller anywhere on the floating map and push the right stick up to zoom in, down to zoom out; the area grows and shrinks with the map. The wrist map zooms as before, by looking at it; both show the same picture, so they zoom together |
@@ -175,15 +176,12 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Support a crossbow | Hold Left Grip near the stock; release to free the hand. After a shoulder swap, release the swap grip before grabbing the stock again |
 | Javelin, throwing knife or axe throw | Right trigger on Attack, Throw or nothing; hold the trigger, throw, release |
 | Cancel a physical attack / draw | Open either wheel, then release the held controls |
-| Swap weapon sets I / II | Main hand's grip over either shoulder (right hand; left with Left-handed on); or wheel → EQUIPMENT |
-| Stow / draw weapons | Wheel → EQUIPMENT → Stow / Draw |
-| Grab / drink potion | Grip a belt bottle, bring its opening to the mouth and tip it; release to return unused |
+| Swap weapon sets I / II | Main hand's grip over either shoulder (right hand; left with Left-handed on) |
+| Grab / drink potion | Grip a belt bottle with either hand, bring its opening to the mouth and tip it; release to return unused. With **VR Settings > Comfort > Body > Click to drink** on, that hand's trigger drinks it too |
 | Drop the empty bottle | Open your hand after drinking; it falls, bounces and rolls on the floor (visual only). Swing a weapon or shield into it to knock it away |
 | Knock over cups, plates, vases, stools | Swing a weapon, punch or block into the level's small props; they fall and roll where they land until the area reloads (visual only) |
 | Heal your mercenary | Toss a held Health, Rejuvenation, Antidote or Thawing bottle so it lands near its feet; with bottle physics it flies as a real body and breaks where it first hits. A miss keeps the potion |
 | Command your mercenary (offline) | Point at it (with the controller, or your hand in line with it) with **Grip** held and pull **Trigger**: grip first or both at once, either way; the trigger casts nothing while you do. Aim, and let go: at the ground it walks there and holds; at a monster it focuses it; still on the mercenary it holds its place, or regroups if it was holding. Grip alone does nothing to it. **VR Settings > Gameplay > Monsters > Tactical commands** turns this off |
-| Quick potion | Wheel → EQUIPMENT → potion, using opposite laser + trigger |
-| Grab wheel potion | Wheel → EQUIPMENT → potion, using the pointing hand's grip |
 | Wrist health / mana / XP | Look at the back of the left wrist |
 | Wipe blood off the visor | Scrub either hand side to side in front of your face, trigger released. About six strokes clear a full visor. **Interface > Warnings > Wipe blood by hand** turns this off |
 | Recenter / stereo capture | PC F11 / F8 |
@@ -257,8 +255,9 @@ stops at the shield on your other arm and slides along its face, and two weapons
 one in each hand, stop at each other. Your real hand cannot be stopped, so the
 hero's hand gives way instead, at most 60 cm, and eases back to your controller in
 about 0.1 s once they part; push further and they pass through. A strike clanks in
-both controllers (Melee hits strength), and a fast one plays the game's block
-clank. Bows, two-handed grips, throws, Druid forms and menus are left alone; an
+both controllers (Melee hits strength). Only a hard knock (3 m/s or more) also
+plays the game's block clank, at most every half second, so brushing the shield
+mid-swing stays quiet. Bows, two-handed grips, throws, Druid forms and menus are left alone; an
 Assassin's crossed claws rest against each other and still block.
 **Gameplay > Physics > Struck monsters** (both On by default) makes monsters answer
 your strokes. **Monsters stagger:** a long, committed stroke that lands on the beat
@@ -487,7 +486,7 @@ target: armors, warcries, auras, Energy Shield, summons and the like.
    back on it, or **CLEAR SLOT**, stops it drawing. Each hand can have its own
    Draw glyph button: put one on the other hand's wheel too to draw with both.
 2. Give the shapes their skills: the wheel's **GLYPHS** box (upper right, on the
-   spells and equipment pages) opens a page of eight shapes: circle, triangle,
+   spells page) opens a page of eight shapes: circle, triangle,
    square, lightning bolt, spiral, V, star and wave. Select a shape, then the
    skill it casts; the list holds your hero's own skills that need no target.
    **CLEAR GLYPH** takes its skill off; **BACK** keeps it. Each hand has its own
@@ -826,7 +825,7 @@ During motion gameplay, Inventory and VR Settings are available in either wheel.
 VR Settings reopens on the page you closed it on, Right B included; a new game
 starts it over on the Guide.
 Right-stick click toggles the right wheel during gameplay. Use the shoulder
-gesture or **EQUIPMENT / BELT** wheel for weapon configurations.
+gesture to swap weapon sets.
 
 Quest controllers do not need a separate D-pad or Xbox controller: use sticks
 for native navigation and the laser for the on-screen controls. When using

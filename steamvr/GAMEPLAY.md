@@ -195,14 +195,12 @@ stays with its hand: each hand's wheel opens from its own stick ([Sticks stay ri
 | Drink | Keep grip held, bring the bottle's opening to your mouth and tip nearly horizontal for 0.25 seconds; release to return an unused potion |
 | Drop the empty bottle | Open your hand after drinking: the bottle falls, bounces and rolls on the floor (visual only); hit it with your weapon or shield to knock it away |
 | Heal the mercenary | Toss a held Health, Rejuvenation, Antidote or Thawing bottle (release mid-swing, at least 1.4 m/s) so it lands within 4 m of your mercenary's feet (it walks on while the bottle flies). It shatters on landing (with bottle physics, where it first touches a wall, table, prop or the floor); a miss leaves the potion on the belt |
-| Quick potion | Left Y → **EQUIPMENT / BELT** → trigger a potion wedge; grip on a potion wedge instead grabs it into the right hand |
 | Swap weapon sets | Reach the swap hand over either shoulder and press its grip; the right hand, or the left with VR Settings > Controls > Hands > Left-handed on. Hip anchors are removed |
-| Seated weapon selection | Utility wheel → **Weapon I** or **Weapon II** |
 | Recalibrate body and eye height | Stand in a **T cross**, nothing pressed and no potion in hand, for 2 seconds: both controllers buzz while you hold it, then the calibration prompt opens ([BODY_CALIBRATION.md](BODY_CALIBRATION.md)). Not in Seated play. Vibration off: the prompt opening is the only cue |
-| Stow/draw | Utility wheel → **Stow weapons** / **Draw weapons**; native equipped stats stay unchanged |
 | Health/mana | Check the back of your left wrist, or choose **Palm** in **VR Settings > Interface > Wrist > Life and mana** and hold your left palm upward in front of you briefly. No button required; automatic alerts are off by default |
 | Show all nearby loot labels (Alt) | Hold the **right stick down** to hold the native Show Items action; let go to restore normal drop/hover labels. Push it **up** to toggle running / walking. Neither while you look at the wrist / palm map, or point the right controller at a floating map: they zoom it instead. Listed in **VR Settings > Guide** |
 | Explored minimap | Hold Left Y ? **MAP** in the bottom tabs; point right laser + trigger. **SPELLS** returns to skills; releasing Left Y closes the menu |
+| Chat (multiplayer games) | Either wheel → **CHAT**, only in a hosted or joined multiplayer game: the game's chat on the wheel, typed with the VR keyboard (point at its input line, trigger); point at it and squeeze grip to take it off the wheel and keep it in view. The game's own client mode decides (0 offline, 5 / 7 TCP/IP; the getter verified by its bytes, as for Offline difficulty); `Frame chat: client mode N - ...` logs each change. Single-player and offline games have no CHAT tab and the other tabs close up; a chat open, pinned or typing closes when the game stops being a multiplayer one |
 | Zoom the minimap | Look at the wrist / palm map or the wheel's MAP tab; right stick up zooms in, down zooms out. No run / walk toggle or loot labels meanwhile; left / right still turns, except during a zoom push; looking away returns the stick. Pointing at a floating map zooms it the same way |
 | Floating map | Point the right controller at the raised wrist map (or roughly at it) and squeeze **Right Grip**: a copy of the map comes off the wrist in your hand. Move and turn it any way, push the right stick forward / back to send it out (up to 3 m) or pull it in, then let go: it stays there, facing you. While you hold it, the right stick does not turn you. Grab it again any time by pointing at it. Squeeze both grips (either order) while pointing at it and spread or close your hands to make it bigger or smaller. Let go of it next to the raised wrist map to put it away. It shows while you look toward it; Save and Exit or a new game puts it back on the wrist. With no copy out, pointing at the raised wrist map shows a small grab sign beside it and a glow on its border (**VR Settings > Interface > Wrist > Map grab hint**) |
 | Zoom a floating map | Point the right controller anywhere on the floating map and push the right stick up to zoom in, down to zoom out; the area grows and shrinks with the map. The wrist map zooms as before, by looking at it; both show the same picture, so they zoom together |
@@ -1862,15 +1860,65 @@ Log: `Frame flail reach:` as a hand takes a flail up or puts it away.
 game's flail models carry a chain of bones from the top of the handle to the
 ball, which the game moves with each class's own animation of it; with the arm
 on a controller that pose stayed fixed in the hand whichever way it turned. In
-first person the chain now hangs from the handle under the ball's weight and
-swings with the hand: a rope of the chain's joints and the ball, stepped in the
-world and laid back on the item's own bones (`flail_chain.h`; `vr/skeletons.cpp`
-PoseFlailChain), as the bow's string is. Only the player's own held flail is
-moved. A snap turn carries the chain along as it hangs; a teleport, a load or a
-pause of over 0.1 s starts it again from the game's pose; the ball rests on the
-floor. `0` leaves the game's own animation. Log: `Frame flail chain:` the setting,
-the rig once it is laid (1 chain of 18 links for a Flail, 3 of 14 for Khalim's),
-and a ten-second line of poses, steps, fresh starts and the ball's fastest.
+first person the chain hangs from the handle and swings with the hand
+(`flail_chain.h`; `vr/skeletons.cpp` PoseFlailChain), laid back on the item's
+own bones after the game poses them, as the bow's string is. Only the player's
+own held flail is moved; each hand's flail swings on its own.
+
+The first version (2026-11-19) never moved a chain in the game (owner,
+2026-11-24: "Flail Weapons are not flailing around"). It found the rig, but
+read the item's place through the bow's matrix check, which refuses any number
+over 10000; the game's world coordinates are larger than that nearly
+everywhere (that session stood at 10305, 10403), so every pose was left to the
+game (`unusable` in the ten-second line). The item's place is now read as it
+is, and the chain is simulated about the item's own place, so it keeps its
+precision anywhere in the world.
+
+The chain is its joints and the ball's centre, under gravity, the ball 25
+times a link's weight (a steel ball of about a kilogram on 40 g links), in
+substeps of about 2 ms. Every substep the links are pulled exactly back to
+length by one solve of the whole chain at once, weighted by mass: the ball's
+weight swings the chain and pulls it straight behind it, and the light links
+ripple and fold when it comes back toward the hand. A link bends on the next by
+up to 60 deg (the ball on the last one by 90 deg). The chain stays out of the
+handle, the player's head (13 cm about the eyes, smaller with the hand at the
+face), the floor and, with Khalim's three chains, the other balls. A swing
+about the hand halves in about two seconds. Each bone is turned to its link
+from its last pose, so nothing flips as the chain passes where the game's pose
+had it pointing the other way; its twist about the chain is held within 60 deg
+of hanging straight. The ball's size comes from the game's models: its centre
+sits a fifth of the chain's length past the last joint, and its radius is the
+same.
+
+The chain steps once a game frame. Both eyes of a stereo pair are drawn from one
+game frame, and the game poses the item once in each eye's pass; the first
+pose steps the chain and lays its bones, the second lays the very same bones
+again (owner, 2026-11-25, of the chain stepped once an eye: "almost like their
+depth is off, or left and right eye is off"). The game's own record of the
+item's place is a frame behind at the first eye's pose and current at the
+second's; the bones are laid on the item, which both eyes draw in the same
+place, so both see one chain. The frame is vrcam's game draw (`gamedraw::Now`:
+the serial of the draw call that holds a pair's two passes, or the one pass
+when eyes go by turns).
+
+The game's rigs: Flail, Knout and Scourge share one skeleton (23 bones, one
+chain of 18); Khalim's Flail has three chains of 14 (51 bones), Khalim's Will
+three of 12 (45). A flail taken up hangs straight down at once. A snap turn
+carries the chain along as it hangs and swings; a teleport, a load or a pause
+of over 0.1 s carries it on the item as it was; another item or size hangs it
+afresh. `0` leaves the game's own animation.
+
+Log: `Frame flail chain:` the setting; once for each held flail, its rig and
+the chain it swings (`the held flail's rig - 1 chain(s) of 18 links (0.38 m to
+the last joint, ...)`), or why the game's animation keeps it (`- left to the
+game's animation: <reason>`); if a flail is in hand for 5 s and no posed
+skeleton was the player's own flail, one line why; and while a flail is posed,
+every ten seconds its poses, the game frames it was posed in, its steps (one a
+frame: `1.00 a frame`), the poses laid again for the other eye and how far the
+item's place as read moved between a frame's eyes, fresh starts and carries,
+what was left to the game and why, the ball's fastest about the hand, its
+widest swing from hanging and the links' worst stretch. Fixtures:
+`flail-chain-test`.
 
 ### Weapons collide
 
@@ -1908,10 +1956,30 @@ applies it.
   out with a 33 ms time constant (95% gone in 0.1 s), not a snap.
 - **Clank.** A first touch closing at 0.5 m/s or more clanks in both controllers:
   a sharp tap and a short ring, stronger up to 3 m/s, on the Melee hits strength.
-  A resting touch is silent; one clank at most every 0.12 s. At 1 m/s or more the
-  game also plays `[gameplay] held_collision_sound` at the hero (default 398,
-  block_weapon_1, the block's metal clank; 0 is silent) through the same path as the
-  block sound.
+  A resting touch is silent; one clank at most every 0.12 s.
+- **Sound: only a hard knock.** The game's `[gameplay] held_collision_sound` (default
+  398, block_weapon_1, the block's metal clank; 0 is silent) plays at the hero with
+  a clank of 3 m/s or more (`held::KnockSoundSpeed`, the strongest clank's speed), at
+  most once every 0.5 s (`held::KnockSoundGap`), through the same path as the block
+  sound. A resting, sliding or grinding touch never sounds, since it never clanks.
+  The solver decides it with the clank (`Output::sound`), so the fixtures check it.
+  - **Why (owner, 2026-11-24).** "Leave the weapon collision in but ... reduce the
+    times that it makes a sound ... it takes a certain force to hit each other
+    before it makes a sound." It played with every clank of 1 m/s or more. In the
+    owner's 15 dev sessions of 2026-11-17..23 (a Paladin's scepter and shield),
+    203 touches made 128 haptic clanks, 1-5 in every ten seconds of a fight. Each
+    one of 1 m/s or more also sounded; the log did not count those.
+  - **Why 3 m/s.** The logs counted clanks, not their speeds. The value comes
+    from what the melee code takes as a real strike: a stab or a shield bash needs
+    2 m/s of hand speed, and a blade's contact point moves faster than the hand. It
+    is also the middle of the 153 weapon-on-monster touches the same sessions
+    logged (`Frame bodies: pushed a monster (right hand, X m/s)`, Box3D's approach
+    speed, 1 m/s and up): half were 3 m/s or more. A swing that clips the shield
+    at full force still sounds; a brush does not.
+  - **Why 0.5 s.** About one swing: the Paladin's 560 ms per landed hit there. A
+    blade chattering on the face, or a flurry, makes one sound.
+  - **Unchanged.** The buzz, the push and the touch, and the walls' and the
+    floor's sound (still from 1 m/s, Weapons hit walls).
 - **What hits.** Melee contact, the shield guard and Smite, the Assassin's claw
   guard, the dropped bottles and small props, and the pushable bodies all read the
   drawn skeleton, so they all meet the corrected pose: what you see is what hits.
@@ -1934,7 +2002,9 @@ applies it.
   ...`, or `none, not colliding (<reasons>)`) when what the hands hold changes; and
   every ten seconds with touches, `Frame held collisions: N contacts
   (weapon-shield A, weapon-weapon B), deepest X cm, pushes capped C, haptic clanks
-  H; excluded: <reasons>`.
+  H, sounds S (a knock of 3.0 m/s, 0.5 s apart), fastest touch V m/s; ...;
+  excluded: <reasons>`. The fastest touch is the quickest first touch's closing
+  speed in those ten seconds, which is the evidence for tuning the knock.
 
 ### Weapons hit walls
 
@@ -2662,7 +2732,7 @@ button opens a card of four switches, **Unique**, **Set**, **Rare** and
 Turn them all Off for no beams. A change takes effect within a quarter of a
 second of **Apply**.
 
-To try it: **DEV > Character > Loot beam test** puts one item of each kind in
+To try it: **DEV > HERO > Loot beam test** puts one item of each kind in
 the inventory (see DEVELOPMENT_SCENARIOS.md); drop them.
 
 `d2r_pcvr.ini`:
@@ -3192,8 +3262,8 @@ gives a hand button that record).
 
 Motions (`steamvr/spell_motion.h`; owner, 2026-11-03). With **Weapon skill gestures** on, every
 Sorceress spell that has a motion casts by it while both grips are held, both triggers free: no
-button or glyph needed. The wheel's MOTIONS page (the box at the lower right of the Spells and
-Equipment pages; each class with motions has its own, below) lists them with how to do each, and a press on one turns its
+button or glyph needed. The wheel's MOTIONS page (the box at the lower right of the Spells
+page; each class with motions has its own, below) lists them with how to do each, and a press on one turns its
 motion on or off (`[motions] off`, one bit each, `spellmotion::Bit`; 0, all on); a spell with no
 points shows dimmed. A motion that is off still casts from a button its spell is on. One watcher
 per motion that is on and learned, active only while both grips are held (held above 0.6, let go

@@ -1,6 +1,9 @@
 // Private depth channel adapted from natpoh/diablo2-vr-port 4b6284c,
 // vr/vrcam.cpp namespace scenedepth. MIT, Copyright (c) 2026 BodyWalkVR.
 #include "scene_depth.h"
+#ifdef D2RVR_COMPARE_DEPTH_BARRIERS
+#include "depth_barrier_compare.h"
+#endif
 #include "resource_descriptions.h"
 #include "native_lock.h"
 #include "../vr/game_device_only.h"
@@ -62,12 +65,73 @@ void RuntimeDestroyed(effect_runtime* rt) {
 void Reloaded(effect_runtime* rt) {
     std::lock_guard lock(mutex);if(runtime==rt)bound=false;
 }
+bool ApplyBarriers(bool filter,command_list* cl,uint32_t count,const resource* resources,const resource_usage* after) {
+    if(filter&&!candidates.MayTransition(count,resources))return false;
+    std::lock_guard lock(mutex);
+    const auto device=uintptr_t(cl->get_device());
+    for(uint32_t i=0;i<count;++i)candidates.Barrier(device,resources[i].handle,uint32_t(after[i]));
+    return true;
+}
+#ifdef D2RVR_COMPARE_DEPTH_BARRIERS
+std::atomic<bool> compareFilter{false};
+struct Totals { uint64_t locked, skipped, nanos; };
+struct Samples {
+    std::atomic<uint64_t> locked{0}, skipped{0}, nanos{0};
+    Totals Read() const { return {locked.load(), skipped.load(), nanos.load()}; }
+};
+Samples samples[2];
+// Vary the distance between samples to avoid repeatedly timing the same pass
+// in a periodic command stream. No other thread writes this countdown.
+bool SampleNow() {
+    static thread_local uint32_t remaining=1, random=GetCurrentThreadId();
+    if (--remaining) return false;
+    random=random*1664525u+1013904223u;
+    remaining=1+(random>>25);
+    return true;
+}
+#endif
 void Barrier(command_list* cl,uint32_t count,const resource* resources,const resource_usage*,const resource_usage* after) {
     if(own||!enabled.load(std::memory_order_relaxed))return;
-    std::lock_guard lock(mutex);
-    for(uint32_t i=0;i<count;++i)candidates.Barrier(uintptr_t(cl->get_device()),resources[i].handle,uint32_t(after[i]));
+#ifdef D2RVR_COMPARE_DEPTH_BARRIERS
+    const bool filter=compareFilter.load(std::memory_order_relaxed);
+    if(SampleNow()) {
+        const auto start=hookmetrics::Nanos();
+        const bool locked=ApplyBarriers(filter,cl,count,resources,after);
+        const auto ns=hookmetrics::Nanos()-start;
+        auto& s=samples[filter];
+        s.nanos.fetch_add(ns,std::memory_order_relaxed);
+        (locked?s.locked:s.skipped).fetch_add(1,std::memory_order_relaxed);
+        return;
+    }
+#else
+    constexpr bool filter=true;
+#endif
+    ApplyBarriers(filter,cl,count,resources,after);
 }
 }
+#ifdef D2RVR_COMPARE_DEPTH_BARRIERS
+void compare::FinishPair(double cycleMs,double eyesMs) {
+    static Block block;
+    static Totals baseline{};
+    block.Pair(cycleMs,eyesMs);
+    const bool filter=block.Filtered();
+    if(block.pairs==Block::Warmup) baseline=samples[filter].Read();
+    if(block.pairs!=Block::Pairs)return;
+    const auto end=samples[filter].Read();
+    const auto locked=end.locked-baseline.locked;
+    const auto measured=locked+end.skipped-baseline.skipped;
+    constexpr auto kept=Block::Pairs-Block::Warmup;
+    if(logger) {
+        char line[256];
+        std::snprintf(line,sizeof line,"Frame depth compare: block=%llu filter=%u pairs=%u cycle_ms=%.4f eyes_ms=%.4f samples=%llu locked=%llu callback_ns=%.1f",
+            (unsigned long long)block.index,unsigned(filter),kept,block.cycleMs/kept,block.eyesMs/kept,
+            (unsigned long long)measured,(unsigned long long)locked,measured?double(end.nanos-baseline.nanos)/measured:0.0);
+        logger(line);
+    }
+    block.Next();
+    compareFilter.store(block.Filtered(),std::memory_order_relaxed);
+}
+#endif
 void Observe(reshade::api::command_list* cl,uint32_t count,const reshade::api::resource_view* rtvs,
              reshade::api::resource depth,const reshade::api::resource_desc& desc) {
     if(own||!enabled.load(std::memory_order_relaxed)||!depth.handle||!count||!rtvs)return;
@@ -149,5 +213,5 @@ void Register(void (*log)(const char*)) {
     reshade::register_event<reshade::addon_event::destroy_effect_runtime>(&d2rvr::D3D12Only<&RuntimeDestroyed>::Call);
     reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(&d2rvr::D3D12Only<&Reloaded>::Call);
 }
-void Shutdown(){std::lock_guard lock(mutex);OwnScope scope;enabled=false;latest={};lastPick={};Release();candidates={};}
+void Shutdown(){std::lock_guard lock(mutex);OwnScope scope;enabled=false;latest={};lastPick={};Release();candidates.Clear();}
 }

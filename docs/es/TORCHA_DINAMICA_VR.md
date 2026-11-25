@@ -82,7 +82,7 @@ Implementado en [vr/vrcam.cpp](../../vr/vrcam.cpp) y [reshade/D2R_DepthFog.fx](.
 ---
 
 ## 5. Menú de Desarrollador (Dev Scenario)
-- Opción **"Torch kit"** en la página **EQUIPMENT** del menú DEV (Choice ID 41).
+- Opción **"Torch kit"** en la página **GEAR** del menú DEV (Choice ID 43, `TorchChoice`).
 - Genera en el inventario un garrote de una mano (`clb` - Club normal, nivel 1) para pruebas inmediatas en Blood Moor y Catacumbas.
 
 ---

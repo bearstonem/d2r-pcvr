@@ -54,8 +54,8 @@ existing charcoal-stone and aged-bronze UI materials.
 Both hand wheels share this frame. It contains five empty 72-degree sectors,
 with the trigger sector centered at twelve o'clock and a divider at six
 o'clock. Button labels, assignment icons, center labels, utility buttons and
-highlights remain runtime content. The equipment page retains the eight-sector
-frame. Both frames are embedded in the DLL, decoded once, and preserve their
+highlights remain runtime content. The GLYPHS page's eight shapes use the
+eight-sector frame. Both frames are embedded in the DLL, decoded once, and preserve their
 transparent silhouette. No additional loose files are needed for installation.
 
 Run `interaction-preview.exe <output.png> --hands-check` to preview both hand

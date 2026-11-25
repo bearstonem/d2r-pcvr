@@ -26,10 +26,12 @@ uintptr_t Addr(uint64_t rva){assert(rva==abi::ModeRva);return reinterpret_cast<u
 namespace vrsettings {void SetOfflineDifficultyAvailable(bool ready){available=ready;}}
 namespace framevr::logging {void Write(const char*){}}
 int main() {
-    Install();assert(!installed&&!hooks&&!available);
+    Install();assert(!installed&&!hooks&&!available&&ClientMode()==-1);   // the chat's client mode: unverified
     signatures=true;
     for(const auto rva:{abi::PlayersRva,abi::ModeRva}){badGuard=rva;Install();assert(!installed&&!hooks&&!available);}
     badGuard=0;Install();assert(!installed&&hooks==1&&!available);
+    for(int state:{0,5,7}){clientMode=state;assert(ClientMode()==state);}   // verified apart from the player-count hook
+    clientMode=0;
     hookWorks=true;Install();assert(installed&&hooks==2&&available);
     Install();assert(hooks==2);
     game[0x101]=1;

@@ -416,10 +416,8 @@ the left stick walking and the right stick turning while the rest stays left-han
 | Bow | Bring the right hand to the bowstring, hold right trigger, draw back, then release |
 | Javelin | In **WEAPON** mode, hold right trigger, make a throwing motion, then release |
 | Swap weapon sets I/II | Reach your right hand over either shoulder and press grip; with VR Settings > Controls > Hands > Left-handed on, the left hand |
-| Seated weapon swap / stow | Wheel → **EQUIPMENT / BELT** → **Weapon I**, **Weapon II** or **Stow/Draw** |
 | Grab a belt potion | Reach to a bottle and hold grip with either hand |
-| Drink | Keep grip held, bring the bottle opening to your mouth and tip it; release an unused bottle to return it |
-| Quick potion | Wheel → **EQUIPMENT / BELT** → select a potion with right trigger |
+| Drink | Keep grip held, bring the bottle opening to your mouth and tip it; release an unused bottle to return it. With VR Settings > Comfort > Body > Click to drink on, that hand's trigger drinks it |
 | Wrist health / mana / XP | Look at the back of your left wrist, like checking a watch |
 | Minimap tab | Spell wheel ? **MAP** at the bottom; right laser + trigger |
 | Map / height reset | Left stick click / Left Grip + left stick click |
