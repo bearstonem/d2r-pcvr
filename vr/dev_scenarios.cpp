@@ -243,10 +243,29 @@ void __cdecl Gear(const PluginContext*,void* callbackToken) noexcept {
     const int cls=interactionstate::Read().devClass;
     if(!framevr::dev::ValidClass(cls)){Finish(r,Result::Refused,claim);return;}
     const auto codes=framevr::dev::Kit(cls,r.index);
-    std::array<Items::ItemCreateSpec,10> specs{};
-    std::array<ItemHandle,10> handles{};
+    const auto* named=framevr::dev::CollectionKit(r.index);
+    std::array<Items::ItemCreateSpec,framevr::dev::NamedKitMost> specs{};
+    std::array<ItemHandle,framevr::dev::NamedKitMost> handles{};
+    static_assert(framevr::dev::NamedKitMost<=Items::MaxTransactionOutputs);
     size_t count=0;
-    for(size_t i=0;i<codes.size();++i) {
+    // The Collection kits (dev_scenarios.h): each named item by its quality, row, sockets and identified state.
+    if(named)for(const auto& item:*named) {
+        if(!item.code)continue;
+        using framevr::dev::KitQuality;
+        auto& spec=specs[count++];spec.structSize=sizeof spec;
+        spec.code=Items::MakeItemCode(item.code[0],item.code[1],item.code[2]);
+        spec.quality=item.quality==KitQuality::Unique?Items::Quality::Unique:item.quality==KitQuality::Set?Items::Quality::Set:Items::Quality::Normal;
+        spec.qualityRecordId=item.row>=0?uint32_t(item.row):Items::RandomQualityRecord;
+        spec.flags=item.quality==KitQuality::Unique?Items::ItemCreateFlagBit(Items::ItemCreateFlag::AllowDuplicateUnique):0;
+        spec.itemLevel=99;spec.seedMode=Items::SeedMode::Random;
+        spec.quantity=spec.durability=Items::DefaultValue;
+        spec.socketCount=uint32_t(item.sockets);
+        spec.stateFlags=item.identified?Items::ItemStateIdentified:0;
+        spec.destination.structSize=sizeof spec.destination;
+        spec.destination.container=Items::ItemContainer::Inventory;
+        spec.destination.placement=Items::Placement::Automatic;
+    }
+    for(size_t i=0;!named&&i<codes.size();++i) {
         if(!codes[i])continue;
         const bool ammo=framevr::dev::Ammo(codes[i]);
         auto& spec=specs[count++];spec.structSize=sizeof spec;

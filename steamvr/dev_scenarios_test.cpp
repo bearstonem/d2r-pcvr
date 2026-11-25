@@ -62,8 +62,29 @@ static Items::Result __cdecl RemoveToken(const PluginContext*,PlayerHandle playe
     (void)devscenarios::Status();
     ++tokenRemoves;tokenLive=false;return Items::Result::Success;
 }
+static const framevr::dev::NamedKit* expectNamed=nullptr;   // a Collection kit's transaction expected (#608)
 static Items::Result __cdecl ItemsCall(const PluginContext*,const Items::Transaction* t,Items::TransactionResult* r) noexcept {
-    ++itemCalls;assert(t->player==local&&(t->outputCount==1||t->outputCount==2||(t->outputCount>=5&&t->outputCount<=10)||
+    ++itemCalls;
+    if(expectNamed) {   // each named item as the kit has it: forced by its row at 99, exact sockets, identified or not
+        using framevr::dev::KitQuality;
+        assert(t->player==local&&t->outputCount==framevr::dev::NamedCount(*expectNamed)&&t->outputCapacity>=t->outputCount);
+        for(unsigned i=0;i<t->outputCount;++i) {
+            const auto& item=(*expectNamed)[i];const auto& s=t->outputs[i];
+            assert(s.code==Items::MakeItemCode(item.code[0],item.code[1],item.code[2]));
+            assert(s.quality==(item.quality==KitQuality::Unique?Items::Quality::Unique:item.quality==KitQuality::Set?Items::Quality::Set:Items::Quality::Normal));
+            assert(s.qualityRecordId==(item.row>=0?uint32_t(item.row):Items::RandomQualityRecord));
+            assert(s.flags==(item.quality==KitQuality::Unique?Items::ItemCreateFlagBit(Items::ItemCreateFlag::AllowDuplicateUnique):0u));
+            assert(s.itemLevel==99&&s.socketCount==uint32_t(item.sockets)&&s.stateFlags==(item.identified?Items::ItemStateIdentified:0u));
+            assert(s.quantity==Items::DefaultValue&&s.durability==Items::DefaultValue&&s.destination.container==Items::ItemContainer::Inventory);
+        }
+        (void)devscenarios::Status();
+        if(!t->inputCount||!t->inputs)return Items::Result::InvalidArgument;
+        assert(t->inputCount==1&&t->inputs[0].item==Token&&t->inputs[0].quantity==1&&tokenLive);
+        grantedCodes.clear();for(unsigned i=0;i<t->outputCount;++i)grantedCodes.push_back(t->outputs[i].code);
+        if(failItems)return Items::Result::PolicyRejected;
+        tokenLive=false;r->outputCount=t->outputCount;return Items::Result::Success;
+    }
+    assert(t->player==local&&(t->outputCount==1||t->outputCount==2||(t->outputCount>=5&&t->outputCount<=10)||
                      (t->outputCount==4&&t->outputs[0].code==Items::MakeItemCode("fla"))));   // (4: the flails kit only)
     if(t->outputCount==1)assert(t->outputs[0].code==Items::MakeItemCode("buc")||t->outputs[0].code==Items::MakeItemCode("clb"));
     if(t->outputCount==5){   // the throwing kit, or the item-fired bows kit (#432)
@@ -311,6 +332,45 @@ int main(){
     assert(FlailKitUniques[0]==21&&FlailKitUniques[1]==20);
     for(size_t i=0;i<FlailKit.size();++i)
         assert((FlailKit[i].quality==KitQuality::Unique)==(i<FlailKitUniques.size())&&FlailKit[i].identified);
+    // The Collection kits (#608) on STASH, the same for every class: one all-or-nothing transaction of named items;
+    // a refused one removes only its own token.
+    assert(PageCount==7&&std::string_view(PageNames[6])=="STASH");
+    {
+        constexpr int collect[]={CollectUniquesChoice,CollectSetsChoice,CollectRunewordsChoice,CollectGemsChoice};
+        for(int slot=0;slot<4;++slot) {
+            const int choice=collect[slot];const auto* kit=CollectionKit(choice);
+            assert(kit&&IsKit(choice)&&!NormalKit(choice)&&PageFor(choice)==6&&SlotFor(choice)==slot&&!Choices[choice].command);
+            for(const char* code:Kit(3,choice))assert(!code);   // no plain codes: Gear() takes the named kit
+            for(int cls=0;cls<8;++cls) {
+                state.devClass=cls;expectNamed=kit;const auto commandCount=commands.size();
+                devscenarios::Request(Make(choice));assert(tasks.back().game);Run(tasks.size()-1);
+                assert(devscenarios::Status().result==Result::Applied&&!tokenLive&&grantedCodes.size()==NamedCount(*kit));
+                assert(commands.size()==commandCount);
+            }
+            failItems=true;const auto beforeCleanup=tokenRemoves;
+            devscenarios::Request(Make(choice));Run(tasks.size()-1);
+            assert(devscenarios::Status().result==Result::KitRefused&&!tokenLive&&tokenRemoves==beforeCleanup+1);
+            failItems=false;expectNamed=nullptr;
+        }
+        state.devClass=3;
+        assert(!CollectionKit(FlailsChoice)&&!CollectionKit(1)&&!CollectionKit(-1));
+        // The rows as the Collection catalog numbers them (the UniqueItems / SetItems *ID column).
+        assert(NamedCount(CollectUniquesKit)==11&&NamedCount(CollectSetsKit)==6&&NamedCount(CollectRunewordsKit)==13&&NamedCount(CollectGemsKit)==12);
+        assert(CollectUniquesKit[0].row==122&&CollectUniquesKit[1].row==122);   // the Stone of Jordan twice: one copy is kept
+        for(size_t i=0;i<NamedCount(CollectUniquesKit);++i)
+            assert(CollectUniquesKit[i].quality==KitQuality::Unique&&CollectUniquesKit[i].identified==(i!=10)&&!CollectUniquesKit[i].sockets);
+        constexpr int setRows[]={50,51,52,53,29,28};   // Angelic Raiment whole, Cathan's Seal and Sigil
+        for(size_t i=0;i<6;++i)assert(CollectSetsKit[i].quality==KitQuality::Set&&CollectSetsKit[i].row==setRows[i]&&CollectSetsKit[i].identified);
+        // Stealth (Tal Eth) in a 2-socket armor; Spirit (Tal Thul Ort Amn) in a 4-socket sword and a 4-socket shield.
+        std::vector<std::string_view> runes;
+        for(size_t i=0;i<NamedCount(CollectRunewordsKit);++i) {
+            const auto& item=CollectRunewordsKit[i];
+            assert(item.quality==KitQuality::Normal&&item.row==-1&&item.identified);
+            if(i<3)assert(item.sockets==(i?4:2));else{assert(!item.sockets);runes.push_back(item.code);}
+        }
+        assert((runes==std::vector<std::string_view>{"r07","r05","r07","r10","r09","r11","r07","r10","r09","r11"}));
+        for(size_t i=0;i<NamedCount(CollectGemsKit);++i)assert(CollectGemsKit[i].quality==KitQuality::Normal&&CollectGemsKit[i].row==-1&&!CollectGemsKit[i].sockets);
+    }
     // Unlock quests & waypoints button: sends cheat quests and cheat waypoints via console
     assert(ValidChoice(UnlockQuestsChoice)&&PageFor(UnlockQuestsChoice)==0&&SlotFor(UnlockQuestsChoice)==5);
     const auto beforeQuestCommands = commands.size();
