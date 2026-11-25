@@ -62,21 +62,28 @@ struct LaserClick {
 // Sticks/face buttons select native navigation. A deliberate change in aim
 // returns to the laser after native controls are released. Tracking jitter
 // cannot steal focus; a drag keeps its pointer even outside the canvas.
+// A started from laser aim temporarily owns input, retaining the visible ray
+// and restoring laser control on release without requiring hand movement.
 class Navigation {
-    bool native=false,anchor=false;
+    bool native=false,anchor=false,confirmHold=false;
     float u=0,v=0;
     ReleaseGate nativeGate;
 public:
-    void Reset(){native=anchor=false;nativeGate.Suspend();}
+    void Reset(){native=anchor=confirmHold=false;nativeGate.Suspend();}
     bool Native() const{return native;}
+    bool LaserVisible() const{return !native||confirmHold;}
     Pad Step(bool active,Pad p,bool hit,float x,float y,bool dragging) {
         if(!active){Reset();return {};}
         const bool intent=(p.buttons&~(LeftBumper|RightBumper))||Tilted(p.lx,p.ly)||Tilted(p.rx,p.ry);
+        const bool confirmOnly=(p.buttons&A)&&!(p.buttons&~(A|LeftBumper|RightBumper))&&
+            !Tilted(p.lx,p.ly)&&!Tilted(p.rx,p.ry);
         if(!dragging&&intent){
-            if(!native){nativeGate.Suspend();native=true;}
+            if(!native){nativeGate.Suspend();native=true;confirmHold=confirmOnly;}
+            else if(!confirmOnly)confirmHold=false;
             anchor=hit;u=x;v=y;
-        }else if(native&&!Busy(p)&&hit&&(!anchor||std::hypot(x-u,y-v)>.045f)) {
-            native=false;anchor=false;
+        }else if(native&&((confirmHold&&!(p.buttons&A))||
+                 (!Busy(p)&&hit&&(!anchor||std::hypot(x-u,y-v)>.045f)))) {
+            native=false;anchor=false;confirmHold=false;
         }
         if(!native)return {};
         // Modifiers already held for the laser must not become native triggers

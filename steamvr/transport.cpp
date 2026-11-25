@@ -2886,7 +2886,12 @@ void MenuPointer(const menus::Pad& controls) {
     if(wasNative!=menuNavigation.Native()&&uiActive&&focused)
         Say(menuNavigation.Native()?"Frame panels: native controller navigation":"Frame panels: laser navigation");
     const bool laser=!menuNavigation.Native();
-    if(!laser){panelinput::UseController();pointerVisible=pointerHit=keyboardPointer=false;}
+    if(!laser){
+        panelinput::UseController();
+        // A's native hold action owns input, but does not hide the aiming ray.
+        // No mouse movement/click is dispatched until laser control resumes.
+        if(!menuNavigation.LaserVisible())pointerVisible=pointerHit=keyboardPointer=false;
+    }
     // The handheld journal has its own left-grip placement; the leather is strapped to the left hand.
     const bool grip=aimTracked&&laser&&!journalMode&&!leatherMode&&!(cinemaMode&&!spatialMode)&&(controls.buttons&menus::RightBumper);   // the cinema screen stays put
     const bool grabbing=GrabPanel(spatialMode?uiPose:menuPose,spatialMode?uiBase:menuBase,menuOffset,
