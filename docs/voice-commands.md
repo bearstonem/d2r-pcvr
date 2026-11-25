@@ -3,6 +3,13 @@
 Build/install normally with test-current.ps1. Open **VR Settings > Gameplay > Voice**.
 No separate app is needed. There are six independent sound-to-skill bindings.
 
+First setup: check the character name, choose a sound slot, **Record example**,
+then **Choose skill**. Repeat the sound and watch **Last match**. Select **On**
+and **SAVE CHANGES**, then close settings to cast. The bottom hint guides you
+through the next step. Extra examples are optional; playback and deletion are
+available only for a recorded example. **RETRY MICROPHONE** restarts listening
+if it has stopped.
+
 - **On / Off** controls gameplay casting. Press the prominent **SAVE CHANGES**
   button to apply it, along with skill bindings, microphone and sensitivity.
 - Unsaved edits show an **UNSAVED CHANGES** warning and the current saved On/Off

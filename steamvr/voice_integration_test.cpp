@@ -4,6 +4,13 @@
 #include <cstdio>
 int main(){
     using namespace framevr;
+    voice::Editor guide;
+    assert(guide.NextStep().find("offline game")!=std::string::npos);
+    guide.character="Test";assert(guide.NextStep().find("One example")!=std::string::npos);
+    guide.samples[0]=1;assert(guide.HasSample());assert(guide.NextStep().find("Choose the skill")!=std::string::npos);
+    guide.sample=1;assert(!guide.HasSample());guide.bindings[0].skill=149;
+    guide.mode=2;guide.RefreshDirty();assert(guide.NextStep().find("Recordings are saved immediately")!=std::string::npos);
+    guide.Commit();assert(guide.NextStep().find("Close settings")!=std::string::npos);
     voice::Editor e;e.choices={{-1,"Unassigned"},{149,"Battle Orders"},{3906,"Regroup"}};
     for(char c:std::string("battle orders"))assert(e.Edit(1,c));
     assert(e.Edit(4,1)&&e.bindings[0].skill==149);

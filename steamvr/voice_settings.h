@@ -19,6 +19,16 @@ struct Editor {
     bool loaded=false,dirty=false;
     std::string status="Voice recognition off";
     std::string character;
+    bool HasSample()const{return (samples[size_t(slot)]&(1u<<sample))!=0;}
+    std::string NextStep()const{
+        if(character.empty())return "Enter an offline game to set up this character's voice commands.";
+        if(activeMode==3)return "Make your sound now, then pause. Recording stops automatically.";
+        if(!samples[size_t(slot)])return "Record a short sound, then pause. One example is enough; two more are optional.";
+        if(bindings[size_t(slot)].skill<0)return "Choose the skill for this sound. Each character has their own six bindings.";
+        if(dirty)return "Save applies On/Off, skills, microphone and sensitivity. Recordings are saved immediately.";
+        if(savedMode!=2)return "Repeat your sound to test it here. To cast in game, select On, then Save changes.";
+        return "Repeat your sound and check Last match. Close settings to cast. No spells cast on this screen.";
+    }
     bool Edit(int op,int value){
         auto& b=bindings[size_t(slot)];
         switch(op){
