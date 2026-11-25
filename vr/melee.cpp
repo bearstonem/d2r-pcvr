@@ -138,7 +138,7 @@ using HitRecoveryFn=int(*)(uintptr_t game,const uintptr_t* event);
 std::atomic<bool> parryReady{false};std::atomic<unsigned> parried{0},parryRefused{0},parryRepaired{0},deflected{0};
 std::atomic<int> parrySound{236}; // item_platearmor: Archon Plate's equip sound (HD redirect)
 std::atomic<int> blockSound{398};  // block_weapon_1; [gameplay] block_sound
-std::atomic<int> heldClankSound{398};  // block_weapon_1 again: the weapon struck the shield or the other weapon; [gameplay] held_collision_sound
+std::atomic<int> heldClankSound{398};  // block_weapon_1 again: the weapon knocked hard on the shield or the other weapon, or struck a wall; [gameplay] held_collision_sound
 // 34E5F0(unit, mode) is the unit animation-mode setter, the only writer of
 // unit+0xC seen while probing. Hooked with the parry to time monster attack starts.
 constexpr uint64_t SetModeRva=0x34e5f0;
