@@ -50,12 +50,19 @@ public:
         file=root/L"assignments.ini";storage=root/L"samples";
         if(profile.empty()){e.status="Enter a character to configure voice commands";return;}
         if(drafts.contains(profile)){auto name=e.character;e=drafts[profile];e.character=name;e.loaded=true;return;}
-        for(UINT i=0;i<waveInGetNumDevs();++i){WAVEINCAPSW caps{};if(waveInGetDevCapsW(i,&caps,sizeof caps)==MMSYSERR_NOERROR)e.microphones.push_back(Utf8(caps.szPname));else e.microphones.push_back("Microphone "+std::to_string(i+1));}
-        e.microphone=std::clamp(int(GetPrivateProfileIntW(L"voice",L"microphone",-1,file.c_str())),-1,int(e.microphones.size())-2);
+        e.microphone=std::max(-1,int(GetPrivateProfileIntW(L"voice",L"microphone",-1,file.c_str())));   // checked against the devices in ListMicrophones
         e.tolerance=std::clamp(int(GetPrivateProfileIntW(L"voice",L"tolerance",2,file.c_str())),0,2);
         e.mode=GetPrivateProfileIntW(L"voice",L"enabled",0,file.c_str())?2:0;
         for(int i=0;i<6;++i){auto section=L"phrase"+std::to_wstring(i+1);wchar_t text[128]{};GetPrivateProfileStringW(section.c_str(),L"text",L"",text,128,file.c_str());e.bindings[size_t(i)]={Utf8(text),int(GetPrivateProfileIntW(section.c_str(),L"skill",-1,file.c_str()))};}
         e.Commit();
+    }
+    // Listing the microphones took 74 ms the first time (5 devices, a fresh process): on the frame path that is a
+    // stall, so it waits for the Voice page or saved voice casting, never every character's first frame.
+    void ListMicrophones(Editor& e){
+        if(e.microphonesListed||profile.empty())return;e.microphonesListed=true;
+        for(UINT i=0;i<waveInGetNumDevs();++i){WAVEINCAPSW caps{};if(waveInGetDevCapsW(i,&caps,sizeof caps)==MMSYSERR_NOERROR)e.microphones.push_back(Utf8(caps.szPname));else e.microphones.push_back("Microphone "+std::to_string(i+1));}
+        const int last=int(e.microphones.size())-2;
+        e.microphone=std::clamp(e.microphone,-1,last);e.savedMicrophone=std::clamp(e.savedMicrophone,-1,last);
     }
     bool Save(Editor& e,unsigned command=0){
         Load(e);
@@ -72,7 +79,7 @@ public:
         if(!saved||!MoveFileExW(temp.c_str(),file.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)){e.status="Could not save voice-assignments.ini";return false;}
         e.Commit();published.clear();actionPending=false;return Sync(e,pageOpen);
     }
-    bool Sync(Editor& e,bool settingsPage){Load(e);pageOpen=settingsPage;if(profile.empty())return Publish(e,0,false);if(actionPending&&settingsPage)return true;if(!settingsPage)actionPending=false;return Publish(e,settingsPage?1u:unsigned(e.savedMode),settingsPage);}
+    bool Sync(Editor& e,bool settingsPage){Load(e);pageOpen=settingsPage;if(profile.empty())return Publish(e,0,false);if(settingsPage||e.savedMode)ListMicrophones(e);if(actionPending&&settingsPage)return true;if(!settingsPage)actionPending=false;return Publish(e,settingsPage?1u:unsigned(e.savedMode),settingsPage);}
     bool Publish(Editor& e,unsigned mode,bool draft){
         std::string bindings;for(const auto& b:draft?e.bindings:e.savedBindings){if(!bindings.empty())bindings+=',';bindings+="{\"Phrase\":"+Quote(b.phrase)+",\"Skill\":"+std::to_string(b.skill)+"}";}
         if(!control){
@@ -108,7 +115,8 @@ public:
             if(t.magic==0x534e4432&&e.resultSerial!=t.serial){e.resultSerial=t.serial;e.matchedSlot=t.matched;e.lastResult.assign(t.result,strnlen(t.result,sizeof t.result));changed=true;}
         });
         if(process&&WaitForSingleObject(process,0)==WAIT_OBJECT_0){CloseHandle(process);process=nullptr;status="Recognition stopped. Save / retry to restart.";}
-        for(int slot=0;slot<6;++slot){unsigned mask=0;for(int sample=0;sample<3;++sample){auto path=storage/(L"sound-"+std::to_wstring(slot+1)+L"-"+std::to_wstring(sample+1)+L".wav");if(GetFileAttributesW(path.c_str())!=INVALID_FILE_ATTRIBUTES)mask|=1u<<sample;}if(e.samples[size_t(slot)]!=mask){e.samples[size_t(slot)]=mask;changed=true;}}
+        // Which examples are recorded matters to the Voice page only: no file checks on the frame path otherwise.
+        if(pageOpen)for(int slot=0;slot<6;++slot){unsigned mask=0;for(int sample=0;sample<3;++sample){auto path=storage/(L"sound-"+std::to_wstring(slot+1)+L"-"+std::to_wstring(sample+1)+L".wav");if(GetFileAttributesW(path.c_str())!=INVALID_FILE_ATTRIBUTES)mask|=1u<<sample;}if(e.samples[size_t(slot)]!=mask){e.samples[size_t(slot)]=mask;changed=true;}}
         if(!status.empty()&&status!=e.status){e.status=status;return true;}return changed;
     }
 };

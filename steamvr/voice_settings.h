@@ -11,6 +11,7 @@ struct Editor {
     std::array<Assignment,6> bindings{};
     std::vector<Choice> choices{{-1,"Unassigned"}};
     std::vector<std::string> microphones{"Windows default"};
+    bool microphonesListed=false;   // the devices after the default (voice::Runtime::ListMicrophones)
     std::array<unsigned,6> samples{};
     std::array<Assignment,6> savedBindings{};int savedMode=0,savedMicrophone=-1,savedTolerance=2;
     int slot=0,sample=0,tolerance=2,microphone=-1,mode=0,pickerPage=0,level=0,activeMode=0,matchedSlot=-1;bool picker=false,signal=false;
