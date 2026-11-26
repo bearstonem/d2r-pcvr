@@ -286,6 +286,8 @@ struct Snapshot {
     bool devSkyRims=false;      // and [sky] cover_rims
     std::array<float,limbs::Knobs> devBodies{};   // [bodies] as they stand (DEV > Bodies)
     int devClass=-1,skillClass=-1;
+    std::array<char,16> voiceCharacter{};
+    unsigned voiceBank=0;
     uint64_t session=0,at=0;
     uint32_t revision=0,activeSet=0;
     bool equipmentKnown=false,beltKnown=false;
