@@ -265,10 +265,10 @@ credits: Kudlatytrue, geekstreetstudios, ptkk73, beadlebytes, DevilInLaw, RobinH
 - VOICE CASTING: Gameplay > Voice binds up to six sounds to skills - by ptkk73.
 - Record a sound, choose its skill, select On and Save; each character has its own.
 - Warlock: Miasma Bolt leaves your hand and aims up and down.
-- Weapons collide: the clank sounds only on a hard knock; the hands still feel each touch.
+- Weapons clank only on a hard knock; your hands still feel every touch.
 - MAIN MENU IN 3D: each act's scene and sky stand round you - by Kudlatytrue.
 - The main menu lists your 5 last played heroes first, then the rest by name.
-- FLOOR MAP: Menus > Controller menus > Detached map > Floor - by geekstreetstudios.
+- FLOOR MAP: Menus > Detached map > Floor - by geekstreetstudios.
 - Floating map: a see-through background and a grab hint - by beadlebytes.
 - Area banner: a new area's name before your eyes, with the terror level - by ptkk73.
 - You face into a new area, and a town portal home faces the town - by ptkk73.
@@ -278,7 +278,7 @@ credits: Kudlatytrue, geekstreetstudios, ptkk73, beadlebytes, DevilInLaw, RobinH
 - Hand wheel: EQUIPMENT page removed; CHAT shows only in multiplayer games.
 - Controller menu size: Menus > Controller menus - by geekstreetstudios.
 - Kick has its own icon - by beadlebytes.
-- GRAPHICS > EFFECTS: hide armors, auras and shouts; they keep working - by DevilInLaw.
+- GRAPHICS > EFFECTS: hide armors, auras and shouts; they still work - by DevilInLaw.
 - Ice Armor icicles, forearm mists for Cyclone Armor and Psychic Ward - by DevilInLaw.
 - Assassin charges as compact orbs on the forearm - by DevilInLaw.
 - Campfire 1.0: a new mountain panorama and wind gusts - by Kudlatytrue.
