@@ -219,7 +219,8 @@ Known issues:
 
 Thanks to these contributors:
 - **Kudlatytrue** for the 3D main menu and Campfire 1.0;
-- **geekstreetstudios** for multiplayer, game chat and the floor map;
+- **geekstreetstudios** for multiplayer, game chat, the floor map and the
+  controller menu size;
 - **ptkk73** for voice casting, suggested potions, monster abilities, the area
   banner, facing on arrival, the town portal in front, a potion in each hand,
   the health bar and laser fixes;
