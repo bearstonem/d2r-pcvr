@@ -117,6 +117,7 @@ namespace hud { void SetWorkspaceBand(float top, float bottom); void SetBoardCle
 namespace gamecmd { void Init(const D2RL::PluginContext* ctx); void Tick(); }   // the game's key commands from BodyWalk (gamecmd.cpp)
 namespace spatialaudio { void SetLogger(void (*log)(const char*)); void SetViewYaw(float (*yaw)()); void Configure(bool headFollow, bool listenerTurn, float forwardSign, float depthScale); void Poll(); }   // head-relative sound (spatial_audio.cpp)
 namespace worldsound { void SetLogger(void (*log)(const char*)); void Init(const D2RL::PluginContext* ctx, bool soundLog, float echo, bool headset); void Poll(); }   // the game's reverb raised, sounds counted by channel (world_sound.cpp)
+namespace nativeui { uint32_t DesktopPoseUnit(uint64_t session); }
 namespace gamestate { bool ToggleMenus(); }
 namespace gamestate { uint32_t MenuEpoch(); }
 namespace gamestate { void Init(const D2RL::PluginContext* ctx); void Tick(); uint32_t WeaponClass(); uint32_t WeaponSet(); uint32_t WeaponType(); uint32_t HandsHeld(); uint32_t TwoHanded(); uint32_t WeaponHand(); uint32_t HandsKey(); bool MenuOpen(); int ObjectLight(uint32_t txt, uint32_t mode, float rgb[3]); uint64_t LocalPlayer(); void SetViewMode(uint32_t mode); bool AutoMapOpen(); bool SetAutoMap(bool open); void PollPlate(); bool PlateRect(int32_t out[4]); }
@@ -13773,7 +13774,7 @@ void DesktopTick(){
         if(!g_h.skeleton)g_h.skeleton=d2rsig::Hook(RVA_COMPUTE_SELF_WORLD_POSE,kSigComputeSelfWorldPose,sizeof kSigComputeSelfWorldPose,skel::Detour(),skel::OrigSlot());
         upperbodyskin::Init(g_ctx);
     }
-    uint32_t unit=0;combat::LocalPlayerId(unit);
+    const uint32_t unit=nativeui::DesktopPoseUnit(gamestate::LocalPlayer());
     float pos[3]{};
     const bool placed=d2rcam::LookAtNow(pos)&&std::isfinite(pos[0]+pos[1]+pos[2]);
     const bool world=unit&&gamestate::LocalPlayer()&&d2rcam::InWorld()&&placed;

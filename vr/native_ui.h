@@ -4,6 +4,8 @@
 namespace D2RL {struct PluginContext;}
 namespace nativeui {
 void Init(const D2RL::PluginContext*);
+void CaptureDesktopPoseUnit(uint64_t session); // UI thread, identity only
+uint32_t DesktopPoseUnit(uint64_t session);
 void Capture(framevr::interaction::Snapshot&); // UI thread only
 // Thread-safe copy, unknown on session mismatch or after 1000 ms without capture.
 framevr::partyroster::Snapshot PartyRoster(uint64_t session,uint64_t now);

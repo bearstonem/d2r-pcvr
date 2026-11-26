@@ -278,6 +278,23 @@ std::string Name(int id) {
     std::snprintf(text,sizeof text,"Skill %d",id);return text;
 }
 }
+// Desktop mode never starts the headset capture loop that refreshes combat's player ID.
+// Observe only the visual recipient identity from the existing inventory UI callback.
+namespace {std::mutex desktopMutex;uint64_t desktopSession=0,desktopAt=0;uint32_t desktopId=0;}
+void CaptureDesktopPoseUnit(uint64_t session){
+    uint32_t id=0;static bool checked=false;
+    if(session&&!checked)checked=d2rsig::Check(abi::LocalIndexRva,abi::LocalIndexSig,sizeof abi::LocalIndexSig)&&
+        d2rsig::Check(abi::ClientPlayerRva,abi::ClientPlayerSig,sizeof abi::ClientPlayerSig);
+    if(session&&checked){
+        const int index=reinterpret_cast<int(*)()>(d2rsig::Addr(abi::LocalIndexRva))();
+        if(index>=0&&index<8){const auto ptr=reinterpret_cast<uintptr_t(*)(int)>(d2rsig::Addr(abi::ClientPlayerRva))(index);
+            uint32_t header[3]{};if(Read(ptr,header)&&header[0]==0&&header[2]!=UINT32_MAX)id=header[2];}
+    }
+    std::lock_guard lock(desktopMutex);desktopSession=session;desktopId=id;desktopAt=GetTickCount64();
+}
+uint32_t DesktopPoseUnit(uint64_t session){std::lock_guard lock(desktopMutex);
+    return session&&session==desktopSession&&GetTickCount64()-desktopAt<=1500?desktopId:0;
+}
 void Init(const D2RL::PluginContext* c){
     context=c;c->QueryService(&strings);c->QueryService(&tables);
     const auto core=GetModuleHandleW(L"D2RCore.dll");

@@ -17,6 +17,8 @@ class DesktopRuntimeTests(unittest.TestCase):
         body = text.split('void DesktopTick(){',1)[1].split('bool StartDesktop(',1)[0]
         self.assertIn('upperbody::Tick(world,nullptr,unit)',body)
         self.assertIn('PublishRemoteBodies(world)',body)
+        self.assertIn('nativeui::DesktopPoseUnit(gamestate::LocalPlayer())',body)
+        self.assertNotIn('combat::LocalPlayerId',body)
         for forbidden in ['HookXInput(', 'OpenShared(', 'LoadReShade(', 'PushArms(', 'MouseTick(']:
             self.assertNotIn(forbidden,body)
 
