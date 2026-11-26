@@ -10,6 +10,11 @@ int main(){
  assert(!Decode(b,n-1,&q));assert(!Decode(b,n+1,&q));
  p.hand[0][0]=std::numeric_limits<float>::quiet_NaN();assert(!Encode(p,b,sizeof b,&n));p.hand[0][0]=0;
  p.headPitch=100;assert(!Encode(p,b,sizeof b,&n));p.headPitch=0;
+ AttackView action;assert(!action.Step(1,100,false,7));assert(!action.Step(1,101,true,1));
+ assert(action.Step(1,130,false,7));assert(action.Step(1,260,false,8));assert(!action.Step(1,270,false,2));
+ assert(!action.Step(1,1000,false,7));assert(!action.Step(2,1001,false,8));
+ p.nativeAttack=true;assert(Encode(p,b,sizeof b,&n)&&Decode(b,n,&q)&&q.nativeAttack);
+ p.nativeAttack=false;assert(Encode(p,b,sizeof b,&n)&&Decode(b,n,&q)&&!q.nativeAttack);
  Playback pb;assert(pb.Push(7,1,p,1000));assert(!pb.Push(7,1,p,1010));assert(!pb.Push(7,0,p,1010));
  p.hand[0][0]=1;assert(pb.Push(7,2,p,1040));Remote r{};assert(pb.Sample(7,1060,&r));
  assert(!pb.Sample(7,1600,&r));assert(pb.Expire(1600,500)==1);pb.Reset();assert(!pb.Sample(7,1060,&r));

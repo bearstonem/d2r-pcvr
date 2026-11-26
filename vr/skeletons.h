@@ -168,6 +168,7 @@ void Set(const Input& in);
 // Fresh remote hero snapshot. worldPosition is in game renderer units;
 // ECS entity ids are deliberately not exposed as game unit ids.
 struct RemoteUpperBody {
+    bool nativeAttack=false;
     upperbody::Resolved resolved{};
     uint64_t unit = 0;
     float worldPosition[3] = {};

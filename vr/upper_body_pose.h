@@ -11,7 +11,21 @@ namespace upperbody {
 // Final locally solved wrists + R/L weapon attachments, in yaw-neutral model
 // axes. Each affine frame stores three 3D rows and an eye-relative metre offset.
 struct Resolved {uint8_t mask=0;float frame[4][12]{};};
+// Presentation only: a skill press arms the next native attack. A release is not
+// an animation end; the player's native mode returning to idle/walk is.
+struct AttackView {
+ uint64_t session=0,armed=0;bool active=false;
+ bool Step(uint64_t s,uint64_t now,bool skill,int mode){
+  if(session!=s||!s){*this={};session=s;}
+  if(!s)return false;if(skill)armed=now+250;
+  const bool swing=mode==7||mode==8||mode==11||(mode>=12&&mode<=15)||mode==18;
+  if(!swing){active=false;return false;}
+  if(!active&&armed&&now<=armed)active=true;
+  return active;
+ }
+};
 struct Pose {
+ bool nativeAttack=false;
  Resolved resolved{};
  uint8_t tracked=0;
  float hand[2][3]{};
@@ -45,7 +59,7 @@ inline bool Valid(const Pose&p){
 inline bool Encode(const Pose&p,uint8_t*out,size_t cap,size_t*n){
  if(!out||!n||cap<kPacketBytes||!Valid(p))return false;
  size_t z=0;auto put=[&](const auto&v){std::memcpy(out+z,&v,sizeof v);z+=sizeof v;};
- const uint8_t prefix[6]={'U','B','P',2,p.tracked,0};std::memcpy(out,prefix,6);z=6;
+ const uint8_t prefix[6]={'U','B','P',2,p.tracked,uint8_t(p.nativeAttack)};std::memcpy(out,prefix,6);z=6;
  for(auto&h:p.hand)for(float v:h)put(v);
  for(auto&q:p.rot)for(float v:q)put(v);
  for(float v:{p.userHeadM,p.headPitch,p.headRoll,p.yawInModel,p.worldYaw})put(v);
@@ -57,8 +71,8 @@ inline bool Encode(const Pose&p,uint8_t*out,size_t cap,size_t*n){
  *n=z;return z==kPacketBytes;
 }
 inline bool Decode(const uint8_t*b,size_t n,Pose*out){
- if(!b||!out||n!=kPacketBytes||b[0]!='U'||b[1]!='B'||b[2]!='P'||b[3]!=2||b[5])return false;
- Pose p{};p.tracked=b[4];size_t z=6;
+ if(!b||!out||n!=kPacketBytes||b[0]!='U'||b[1]!='B'||b[2]!='P'||b[3]!=2||b[5]>1)return false;
+ Pose p{};p.nativeAttack=b[5]!=0;p.tracked=b[4];size_t z=6;
  auto get=[&](auto&v){std::memcpy(&v,b+z,sizeof v);z+=sizeof v;};
  for(auto&h:p.hand)for(float&v:h)get(v);
  for(auto&q:p.rot)for(float&v:q)get(v);

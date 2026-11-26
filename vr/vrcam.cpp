@@ -7194,6 +7194,20 @@ template <int I> DWORD WINAPI XDetour(DWORD idx, XINPUT_STATE* s) {
     bool mirror = false;
     BWPadMirror report{};
     if (t_xDepth == 0 && idx == 0 && s && !FlatKeyMode() && PadFromBodyWalk(s,&report)) { r = ERROR_SUCCESS; mirror = true; }
+#ifdef D2RVR_NATIVE_OPENXR
+    // A loading screen can pause the XR producer longer than the mirror's one-second
+    // freshness limit. Keep connectivity, not the last action, for an established VR pad.
+    if(t_xDepth==0&&idx==0&&s){
+        static std::atomic<ULONGLONG> localMirrorAt{0};static std::atomic<DWORD> lastPacket{0};
+        const auto now=GetTickCount64();
+        if(mirror){localMirrorAt.store(report.writer_pid==GetCurrentProcessId()?now:0);lastPacket.store(s->dwPacketNumber);}
+        else if(!g_enabled.load()||!g_set.bodywalkPad.load()||FlatKeyMode())localMirrorAt.store(0);
+        else if(const auto at=localMirrorAt.load();at&&now>=at&&now-at<=15000&&r==ERROR_DEVICE_NOT_CONNECTED){
+            *s={};s->dwPacketNumber=lastPacket.load()+1;SequenceSkillPad(s,false);InteractButton(false,ActionsHeld());
+            g_skillHeld.store(false);g_aHeld.store(false);g_rightX.store(0);return ERROR_SUCCESS;
+        }
+    }
+#endif
     if (t_xDepth == 0 && idx == 0 && s) KeysAsStick(s, &r);
     if (r == ERROR_SUCCESS && t_xDepth == 0) {
 #ifdef D2RVR_NATIVE_OPENXR
@@ -9871,7 +9885,7 @@ void PublishRemoteBodies(bool on){
         const auto&p=remotes[i].pose;auto&t=targets[i];t.unit=remotes[i].unit;
         memcpy(t.worldPosition,p.worldPosition,sizeof t.worldPosition);t.classId=int(p.classId);
         memcpy(t.hand,p.hand,sizeof t.hand);memcpy(t.rot,p.rot,sizeof t.rot);
-        t.handsValid=p.tracked;t.userHeadM=p.userHeadM;t.headPitch=p.headPitch;t.headRoll=p.headRoll;
+        t.nativeAttack=p.nativeAttack;t.handsValid=p.tracked;t.userHeadM=p.userHeadM;t.headPitch=p.headPitch;t.headRoll=p.headRoll;
         t.yawInModel=p.yawInModel;t.worldYaw=p.worldYaw;t.resolved=p.resolved;
     }
     skel::SetRemoteUpperBodies(targets,count);
@@ -10219,7 +10233,11 @@ void PushArms() {
         for(int h=0;h<2;++h)if(!(pose.tracked&(1u<<h))){memset(pose.hand[h],0,sizeof pose.hand[h]);memset(pose.rot[h],0,sizeof pose.rot[h]);pose.rot[h][3]=1;}
         pose.headPitch=in.headPitch;pose.headRoll=in.headRoll;pose.yawInModel=in.yawInModel;
         memcpy(pose.worldPosition,hero,sizeof hero);pose.classId=uint32_t(cls);pose.sampleMs=GetTickCount();
-        if(pose.tracked==3)skel::ReadLocalResolved(&pose.resolved,in.worldEpoch,cls);
+        static upperbody::AttackView remoteAttack;
+        uintptr_t nativeUnit=0;uint32_t hdr[4]{};
+        const bool known=combat::LocalPlayerUnit(nativeUnit)&&SafeRead(hdr,reinterpret_cast<const void*>(nativeUnit),sizeof hdr)&&hdr[0]==0&&hdr[2]==unit;
+        pose.nativeAttack=remoteAttack.Step(gamestate::LocalPlayer(),GetTickCount64(),in.attacking,known?int(hdr[3]):-1);
+        if(!pose.nativeAttack&&pose.tracked==3)skel::ReadLocalResolved(&pose.resolved,in.worldEpoch,cls);
         float model[16];const auto at=g_heroMatrix.load();
         if(at&&SafeRead(model,reinterpret_cast<void*>(at),sizeof model)){
             const float x=sinf(in.yawInModel),z=cosf(in.yawInModel);

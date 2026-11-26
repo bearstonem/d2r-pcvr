@@ -8,6 +8,13 @@ int main(){
  assert(Match(c,2,3,rig,local)==0);assert(Match(c,2,2,rig,local)==-1);
  assert(Match(c,2,3,rig,rig)==-1);c[1].position[0]=20;c[1].position[2]=20;
  assert(Match(c,2,3,rig,local)==-1);
+ LocalRig owner;assert(!owner.Accept(1,100,10,0,100,true)); // overlapping before any safe bind
+ assert(owner.Accept(1,100,10,0,101,false));
+ for(unsigned tick=102;tick<5000;++tick){assert(!owner.Accept(1,200,11,0,tick,true));assert(owner.Accept(1,100,10,0,tick,true));}
+ assert(!owner.Accept(1,200,11,0,5001,false)); // rig order does not matter on separation
+ assert(!owner.Accept(1,100,22,0,5010,true)); // recycled skeleton, different renderer entity
+ assert(!owner.Accept(1,200,11,0,7200,true));assert(owner.Accept(1,300,22,0,7200,false));
+ assert(owner.Accept(1,301,22,1,7201,false));assert(!owner.Accept(2,301,22,1,7202,true));
  const float pivot[3]={2,3,4};
  for(float nativeYaw:{0.f,1.5707963f,3.1415927f,-1.5707963f})for(float facing:{0.f,.7f,-2.f}){
   float m[16];FacingCorrection(nativeYaw,facing,pivot,m);
