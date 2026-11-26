@@ -54,6 +54,17 @@ flails that swing. It also has a long list of community contributions.
   Potions are also easier to grab, by the neck too.
 - **A potion in each hand - contributed by ptkk73:** both hands can take a
   potion from the belt at once, for you or your mercenary.
+- **Voice casting - contributed by ptkk73:** **Gameplay > Voice** binds up to
+  six sounds of your own to skills or army commands. Each character has its
+  own.
+  - Record a short sound (one example is enough, up to three), choose its
+    skill, select **On** and **Save changes**, then close settings to cast.
+  - The page tests your sounds without casting, with a microphone meter and
+    the last match. Pick the microphone and the sensitivity there too.
+  - It matches the sound itself, so any word in any language works.
+  - The game's own mana, skill and cooldown checks apply. Voice casts work in
+    offline games, and not in menus.
+  - Your recordings stay on your PC. Voice is off until you turn it on.
 - **Warlock: Miasma Bolt leaves your hand,** as Fire Bolt does, and aims up and
   down with your hand.
 - **Weapons collide, more quietly:** your weapon against your own shield or
@@ -159,7 +170,7 @@ The campfire's new panorama also sits at the right height after an update.
 
 ## Verification and known issues
 
-Automated: the native Windows build and its 299 tests pass, with the release
+Automated: the native Windows build and its 304 tests pass, with the release
 notes, identity and installer staging checks.
 
 Tried in the headset (one PC, SteamVR, offline):
@@ -183,6 +194,7 @@ Contributors tried their own work in their headsets on v0.3.35-based builds:
 - Campfire 1.0.
 
 Not yet tried in a headset:
+- voice casting, which its contributor showed working in their game;
 - Miasma Bolt from the hand;
 - the new ceiling heights;
 - a hard knock's clank;
@@ -208,9 +220,9 @@ Known issues:
 Thanks to these contributors:
 - **Kudlatytrue** for the 3D main menu and Campfire 1.0;
 - **geekstreetstudios** for multiplayer, game chat and the floor map;
-- **ptkk73** for suggested potions, monster abilities, the area banner, facing
-  on arrival, the town portal in front, a potion in each hand, the health bar
-  and laser fixes;
+- **ptkk73** for voice casting, suggested potions, monster abilities, the area
+  banner, facing on arrival, the town portal in front, a potion in each hand,
+  the health bar and laser fixes;
 - **beadlebytes** for the floating map's background and grab hint, and Kick's
   icon;
 - **DevilInLaw** for Graphics > Effects, the icicles, the forearm mists and the
@@ -250,6 +262,8 @@ credits: Kudlatytrue, geekstreetstudios, ptkk73, beadlebytes, DevilInLaw, RobinH
 - Set it: Graphics > Performance > Draw distance > Enemy activation distance.
 - Suggested potions: a missing type shows in the belt from your inventory - by ptkk73.
 - Potions are easier to grab, and each hand can take one at once - by ptkk73.
+- VOICE CASTING: Gameplay > Voice binds up to six sounds to skills - by ptkk73.
+- Record a sound, choose its skill, select On and Save; each character has its own.
 - Warlock: Miasma Bolt leaves your hand and aims up and down.
 - Weapons collide: the clank sounds only on a hard knock; the hands still feel each touch.
 - MAIN MENU IN 3D: each act's scene and sky stand round you - by Kudlatytrue.
