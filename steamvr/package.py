@@ -50,7 +50,7 @@ def main():
         paths += ['steamvr/setup_native.py']
     paths += ['steamvr/prepare_icons.py', 'steamvr/steam_assets.py', 'steamvr/game_assets.py',
               'steamvr/game_install.py', 'steamvr/casc_assets.py', 'steamvr/enemy_health_layout.py',
-              'steamvr/voice_payload.py', 'docs/voice-commands.md']
+              'steamvr/area_banner_layout.py', 'steamvr/voice_payload.py', 'docs/voice-commands.md']
     paths += ['steamvr/prepare_potions.py', 'steamvr/potion_assets.py', 'steamvr/bone_pieces.py', 'steamvr/prepare_spell_sprites.py', 'steamvr/vendor/bitknit.py',
               'steamvr/prepare_arcane_sky.py', 'steamvr/prepare_monster_immunity.py', 'steamvr/prepare_sewer_backdrop.py', 'steamvr/prepare_kurast_dock.py',
               'steamvr/prepare_game_ceiling.py', 'steamvr/granny_write.py', 'steamvr/prepare_campfire_sky.py',

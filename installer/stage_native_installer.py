@@ -26,7 +26,10 @@ SCRIPTS = {'setup_windows.ps1', 'setup_windows.py', 'setup_native.py', 'uninstal
            'prepare_potions.py', 'potion_assets.py', 'prepare_spell_sprites.py', 'prepare_arcane_sky.py', 'prepare_dev_scenarios.py',
            'prepare_monster_immunity.py', 'prepare_sewer_backdrop.py', 'prepare_kurast_dock.py', 'prepare_props.py', 'prepare_leather.py',
            'prepare_game_ceiling.py', 'granny_write.py', 'prepare_campfire_sky.py', 'enemy_health_layout.py',
+           'area_banner_layout.py', 'prepare_frontend_floor.py', 'prepare_frontend_scene.py', 'podglad_modeli.py',
            'voice_payload.py'}
+# Data files install.py reads from the package: the main menu's scene edits and the Ice Armor icicles.
+DATA = re.compile(r'steamvr/frontend_edits_act[0-9]\.json|steamvr/assets/ice-armor/(?:ic[123]\.pvr|README\.md)')
 
 
 def safe_name(name):
@@ -39,6 +42,7 @@ def safe_name(name):
 def allowed(name, source):
     path = safe_name(name)
     return (name in ROOT_FILES or name in {'steamvr/' + item for item in SCRIPTS}
+            or (DATA.fullmatch(name) is not None and (source / name).is_file())
             or (len(path.parts) == 2 and path.parts[0] == 'reshade' and re.fullmatch(r'D2R_\w+\.fxh?', path.name) is not None
                 and (source / name).is_file())   # the effect and every feature header, by pattern
             or (len(path.parts) == 3 and path.parts[:2] in (('steamvr', 'licenses'), ('reshade', 'sky'))
