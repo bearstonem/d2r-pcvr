@@ -351,6 +351,7 @@ inline constexpr Option AllyHealthOptions[]={
     {0,"Off","Hide ally health bars."},{1,"Wrist","Names and live health beside the wrist map."},
     {2,"Overhead","Names and live health above located allies."},{3,"Both","Show wrist and overhead bars."},
 };
+inline constexpr Option MapPlacementOptions[]={{0,"HUD","Leave the map where you release it."},{1,"Floor","Lay the map ahead of you. A sustained head turn brings it around."}};
 inline constexpr Option MapViewOptions[]={
     {0,"Isometric","The game's own slanted minimap, with NPC and exit names."},
     {1,"Top-down","The minimap laid flat like a floor plan. NPC and exit names are hidden."},
@@ -688,7 +689,7 @@ inline constexpr Override Overrides[]={
      .help="The minimap or the game's full map, slanted or flat. The gold arrow shows which way you face. Look at the map and push the right stick to zoom.",
      FRAMEVR_OPTIONS(MapViewOptions)},
     {.id="interactions.map_rotate",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Turn map with you",
-     .help="On keeps the way you face at the top of the map. Off keeps north at the top and turns the arrow. Top-down views only."},
+     .help="Top-down wrist and HUD maps only. On keeps your heading at the top; off keeps north at the top. The floor map stays aligned with the world."},
     {.id="interactions.companion_counts",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Buffs and companions",
      .help="Under the minimap: your companion counts, and the buffs, auras and harmful effects on you. Follows the minimap's gesture."},
     {.id="interactions.floating_map_background_pct",.page=View::Wrist,.section="Map",.kind=RowKind::Slider,.label="Map background",
@@ -712,6 +713,12 @@ inline constexpr Override Overrides[]={
     {.id="interactions.controller_menu_size",.page=View::Menus,.section="Controller menus",.kind=RowKind::Slider,.label="Controller menu size",
      .help="Size of both stick-click menus, including their buttons and map tab. 100% keeps the original size. Apply, then open either hand menu to see the change.",
      .format={.unit="%"}},
+    {.id="interactions.detached_map_placement",.page=View::Menus,.section="Controller menus",.kind=RowKind::Choice,.label="Detached map",
+     .help="Choose Floor or HUD, then Apply. Pull the wrist map out and release away from the wrist at any height.",FRAMEVR_OPTIONS(MapPlacementOptions)},
+    {.id="interactions.ground_map_size",.page=View::Menus,.section="Controller menus",.kind=RowKind::Slider,.label="Floor map width",
+     .help="Changes the diameter of the map at your feet. Wrist and HUD maps keep their own size. Apply to save.",.format={.unit="%"}},
+    {.id="interactions.ground_map_distance_cm",.page=View::Menus,.section="Controller menus",.kind=RowKind::Slider,.label="Ground map distance",
+     .help="How far ahead the centre of the floor map sits. Lower brings it closer without resizing it.",.format={.unit="cm"}},
     // Labels: Names and bars
     {.id="hud.labels_size",.page=View::Labels,.section="Names and bars",.kind=RowKind::Slider,.label="Loot name size",
      .help="Size of item names on the ground; 45% is the game's size. Hold the right stick down to show every nearby name.",

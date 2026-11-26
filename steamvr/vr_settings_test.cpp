@@ -972,7 +972,7 @@ int main(int argc,char** argv){
     {   // Left-handed (#307, hand_role.h): Off by default, experimental, a row of its own, saved alone
         Check(Defaults()[LeftHanded]==0&&std::wstring(Definitions[LeftHanded].section)==L"interactions"&&
               std::wstring(Definitions[LeftHanded].key)==L"left_handed"&&Definitions[LeftHanded].min==0&&Definitions[LeftHanded].max==1&&
-              HelpText(LeftHanded)[0]!=0&&LeftHanded<ChangeMask::Bits&&LeftHanded+1==HeldCollisions&&ControllerMenuSize<AllyHealthBars&&AllyHealthBars==Count-1,
+              HelpText(LeftHanded)[0]!=0&&LeftHanded<ChangeMask::Bits&&LeftHanded+1==HeldCollisions&&ControllerMenuSize<AllyHealthBars&&AllyHealthBars+1==DetachedMapPlacement&&GroundMapDistance==Count-1,
               "Left-handed: Off by default, [interactions] left_handed Off / On, explained, its own change bit, appended after the haptics (Weapons collide after it)");
         const auto* row=content::RowOf(LeftHanded);
         Check(row&&!row->beside&&row->page==View::Hands&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Left-handed (experimental)")==0&&
@@ -1059,6 +1059,8 @@ int main(int argc,char** argv){
               std::wstring(Definitions[PropHeft].key)==L"prop_heft"&&Definitions[PropHeft].min==0&&Definitions[PropHeft].max==1&&
               Definitions[PropHeft].step==1&&HelpText(PropHeft)[0]!=0&&PropHeft<ChangeMask::Bits&&PropHeft+1==FloatingMapBackground,
               "Props have weight: On by default, [interactions] prop_heft Off / On, explained, its own change bit, appended (Floating map background after it)");
+        const auto* ground=content::RowOf(GroundMapSize);
+        Check(ground&&ground->kind==content::RowKind::Slider&&ground->page==View::Menus&&Defaults()[GroundMapSize]==100&&Normalize(GroundMapSize,0)==50&&Normalize(GroundMapSize,999)==200,"ground map size is a bounded independent slider");
         const auto* row=content::RowOf(PropHeft);const auto* props=content::RowOf(PropPhysics);
         Check(row&&props&&!row->beside&&row->page==View::Physics&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Props have weight")==0&&
               row->section==props->section&&row->classes==content::AllClasses&&std::strlen(row->help)<=160,

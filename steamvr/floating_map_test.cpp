@@ -89,6 +89,27 @@ static fm::Output Out(fm::Engine& e, const fm::Tuning& t, fm::Pose at = HomePose
 }
 
 int main() {
+    { fm::Engine e;fm::Tuning tune;tune.floorMode=true;auto in=Standing(1);in.wristShown=true;in.wristSize=.24f;
+      in.wristP={0,1,-.35f};in.groundKnown=true;in.feet={0,0,0};in.groundYaw=0;Aim(in,{0,1,0},in.wristP);
+      e.Step(in,tune);in.grip[0]=1;in.time+=.01;e.Step(in,tune);
+      in.wristShown=false;in.aim.y=in.hand[0].y=1.3f;in.time+=.01;e.Step(in,tune);
+      in.grip[0]=0;in.time+=.01;auto a=e.Step(in,tune);Check(e.Grounded()&&Near(a.p.y,.025f),"floor selected: chest-height release snaps to feet");
+      tune.floorMode=false;in.time+=.01;auto hud=e.Step(in,tune);Check(!e.Grounded()&&hud.p.y>1,"HUD restores actual release, not floor pose");
+      tune.floorMode=true;in.groundKnown=false;in.time+=.01;Check(!e.Step(in,tune).shown&&e.Grounded(),"floor unavailable: no HUD fallback");
+      in.groundKnown=true;in.time+=.01;a=e.Step(in,tune);Check(a.shown&&e.Grounded(),"floor acquired without another drop");
+      Aim(in,{0,1,0},a.p);for(int k=0;k<60;++k){in.time+=.01;a=e.Step(in,tune);}Check(a.frame>.99f,"pointing at floor reveals its frame");
+      Aim(in,{0,1,0},{4,2,0});for(int k=0;k<60;++k){in.time+=.01;a=e.Step(in,tune);}Check(a.frame<.01f,"looking away hides floor frame");
+      tune.groundScale=.5f;in.time+=.01;Check(Near(e.Step(in,tune).size,a.size*.5f),"ground only size slider halves diameter");tune.groundScale=1;
+      tune.groundDistance=2.2f;in.time+=.01;auto closer=e.Step(in,tune);Check(Near(closer.p.z,-2.2f)&&Near(closer.size,a.size)&&Near(closer.p.y,a.p.y),"distance changes radius alone while placed");tune.groundDistance=2.5f;
+      Check(a.p.z < -2 && a.size>2,"floor footprint farther ahead and larger at 100 percent");
+      in.head={.4f,1.45f,.2f};in.headQ=math::Yaw(.2f);auto b=a;
+      for(int k=0;k<50;++k){in.time+=.01;b=e.Step(in,tune);}Check(Len(b.p-a.p)<.001f,"small glance stays inside deadzone");
+      in.headQ=math::Yaw(1.f);for(int k=0;k<10;++k){in.time+=.01;b=e.Step(in,tune);}Check(Len(b.p-a.p)<.001f,"brief large glance stays put");
+      for(int k=0;k<160;++k){in.time+=.01;b=e.Step(in,tune);}Check(b.p.x<-1.f&&Near(b.p.y,a.p.y),"sustained head turn eases floor map around feet");
+      in.feet.x=1;auto before=b;in.time+=.01;b=e.Step(in,tune);Check(Near(b.p.x-before.p.x,1.f),"walking carries the settled map");
+      in.travelEpoch++;in.headQ=math::Yaw(0);in.time+=.01;b=e.Step(in,tune);Check(Near(b.p.x,in.feet.x)&&Near(b.p.z,in.feet.z-2.5f),"arrival immediately re-aligns placed map without manual recenter");
+      in.wristShown=true;in.grip[0]=1;Aim(in,{0,1,0},in.wristP);in.time+=.01;b=e.Step(in,tune);Check(!e.Grounded()&&b.held,"recall ground map from wrist"); }
+
     const fm::Tuning t = Plain();
     {   // the shipped values (tuned in the headset 2026-11-06), one constexpr each
         const fm::Tuning s;
