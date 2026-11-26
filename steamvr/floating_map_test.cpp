@@ -97,8 +97,8 @@ int main() {
       tune.floorMode=false;in.time+=.01;auto hud=e.Step(in,tune);Check(!e.Grounded()&&hud.p.y>1,"HUD restores actual release, not floor pose");
       tune.floorMode=true;in.groundKnown=false;in.time+=.01;Check(!e.Step(in,tune).shown&&e.Grounded(),"floor unavailable: no HUD fallback");
       in.groundKnown=true;in.time+=.01;a=e.Step(in,tune);Check(a.shown&&e.Grounded(),"floor acquired without another drop");
-      Aim(in,{0,1,0},a.p);for(int k=0;k<60;++k){in.time+=.01;a=e.Step(in,tune);}Check(a.frame>.99f,"pointing at floor reveals its frame");
-      Aim(in,{0,1,0},{4,2,0});for(int k=0;k<60;++k){in.time+=.01;a=e.Step(in,tune);}Check(a.frame<.01f,"looking away hides floor frame");
+      Aim(in,{0,1,0},a.p);for(int k=0;k<60;++k){in.time+=.01;a=e.Step(in,tune);}Check(a.frame<.01f,"pointing at the floor map shows no frame");
+      Aim(in,{0,1,0},{4,2,0});for(int k=0;k<60;++k){in.time+=.01;a=e.Step(in,tune);}Check(a.frame<.01f,"pointing away: still no frame on the floor");
       tune.groundScale=.5f;in.time+=.01;Check(Near(e.Step(in,tune).size,a.size*.5f),"ground only size slider halves diameter");tune.groundScale=1;
       tune.groundDistance=2.2f;in.time+=.01;auto closer=e.Step(in,tune);Check(Near(closer.p.z,-2.2f)&&Near(closer.size,a.size)&&Near(closer.p.y,a.p.y),"distance changes radius alone while placed");tune.groundDistance=2.5f;
       Check(a.p.z < -2 && a.size>2,"floor footprint farther ahead and larger at 100 percent");

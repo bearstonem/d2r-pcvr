@@ -65,6 +65,8 @@ constexpr float TieDeg=1;             // point to grab: both maps this close in 
 // The copy's frame (its gold border and dark bands; Jeff 2026-11-15: "the floating map should not show the border when
 // looking at the map ... can show up when you point to the map"): hidden, it fades in over FrameFadeS while Right Grip
 // would take the copy (the laser on it or in its grab band) or it is held or sized, and out again over FrameFadeS.
+// On the floor (Detached map: Floor) it has no frame at all (owner 2026-11-25: "for HUD map, it's fine, for floor map,
+// no frame"): pointing at it there shows none, and ui_blit draws the floor map without one.
 constexpr float FrameFadeS=.15f;
 // The frame's fade, one step: 0 hidden .. 1 shown, toward `on` by dt / FrameFadeS (a long dt, as after a gap: at once).
 inline float FrameStep(float frame,bool on,float dt){
@@ -401,8 +403,7 @@ public:
         const bool mapIn=onMap.known&&(onMap.miss<=0||(pointing&&onMap.miss<=tolerance&&InBand(in.aim,aim.q,at,size,margin)));
         const int pick=pointing?Choose(mapIn,onWrist.known&&onWrist.miss<=tolerance,onMap,onWrist):onMap.known&&onMap.miss<=0?0:onWrist.known&&onWrist.miss<=0?1:-1;
         bool aimedNow=pick==0,force=false;
-        const MapAim floorAim=grounded&&in.groundKnown&&in.handFree&&in.aimTracked?AimAt(in.aim,aim.q,at,size):MapAim{};
-        const bool copyAimed=pick==0||(floorAim.known&&floorAim.miss<=0); // floor hover shows a frame, never steals grip
+        const bool copyAimed=pick==0;   // on the floor never: the floor map has no frame, and pointing at it never takes grip
         const bool wristNow=pick==1;
         math::Vec hitAt=aimedNow?onMap.point:onWrist.point;
         // Two-hand size: both grips within the window, in either order, with either hand pointing at it. A grip that may be

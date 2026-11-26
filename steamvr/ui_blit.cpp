@@ -25,7 +25,7 @@ cbuffer Options : register(b0) {uint blackBackground;uint mapSide;uint mapFlags;
 // its dark backing, margins and the frame's dark bands at backAlpha (1 solid, as before; below 1
 // the floating map's see-through copy); the walls, markers, labels, the arrow and the frame's gold
 // stay solid. Its frame (the bevel and the corner cuts) at frameAlpha over the map beneath it (1
-// shown, as before; 0 hidden: the floating copy while it is not pointed at).
+// shown, as before; 0 hidden: the floating copy while it is not pointed at). The floor map (mapFlags 32) has none.
 // xReach, xShift (the full map, xReach > 0; wrist_full_map.h XSearchAt): the X's search square,
 // xReach source pixels each way from the source's center moved by xShift, where the game draws
 // the hero's X on its full map at the game zoom the share was drawn at; sized to that X, so other
@@ -291,17 +291,18 @@ float4 Square(float4 position) {
 }
 float4 PS(float4 position:SV_Position):SV_Target {
     position.y-=mapTop;   // the square's own pixels (0 but for the floating copy's own square)
-    // The frame first (the arrow, at the centre, never reaches it): shown (frameAlpha 1), as ever;
-    // fading, over the map beneath it (premultiplied, out unassociated); hidden, the map alone.
-    float4 frame=0;
-    const bool inFrame=mapSide&&Frame(position.xy,frame);
+    // The floor map: no frame, pointed at or not (owner 2026-11-25: "for HUD map, it's fine, for floor map, no frame");
+    // its edge fades out into the ground.
     if(mapFlags&32u){
         float4 ground=Square(position);
         ground.a*=.55*(1-smoothstep(.62,1.,length(position.xy*(2./mapSide)-1.)));
         ground.rgb*=ground.a; // the OpenXR floor layer takes premultiplied color
-        if(inFrame){frame.rgb*=frame.a;ground=lerp(ground,frame,frameAlpha);}
         return ground;
     }
+    // The frame first (the arrow, at the centre, never reaches it): shown (frameAlpha 1), as ever;
+    // fading, over the map beneath it (premultiplied, out unassociated); hidden, the map alone.
+    float4 frame=0;
+    const bool inFrame=mapSide&&Frame(position.xy,frame);
     if(inFrame&&frameAlpha>=1)return frame;
     const float4 m=Square(position);
     if(!inFrame||frameAlpha<=0)return m;
@@ -464,14 +465,14 @@ bool UiBlit::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D12R
     }
     if(squareMap&&groundTop>=UINT(t.Width)+2&&uint64_t(groundTop)+t.Width<=t.Height){
         rows(groundTop-1,groundTop+UINT(t.Width));
-        UINT backBits,frameBits,angleBits;std::memcpy(&backBits,&backAlpha,4);std::memcpy(&frameBits,&frameAlpha,4);std::memcpy(&angleBits,&groundBearing,4);
+        UINT backBits,angleBits;std::memcpy(&backBits,&backAlpha,4);std::memcpy(&angleBits,&groundBearing,4);   // no frame on the floor
         // A glance may reposition the floor panel, but must not turn the dungeon underfoot.
         // Compensate for the panel yaw, independent of the wrist/HUD turn setting; the arrow turns separately.
         const float arrow=bearing-groundBearing;UINT arrowBits;std::memcpy(&arrowBits,&arrow,4);
         list->SetGraphicsRoot32BitConstant(1,arrowBits,17);
         UINT spanBitsGround;std::memcpy(&spanBitsGround,&groundSpan,4);list->SetGraphicsRoot32BitConstant(1,spanBitsGround,6);
         list->SetGraphicsRoot32BitConstant(1,mapFlags|32u|4u,2);list->SetGraphicsRoot32BitConstant(1,angleBits,3);
-        list->SetGraphicsRoot32BitConstant(1,groundTop,10);list->SetGraphicsRoot32BitConstant(1,backBits,11);list->SetGraphicsRoot32BitConstant(1,frameBits,16);
+        list->SetGraphicsRoot32BitConstant(1,groundTop,10);list->SetGraphicsRoot32BitConstant(1,backBits,11);
         list->DrawInstanced(3,1,0,0);
     }
     if(findHero) {

@@ -163,9 +163,10 @@ int main(int argc,char** argv){try {
         if(!squareMap)std::memcpy(want,expected[y*sourceWidth+x],sizeof want);
         else if(!seeThrough||y<=32)squarePixel(x,int(y),1,1,want,filtered,fore,inFrame);   // the solid square, and the row under it
         else if(ground&&y>=2*SeeThroughTop-1){
-            int row=int(y)-int(2*SeeThroughTop);squarePixel(x,row,back,frameShown,want,filtered,fore,inFrame);
+            // the floor map: never a frame, whatever the copy's (--frame 100 too), its edge faded out
+            int row=int(y)-int(2*SeeThroughTop);squarePixel(x,row,back,0,want,filtered,fore,inFrame);
             float r=std::hypot((x+.5f)/16-1,(row+.5f)/16-1),q=std::clamp((r-.62f)/.38f,0.f,1.f);
-            float cover=inFrame&&frameShown==1?1.f:.55f*(1-q*q*(3-2*q));
+            float cover=.55f*(1-q*q*(3-2*q));
             want[3]*=cover;for(int lane=0;lane<3;++lane)want[lane]*=want[3];
             for(int lane=0;lane<4;++lane)if(std::abs(Half(out[lane])-want[lane])>(filtered?.026f:.0008f)){correct=false;std::printf("floor %u,%d lane %d mismatch\n",x,row,lane);}
             continue;
