@@ -330,31 +330,31 @@ static void RailTests(){
     using content::Group;
     const auto row=[](Group g){return Hit{Kind::OpenGroup,int(g),-1};};
     const auto tab=[](View v){return Hit{Kind::Open,int(v),-1};};
-    const Hit comfort=row(Group::Comfort),graphics=row(Group::Graphics);
+    const Hit interface=row(Group::Interface),graphics=row(Group::Graphics);
     Model m;Snapshot s;s.ready=true;m.Open(s);
-    L::Press(m,tab(View::Body),0);L::Press(m,tab(View::Shield),0);   // Gameplay open; Comfort remembers Body
+    L::Press(m,tab(View::Labels),0);L::Press(m,tab(View::Shield),0);   // Gameplay open; Interface remembers Labels
     P::PointerFilter f;uint64_t ms=1000;
     auto layout=L::Build(m,{},{});
-    const L::Element* pressedRow=L::Find(layout,comfort);
-    Check(pressedRow&&!L::Find(layout,tab(View::Moving)),"Gameplay open: Comfort's row, its pages hidden");
-    Check(pressedRow&&pressedRow->rect.y==L::TabY+7*L::TabPitch,"Comfort sits under Gameplay's 5 pages");
+    const L::Element* pressedRow=L::Find(layout,interface);
+    Check(pressedRow&&!L::Find(layout,tab(View::Wrist)),"Gameplay open: Interface's row, its pages hidden");
+    Check(pressedRow&&pressedRow->rect.y==L::TabY+10*L::TabPitch,"Interface sits under Gameplay's 6 pages, Comfort and Controls");
     const float x=float(pressedRow->rect.x+pressedRow->rect.w/2),y=float(pressedRow->rect.y+pressedRow->rect.h/2);
     for(int i=0;i<10;++i){f.Step(layout,ms,true,x,y,false);ms+=11;}
     f.Step(layout,ms,true,x,y,true);ms+=11;
     auto out=f.Step(layout,ms,true,x,y,false);ms+=11;
-    Check(out.click==comfort,"a press on a group row clicks it on release");
+    Check(out.click==interface,"a press on a group row clicks it on release");
     const auto openBefore=L::OpenGroup(m);
     L::Press(m,out.click,ms);layout=L::Build(m,{},{});
-    Check(m.view==View::Body,"and opens its last page");
+    Check(m.view==View::Labels,"and opens its last page");
     Check(L::OpenGroup(m)!=openBefore,"the open group changed: transport guards the rail (GuardRail)");
     f.GuardRail(ms);
-    Check(L::HitTest(layout,x,y)==graphics,"Gameplay closed: the rows moved up, Graphics slid under the laser");
+    Check(L::HitTest(layout,x,y)==graphics,"Gameplay closed: Graphics moved up under the laser, past Interface's 5 pages");
     // At once: the rail guard ignores the press, whichever row is under the laser: the release clicks nothing.
     f.Step(layout,ms,true,x,y,false);ms+=11;
     f.Step(layout,ms,true,x,y,true);ms+=11;
     for(int i=0;i<3;++i){f.Step(layout,ms,true,x,y,true);ms+=11;}
     out=f.Step(layout,ms,true,x,y,false);ms+=11;
-    Check(out.click.kind==Kind::None&&m.view==View::Body,"a press right after the group opens takes nothing: the guard stops it");
+    Check(out.click.kind==Kind::None&&m.view==View::Labels,"a press right after the group opens takes nothing: the guard stops it");
     // Settled on it, still inside the rail guard: a second pull takes nothing.
     for(int i=0;i<10;++i){f.Step(layout,ms,true,x,y,false);ms+=11;}
     {auto down=f.Step(layout,ms,true,x,y,true);ms+=11;auto up=f.Step(layout,ms,true,x,y,false);ms+=11;
@@ -364,21 +364,21 @@ static void RailTests(){
     f.Step(layout,ms,true,x,y,true);ms+=11;out=f.Step(layout,ms,true,x,y,false);ms+=11;
     Check(out.click==graphics,"once settled past the guard, the row under the laser takes the press");
     // Pressing the open group again stays put.
-    const auto before=m.revision;L::Press(m,comfort,ms);
-    Check(m.view==View::Body&&m.revision==before,"pressing the open group again changes nothing");
+    const auto before=m.revision;L::Press(m,interface,ms);
+    Check(m.view==View::Labels&&m.revision==before,"pressing the open group again changes nothing");
     // Moving between pages of the open group moves no row: no guard.
-    {const auto open=L::OpenGroup(m);L::Press(m,tab(View::Moving),ms);Check(L::OpenGroup(m)==open,"a page of the open group leaves the open group as it is");}
-    // Interface, from Gameplay open: its last page lands under the laser.
-    {Model n;n.Open(s);L::Press(n,tab(View::Shield),0);
+    {const auto open=L::OpenGroup(m);L::Press(m,tab(View::Wrist),ms);Check(L::OpenGroup(m)==open,"a page of the open group leaves the open group as it is");}
+    // Interface, from Comfort open: one of its pages lands under the laser.
+    {Model n;n.Open(s);L::Press(n,tab(View::Body),0);
      const auto a=L::Build(n,{},{});const auto* r=L::Find(a,row(Group::Interface));
-     Check(r&&r->rect.y==L::TabY+9*L::TabPitch,"Interface's row with Gameplay open");
+     Check(r&&r->rect.y==L::TabY+6*L::TabPitch,"Interface's row with Comfort open");
      const float ix=float(r->rect.x+r->rect.w/2),iy=float(r->rect.y+r->rect.h/2);
      L::Press(n,row(Group::Interface),0);
-     Check(L::HitTest(L::Build(n,{},{}),ix,iy)==tab(View::Warnings),"Interface's last page slides under the laser: the guard covers it");}
+     Check(L::HitTest(L::Build(n,{},{}),ix,iy)==tab(View::Menus),"Interface's Menus page slides under the laser: the guard covers it");}
     // The guard is for rail rows only, its edge is RailGuardMs, and a view change's Reset keeps it.
     {layout=L::Build(m,{},{});P::PointerFilter g;uint64_t t=5000;g.GuardRail(t);g.Reset();
      const L::Element* close=nullptr;for(const auto& e:layout.elements)if(e.role==L::Role::FooterClose)close=&e;
-     const L::Element* page=L::Find(layout,tab(View::Body));
+     const L::Element* page=L::Find(layout,tab(View::Labels));
      Check(close&&page&&close->Has(L::Enabled),"a footer button and a page row to press");
      auto tap=[&](const L::Element* e){const float ex=float(e->rect.x+e->rect.w/2),ey=float(e->rect.y+e->rect.h/2);
          for(int i=0;i<10;++i){g.Step(layout,t,true,ex,ey,false);t+=11;}
