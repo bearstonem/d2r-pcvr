@@ -261,7 +261,7 @@ int main(int argc,char** argv){
         for(size_t i=0;i<tables.rowCount;++i)Check(content::PageOf(tables.rows[i].page).settings,"rows live on settings pages");
     }
     // ---- the idle card: the page's intro when the page did not draw it, then a sentence that stands alone ----
-    for(int view=0;view<int(View::Count);++view)if(content::PageOf(View(view)).settings&&View(view)!=View::More){
+    for(int view=0;view<int(View::Count);++view)if(content::PageOf(View(view)).settings&&View(view)!=View::More&&View(view)!=View::Voice){
         Model m;m.Open(Ready());L::Press(m,{Kind::Open,view,-1},0);
         const auto l=L::Build(m,{},{});const auto* text=FindRole(l,L::Role::CardText);
         const std::string what="A setting's help shows here, with Undo and Default when they apply.",intro=content::PageOf(View(view)).intro;
@@ -274,7 +274,7 @@ int main(int argc,char** argv){
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};
         const std::vector<Want> rail={
-            {content::Group::Gameplay,"Gameplay",{"Combat","Targeting","Shield","Monsters","Physics"}},
+            {content::Group::Gameplay,"Gameplay",{"Combat","Targeting","Shield","Monsters","Physics","Voice"}},
             {content::Group::Comfort,"Comfort",{"Moving","Body"}},
             {content::Group::Controls,"Controls",{"Hands","Vibration"}},
             {content::Group::Interface,"Interface",{"Wrist","Menus","Labels","Outlines","Warnings"}},
@@ -392,7 +392,7 @@ int main(int argc,char** argv){
             for(int saving=0;saving<2;++saving){
                 L::LayoutInput in;
                 const auto layout=L::Build(m,m.context,in);CheckLayout(layout,where);
-                if(content::PageOf(View(view)).settings&&view!=int(View::Performance))Check(FindRole(layout,L::Role::PendingEntry)||FindRole(layout,L::Role::ChangeLine),where+": the idle card lists what is not applied");
+                if(content::PageOf(View(view)).settings&&view!=int(View::Performance)&&view!=int(View::Voice))Check(FindRole(layout,L::Role::PendingEntry)||FindRole(layout,L::Role::ChangeLine),where+": the idle card lists what is not applied");
                 for(const auto& e:layout.elements){
                     if(e.role==L::Role::Row||e.role==L::Role::Tab||e.role==L::Role::GroupTab||e.role==L::Role::PresetCard){
                         L::LayoutInput p;p.card=e.help;p.hover=e.hit;CheckLayout(L::Build(m,m.context,p),where+" card "+std::to_string(e.help));
@@ -603,7 +603,7 @@ int main(int argc,char** argv){
             L::LayoutInput in;in.card=HelpGroupFirst+int(Group::Gameplay);
             const auto c=L::Build(m,{},in);CheckLayout(c,"Gameplay's card with a change");
             Check(FindRole(c,L::Role::CardState)&&FindRole(c,L::Role::CardState)->text=="1 not applied","its card counts what is not applied");
-            Check(FindRole(c,L::Role::CardText)->text=="Its pages: Combat, Targeting, Shield, Monsters and Physics. Press to open Combat.","its card names its pages and the page a press opens");
+            Check(FindRole(c,L::Role::CardText)->text=="Its pages: Combat, Targeting, Shield, Monsters, Physics and Voice. Press to open Combat.","its card names its pages and the page a press opens");
             L::Press(m,groupHit(Group::Gameplay),0);l=L::Build(m,{},{});
             Check(L::Find(l,groupHit(Group::Gameplay))->Has(L::Changed)&&L::Find(l,{Kind::Open,int(View::Shield),-1})->Has(L::Changed)&&
                   !L::Find(l,{Kind::Open,int(View::Combat),-1})->Has(L::Changed),"open: the row and the changed page");

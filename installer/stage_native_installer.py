@@ -18,6 +18,7 @@ ROOT_FILES = {
     'vrmod-manifest.json', 'launcher_icon.png',
     'third_party/minhook/LICENSE.txt', 'external/reshade/LICENSE.md',
     'bin/d2rl-pcvr.dll', 'bin/openxr_loader.dll', 'bin/CascLib.dll', 'steamvr/vendor/bitknit.py',
+    'bin/voice/voice-recognition.exe', 'docs/voice-commands.md',   # Gameplay > Voice's helper and its guide
 }
 SCRIPTS = {'setup_windows.ps1', 'setup_windows.py', 'setup_native.py', 'uninstall_windows.py', 'hdr_check.py',
            'steam_config.py', 'install.py', 'mod_identity.py', 'launch_windows.py', 'prepare_icons.py',
@@ -25,7 +26,8 @@ SCRIPTS = {'setup_windows.ps1', 'setup_windows.py', 'setup_native.py', 'uninstal
            'prepare_potions.py', 'potion_assets.py', 'prepare_spell_sprites.py', 'prepare_arcane_sky.py', 'prepare_dev_scenarios.py',
            'prepare_monster_immunity.py', 'prepare_sewer_backdrop.py', 'prepare_kurast_dock.py', 'prepare_props.py', 'prepare_leather.py',
            'prepare_game_ceiling.py', 'granny_write.py', 'prepare_campfire_sky.py', 'enemy_health_layout.py',
-           'area_banner_layout.py', 'prepare_frontend_floor.py', 'prepare_frontend_scene.py', 'podglad_modeli.py'}
+           'area_banner_layout.py', 'prepare_frontend_floor.py', 'prepare_frontend_scene.py', 'podglad_modeli.py',
+           'voice_payload.py'}
 # Data files install.py reads from the package: the main menu's scene edits and the Ice Armor icicles.
 DATA = re.compile(r'steamvr/frontend_edits_act[0-9]\.json|steamvr/assets/ice-armor/(?:ic[123]\.pvr|README\.md)')
 
