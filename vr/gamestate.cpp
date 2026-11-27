@@ -1025,11 +1025,8 @@ framevr::CallbackTicket g_collectionTabTicket;
 std::atomic<bool> g_collectionTabOnBar{false};
 void MaintainCollectionTab(const PluginContext* ctx) {
     if (!g_widgets || !g_widgets->findPanel || !g_widgets->findWidget) {
+        g_collectionTabOnBar.store(true);   // cannot be told: the laser keeps taking the sixth tab, as before
         Log("gamestate: no widget service; the Collection tab cannot be routed");
-        return;
-    }
-    if (!HasWidgetServiceField(g_widgets, WidgetServiceSetWidgetEventMessageFieldEnd)) {
-        Log("gamestate: this loader has no setWidgetEventMessage; the Collection tab cannot be routed");
         return;
     }
     Widgets::WidgetHandle panel = 0;
@@ -1044,6 +1041,11 @@ void MaintainCollectionTab(const PluginContext* ctx) {
         return;
     }
     g_collectionTabOnBar.store(true);
+    // D2RLoader 1.3.1 cannot route the click: the mod's laser takes the tab itself (collection_tab_button.h).
+    if (!HasWidgetServiceField(g_widgets, WidgetServiceSetWidgetEventMessageFieldEnd)) {
+        Log("gamestate: the Collection tab is on the stash bar; this loader cannot route its click, the laser takes it");
+        return;
+    }
     const auto result = g_widgets->setWidgetEventMessage(ctx, button, Widgets::EventKind::Click,
                                                          framevr::collection::TabTarget, framevr::collection::TabCommand);
     Log(result == Widgets::Result::Success

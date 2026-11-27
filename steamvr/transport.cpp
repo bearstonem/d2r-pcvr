@@ -3483,18 +3483,6 @@ void MenuPointer(const menus::Pad& controls) {
             nativeMenuPad.lt=nativeMenuPad.rt=0;
             nativeMenuPad.buttons&=uint16_t(~(menus::LeftBumper|menus::RightBumper));
         }
-        // On the Collection page (the laser's): B puts the page away, back to the stash tab under it,
-        // and neither B nor A reaches the game - its Back closed the whole stash and its A acted on a
-        // focus hidden under the page (bearstonem's review of #608, point 6).
-        {
-            static bool bWas=false;
-            const bool b=(controls.buttons&menus::B)!=0;
-            if(up&&collection::TabWanted()) {
-                if(b&&!bWas){collection::TabSetWanted(false);Say("Frame stash: B - the Collection page put away");}
-                nativeMenuPad.buttons&=uint16_t(~(menus::B|menus::A));
-            }
-            bWas=b;
-        }
         if(now<pulseUntil) {
             nativeMenuPad.buttons|=pulse.buttons;
             nativeMenuPad.lt=std::max(nativeMenuPad.lt,pulse.lt);nativeMenuPad.rt=std::max(nativeMenuPad.rt,pulse.rt);

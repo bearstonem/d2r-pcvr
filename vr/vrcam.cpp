@@ -8061,7 +8061,8 @@ void CampfireTick() {
     framevr::SetUiShotGrips(g_set.uiShotGrips.load());       // [dev] ui_shot_grips
     framevr::SetCollectionLog(g_set.collectionLog.load());   // [dev] collection_log
     // The game's tooltips held back while the page covers the stash ([collection] game_tooltips=0): the mod draws them.
-    d2rcam::SetHideGameTooltips(!g_set.collectionGameTooltips.load() && framevr::CollectionCoversStash());
+    d2rcam::SetHideGameTooltips(!g_set.collectionGameTooltips.load() && framevr::collection::tooltip::ItemTextAvailable() &&
+                                framevr::CollectionCoversStash());
     {   // the caption over the heroes ([campfire] caption...)
         const float rect[4] = { g_set.campfireCaptionRect[0].load(), g_set.campfireCaptionRect[1].load(), g_set.campfireCaptionRect[2].load(), g_set.campfireCaptionRect[3].load() };
         framevr::SetCampfireCaption(g_campfire.load() && !g_frontend3d.load() && g_set.campfireMenuBoard.load() && g_set.campfireCaption.load(), rect,

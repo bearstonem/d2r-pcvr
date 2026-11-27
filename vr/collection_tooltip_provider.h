@@ -46,6 +46,8 @@ Answer Current();
 // tooltips are held back then, and the page draws this one): the item covering cell x, y of the
 // 10 x 4 grid. Call only when the pointed cell changed; returns the answer's revision.
 uint64_t RequestInventory(int x, int y);
+// Whether this loader gives an item's own text (getItemTooltip; D2RLoader 1.3.1 does not).
+bool ItemTextAvailable();
 struct InventoryAnswer {
     std::string text;            // the item's own text (getItemTooltip); empty for an empty cell
     int         x = 0, y = 0, w = 0, h = 0;   // the item's block in the grid

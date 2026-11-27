@@ -201,6 +201,10 @@ uint64_t RequestInventory(int x, int y) {
     return g_invRequestRevision;
 }
 
+bool ItemTextAvailable() {
+    return g_items != nullptr && D2RL::HasItemServiceField(g_items, D2RL::ItemServiceTooltipFieldEnd);
+}
+
 InventoryAnswer CurrentInventory() {
     std::lock_guard<std::mutex> lock(g_mutex);
     return g_invResult;
