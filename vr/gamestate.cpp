@@ -37,6 +37,10 @@
 #include "interactionstate.h"
 #include "target_lock.h"
 #include "journal_ui.h"
+#ifdef D2RVR_NATIVE_OPENXR
+#include "native_ui.h"
+#include "../steamvr/desktop_mode.h"
+#endif
 #include "../steamvr/native_panels.h"
 #include "../steamvr/leather_menu.h"
 #include "../steamvr/stats_button.h"
@@ -711,6 +715,9 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
     PlayerHandle player = InvalidPlayerHandle;
     const bool havePlayer = g_inventory && g_inventory->getLocalPlayer(ctx, &player) == Inventory::Result::Success && player != InvalidPlayerHandle;
     g_player.store(havePlayer ? player : 0);
+#ifdef D2RVR_NATIVE_OPENXR
+    if(pcvrdesktop::Enabled())nativeui::CaptureDesktopPoseUnit(havePlayer?player:0);
+#endif
     {   // the item on the cursor, for a drop outside the menu (transport MenuPointer)
         ItemHandle onCursor=InvalidItemHandle;
         g_cursorItem.store(havePlayer&&g_inventory&&g_inventory->getCursorItem&&

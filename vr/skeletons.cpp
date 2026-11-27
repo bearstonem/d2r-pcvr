@@ -37,6 +37,7 @@
 #include "skeletons.h"
 #include "upper_body_skin.h"
 #include "upper_body_render.h"
+#include "offline_difficulty.h"
 #include "../steamvr/body_tracking.h"
 #include "../steamvr/dual_wield.h"
 #include "../steamvr/crossbow_pose.h"
@@ -4437,6 +4438,7 @@ bool PoseRemoteUpper(uintptr_t self,const Hero&h,const float*local) {
     int match=upperbodyrender::Match(candidates.data(),candidates.size(),h.cls,pos,local);
     if(match<0)return false;
     const auto&r=targets[match];
+    if(r.nativeAttack){upperbodyskin::ForgetOwner(self);return true;} // native animation owns this actor only, for this attack
     uintptr_t world=0,mats=0,previous=0;int n=0;
     if(!Get(self+0x20,&world)||!Get(world,&n)||n!=h.count||!Get(world+4,&mats)||!mats)return true;
     std::vector<Mat> oldW(n);if(!SafeCopy(oldW.data(),reinterpret_cast<void*>(mats),sizeof(Mat)*n))return true;
@@ -4899,6 +4901,21 @@ void Arms(Posed& posed) {
     // form's is still drawn: back from a form, the sample trails the swap as it did going in
     else if(in.shapeForm&&framevr::shapeshift::RigDrawn(GetTickCount64(),g_formPosedAt.load()))return;
     else g_rigPosedAt[0].store(GetTickCount64());
+#endif
+#ifdef D2RVR_NATIVE_OPENXR
+    if(offlinedifficulty::ClientMode()>0){
+        static upperbodyrender::LocalRig owner;
+        const auto now=GetTickCount64(),session=gamestate::LocalPlayer();
+        AcquireSRWLockExclusive(&g_remoteLock);
+        bool ambiguous=false;
+        if(now-g_remoteAt<=500)for(const auto& peer:g_remoteBodies){
+            if(upperbodyrender::Distance(position,peer.worldPosition)<=16.f){ambiguous=true;break;}
+        }
+        const bool mine=owner.Accept(session,self,posed.hero.entity,hero.form,now,ambiguous);
+        if(mine)NoteHero(self);
+        ReleaseSRWLockExclusive(&g_remoteLock);
+        if(!mine)return; // Leave an overlapping non-owner to its native pose, not local head/hands.
+    }else
 #endif
     NoteHero(self);
 #ifdef D2RVR_NATIVE_OPENXR
