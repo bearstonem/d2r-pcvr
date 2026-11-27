@@ -226,7 +226,7 @@ static void Run() {
     }
     {   // Whirlwind: a T held a moment (owner, 2026-11-06), whirling ahead
         Sim s(Motion::Whirlwind);Whirlwind(s);
-        Check(s.casts==1&&s.land==spellmotion::Land::Spot&&s.spot.ahead>9&&std::fabs(s.spot.right)<1,"Whirlwind: lands 10 cells ahead, where you face");
+        Check(s.casts==1&&s.land==spellmotion::Land::None,"Whirlwind: the T casts once, on no spot of its own (it turns Whirlwind on: whirl_on.h)");
         s.Hold(4);
         Check(s.casts==1,"Whirlwind: the T held on for four seconds whirls once (it cast again every 0.9 s and emptied the mana)");
         s.Move(RestR,RestL,.3f);Whirlwind(s);

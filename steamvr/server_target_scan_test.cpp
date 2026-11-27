@@ -16,6 +16,7 @@ int main(){
  constexpr uintptr_t game=0x100000,player=0x200000;
  Memory m;std::array<uintptr_t,128>buckets{};
  auto unit=[&](uintptr_t u,uint32_t type,uint32_t id,uint32_t mode,uint16_t x,uint16_t y){
+  m.put(u,std::array<uint8_t,0x160>{});
   const uint32_t h[4]{type,100,id,mode};m.put(u,h);m.put(u+0xd8,game);
   const uintptr_t path=u+0x200,data=u+0x300,stats=u+0x400;const uint16_t xy[4]{0,x,0,y};
   m.put(u+0x38,path);m.put(path,xy);m.put(u+0x10,data);m.put(data,stats);m.put(stats+0x3c,uint32_t(0));m.put(u+0x158,uintptr_t(0));
@@ -28,7 +29,11 @@ int main(){
  m.put(first+2*0x1000+0x400+0x3c,uint32_t(0x100));
  m.put(first+3*0x1000+12,uint32_t(12));
  m.put(first+4*0x1000+0xd8,uintptr_t(game+1));
- auto read=[&](uintptr_t a,void*b,size_t n){return m.read(a,b,n);};
+ unsigned nodeReads=0;
+ auto read=[&](uintptr_t a,void*b,size_t n){
+  if(a>=first && a<first+7*0x1000 && (a-first)%0x1000<0x160)++nodeReads;
+  return m.read(a,b,n);
+ };
  auto lookup=[&](uintptr_t g,int t,uint32_t id){assert(g==game&&t==0);return id==77?player:uintptr_t(0);};
  unsigned relations=0,lines=0;
  auto relation=[&](uintptr_t g,uintptr_t viewer,uintptr_t monster){assert(g==game&&viewer==player);++relations;return monster==first+0x1000?0:1;};
@@ -37,10 +42,15 @@ int main(){
  targetcone::Target out[64]{};float hx=0,hy=0;
  auto scan=[&](uint32_t id=77,int cap=64){return servertarget::Scan(game,id,out,cap,30,hx,hy,read,lookup,relation,line,level);};
  assert(scan()==2);assert(hx==40000.5f&&hy==20&&out[0].id==501&&out[0].clear&&out[1].id==507&&!out[1].clear);
+ assert(nodeReads==7);
  assert(relations==3&&lines==2);assert(targetcone::Pick(out,2,hx,hy,1,0,0)==0);
  assert(scan(77,1)==1&&out[0].id==501);assert(scan(0)==-1&&scan(88)==-1&&scan(77,0)==-1);
  m.put(player+12,uint32_t(17));assert(scan()==-1);m.put(player+12,uint32_t(1));
  m.put(player+0xd8,uintptr_t(game+1));assert(scan()==-1);m.put(player+0xd8,game);
+ // Losing the last byte of the next link ends this bucket. The next bucket still runs.
+ m.bytes.erase(first+0x15f);buckets[1]=first+6*0x1000;m.put(game+0x4c6*8,buckets);
+ assert(scan()==1&&out[0].id==507&&!out[0].clear);
+ m.put(first+0x158,first+0x1000);buckets[1]=0;m.put(game+0x4c6*8,buckets);
  // Missing flags cannot turn an unreadable unit into an enemy.
  m.bytes.erase(first+0x400+0x3c);assert(scan()==1&&out[0].id==507);
  // Valid empty roster clears, rather than retaining the previous targets.

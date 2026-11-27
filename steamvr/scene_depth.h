@@ -1,4 +1,5 @@
 #pragma once
+#include "active_keys.h"
 #include <reshade.hpp>
 #include <array>
 #include <cmath>
@@ -16,24 +17,40 @@ struct Candidate {
 };
 class Candidates {
     std::array<Candidate,32> entries{};
+    ActiveKeys tracked;
+    void Erase(Candidate& entry) {
+        tracked.Remove(entry.resource);
+        entry = {};
+    }
 public:
+    // Recording threads check one published mask for the whole barrier batch.
+    // Mutations and the authoritative device/resource lookup use the scene mutex.
+    bool MayTransition(uint32_t count, const reshade::api::resource* resources) const {
+        return tracked.MaybeContainsAny(count, [&](uint32_t i) { return resources[i].handle; });
+    }
     void Bind(uintptr_t device,uint64_t resource,uint32_t w,uint32_t h,bool matchingColor) {
-        if(!matchingColor)return;
+        if(!resource||!matchingColor)return;
         Candidate* slot=nullptr;
         for(auto& e:entries) {
             if(e.device==device&&e.resource==resource){++e.binds;return;}
             if(!e.resource&&!slot)slot=&e;
         }
-        if(slot)*slot={device,resource,w,h,1,0,false};
+        if(slot) {
+            *slot={device,resource,w,h,1,0,false};
+            tracked.Add(resource);
+        }
     }
     void Barrier(uintptr_t device,uint64_t resource,uint32_t state) {
-        for(auto& e:entries)if(e.device==device&&e.resource==resource){e.state=state;e.known=true;}
+        for(auto& e:entries)if(e.device==device&&e.resource==resource){e.state=state;e.known=true;return;}
     }
     void Destroy(uintptr_t device,uint64_t resource=0) {
-        for(auto& e:entries)if(e.device==device&&(!resource||e.resource==resource))e={};
+        for(auto& e:entries)if(e.resource&&e.device==device&&(!resource||e.resource==resource))Erase(e);
+    }
+    void Clear() {
+        for(auto& e:entries)if(e.resource)Erase(e);
     }
     void EndEye(uintptr_t device) {
-        for(auto& e:entries)if(e.device==device) {if(!e.binds)e={};else e.binds=0;}
+        for(auto& e:entries)if(e.resource&&e.device==device) {if(!e.binds)Erase(e);else e.binds=0;}
     }
     Candidate Select(uintptr_t device,uint32_t w,uint32_t h)const {
         Candidate exact{},scaled{};

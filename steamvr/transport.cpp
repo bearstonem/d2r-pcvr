@@ -46,6 +46,8 @@
 #include "gameplay.h"
 #include "walk_direction.h"
 #include "whirl_steer.h"
+#include "whirl_on.h"
+#include "entry_facing.h"
 #include "room_scale.h"
 #include "room_steps.h"
 
@@ -69,6 +71,8 @@
 #include "../vr/ally_health_state.h"
 #include "arcane_decay.h"
 #include "glyph_cast.h"
+#include "voice_bridge.h"
+#include "voice_runtime.h"
 #include "glyph_trail.h"
 #include "skill_cooldowns.h"
 #include "spell_motion.h"
@@ -141,6 +145,7 @@
 #include "wrist_chat.h"
 #include "wrist_chat_ui.h"
 #include "../vr/wrist_chat_native.h"
+#include "../vr/offline_difficulty.h"
 #include "native_panels.h"
 #include "cinema_screen.h"
 #include "npc_dialogue.h"
@@ -335,6 +340,8 @@ bool arcaneAtlasPending=false,arcaneImageReady=false;
 glyphcast::Stroke glyphStroke;
 int glyphHand=-1;   // the hand drawing the stroke (right = 0), latched as it begins: each hand casts its own set
 glyphcast::Cast glyphCast;
+voice::Bridge voiceBridge;voice::Gate voiceGate;voice::Runtime voiceRuntime;
+uint64_t voiceOpenAt=0,voiceCatalogAt=0;
 glyphtrail::Painter glyphPainter(ForAtlas(glyphtrail::Painter::Incremental(),glyphtrail::Size,glyphtrail::Size));
 uint64_t glyphStrokeId=0,glyphPaintKey=0,glyphShownStroke=0;
 double glyphBeganAt=0,glyphEndedAt=-1,glyphPaintAt=0;   // the stroke's start and end (recognised, refused or cancelled; -1 drawing or none)
@@ -371,6 +378,26 @@ spellmotion::Gate spellGate;   // every class's motions' gate: both grips held, 
 // last press (ms), live 150 ms on as CastingSkill; glyphRecordAt the same for the record, lock-free.
 struct GlyphPress {interaction::Skill skill{};bool record=false;math::Vec aim{};uint64_t at=0;} glyphPress;
 std::atomic<uint64_t> glyphRecordAt{0};
+// Whirlwind on (whirl_on.h): the mode, the whirls the game took of this turn-on (vrcam reports them: WhirlOnTook,
+// WhirlOnNow), which turn-on it is (vrcam keeps each one's way), and what its lines say. The player's Whirlwind
+// button and his other presses as he made them, before the mode presses its own; another motion or glyph cast.
+whirlon::Mode whirlMode;
+whirlon::Chain whirlChain;
+uint32_t whirlActivation=0;
+uint64_t whirlHero=0;
+bool whirlParked=false;   // this turn-on's Whirlwind put on the right trigger's record (interactionstate::Park took it)
+struct WhirlRun {double from=0;float seconds=0,manaFrom=0;int level=0;bool manaKnown=false;} whirlRun;
+bool whirlStop=false;   // the stick let go after a push: the whirl under way ends short (whirl_turn.h)
+struct WhirlTurns {int turned=0,stopped=0,refused=0,followed=0,missed=0;} whirlTurns;   // this turn-on's, for its off line
+std::atomic<bool> whirlUsed{false},whirlActive{false};
+std::atomic<bool> whirlturnInstalled{false};   // the server's whirl steps reached WhirlOnStep (its hooks are in)
+// The game's server thread reports each step of a whirl (WhirlOnStep, WhirlOnTurned) under this lock alone, never the
+// transport's own: the chain, this turn-on's turns and the steering as the last input frame left it. Taken after
+// the transport's lock where both are held.
+std::mutex whirlStepMutex;
+struct WhirlSteerNow {uint32_t activation=0;bool on=false,pushed=false,stop=false;float stickX=0,stickY=0;uint64_t at=0;} whirlSteer;
+int whirlPlayerSlot=-1;   // this frame: the hand slot of a Whirlwind button the player holds, -1 none
+bool whirlOtherPress=false,whirlOtherWas=false,whirlOtherCast=false,whirlTee=false;
 // The setting holding which of a class's motions are off (spellmotion::PageOf), -1 for a class without.
 int MotionsKey(int skillClass) {
     switch(skillClass) {
@@ -543,7 +570,7 @@ LatestWorker<allyhealth::List,AllyPainted> allyPainter([](const allyhealth::List
 bool companionAtlasPending=false,companionPaintValid=false;
 interaction::PaintContext companionPaintContext{};
 XrSwapchain compassChain=XR_NULL_HANDLE;
-compass::Heading wristHeading;
+compass::Heading wristHeading;float groundBearing=0;
 bool compassFrame=false,compassAtlasReady=false;
 // VR Settings, the quest card, the blood visor, the strain light and the bow
 // laser share one swapchain (panelatlas): each its region of sharedMaster, a
@@ -581,6 +608,7 @@ keyboard::Board chatBoard{};
 bool chatShown=false,chatKeyboard=false,chatConsumes=false,chatTrigger=false,chatGrip=false,chatCancelPending=false;
 bool chatAtlasPending=false,chatImageReady=false,chatNativeCaptured=false;
 int chatLit=-1;std::string chatPaintKey;wristchat::FirstHistory firstHistory;wristchat::Composer chatSubmit;bool chatSourceRequested=false;uint64_t chatPollAt=0,chatOpenUntil=0;
+bool chatAllowed=false;   // a multiplayer game this frame (ChatAllowed): the wheel's CHAT tab and the chat itself
 
 uint64_t settingsSession=0;
 // The redesign's pointing: the filter turns the laser and the right trigger
@@ -642,6 +670,19 @@ struct SettingsPainted {std::vector<uint8_t> pixels;settings::layout::Layout lay
 LatestWorker<SettingsPaintJob,SettingsPainted> settingsPainter([](const SettingsPaintJob& job) {
     const auto start=hookmetrics::Nanos();
     auto picture=settings::PaintPage(job.model,job.input);   // Width x Height straight RGBA and the layout it drew
+    if(picture.pixels.size()==size_t(settings::Width)*settings::Height*4)for(const auto& e:picture.layout.elements){
+        if(e.role!=settings::layout::Role::VoiceSkill||e.option<0)continue;
+        auto icon=interaction::icons::Get("s"+std::to_string(e.option));if(!icon||!icon->width||!icon->height)continue;
+        const int side=std::min(64,e.rect.h-8),left=e.rect.x+8,top=e.rect.y+(e.rect.h-side)/2;
+        for(int y=0;y<side;++y)for(int x=0;x<side;++x){
+            if(left+x<0||left+x>=settings::Width||top+y<0||top+y>=settings::Height)continue;
+            const auto* src=&icon->rgba[(size_t(y*icon->height/side)*icon->width+x*icon->width/side)*4];
+            auto* dst=&picture.pixels[(size_t(top+y)*settings::Width+left+x)*4];
+            const unsigned alpha=src[3],out=alpha+(unsigned(dst[3])*(255-alpha)+127)/255;
+            if(out)for(int c=0;c<3;++c)dst[c]=uint8_t((unsigned(src[c])*alpha+(unsigned(dst[c])*dst[3]*(255-alpha)+127)/255)/out);
+            dst[3]=uint8_t(out);
+        }
+    }
     return SettingsPainted{std::move(picture.pixels),std::move(picture.layout),double(hookmetrics::Nanos()-start)/1e6,std::move(picture.error)};
 });
 // The Collection panel (collection_draw.h): the same background-painter pattern
@@ -1109,6 +1150,7 @@ stickgestures::Gestures rightStickGestures;   // right stick up: run / walk (the
 MenuTriggerGate menuTriggerGate;
 PressEdge inventoryButton,menuButton;
 float lastRecenter=0;
+uint64_t mapTravelEpoch=0,mapTravelPlayer=0;math::Vec mapTravelOffset{};
 uint32_t width=0,height=0;
 resolution::Size recommendedResolution{},maximumResolution{};
 DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
@@ -1144,7 +1186,7 @@ constexpr uint32_t mapSide=512;
 // background below 100%, or its frame not fully shown, floating_map.h FrameStep): a second square on the map's surface,
 // panelatlas::Gap rows under the first, so no swapchain more and the wrist's own picture stays solid and framed.
 // mapCopyOwn: this frame's copy (mapEye.copied) has it.
-constexpr uint32_t mapCopyTop=mapSide+panelatlas::Gap,mapHeight=mapCopyTop+mapSide;
+constexpr uint32_t mapCopyTop=mapSide+panelatlas::Gap,mapGroundTop=2*mapCopyTop,mapHeight=mapGroundTop+mapSide;
 bool mapCopyOwn=false;
 // The map's surface is made the first time a map shows. With OFXR Bridge
 // loaded that failed in every session it was tried (frame log, 2026-10-23 to
@@ -2320,14 +2362,8 @@ std::vector<uint8_t> PaintGameplay() {
     HFONT font=CreateFontW(33,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Arial");
     auto oldFont=SelectObject(dc,font);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(225,235,240));
     auto label=[&](const wchar_t* text,RECT rect) {DrawTextW(dc,text,-1,&rect,DT_CENTER|DT_VCENTER|DT_SINGLELINE);};
-    label(L"SKILLS  /  EQUIPMENT  /  BELT",{0,0,1024,96});
-    const wchar_t* names[]={L"B",L"X",L"Y",L"RB",L"LT + B",L"LT + X",L"LT + Y",L"LT + RB",
-        L"Melee / Bow",L"Swap I / II",L"",L"",L"Belt 1",L"Belt 2",L"Belt 3",L"Belt 4"};
-    for(int i=0;i<16;++i) {
-        RECT cell{(i%4)*256+7,96+(i/4)*144+7,(i%4+1)*256-7,96+(i/4+1)*144-7};
-        fill(cell,i>=12?RGB(42,34,25):RGB(27,43,54));label(names[i],cell);
-    }
-    label(L"Trigger: select skill   /   Grip: take belt potion",{0,672,1024,768});
+    // (0,0)-(1024,768) held a SKILLS / EQUIPMENT / BELT reference card that no quad ever showed; it went with the
+    // wheel's EQUIPMENT page (2026-11-24). The parts of this image drawn are the sewer prompts and the arrow below.
     // Neutral bottle, labelled by belt column. Colour/type is deliberately not
     // guessed: the native game decides which item occupies that column.
     for(int i=0;i<4;++i) {
@@ -2810,8 +2846,24 @@ void CancelChatTyping(){
   else if(GetTickCount64()>=chatOpenUntil){chatCancelPending=false;chatOpenUntil=0;}
  }
 }
+// The wrist chat is for multiplayer games only (wristchat::Available): the game's own client mode, the getter verified
+// by its bytes that offline difficulty and Reset Skills & Stats also read (offlinedifficulty::ClientMode). It follows
+// the game live; a line at each change.
+bool ChatAllowed(){
+ const uint64_t local=gamestate::LocalPlayer();const int mode=offlinedifficulty::ClientMode();
+ const bool allowed=wristchat::Available(local!=0,mode);
+ static int said=-2;
+ if(const int state=local?mode:-2;state!=said){
+  said=state;
+  if(local){char line[160];std::snprintf(line,sizeof line,"Frame chat: client mode %d - %s",mode,allowed?"a multiplayer game: the wheel's CHAT tab and the chat":
+   mode<0?"not verified: no CHAT tab or chat":"not a multiplayer game: no CHAT tab or chat");Say(line);}
+ }
+ return allowed;
+}
 void ChatStep(){
- const auto now=GetTickCount64();const uint64_t local=gamestate::LocalPlayer();
+ // Not a multiplayer game: the chat runs as outside a game (session 0), so one open, pinned or typing closes below
+ // (CancelChatTyping, the model reset) and nothing is captured or shown.
+ const auto now=GetTickCount64();const uint64_t local=chatAllowed?gamestate::LocalPlayer():0;
  if(local!=chatModel.session){chatSourceRequested=false;chatPollAt=0;chatSubmit.Reset();CancelChatTyping();chatModel.Session(local);chatNativeCaptured=false;chatPaintKey.clear();}
  const bool focused=gameWindow&&GetForegroundWindow()==gameWindow;
  if(chatCancelPending&&focused)CancelChatTyping();
@@ -3269,7 +3321,12 @@ void MenuPointer(const menus::Pad& controls) {
     if(wasNative!=menuNavigation.Native()&&uiActive&&focused)
         Say(menuNavigation.Native()?"Frame panels: native controller navigation":"Frame panels: laser navigation");
     const bool laser=!menuNavigation.Native();
-    if(!laser){panelinput::UseController();pointerVisible=pointerHit=keyboardPointer=false;}
+    if(!laser){
+        panelinput::UseController();
+        // A's native hold action owns input, but does not hide the aiming ray.
+        // No mouse movement/click is dispatched until laser control resumes.
+        if(!menuNavigation.LaserVisible())pointerVisible=pointerHit=keyboardPointer=false;
+    }
     // The handheld journal has its own left-grip placement; the leather is strapped to the left hand.
     const bool grip=aimTracked&&laser&&!journalMode&&!leatherMode&&!(cinemaMode&&!spatialMode)&&(controls.buttons&menus::RightBumper);   // the cinema screen stays put
     const bool grabbing=GrabPanel(spatialMode?uiPose:menuPose,spatialMode?uiBase:menuBase,menuOffset,
@@ -3653,7 +3710,7 @@ void MotionPointer() {
     const auto mid=ray+direction*(beamLength*.5f);
     beamPose=XrPose({mid,math::BeamOrientation(direction,V(head.position)-mid)});pointerVisible=true;
     if(pointerHit) {
-        motionInput.hover=interaction::WheelCell(hit.u,hit.v,interactionOutput.hover,interactions.Page(),hand,interactionInput.snapshot.developer,interactions.DeveloperPage(),interactionOutput.leftStrikes>=0,interactionOutput.motionsBox,spellmotion::PageOf(interactionInput.snapshot.skillClass).count);
+        motionInput.hover=interaction::WheelCell(hit.u,hit.v,interactionOutput.hover,interactions.Page(),hand,interactionInput.snapshot.developer,interactions.DeveloperPage(),interactionOutput.leftStrikes>=0,interactionOutput.motionsBox,spellmotion::PageOf(interactionInput.snapshot.skillClass).count,interactionInput.snapshot.multiplayer);
         dotPose=XrPose({hit.point+math::Rotate(pose.q,{0,0,.003f}),pose.q});
     }
 }
@@ -4230,6 +4287,8 @@ bool MonoAudioOn(ULONGLONG now) {
 // (Feel it, Calibrate body, Set eye height), the rest go to layout::Press.
 // how: forwarded to CloseSettings for its log line only ("B").
 void SettingsPress(const settings::Hit& hit,uint64_t ms,const char* how=nullptr) {
+    if(hit.kind==settings::Kind::VoiceEdit){if(settingsModel.voice.Edit(hit.index,hit.delta))++settingsModel.revision;return;}
+    if(hit.kind==settings::Kind::VoiceSave){voiceBridge.Open(true,GetCurrentProcessId());voiceRuntime.Save(settingsModel.voice,unsigned(hit.delta));++settingsModel.revision;return;}
     if(hit.kind==settings::Kind::Recenter){ResetHeight();MotionPulse(UiRole(1),haptics::Category::Interaction,.4f,35000000);return;}
     if(hit.kind==settings::Kind::Calibrate){if(settingsModel.CanCalibrate())OpenBodyCalibration();return;}
     if(hit.kind==settings::Kind::TestHaptics){
@@ -4240,6 +4299,8 @@ void SettingsPress(const settings::Hit& hit,uint64_t ms,const char* how=nullptr)
         MotionPattern(category,haptics::Preview(category,hit.delta-1,settingsModel.Get()[settings::HapticShortMelee]>.5f),&levels);
         return;
     }
+    if(settingsModel.voice.picker&&hit.kind==settings::Kind::Close){settingsModel.voice.picker=false;++settingsModel.revision;return;}
+    if(hit.kind==settings::Kind::Close&&settingsModel.voice.dirty){settingsModel.view=settings::View::Voice;settingsModel.voice.status="Unsaved voice changes. Save or Discard before closing.";++settingsModel.revision;return;}
     const int popoverBefore=settingsModel.popoverKey;
     const auto request=settings::layout::Press(settingsModel,hit,ms);
     if(settingsModel.popoverKey!=popoverBefore){   // Frame VR settings popover: each open and close, and why
@@ -4256,6 +4317,9 @@ void SettingsPress(const settings::Hit& hit,uint64_t ms,const char* how=nullptr)
 }
 void SettingsPointer(bool grip) {
     if(!settingsModel.open)return;
+    voiceBridge.Open(true,GetCurrentProcessId());
+    if(settingsModel.view==settings::View::Voice){static uint64_t iconsAt=0;auto revision=interaction::icons::Revision();if(revision!=iconsAt){iconsAt=revision;++settingsModel.revision;}}
+    if(voiceRuntime.Poll(settingsModel.voice))++settingsModel.revision;
     const bool monoAudio=MonoAudioOn(GetTickCount64());
     settingsModel.Observe(vrsettings::Read());settingsHover={};pointerVisible=pointerHit=false;
     if(!settingsModel.open){CloseSettings();return;}   // Apply and close: the save landed
@@ -4869,6 +4933,7 @@ void StepDroppedBottles() {
     droppedBottles->Heft(propHeft.load());
     droppedBottles->Weapons(HeldColliders());
     droppedBottles->Advance(in.time,in.stage.anchor);
+    propscan::CountBodies(droppedBottles->Bodies());   // props are bodies only on contact: the ten-second line says how many at most
     // Draw a thrown potion where this frame's steps left it.
     if(interactionOutput.flying&&interactionOutput.flightId&&droppedBottles->Tossed(thrown)&&thrown.id==interactionOutput.flightId&&!thrown.landed)
         interactionOutput.flight={in.stage.Room(thrown.p),math::Multiply(math::Conjugate(in.stage.base),thrown.q)};
@@ -5438,6 +5503,10 @@ void Input() {
             floatMapWrist.p,floatMapWrist.q,floatMapWristMs,interaction::WristMapSize,
             motionInput.grip[R],motionInput.grip[L],controls.rx,controls.ry,floatMapWant,floatMapPointed,floatMapFrame,
             +[](int h,float s){MotionPulse(UiRole(h,handrole::System::WristHud),haptics::Category::Interaction,s,25000000);},&Say};
+        const auto groundTime=GetTickCount64();
+        if(stageWorld.valid&&stageWorld.upm>0&&groundTime>=stageWorld.at&&groundTime-stageWorld.at<=250){
+            f.groundKnown=true;f.travelEpoch=mapTravelEpoch;f.feet=stageWorld.origin+math::Rotate(math::Conjugate(stageWorld.base),mapTravelOffset);f.feet.y-=stageWorld.eyeHeight/stageWorld.upm;
+        }
         floatmap::StepFrame(f);
     }
 
@@ -5552,6 +5621,7 @@ void Input() {
     interactionInput.at=GetTickCount64();interactionInput.epoch=meleeEpoch;interactionInput.active=motionInput.active;
     interactionInput.head={motionInput.head.p,motionInput.head.q};
     interactionInput.snapshot=bindingSnapshot;interactionInput.reply=interactionstate::Status();
+    chatAllowed=ChatAllowed();interactionInput.snapshot.multiplayer=chatAllowed;   // the CHAT tab: a multiplayer game only
     interactionInput.spell=motion.Selection()>=0;interactionInput.wheel=motionInput.palette;interactionInput.cancel=motionInput.cancel;
     interactionInput.quickCast=handOutput.slot>=0||handOutput.spells[0]>=0||handOutput.spells[1]>=0;
     interactionInput.wheelHand=handOutput.wheel;
@@ -5678,7 +5748,7 @@ void Input() {
            (interactions.Page()!=interaction::MenuPage::Spells||interactions.TreeFilter()!=skillcategories::All)){
             const auto page=interactions.Page();
             const char* name=page==interaction::MenuPage::Map?"Map":page==interaction::MenuPage::Developer?"Developer":
-                page==interaction::MenuPage::Equipment?"Equipment":page==interaction::MenuPage::Spells?"Spells":"editor";
+                page==interaction::MenuPage::Glyphs?"Glyphs":page==interaction::MenuPage::Motions?"Motions":page==interaction::MenuPage::Spells?"Spells":"editor";
             const char* hand=interactionOutput.wheelHand==0?"main":interactionOutput.wheelHand==1?"off":"both";
             if(!handRoles.map.left)hand=interactionOutput.wheelHand==0?"R":interactionOutput.wheelHand==1?"L":"both";   // right-handed: as it always logged
             char line[160];
@@ -6002,7 +6072,7 @@ void Input() {
             potions::AtMouth(hand.p,hand.q,interactionInput.head.p,interactionInput.head.q),interactionOutput.bottleEmpty);
         Say(line);potionReportAt=GetTickCount64()+2000;
     }
-    if(interactionOutput.chat&&!chatModel.tab){
+    if(interactionOutput.chat&&chatAllowed&&!chatModel.tab){
         CancelChatTyping();chatModel.Session(gamestate::LocalPlayer());chatModel.Open(interactionOutput.wheelHand>=0?interactionOutput.wheelHand:interactionInput.wristHand);
         chatStartRequested=chatModel.pinned;chatPaintKey.clear();chatImageReady=false;chatTrigger=chatGrip=true;
         interactionOutput.block=true;settingsOwned=true;interactionInput.active=motionInput.active=false;lootGate|=lootaim::GateSettings;
@@ -6401,6 +6471,19 @@ void Input() {
     motionOutput.shieldContact=motionInput.active&&!motionOutput.block&&!motionInput.quickCast&&motionInput.trigger<.2f&&
         motionInput.shieldEquipped&&gestureSettings[settings::SkillGestures]>.5f&&quickFresh&&shieldSkill.available&&shieldSkill.motion&&shieldSkill.id==weaponskills::Smite;
     if(motionOutput.skill>=0&&(!quickFresh||!quickSnapshot.skills[motionOutput.skill].available))motionOutput.skill=-1;
+    // Whirlwind on (whirl_on.h): the player's own presses this frame, before anything presses for him. A hand button
+    // holding Whirlwind is the mode's (taken from the game below, where the mode steps); any other skill, a trigger
+    // attack or Interact, newly pressed, turns it off.
+    {
+        const int slot=motionOutput.skill;
+        const bool whirl=motionControls.load()&&gameplayChain&&slot>=0&&slot<skills::Count&&quickFresh&&
+            quickSnapshot.skills[slot].known&&quickSnapshot.skills[slot].id==whirlon::Whirlwind;
+        whirlPlayerSlot=whirl?slot:-1;
+        if(whirl)motionOutput.skill=-1;   // never the game's own press: the mode presses it (or refuses it) below
+        const bool other=(slot>=0&&!whirl)||motionOutput.attack||handOutput.interact;
+        whirlOtherPress=other&&!whirlOtherWas;whirlOtherWas=other;
+        whirlOtherCast=whirlTee=false;
+    }
     // Bow skills leave the bow: the arrow is in the left hand's model, so the
     // target, the lock and the shot follow the bow whichever button casts. A
     // drawn string (or the shot just loosed) keeps its own line. Only with VR
@@ -6534,6 +6617,7 @@ void Input() {
             std::snprintf(line,sizeof line,"Frame spell motion: %s's motion done, not cast: %s",motionName(skill).c_str(),refused);
             MotionPulse(0,haptics::Category::Interaction,.25f,100000000);
         } else {
+            whirlOtherCast=whirlOtherCast||skill!=whirlon::Whirlwind;   // another motion's cast turns Whirlwind off (whirl_on.h)
             glyphCast.Begin(plan,skill,-1,motionNow);
             glyphPress={};glyphPress.skill=known;
             // its way, head-local as the motion saw it, to the room (level)
@@ -6546,6 +6630,82 @@ void Input() {
         Say(line);
         return !refused;
     };
+    // In-game Voice settings control an isolated, automatically launched recognizer.
+    // Consume commands once, then use the same checked native dispatch as glyphs.
+    {
+        const auto at=GetTickCount64();
+        if(voiceRuntime.SelectCharacter(settingsModel.voice,quickFresh?quickSnapshot.voiceCharacter.data():"",
+                                       quickFresh?quickSnapshot.skillClass:-1,quickFresh?quickSnapshot.voiceBank:0)){
+            voiceCatalogAt=0;++settingsModel.revision;
+            voiceBridge.With([](voice::Shared& shared){shared.ready=false;shared.command={};});
+        }
+        if(voiceRuntime.Poll(settingsModel.voice))++settingsModel.revision;
+        voiceRuntime.Sync(settingsModel.voice,settingsModel.open&&settingsModel.view==settings::View::Voice);
+        if(at>=voiceOpenAt){voiceBridge.Open(false,GetCurrentProcessId());voiceOpenAt=at+1000;}
+        const bool allowed=settingsModel.voice.savedMode==2&&quickFresh&&motionInput.active&&gameplayChain&&focused&&offlinedifficulty::ClientMode()==0&&
+            !panelMode&&!spatialMode&&!settingsOwned&&!interactionOutput.wheel&&!interactionOutput.settings&&
+            !interactionOutput.block&&!glyphCast.Busy()&&!glyphStroke.Drawing()&&!glyphPressed&&
+            interactionOutput.owner[0]==interaction::Owner::Combat&&interactionOutput.owner[1]==interaction::Owner::Combat&&
+            !interactionOutput.Holding(0)&&!interactionOutput.Holding(1)&&!motionOutput.bowDrawing&&
+            motionOutput.skill<0&&!handInput.occupied&&handOutput.slot<0&&
+            quickSnapshot.vitalsKnown&&quickSnapshot.health>0;
+        voice::Command command;bool helperReady=false;
+        voiceBridge.With([&](voice::Shared& shared){
+            shared.gameAt=at;shared.session=interactionInput.session;shared.ready=allowed;
+            if(at>=voiceCatalogAt){
+                shared.count=0;
+                if(quickFresh){
+                    for(unsigned i=0;i<quickSnapshot.skillCount&&i<quickSnapshot.catalog.size()&&shared.count<140;++i){
+                        const auto& skill=quickSnapshot.catalog[i];if(!skill.known||skill.owner!=-1)continue;
+                        auto& entry=shared.skills[shared.count++];entry.id=skill.id;std::snprintf(entry.name,sizeof entry.name,"%s",skill.name);
+                    }
+                    if(interaction::HasSummonArmy(quickSnapshot))for(int id=commander::SkillPhalanxDef;id<=commander::SkillFallOut&&shared.count<140;++id){
+                        auto& entry=shared.skills[shared.count++];entry.id=id;std::snprintf(entry.name,sizeof entry.name,"%s",commander::CommanderSkillName(id));
+                    }
+                }
+                if(quickFresh&&shared.count){
+                    std::vector<voice::Choice> choices{{-1,"Unassigned"}};
+                    for(unsigned i=0;i<shared.count;++i)choices.push_back({shared.skills[i].id,shared.skills[i].name});
+                    const auto& previous=settingsModel.voice.choices;
+                    bool changed=previous.size()!=choices.size();
+                    if(!changed)for(size_t i=0;i<choices.size();++i)if(previous[i].id!=choices[i].id||previous[i].name!=choices[i].name){changed=true;break;}
+                    if(changed){settingsModel.voice.choices=std::move(choices);++settingsModel.revision;}
+                }
+                voiceCatalogAt=at+500;
+            }
+            command=shared.command;
+            helperReady=shared.enabled&&at>=shared.helperAt&&at-shared.helperAt<500;
+        });
+        const bool fresh=command.sequence&&command.sequence!=voiceGate.seen;
+        const bool accepted=voiceGate.Take(command,interactionInput.session,at,allowed&&helperReady&&settingsModel.voice.AllowsCast(command.skill));
+        if(fresh){
+            const char* status="Dropped: game busy, inactive or command expired";
+            const auto known=interaction::GlyphSkill(quickSnapshot,command.skill);
+            char recharging[64]{};
+            if(accepted){
+                const char* cooling=CooldownRefusal(cooldownsOn,quickSnapshot,command.skill,at,recharging);
+                if(!known.known||!known.available)status="Refused: skill not learned or unavailable";
+                else if(cooling)status="Refused: skill cooldown";
+                else if(commander::IsCommanderSkill(command.skill)){
+                    float x=0,y=0;resolveHandSubtile(0,x,y);
+                    status=interaction::HasSummonArmy(quickSnapshot)&&::companionai::ExecuteCommanderSkill(command.skill,x,y)?
+                        "Army command sent":"Refused: no available army";
+                }else{
+                    std::array<glyphcast::Slot,skills::Count> slots{};
+                    for(int i=0;i<skills::Count;++i){const auto& k=quickSnapshot.skills[i];slots[size_t(i)]={k.id,k.owner,k.known,k.available};}
+                    const bool record=quickSnapshot.glyphRecord>=0;
+                    const auto plan=glyphcast::Dispatch(command.skill,-1,slots,record?quickSnapshot.glyphSkill:-2,record?quickSnapshot.glyphOwner:-2);
+                    if(plan.how==glyphcast::How::Park&&(!record||!interactionstate::Park(interactionInput.session,command.skill,-1)))status="Refused: skill binding busy or unavailable";
+                    else{
+                        glyphCast.Begin(plan,command.skill,-1,motionNow);glyphPress={};glyphPress.skill=known;
+                        MotionPulse(0,haptics::Category::Spell,.5f,60000000);status="Skill press sent (native mana and skill checks apply)";
+                    }
+                }
+            }
+            char line[240];std::snprintf(line,sizeof line,"Frame voice: skill %d: %s",command.skill,status);Say(line);
+            voiceBridge.With([&](voice::Shared& shared){shared.ack=command.sequence;std::snprintf(shared.status,sizeof shared.status,"%s",status);});
+        }
+    }
     // Glyph casting (glyph_cast.h): while a hand's Draw glyph button is held its path is a stroke on
     // the upright plane facing the player; let go, it is recognised and the skill that hand has on that
     // shape (each hand its own set; a left shape with none, the right hand's: interaction::GlyphCasts) is
@@ -6614,6 +6774,7 @@ void Input() {
                     glyphs::Name(r.shape),known.name,skill,r.score,r.second,r.corners,stroke.seconds);
                 MotionPulse(hand,haptics::Category::Spell,.6f,60000000);
             } else {
+                whirlOtherCast=whirlOtherCast||skill!=whirlon::Whirlwind;   // a glyph's cast turns Whirlwind off (whirl_on.h)
                 glyphCast.Begin(plan,skill,-1,now);glyphLook=glyphtrail::ElementLook(skill);
                 glyphPress={};glyphPress.skill=known;
                 std::snprintf(line,sizeof line,"Frame glyph: %s hand, the %s -> %s (skill %d%s) via %s (score %.2f, next %.2f, corners %d, %.1f s, %s)",whose,
@@ -6728,12 +6889,6 @@ void Input() {
                 const int skill=spellmotion::CastSkillOf(skillOf[done],[&](int id){return interaction::GlyphSkill(quickSnapshot,id).known;});
                 const auto spot=arcKnown?spellmotion::Spot{-arcWay.z,arcWay.x}:spellmotion::PointSpot(donePoint,punchTuning);
                 if(doneLanding&&landKnown)doneAim={spot.right,0,-spot.ahead};
-                // Whirlwind's T with the walk stick pushed as it casts (whirl_steer.h): its whirl goes where that push
-                // would walk, at the T's own length, instead of straight ahead. Still one whirl a T: nothing more is
-                // pressed, and the game takes no new spot while it whirls.
-                float steerX=0,steerY=0;
-                const bool whirlSteered=doneMotion==spellmotion::Motion::Whirlwind&&doneLand==spellmotion::Land::Spot&&!doneLanding&&
-                    WhirlStickNow(steerX,steerY)&&whirlsteer::MotionSpot(steerX,steerY,spellmotion::barbarian::tuning.whirlAhead,doneSpot.ahead,doneSpot.right);
                 // A summon on a spot of its own: Decoy and the golems ahead (spellmotion::Engine::LandAt), the
                 // Valkyrie where the right hand points (LandPointed); its way toward it too.
                 float summonX=0,summonY=0;math::Vec pointed{};
@@ -6741,7 +6896,12 @@ void Input() {
                     doneLand==spellmotion::Land::Pointed&&PointedCell(summonX,summonY,pointed));
                 if(summonKnown)doneAim=doneLand==spellmotion::Land::Spot?math::Vec{doneSpot.right,0,-doneSpot.ahead}:pointed;
                 bool cast=false;
-                if(doneMotion==spellmotion::Motion::FistOfHeavens&&interaction::GlyphSkill(quickSnapshot,skill).available&&
+                if(doneMotion==spellmotion::Motion::Whirlwind) {
+                    // Whirlwind's T turns Whirlwind on, or off again (whirl_on.h; the mode steps below, after the glyphs):
+                    // no single whirl of its own. Every motion waits its second from now, as after a cast.
+                    spellFreeAt=motionNow;spellGripCast=true;whirlTee=true;
+                }
+                else if(doneMotion==spellmotion::Motion::FistOfHeavens&&interaction::GlyphSkill(quickSnapshot,skill).available&&
                    !(cooldownsOn&&cooldowns::Cooling(quickSnapshot.cooldowns,skill,GetTickCount64()))) {
                     // Fist of the Heavens' call: the monster the arm points at first (vrcam answers HeavensRequest), then
                     // the cast (below), at most HeavensWaitMs later. Every motion waits its second from now.
@@ -6761,10 +6921,7 @@ void Input() {
                     char line[200];
                     if(summonKnown) {
                         motionLanding={skill,summonX,summonY,GetTickCount64(),gamestate::LocalPlayer()};
-                        if(whirlSteered)
-                            std::snprintf(line,sizeof line,"Frame whirlwind: steered by the walk stick - the T's whirl goes %.0f cells where it points (%.0f ahead, %+.0f across; stick %.2f, %.2f; cell %.1f,%.1f)",
-                                std::hypot(doneSpot.ahead,doneSpot.right),doneSpot.ahead,doneSpot.right,steerX,steerY,summonX,summonY);
-                        else if(doneLand==spellmotion::Land::Spot)
+                        if(doneLand==spellmotion::Land::Spot)
                             std::snprintf(line,sizeof line,"Frame spell motion: %s on its spot, %.0f cells ahead, %+.0f across (cell %.1f,%.1f)",
                                 motionName(skill).c_str(),doneSpot.ahead,doneSpot.right,summonX,summonY);
                         else std::snprintf(line,sizeof line,"Frame spell motion: %s where the %s hand points (cell %.1f,%.1f)",motionName(skill).c_str(),handRoles.map.left?"left":"right",summonX,summonY);
@@ -6847,6 +7004,95 @@ void Input() {
             }
         }
         glyphTrailShown=trail&&glyphImageReady&&glyphPaintKey&&glyphShownStroke==glyphStrokeId;
+    }
+    // Whirlwind on (whirl_on.h): the T (whirlTee) or a press of a hand button holding Whirlwind turns it on for its
+    // time by its level. Meanwhile Whirlwind's button is held for the game - its hand slot, else the right trigger's
+    // record (glyph casting's, Whirlwind put on it first) - so the game's own repeat whirls on, each whirl aimed by
+    // vrcam where the walk stick points (WhirlSteerAim, WhirlOnNow). Physical swings wait: the whirls hit. One line
+    // as it goes on, one as it goes off.
+    {
+        std::lock_guard stepLock(whirlStepMutex);
+        const uint64_t nowMs=GetTickCount64();
+        const auto known=interaction::GlyphSkill(quickSnapshot,whirlon::Whirlwind);
+        const bool record=quickSnapshot.glyphRecord>=0;
+        whirlon::Input in;
+        in.time=motionInput.time;in.hero=interactionInput.session;
+        in.combat=motionControls.load()&&gameplayChain;
+        in.live=motionInput.active&&quickFresh;
+        in.motion=whirlTee;in.button=whirlPlayerSlot;in.other=whirlOtherPress||whirlOtherCast;
+        in.menu=panelMode||spatialMode||settingsOwned||settingsChord||interactionOutput.wheel||interactionOutput.settings||gamestate::MenuOpen();
+        in.town=quickFresh&&entryfacing::Town(quickSnapshot.location.level);
+        in.dead=quickFresh&&((quickSnapshot.vitalsKnown&&quickSnapshot.health<=0)||
+            (quickSnapshot.actionKnown&&(quickSnapshot.actionMode==0||quickSnapshot.actionMode==17)));   // modes death, dead
+        in.available=quickFresh&&known.known&&known.available;
+        in.manaKnown=quickFresh&&quickSnapshot.vitalsKnown;in.mana=quickSnapshot.mana;
+        in.level=known.known?known.level:0;
+        in.whirling=quickFresh&&quickSnapshot.actionKnown&&quickSnapshot.actionMode==18;   // the sequence mode (anim SQ)
+        float steerX=0,steerY=0;
+        in.pushed=motionInput.active&&WhirlStickNow(steerX,steerY);
+        in.taken=whirlChain.taken;
+        {   // where a T's presses go: as a motion's cast (glyphcast::Dispatch)
+            std::array<glyphcast::Slot,skills::Count> slots{};
+            for(int i=0;i<skills::Count;++i){const auto& k=quickSnapshot.skills[i];slots[size_t(i)]={k.id,k.owner,k.known,k.available};}
+            const auto plan=glyphcast::Dispatch(whirlon::Whirlwind,-1,slots,record?quickSnapshot.glyphSkill:-2,record?quickSnapshot.glyphOwner:-2);
+            in.press=plan.how==glyphcast::How::Slot?whirlon::Press::Slot:plan.how==glyphcast::How::Record?whirlon::Press::Record:
+                plan.how==glyphcast::How::Park&&record?whirlon::Press::Park:whirlon::Press::None;
+            in.slot=plan.slot;
+        }
+        in.recordHolds=quickFresh&&record&&quickSnapshot.glyphSkill==whirlon::Whirlwind&&quickSnapshot.glyphOwner==-1;
+        const auto o=whirlMode.Step(in);
+        whirlStop=o.on&&o.stop;whirlActive.store(o.on);
+        const char* by=o.by==whirlon::By::Motion?"the T":"its button";
+        if(o.started) {
+            if(!++whirlActivation)whirlActivation=1;
+            if(whirlHero!=in.hero){whirlChain.Forget();whirlHero=in.hero;}
+            whirlChain.Begin();whirlParked=false;whirlTurns={};whirlUsed.store(true);
+            whirlRun={in.time,o.seconds,in.mana,in.level,in.manaKnown};
+            for(int h=0;h<2;++h)MotionPulse(h,haptics::Category::Spell,.7f,70000000);
+            const auto way=whirlMode.Way();
+            char through[64];
+            if(way==whirlon::Press::Slot)std::snprintf(through,sizeof through,"its hand slot %d",o.holdSlot);
+            else std::snprintf(through,sizeof through,"the right trigger's record%s",way==whirlon::Press::Park?", put on it first":"");
+            char level[48];
+            if(in.level>0)std::snprintf(level,sizeof level,"Whirlwind level %d",in.level);else std::snprintf(level,sizeof level,"Whirlwind's level unread");
+            char line[420];
+            std::snprintf(line,sizeof line,"Frame whirlwind on: by %s, %s - on %.1f s (5 s + 0.1 s a level, at most 8); whirls through %s, "
+                "each %.0f cells (whirl speed %.1f cells/s, %s), steered by the walk stick as it goes, stopped when it is let go (the first where you face); "
+                "%.1f mana a whirl, mana %.0f of %.0f",by,level,o.seconds,through,whirlChain.Cells(),whirlChain.speed,
+                whirlChain.measured?"as measured":"until measured",whirlon::WhirlMana(in.level),in.mana,quickSnapshot.maxMana);
+            Say(line);
+        }
+        if(o.refused) {
+            MotionPulse(o.consume?skills::Hand(whirlPlayerSlot):0,haptics::Category::Interaction,.25f,60000000);
+            char line[200];std::snprintf(line,sizeof line,"Frame whirlwind: not turned on by %s: %s",whirlTee?"the T":"its button",o.refused);
+            Say(line);
+        }
+        if(o.park&&!whirlParked)whirlParked=interactionstate::Park(interactionInput.session,whirlon::Whirlwind,-1);
+        if(o.holdSlot>=0&&motionOutput.skill<0)motionOutput.skill=o.holdSlot;
+        if(o.holdRecord&&!glyphPressRt) {
+            glyphPressRt=true;glyphPress={};glyphPress.skill=known;glyphPress.record=true;glyphPress.at=nowMs;glyphRecordAt.store(nowMs);
+        }
+        if(o.on){motionOutput.meleeContact=false;motionOutput.shieldContact=false;}
+        if(o.stopped!=whirlon::Why::None) {
+            for(int h=0;h<2;++h)MotionPulse(h,haptics::Category::Interaction,.2f,40000000);
+            const float cost=whirlon::WhirlMana(whirlRun.level);
+            whirlChain.Measure();
+            char mana[80];
+            if(whirlRun.manaKnown&&in.manaKnown)std::snprintf(mana,sizeof mana,"; mana %.0f -> %.0f",whirlRun.manaFrom,in.mana);else mana[0]=0;
+            const auto& t=whirlTurns;
+            const bool turning=whirlturnInstalled.load();
+            char turns[200];
+            if(turning)std::snprintf(turns,sizeof turns,"; turned under way %d times, ended short by letting go %d, laid back %d; the client's followed %d, missed %d",
+                t.turned,t.stopped,t.refused,t.followed,t.missed);
+            else std::snprintf(turns,sizeof turns,"; no turning under way (its hooks not in)");
+            char line[700];
+            std::snprintf(line,sizeof line,"Frame whirlwind off: %s, after %.1f of %.1f s (on by %s); %d whirls%s, about %.0f mana (%.1f each%s), "
+                "%.0f cells whirled; whirl speed %.1f cells/s (%s), the next whirls %.0f cells%s",whirlon::Name(o.stopped),o.elapsed,whirlRun.seconds,by,
+                whirlChain.count,turning?" seen on the server":" (commands taken)",cost*float(whirlChain.count),cost,mana,whirlChain.moved,whirlChain.speed,
+                whirlChain.measured?"measured":"not measured: the default",whirlChain.Cells(),turns);
+            Say(line);
+        }
+        whirlSteer={whirlActivation,whirlMode.On()&&motionControls.load(),in.pushed,whirlStop&&!in.pushed,steerX,steerY,nowMs};
     }
     // No physical melee contacts while a Charge is in flight (Cal's
     // 2026-10-27 test: the punch that cast Charge landed a basic attack on a
@@ -7035,7 +7281,7 @@ void Input() {
     panelinput::WorldInput(motionInput.active&&motionInput.tracked[0]&&motionInput.tracked[1]&&motionInput.aimTracked);
     if(!motionInput.active||motionOutput.block||!motionOutput.rayValid)handOutput.interact=false;
     if(motionInput.quickCast&&(motionOutput.block||!motionOutput.rayValid))handControls.Close();
-    const uint32_t hidden=interactionOutput.stowed?3u:(journalMode||leatherMode)?1u<<UiRole(leather::Hand,handrole::System::LeatherMenu):interactionOutput.BottleMask();
+    const uint32_t hidden=(journalMode||leatherMode)?1u<<UiRole(leather::Hand,handrole::System::LeatherMenu):interactionOutput.BottleMask();
     skel::SetInteractionHidden(hidden);
     potionScene=potions::MakeScene(interactionInput,interactionOutput);
     if(potionFlight.id&&potionFlight.shown)potions::AddThrown(potionScene,potionFlight.pose,potionFlight.code);   // #292
@@ -7062,7 +7308,7 @@ void Input() {
     elements::Input elementalInput;
     elementalInput.context={interactionInput.session,(meleeEpoch<<32)|bowWorldEpoch,motionInput.skillContext,motionInput.equipment};
     elementalInput.at=interactionInput.at;
-    elementalInput.active=motionInput.active&&!interactionOutput.wheel&&!interactionOutput.stowed&&!journalMode;
+    elementalInput.active=motionInput.active&&!interactionOutput.wheel&&!journalMode;
     elementalInput.head=interactionInput.head;
     for(int h=0;h<2;++h) {
         elementalInput.hands[h]=interactionInput.hand[h];elementalInput.tracked[h]=interactionInput.tracked[h];
@@ -7186,8 +7432,8 @@ void Input() {
             interaction::icons::Prefetch(interactionInput.snapshot);
             interactionPrefetchSession=interactionInput.session;interactionPrefetchRevision=interactionInput.snapshot.revision;
         }
-        const uint64_t key=(interaction::icons::Revision()*0x9e3779b97f4a7c15ull)^(uint64_t(interactionOutput.editor)<<60)^(uint64_t(interactionOutput.editSlot+1)<<56)^(uint64_t(interactionOutput.editPage)<<48)^(uint64_t(interactionInput.snapshot.revision)<<32)^(uint64_t(interactionOutput.utility)<<24)^(
-            uint64_t(interactionOutput.hover+1)<<16)^(uint64_t(motion.Selection()+1)<<8)^(uint64_t(interactionOutput.result)<<4)^uint64_t(interactionOutput.stowed)^(uint64_t(interactionOutput.map)<<1)^(uint64_t(interactionOutput.nearHolster+1)<<26)^(uint64_t(interactionOutput.bottle+1)<<28)^(uint64_t(interactionOutput.bottleEmpty)<<2)^(uint64_t(snapshotFresh)<<3)^(uint64_t(interactionOutput.BottleMask())<<20)^
+        const uint64_t key=(interaction::icons::Revision()*0x9e3779b97f4a7c15ull)^(uint64_t(interactionOutput.editor)<<60)^(uint64_t(interactionOutput.editSlot+1)<<56)^(uint64_t(interactionOutput.editPage)<<48)^(uint64_t(interactionInput.snapshot.revision)<<32)^(
+            uint64_t(interactionOutput.hover+1)<<16)^(uint64_t(motion.Selection()+1)<<8)^(uint64_t(interactionOutput.result)<<4)^(uint64_t(interactionOutput.map)<<1)^(uint64_t(interactionOutput.nearHolster+1)<<26)^(uint64_t(interactionOutput.bottle+1)<<28)^(uint64_t(interactionOutput.bottleEmpty)<<2)^(uint64_t(snapshotFresh)<<3)^(uint64_t(interactionOutput.BottleMask())<<20)^
             (uint64_t(interactionOutput.bottles[1].column+1)<<22)^(uint64_t(interactionOutput.bottles[1].empty)<<19);
         const auto now=GetTickCount64();
         const bool visible=leatherHudVitals||motionInput.active||interactionOutput.wheel||interactionOutput.wrist||interactionOutput.vitals||interactionOutput.critical||interactionOutput.bottle>=0||
@@ -7196,7 +7442,9 @@ void Input() {
         const bool missingCompanions=snapshotFresh&&wriststatus::Rows(context.companions,context.effects)&&!companionPaintValid;
         if(visible&&(!interactionPaintValid||missingCompanions||key!=interactionPaintKey||context!=interactionPaintContext)) {
             if(now>=interactionPaintAt&&(!interactionPaintRequest||key!=interactionRequestedKey||context!=interactionRequestedContext)) {
-                interactionPaintRequest=interactionPainter.Submit({snapshotFresh?interactionInput.snapshot:interaction::Snapshot{},interactionOutput,motion.Selection(),controllerLabels});
+                auto paintSnapshot=snapshotFresh?interactionInput.snapshot:interaction::Snapshot{};
+                paintSnapshot.multiplayer=interactionInput.snapshot.multiplayer;   // the footer as the ray hits it: CHAT or not, stale or fresh
+                interactionPaintRequest=interactionPainter.Submit({paintSnapshot,interactionOutput,motion.Selection(),controllerLabels});
                 interactionRequestedKey=key;interactionRequestedContext=context;interactionPaintAt=now+100;
             }
             interaction::PaintedAtlas painted;
@@ -7510,7 +7758,7 @@ void Input() {
     if(!dualBindings&&leftMenuButton.PlainPressed())a.held|=D2RVR_ACT_MAP;
 
     // Stick clicks toggle wheels here and retain native hold-to-sort in menus.
-    // Gameplay swaps remain shoulder or equipment-wheel actions.
+    // Gameplay swaps remain shoulder actions.
     if(motionControls.load()&&gameplayChain) {
         p.buttons=0;p.left_trigger=p.right_trigger=0;
         a.held&=~D2RVR_ACT_ATTACK;
@@ -8404,7 +8652,7 @@ bool CopyMap(reshade::api::command_queue* rq) {
     }
     if(!mapBlit.Render(device.Get(),e.commands.Get(),src,e.images[e.index].texture,true,true,flags,float(wristHeading.bearing),1.f,
                        fullMap?1.f:std::min(mapZoom.Zoom(),mapzoom::Max),span,search.reach,search.right,search.down,nullptr,
-                       own?mapCopyTop:0,back,frame)) {
+                       own?mapCopyTop:0,back,frame,floatmap::Grounded()?mapGroundTop:0,groundBearing,fullMap?fullmap::Span(w,h,true,topDown,mapZoom.Zoom(),drawnZoom):0.f)) {
         e.commands->Close();return false;
     }
     if(FAILED(e.commands->Close()))return false;
@@ -9779,7 +10027,7 @@ void EndPair() {
     // is its anchor. Pointer, not index: blood, strain and Arcane Decay insert below the HUD later and shift indices.
     const XrCompositionLayerBaseHeader* floatMapAnchor=count?layers[count-1]:nullptr;
     const bool weaponSkillIndicators=vrsettings::Read().values[settings::WeaponSkillIndicators]>.5f;
-    if(weaponSkillIndicators&&gameplayVisible&&!interactionOutput.wheel&&!interactionOutput.stowed&&interactionOutput.bottle<0&&
+    if(weaponSkillIndicators&&gameplayVisible&&!interactionOutput.wheel&&interactionOutput.bottle<0&&
        interactionPaintValid&&interactionPaintContext.cue==interactionOutput.cue&&interactionChain) {
         const auto& cue=interactionOutput.cue;
         const int side=0;
@@ -9789,7 +10037,7 @@ void EndPair() {
         if(cue.expanded)motionQuad(activeSkill,pose,.24f,.18f,{{768,0},{256,192}},interactionChain);
         else motionQuad(activeSkill,pose,.075f,.075f,{{768,0},{96,96}},interactionChain);
     }
-    if(weaponSkillIndicators&&gameplayVisible&&!interactionOutput.wheel&&!interactionOutput.stowed&&interactionOutput.bottle<0&&
+    if(weaponSkillIndicators&&gameplayVisible&&!interactionOutput.wheel&&interactionOutput.bottle<0&&
        interactionPaintValid&&interactionPaintContext.leftCue==interactionOutput.leftCue&&interactionChain) {
         const auto& cue=interactionOutput.leftCue;
         if(cue.known&&cue.id>=0){
@@ -10193,9 +10441,13 @@ void EndPair() {
     struct FloatMapDraw {decltype(motionQuad)* quad;XrCompositionLayerQuad* layer;};FloatMapDraw floatMapDraw{&motionQuad,&floatMapQuad};
     floatmap::DrawFrame({interactionVisible&&!interactionOutput.wheel,mapEye.copied,GetTickCount64(),&floatMapDraw,
         +[](void* c,math::Vec p,math::Quat q,float side){const auto& d=*static_cast<FloatMapDraw*>(c);
-            (*d.quad)(*d.layer,XrPose({p,q}),side,side,{{0,mapCopyOwn?int32_t(mapCopyTop):0},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);},&Say});
-    if(count&&layers[count-1]==reinterpret_cast<const XrCompositionLayerBaseHeader*>(&floatMapQuad)&&floatMapAnchor)
-        for(uint32_t i=0;i+1<count;++i)if(layers[i]==floatMapAnchor){std::rotate(layers.data()+i+1,layers.data()+count-1,layers.data()+count);break;}
+            const bool ground=floatmap::Grounded();
+            (*d.quad)(*d.layer,XrPose({p,q}),side,side,{{0,ground?int32_t(mapGroundTop):(mapCopyOwn?int32_t(mapCopyTop):0)},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);
+            if(ground)d.layer->layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;},&Say});
+    // Floor belongs directly above the scene and below every interaction overlay (including the belt).
+    const auto* placementAnchor=floatmap::Grounded()?layer:floatMapAnchor;
+    if(count&&layers[count-1]==reinterpret_cast<const XrCompositionLayerBaseHeader*>(&floatMapQuad)&&placementAnchor)
+        for(uint32_t i=0;i+1<count;++i)if(layers[i]==placementAnchor){std::rotate(layers.data()+i+1,layers.data()+count-1,layers.data()+count);break;}
     XrCompositionLayerQuad chatQuads[5]={{XR_TYPE_COMPOSITION_LAYER_QUAD},{XR_TYPE_COMPOSITION_LAYER_QUAD},{XR_TYPE_COMPOSITION_LAYER_QUAD},{XR_TYPE_COMPOSITION_LAYER_QUAD},{XR_TYPE_COMPOSITION_LAYER_QUAD}};
     if(layer&&chatShown&&chatImageReady&&sharedChain&&!settingsModel.open&&!bodyCalibration.Active()){
         const bool headLocked=chatModel.pinned&&!chatModel.dragging;
@@ -10618,6 +10870,40 @@ bool WhirlStick(float& x,float& y) {
     std::lock_guard lock(mutex);
     return motionControls.load()&&motionInput.active&&WhirlStickNow(x,y);
 }
+bool WhirlOnNow(WhirlOnSteer& out,float heroX,float heroY) {
+    std::lock_guard lock(mutex);
+    if(!motionControls.load()||!whirlMode.On())return false;
+    std::lock_guard stepLock(whirlStepMutex);
+    out.activation=whirlActivation;out.cells=whirlChain.Cells();
+    out.pushed=motionInput.active&&WhirlStickNow(out.stickX,out.stickY);
+    (void)heroX;(void)heroY;
+    return true;
+}
+void WhirlOnTook(uint32_t activation,float heroX,float heroY,float cells) {
+    std::lock_guard lock(mutex);
+    std::lock_guard stepLock(whirlStepMutex);
+    if(activation==whirlActivation&&whirlMode.On())whirlChain.Took(Milliseconds()/1000.0,heroX,heroY,cells);
+}
+bool WhirlOnStep(WhirlOnTurn& out,float heroX,float heroY,bool started) {
+    std::lock_guard stepLock(whirlStepMutex);
+    whirlturnInstalled.store(true);
+    const auto& w=whirlSteer;
+    const uint64_t nowMs=GetTickCount64();
+    if(!w.on||nowMs<w.at||nowMs-w.at>250)return false;   // off, or the input frames stopped (a stick read then is stale)
+    const double now=Milliseconds()/1000.0;
+    if(started)whirlChain.Started(now);
+    whirlChain.Seen(now,heroX,heroY);
+    out.activation=w.activation;out.pushed=w.pushed;out.stickX=w.stickX;out.stickY=w.stickY;out.stop=w.stop;
+    return true;
+}
+void WhirlOnTurned(uint32_t activation,int what) {
+    std::lock_guard stepLock(whirlStepMutex);
+    if(activation!=whirlSteer.activation||!whirlSteer.on)return;
+    auto& t=whirlTurns;
+    switch(what){case 0:++t.turned;break;case 1:++t.stopped;break;case 2:++t.refused;break;case 3:++t.followed;break;default:++t.missed;break;}
+}
+bool WhirlOnUsed(){return whirlUsed.load();}
+bool WhirlOnActive(){return whirlActive.load(std::memory_order_relaxed);}
 int AimRulesSkill() {
     std::lock_guard lock(mutex);
     const auto* skill=CastSkillRow();return skill?skill->id:-1;
@@ -10868,6 +11154,7 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
     if(std::fabs(recenterYaw-lastRecenter)>.001f){origin=V(head.position);lastRecenter=recenterYaw;recentered=true;}
     const float upm=(scaleHeight>0?scaleHeight:eyeHeight)/std::max(userEyeHeight,.5f);
     const auto base=math::Yaw(bodyHeading-recenterYaw);
+    if(eye<0)groundBearing=mapNorth-(math::Heading(base)+floatmap::FloorYaw());
     if(eye<0)compassFrame=wristHeading.Update(gamestate::LocalPlayer(),motionHeadTracked,
         Q(head.orientation),bodyHeading-recenterYaw,mapNorth);
     if(eye<0) {   // Room-scale: a snap or smooth turn turns the room about your head (it swung you round the hero's spot)
@@ -10889,6 +11176,16 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
                   // and the game carrying him elsewhere (Leap's flight, Whirlwind) only as far as it pays your step off
                   // (Follow): followed whole, the origin flew off with him and the camera stayed behind until a reload.
         const math::Vec now{hero[0],hero[1],hero[2]};const double at=Milliseconds()/1000.0;
+        const auto player=gamestate::LocalPlayer();
+        if(player!=mapTravelPlayer||recentered){mapTravelPlayer=player;mapTravelOffset={};++mapTravelEpoch;}
+        else if(player&&roomHeroKnown&&at>roomHeroAt&&motionHeadTracked){
+            const math::Vec jump{now.x-roomHero.x,0,now.z-roomHero.z};
+            const float threshold=(at-roomHeroAt<.25?roomsteps::MaxHeroStep:3.f)*upm;
+            if(math::Dot(jump,jump)>threshold*threshold){
+                const auto delta=V(head.position)-origin;
+                mapTravelOffset=math::Rotate(base,{delta.x,0,delta.z});++mapTravelEpoch;
+            }
+        }
         if(roomHeroKnown&&at>roomHeroAt&&at-roomHeroAt<.25) {
             const math::Vec moved{now.x-roomHero.x,0,now.z-roomHero.z};
             const float metres=std::sqrt(moved.x*moved.x+moved.z*moved.z)/upm;
@@ -10994,6 +11291,8 @@ bool Projection(float out[16],float nearWorld,int eye,bool stale) {
 void Shutdown(bool preserveResolution) {
     std::lock_guard lock(mutex);
     hapticPulses.Stop();
+    voiceRuntime.Close();
+    voiceBridge.With([](voice::Shared& s){s.ready=false;s.session=0;s.command={};});voiceBridge.Close();voiceGate={};voiceOpenAt=voiceCatalogAt=0;
     // Keep the HUD hidden through an intentional eye-target/session rebuild.
     if(!preserveResolution)hud::NativeSession(false);
     if(!preserveResolution)resolution::Restore();
@@ -11028,6 +11327,9 @@ void Shutdown(bool preserveResolution) {
     glyphStroke={};glyphHand=-1;glyphCast={};glyphPaintKey=glyphShownStroke=0;glyphBeganAt=0;glyphEndedAt=-1;glyphPaintAt=0;glyphLook=glyphtrail::Look::Drawing;glyphPressRt=glyphTrailShown=false;glyphAtlasPending=glyphImageReady=false;
     glyphPress={};glyphRecordAt.store(0);
     motionLanding={};whirlStick={};teleportArc={};teleportarc::Current().Clear();
+    if(whirlMode.On())Say("Frame whirlwind off: the VR session ended");
+    whirlActive.store(false);
+    whirlMode.Reset();whirlPlayerSlot=-1;whirlOtherPress=whirlOtherWas=whirlOtherCast=whirlTee=false;
     if(teleportShown){telegraph::Current().ClearSkill(telegraph::TeleportMark);teleportShown=false;}
     spellTrigger=0;for(auto& e:spellFree)e.Reset();spellFreeAt=-1;spellGripSince=-1;spellGripCast=false;spellGripsArmed.store(false);spellGate.Reset();
     bowLaserHue=-1;bowLaserAtlasPending=bowLaserImageReady=false;

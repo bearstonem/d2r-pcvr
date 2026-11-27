@@ -146,12 +146,9 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Bow draw | Right trigger near the left-hand bow string; draw and release |
 | Javelin, throwing knife or axe throw | Right trigger on Attack, Throw or nothing; hold the trigger, throw, release |
 | Cancel a physical attack / draw | Open either wheel, then release the held controls |
-| Swap weapon sets I / II | Main hand's grip over either shoulder (right hand; left with Left-handed on); or wheel → EQUIPMENT |
-| Stow / draw weapons | Wheel → EQUIPMENT → Stow / Draw |
-| Grab / drink potion | Grip a belt bottle, bring its opening to the mouth and tip it; release to return unused |
+| Swap weapon sets I / II | Main hand's grip over either shoulder (right hand; left with Left-handed on) |
+| Grab / drink potion | Grip a belt bottle with either hand, bring its opening to the mouth and tip it; release to return unused. With **VR Settings > Comfort > Body > Click to drink** on, that hand's trigger drinks it too |
 | Heal your mercenary | Toss a held Health, Rejuvenation, Antidote or Thawing bottle so it lands near its feet; a miss keeps the potion |
-| Quick potion | Wheel → EQUIPMENT → potion, using opposite laser + trigger |
-| Grab wheel potion | Wheel → EQUIPMENT → potion, using the pointing hand's grip |
 | Wrist health / mana / XP | Look at the back of the left wrist |
 | Recenter / stereo capture | PC F11 / F8 |
 
@@ -298,7 +295,7 @@ Native menu actions use the same buttons in the main menu, tabbed menu, stash,
 inventory and merchant panels. **Inside a native menu, left primary performs the displayed X action.**
 During motion gameplay, Inventory and VR Settings are available in either wheel.
 Right-stick click toggles the right wheel during gameplay. Use the shoulder
-gesture or **EQUIPMENT / BELT** wheel for weapon configurations.
+gesture to swap weapon sets.
 
 Quest controllers do not need a separate D-pad or Xbox controller: use sticks
 for native navigation and the laser for the on-screen controls. When using

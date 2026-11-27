@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include "voice_settings.h"
 #include "far_objects.h"
 #include <algorithm>
 #include <cmath>
@@ -22,13 +23,13 @@ namespace framevr::settings {
 // vr_settings_content.h). Presets heads the rail; Guide and WhatsNew open from
 // the page band, not the rail; More (rows no override placed yet, the menu data
 // rules) too, and only while it has rows.
-enum class View : uint8_t { Presets, Combat, Targeting, Shield, Monsters, Physics, Moving, Body, Hands, Vibration, Wrist, Menus, Labels, Outlines, Warnings, Performance, Frames, Environment, Effects, Guide, WhatsNew, More, Count };
+enum class View : uint8_t { Presets, Combat, Targeting, Shield, Monsters, Physics, Voice, Moving, Body, Hands, Vibration, Wrist, Menus, Labels, Outlines, Warnings, Performance, Frames, Environment, Effects, Guide, WhatsNew, More, Count };
 // The rail's groups (content::Group, content::GroupTable) number below this, so the model
 // can remember a page per group and the help card has an id per group.
 constexpr int MaxRailGroups=8;
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
-           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, MotionsWarlockOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, MeleeReach, WalkDirection, RoomSteps, LightRadiusBoost, WeaponHeft, BowBash, AimWithEyes, MercPotionAssist, ClickToDrink, SkillCooldowns, SummonRangeMultiplier, TCrossCalibrate, LookAtYou, ReverbEcho, HitStagger, HitKnockback, HapticSurfaces, HapticHeartbeat, LeftHanded, HeldCollisions, HeldWorldCollisions, LeftHandedSticks, PropHeft, FloatingMapBackground, MapGrabHint, PlayerAuraVisual, SummonAuraVisual, IceArmorVisual, CycloneArmorVisual, BoneArmorVisual, PlayerShoutVisual, SummonShoutVisual, SubscriptionRings, PsychicWardVisual, AssassinChargesVisual, ControllerMenuSize, AllyHealthBars, Count };
+           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, MotionsWarlockOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, MeleeReach, WalkDirection, RoomSteps, LightRadiusBoost, WeaponHeft, BowBash, AimWithEyes, MercPotionAssist, ClickToDrink, SkillCooldowns, SummonRangeMultiplier, TCrossCalibrate, LookAtYou, ReverbEcho, HitStagger, HitKnockback, HapticSurfaces, HapticHeartbeat, LeftHanded, HeldCollisions, HeldWorldCollisions, LeftHandedSticks, PropHeft, FloatingMapBackground, MapGrabHint, PlayerAuraVisual, SummonAuraVisual, IceArmorVisual, CycloneArmorVisual, BoneArmorVisual, PlayerShoutVisual, SummonShoutVisual, SubscriptionRings, PsychicWardVisual, AssassinChargesVisual, ControllerMenuSize, AllyHealthBars, DetachedMapPlacement, GroundMapSize, GroundMapDistance, Count };
 // One bit per setting, 256 wide: four words, since MSVC has no wider integer.
 // (128 until 2026-11-08, when 126 were in use and more rows were coming.)
 
@@ -124,7 +125,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Desktop shows one eye", "Monitor shows the left eye only; one extra GPU copy per frame", L"render",L"desktop_one_eye",1,0,1,1},
     // 0 Isometric, 1 Top-down (the corner map, as before); 2 Full map, 3 Full top-down: the game's full map, zoomed from its widest (wrist_full_map.h)
     {"Map view", "The minimap Isometric or Top-down, or the game's full map", L"interactions",L"map_top_down",0,0,3,1},
-    {"Rotate map", "Top-down only: keep your facing direction at the top", L"interactions",L"map_rotate",0,0,1,1},
+    {"Rotate map", "Top-down wrist and HUD maps only: keep your facing direction at the top", L"interactions",L"map_rotate",0,0,1,1},
     {"Foveation strength", "Higher levels shade a larger edge area more coarsely", L"render",L"foveation_strength",1,0,3,1},
     {"Stereo rendering", "Both eyes: each frame twice; By turns: one eye a frame", L"stereo",L"rendering",1,0,1,1},
     {"Defer GPU wait", "Start the next frame while the GPU finishes the last", L"render",L"defer_gpu_wait",0,0,1,1},
@@ -323,6 +324,9 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Assassin charges", "Original or compact forearm charges", L"render",L"assassin_charges_visual",1,0,2,1},
     {"Controller menu size", "Size of the stick-click menus on both hands; 100% is the original size", L"interactions",L"controller_menu_size",100,50,200,5},
     {"Ally health bars", "Party and owned mercenary: Off, Wrist, Overhead, or Both", L"interactions",L"ally_health_bars",3,0,3,1},
+    {"Detached map", "Where the map goes when released away from the wrist",L"interactions",L"detached_map_placement",0,0,1,1},
+    {"Floor map width", "Diameter of the minimap at your feet", L"interactions",L"ground_map_size",100,50,200,5},
+    {"Ground map distance", "Distance ahead to the centre of the floor map",L"interactions",L"ground_map_distance_cm",250,150,400,10},
 }};
 using Values=std::array<float,Count>;
 // The setting holding the skill on glyph shape i (glyph_recognizer.h order): the right hand's (0), or the left's (1).
@@ -639,7 +643,7 @@ inline float LockStep(float value,int delta,const Context& c){
 //                first when fresh); the group of the page shown: nothing
 enum class Kind { None, Change, Apply, Close, Recenter, Calibrate, TestHaptics, NotesPage,
                   Open, Set, Undo, Default, Preset, ResetPage, UndoReset, ConfirmClose, KeepEditing, ApplyClose, Card,
-                  Popover, PopoverClose, OpenGroup };
+                  Popover, PopoverClose, OpenGroup, VoiceEdit, VoiceSave };
 // What's new pages its release lines (2026-10-23: a long list since the last
 // release): NotesPerPage a page, at most NotesMaxLines (release_notes.py
 // MAX_LINES). Previous / Next and the page number sit under the lines, shown
@@ -651,6 +655,7 @@ class Model {
     Values base=Defaults(),draft=base;
     uint64_t serial=0,pending=0;
 public:
+    voice::Editor voice;
     bool open=false,ready=false,offlineDifficultyAvailable=false;
     int notesPage=0,notesPages=1;   // What's new's page, of SetNotesPages
     int morePage=0;                 // the More view's page (8 rows a page; layout::Press turns it)

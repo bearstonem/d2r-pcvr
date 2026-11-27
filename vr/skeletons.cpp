@@ -37,6 +37,7 @@
 #include "skeletons.h"
 #include "upper_body_skin.h"
 #include "upper_body_render.h"
+#include "offline_difficulty.h"
 #include "../steamvr/body_tracking.h"
 #include "../steamvr/dual_wield.h"
 #include "../steamvr/crossbow_pose.h"
@@ -59,6 +60,7 @@
 #include "shield_pose.h"
 #include "hand_swap_pose.h"
 #include "held_pose.h"
+#include "hand_reach.h"
 #include "shield_steady.h"
 #include "dev_scenarios.h"
 #include "../steamvr/shield_surface.h"
@@ -66,6 +68,7 @@
 #include "../steamvr/look_at.h"
 #include "wall_cells.h"
 namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();uint64_t LocalPlayer();uint32_t HandsKey();uint32_t WeaponSet();uint32_t Flails();}
+namespace gamedraw {bool Now(uint32_t* serial);}   // vrcam: the game draw being posed for (a stereo pair's two passes are one), false outside one
 #endif
 
 namespace skel {
@@ -558,6 +561,9 @@ struct Hero {
     int upr[2] = {-1, -1}, lwr[2] = {-1, -1}, hand[2] = {-1, -1};   // [0] right, [1] left
     // first knuckles: index, middle, pinky - they give the hand's own axes
     int ind[2] = {-1, -1}, mid[2] = {-1, -1}, pnk[2] = {-1, -1};
+    // the middle finger's knuckle itself (hand_reach.h Knuckle): mid where the finger starts there, the next
+    // joint where it starts at its metacarpal (amazon, paladin, druid). The palm's middle is half way to it.
+    int knuckle[2] = {-1, -1};
     int head = -1, spine = -1, pelvis = -1;
     int eyes[2] = {-1, -1};     // eyeball bones, where the rig has them
     // Where this hero's eyes are, standing (model space y): the camera's height
@@ -648,15 +654,22 @@ struct HeldItems {
 // The solver and what it gave this pose stamp (each stamp is posed more than once: once per eye).
 struct HeldStep {bool primed=false,stamped=false;uint32_t stamp=0;double time=0,clock=0;float push[2][3]{};};
 // arms: bit 0 the right controller, bit 1 the left (both for two items meeting; one for an item meeting the world).
-struct HeldClank {bool waiting=false;float strength=0,speed=0;unsigned arms=0;ULONGLONG at=0;};
+// sound: the game's metal sound too (two items: a hard knock, held::KnockSoundSpeed; the world: held::SoundSpeed).
+struct HeldClank {bool waiting=false;float strength=0;unsigned arms=0;bool sound=false;ULONGLONG at=0;};
 SRWLOCK g_heldLock=SRWLOCK_INIT;
 HeldItems g_heldItems;HeldStep g_heldStep;HeldClank g_heldClank;
 // A flail's chain swings (steamvr/flail_chain.h; [hands] flail_chain): the world as the hero's last pose placed him -
-// its units a metre, the ground's height (his model's origin) and the turn count (a snap turn) - for the chain's own
-// pose (PoseFlailChain). Under g_flailWorldLock.
-struct FlailWorld {float unitsPerMetre=0,floor=0;uint32_t turn=0,generation=0;ULONGLONG at=0;};
+// its units a metre, the ground's height (his model's origin), his eyes (the chain keeps out of his head) and the turn
+// count (a snap turn) - for the chain's own pose (PoseFlailChain). Under g_flailWorldLock.
+struct FlailWorld {float unitsPerMetre=0,floor=0;float eyes[3]={NAN,NAN,NAN};uint32_t turn=0,generation=0;ULONGLONG at=0;};
 SRWLOCK g_flailWorldLock=SRWLOCK_INIT;FlailWorld g_flailWorld;
 std::atomic<bool> g_flailLive{false};   // Input::flailChain, read without a lock: every skeleton's pose asks
+// What the skeleton hook met while a flail is in hand, for the line that says why no chain swings (WatchFlails): when a
+// posed skeleton was last the hero's held flail, how many skeletons had chain bones but no chain (and the last reason),
+// how many flail rigs were someone else's, and how many poses found no fresh world. Reset as a flail is taken up.
+std::atomic<ULONGLONG> g_flailHeldAt{0};
+std::atomic<unsigned> g_flailBroken{0},g_flailOthers{0},g_flailNoWorld{0};
+std::atomic<uint8_t> g_flailBrokenWhy{0};
 framevr::held::Solver g_heldSolver;
 // Held items meet the world (steamvr/held_world.h; VR Settings > Physics > Weapons hit walls): its solver, the walls
 // and floor gathered for its last step, and how long HeldCollide took (for the ten-second report). Under g_heldLock.
@@ -1285,6 +1298,7 @@ bool Learn(uintptr_t self, Hero* h) {
                 b = k[0];
             }
             if ((int)f.bones.size() > f.firstBend + 1) h->fingers[side].push_back(f);
+            if (root == h->mid[side]) h->knuckle[side] = f.bones[size_t(skel::reach::Knuckle(int(f.bones.size())))];
         }
     }
 
@@ -1470,7 +1484,9 @@ V3 RotOnly(V3 v, const Mat& R) {
 // forward has -Z up, X right, Y back. (+Y turned the hand round the hilt by
 // 180 degrees, knuckles at the face.) Children keep their local offsets, so the two
 // directions are fixed in the hand bone's frame whatever the animation does.
-struct Wrist { bool ok = false; V3 pLocal, kLocal; float det = 1.0f; V3 point, along; float reach = 0.0f; };
+// palm: wrist -> the palm's middle (half way to the middle knuckle, hand_reach.h) once the hand is turned, model units:
+// the controller's grip point is there, the wrist bone that far behind it.
+struct Wrist { bool ok = false; V3 pLocal, kLocal; float det = 1.0f; V3 point, along; float reach = 0.0f; V3 palm{}; };
 
 Wrist PlanWrist(const Hero& h, int side, const std::vector<Mat>& w, const Input& in, float c, float s) {
     Wrist r;
@@ -1489,6 +1505,14 @@ Wrist PlanWrist(const Hero& h, int side, const std::vector<Mat>& w, const Input&
     if (!held::Aim(in.rot[side], in.wristDeg, side, c, s, aimPoint, aimAlong)) return r;
     r.point = {aimPoint.x, aimPoint.y, aimPoint.z};
     r.along = {aimAlong.x, aimAlong.y, aimAlong.z};
+    {   // the palm's middle, in the bone's frame at unit axes, carried as Turn will turn the hand
+        const int kn = h.knuckle[side] >= 0 ? h.knuckle[side] : m;
+        const float axes = (Len({q[0], q[1], q[2]}) + Len({q[4], q[5], q[6]}) + Len({q[8], q[9], q[10]})) / 3.0f;
+        const V3 palmLocal = Scale(RotOnly(Scale(Sub(Pos(w[kn]), Pos(w[k])), 0.5f), inv), axes);
+        const held::V palm = skel::reach::Palm({r.pLocal.x, r.pLocal.y, r.pLocal.z}, {r.kLocal.x, r.kLocal.y, r.kLocal.z}, r.det,
+                                         {palmLocal.x, palmLocal.y, palmLocal.z}, aimPoint, aimAlong);
+        r.palm = {palm.x, palm.y, palm.z};
+    }
     r.ok = true;
     return r;
 }
@@ -1611,8 +1635,9 @@ Mat TurnAbout(V3 k, float deg) {
 // One arm's two-bone IK, the wrist to T: elbow down, a little out to its own
 // side and back - of the body as turned.
 // trackedShield / extend: beyond the arm's reach it lengthens (up to twice) so the hand stays on
-// the controller - the shield arm, and both arms of a grafted shapeshift form.
-void Reach(const Hero& h, int side, V3 T, bool turn, float c, float s, const std::vector<Mat>& baseW, std::vector<Mat>& newW, bool trackedShield=false, bool extend=false) {
+// the controller - the shield arm, and both arms of a grafted shapeshift form. stretched: how much
+// longer StretchArmBones already drew this arm (for the shield's line; it then has the length it needs).
+void Reach(const Hero& h, int side, V3 T, bool turn, float c, float s, const std::vector<Mat>& baseW, std::vector<Mat>& newW, bool trackedShield=false, bool extend=false, float stretched=1.0f) {
     const int u = h.upr[side], l = h.lwr[side], k = h.hand[side];
     const V3 S = Pos(newW[u]);
     float L1 = Len(Sub(Pos(newW[l]), S)), L2 = Len(Sub(Pos(newW[k]), Pos(newW[l])));
@@ -1651,12 +1676,76 @@ void Reach(const Hero& h, int side, V3 T, bool turn, float c, float s, const std
         static ULONGLONG reportAt=0;const auto now=GetTickCount64();
         if(now>=reportAt) {
             char line[180];snprintf(line,sizeof line,"Frame shield reach: extension=%.3f requested=%.3f wrist-error=%.4f model units",
-                reachScale,Len(Sub(requested,S)),Len(Sub(Pos(newW[k]),requested)));
+                reachScale*stretched,Len(Sub(requested,S)),Len(Sub(Pos(newW[k]),requested)));
             framevr::logging::Write(line);reportAt=now+5000;
         }
     }
 #endif
 }
+
+#ifdef D2RVR_NATIVE_OPENXR
+// One tracked arm drawn k times longer along itself, before its IK (hand_reach.h StretchArm): newW and the IK's
+// offsets (baseW) alike, so every later pass on this arm (Reach, a staff's second hand) keeps the length. The
+// hand, its fingers and what it holds keep their size; the arm keeps its thickness.
+bool StretchArmBones(const Hero& h, int side, float k, std::vector<Mat>& newW, std::vector<Mat>& baseW) {
+    const int u = h.upr[side], l = h.lwr[side], w = h.hand[side], n = h.count;
+    if (u < 0 || l < 0 || w < 0 || (int)newW.size() != n || (int)baseW.size() != n) return false;
+    // 1 the upper arm, 2 the forearm, 3 carried whole (the wrist; shield_attach on the left forearm), 4 under one of
+    // those (left to its own re-derivation). Bones come after their parents in every hero rig.
+    std::vector<signed char> segment(n, 0);
+    for (int i = 0; i < n; ++i) {
+        const int p = h.parent[i];
+        if (i == u) segment[i] = 1;
+        else if (p >= 0 && p < i && segment[p])
+            segment[i] = i == l ? 2 : segment[p] >= 3 ? 4 : i == w || (i == h.shieldAttach && segment[p] == 2) ? 3 : segment[p];
+    }
+    if (segment[l] != 2 || segment[w] != 3) return false;
+    std::vector<signed char> arm(segment);
+    for (auto& b : arm) if (b == 4) b = 0;
+    const auto before = newW;
+    if (!reach::StretchArm(newW[0].m, arm.data(), n, u, l, w, k)) return false;
+    std::vector<char> whole(n, 0);
+    int first = n;
+    for (int i = 0; i < n; ++i) if (segment[i] == 3) { whole[i] = 1; first = std::min(first, i); }
+    Propagate(h, before, newW, whole, first);   // fingers, what the hand holds: as they were on it
+    for (int i = 0; i < n; ++i) if (segment[i]) baseW[i] = newW[i];
+    return true;
+}
+// The arms' ten-second account (hand_reach.h Tally): merged from each pose, one line while an arm was drawn
+// longer or a hand was left short of its controller, nothing otherwise.
+SRWLOCK g_reachLock = SRWLOCK_INIT;
+reach::Tally g_reachTally[2];
+ULONGLONG g_reachSince = 0;
+void ReportReach(const reach::Tally (&pose)[2], bool stretchOn) {
+    if (!pose[0].poses && !pose[1].poses) return;
+    const ULONGLONG now = GetTickCount64();
+    reach::Tally done[2];
+    bool report = false;
+    AcquireSRWLockExclusive(&g_reachLock);
+    g_reachTally[0].Merge(pose[0]); g_reachTally[1].Merge(pose[1]);
+    if (!g_reachSince) g_reachSince = now;
+    if (now - g_reachSince >= 10000) {
+        report = g_reachTally[0].Matters() || g_reachTally[1].Matters();
+        done[0] = g_reachTally[0]; done[1] = g_reachTally[1];
+        g_reachTally[0] = g_reachTally[1] = reach::Tally{};
+        g_reachSince = now;
+    }
+    ReleaseSRWLockExclusive(&g_reachLock);
+    if (!report) return;
+    auto arm = [&](const reach::Tally& t, char* out, size_t size) {
+        if (!t.stretched) { snprintf(out, size, "in reach in all %u poses", t.poses); return; }
+        snprintf(out, size, "%s in %u of %u poses (%.2fx on average, %.2fx most; without it the hand stops up to %.1f cm short of the controller)",
+                 stretchOn ? "drawn longer" : "too short", t.stretched, t.poses, t.Mean(), t.most, t.wouldMissCm);
+    };
+    char right[220], left[220];
+    arm(done[0], right, sizeof right); arm(done[1], left, sizeof left);
+    char line[600];
+    snprintf(line, sizeof line, "Frame hand reach: last 10 s: right arm %s; left arm %s; hands left short of their controllers in %u poses (%.1f cm most)%s",
+             right, left, done[0].shortPoses + done[1].shortPoses, std::max(done[0].shortCm, done[1].shortCm),
+             stretchOn ? "" : " - [arms] stretch=0");
+    framevr::logging::Write(line);
+}
+#endif
 
 // a's rotation part turned toward b's by t (rows blended, made square again,
 // each keeping a's length and handedness); a's position.
@@ -2113,16 +2202,26 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
 #ifdef D2RVR_DEVELOPER
     if(graft&&!trackedNeckApplied)++g_formLoose;   // drawn at its rest place, not under the eyes
 #endif
+    // The palm's middle as built: half way from the wrist to the middle knuckle (hand_reach.h), model units.
+    auto bindPalm=[&](int side){
+        const int kn=h.knuckle[side]>=0?h.knuckle[side]:h.mid[side];
+        return kn>=0&&h.hand[side]>=0?.5f*Len(Sub(Pos(h.bind[kn]),Pos(h.bind[h.hand[side]]))):0.f;
+    };
+    // The T pose's span is a person's shoulders and two arms: the arms reach as far as the player's own from a
+    // person's shoulders where the rig's are wider (a grafted form's, the barbarian's 0.27 of his eye height
+    // against 0.24): fitted from his own, his arms came out 6% shorter than any other class's.
+    const float fitShoulders=h.bindOk&&h.upr[0]>=0&&h.upr[1]>=0?
+        framevr::shapeshift::ArmFitShoulders(Len(Sub(Pos(h.bind[h.upr[0]]),Pos(h.bind[h.upr[1]]))),h.eyeY*unitScale):0.f;
+    float fitScale[2]={1.f,1.f};
     if(in.mode==2&&in.armSpanM>0&&h.bindOk&&h.upr[0]>=0&&h.upr[1]>=0){
-        float shoulderWidth=Len(Sub(Pos(h.bind[h.upr[0]]),Pos(h.bind[h.upr[1]])));
-        // a grafted form's arms reach as far as the player's own, from a person's shoulders
-        if(graft)shoulderWidth=framevr::shapeshift::ArmFitShoulders(shoulderWidth,h.eyeY*unitScale);
+        const float shoulderWidth=fitShoulders;
         for(int side=0;side<2;++side){
             const int u=h.upr[side],l=h.lwr[side],k=h.hand[side];
             if(u<0||l<0||k<0)continue;
             const float length=Len(Sub(Pos(h.bind[l]),Pos(h.bind[u])))+Len(Sub(Pos(h.bind[k]),Pos(h.bind[l])));
-            const float palm=h.mid[side]>=0?.5f*Len(Sub(Pos(h.bind[h.mid[side]]),Pos(h.bind[k]))):0;
+            const float palm=bindPalm(side);
             const float scale=framevr::body::ArmScale(h.eyeY,in.userHeadM,in.armSpanM,shoulderWidth,length,palm,graft?.5f:.65f,unitScale);
+            fitScale[side]=scale;
             const auto before=newW;const V3 shoulder=Pos(newW[u]);
             std::vector<char> subtree(n,0);subtree[u]=1;
             for(int i=u;i<n;++i){
@@ -2135,8 +2234,44 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
             std::vector<char> handTree(n,0);handTree[k]=1;Propagate(h,before,newW,handTree,k);
         }
     }
+    // Hands on the controllers: model units per metre as ControllerPoint hangs them, and whether an arm too short
+    // for its controller is drawn longer (hand_reach.h; [arms] stretch) - only with the body under the eyes, where
+    // a reach is a reach; a grafted form's arms keep their own extension (Reach).
+    const float handsUpm=framevr::body::UnitsPerMetre(h.eyeY>0?h.eyeY:(in.haveEye?in.eyeModel[1]:h.head>=0?Pos(newW[h.head]).y:0.f),
+                                                      in.userHeadM,in.scale);
+    bool stretchArms=false;
+#ifdef D2RVR_NATIVE_OPENXR
+    stretchArms=in.armStretch&&in.mode==2&&!graft&&trackedNeckApplied;
+    if(in.mode==2&&!h.form&&h.bindOk&&h.upr[0]>=0&&h.lwr[0]>=0&&h.hand[0]>=0&&handsUpm>0) {
+        // Once per character, calibration or setting: what the right arm was fitted to (the left is its mirror image).
+        static uintptr_t toldSkel=0;static float toldSpan=-1,toldEye=-1,toldAlong=-99;static int toldStretch=-1;
+        if(toldSkel!=h.skel||fabsf(toldSpan-in.armSpanM)>1e-4f||fabsf(toldEye-in.userHeadM)>1e-4f||
+           fabsf(toldAlong-in.handAlongM)>1e-4f||toldStretch!=int(in.armStretch)) {
+            toldSkel=h.skel;toldSpan=in.armSpanM;toldEye=in.userHeadM;toldAlong=in.handAlongM;toldStretch=int(in.armStretch);
+            const int u=h.upr[0],l=h.lwr[0],k=h.hand[0];
+            const float built=Len(Sub(Pos(h.bind[l]),Pos(h.bind[u])))+Len(Sub(Pos(h.bind[k]),Pos(h.bind[l])));
+            int joints=0,at=0;
+            for(const auto& f:h.fingers[0])if(!f.bones.empty()&&f.bones[0]==h.mid[0]){
+                joints=int(f.bones.size());for(int j=0;j<joints;++j)if(f.bones[size_t(j)]==h.knuckle[0])at=j+1;
+            }
+            char fitted[160];
+            if(in.armSpanM>0)snprintf(fitted,sizeof fitted,"fitted %.3fx to a %.3f m span at %.3f m eyes, shoulder to grip %.3f m measured",
+                fitScale[0],in.armSpanM,in.userHeadM,in.armSpanM*.5f-fitShoulders*.5f/handsUpm);
+            else snprintf(fitted,sizeof fitted,"as built (no body calibration), eyes %.3f m",in.userHeadM);
+            char line[420];snprintf(line,sizeof line,"Frame hand reach: %s rig: arms %s; shoulder to wrist %.3f m drawn (%.3f m as built, shoulders %.3f m apart); "
+                "the palm's middle %.1f cm before the wrist (middle knuckle: finger joint %d of %d), on the grip%s%.1f cm; stretch %s",
+                h.cls>=0&&h.cls<8?kHeroClasses[h.cls]:"unknown",fitted,built*fitScale[0]/handsUpm,built/handsUpm,fitShoulders/handsUpm,
+                bindPalm(0)/handsUpm*100.f,at,joints,in.handAlongM!=0?" moved along the hand ":" ",in.handAlongM*100.f,
+                in.armStretch?"on: an arm short of its controller is drawn longer, up to 2x ([arms] stretch=1)":"off: an arm short of its controller leaves the hand short ([arms] stretch=0)");
+            framevr::logging::Write(line);
+        }
+    }
+#endif
     // The animation after the turn and proportion fit: the IK's local offsets.
     std::vector<Mat> baseW = newW;   // (the mirror world's while left-handed play is in it, below)
+#ifdef D2RVR_NATIVE_OPENXR
+    reach::Tally reachTally[2];   // this pose's, for the ten-second line (ReportReach)
+#endif
 
     // Model space: y up, faces +z, its left is +x. The two arms' subtrees are
     // disjoint, and each pass re-derives only its own side.
@@ -2151,9 +2286,20 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
         } else if (in.mode == 2 && (in.handsValid & (1u << side)) && h.head >= 0) {
             V3 T = ControllerPoint(h, side, in, newW, c, s);
             const Wrist wr = PlanWrist(h, side, baseW, in, c, s);
-            // The grip point is the middle of the palm; the wrist bone is half a hand behind it.
-            if (wr.ok) T = Sub(T, Scale(wr.point, 0.5f * wr.reach));
-            Reach(h, side, T, turn, c, s, baseW, newW, side==offArm&&in.leftShield, graft);
+            // The grip point is the middle of the palm; the wrist bone sits that far behind it ([arms] hand_along
+            // moves the hand along itself, toward the fingers).
+            if (wr.ok) T = Sub(Add(T, Scale(wr.point, in.handAlongM * handsUpm)), wr.palm);
+            float stretched = 1.0f;
+#ifdef D2RVR_NATIVE_OPENXR
+            const V3 S = Pos(newW[u]);
+            const float arm = Len(Sub(Pos(newW[l]), S)) + Len(Sub(Pos(newW[k]), Pos(newW[l]))), distance = Len(Sub(T, S));
+            if (stretchArms && (stretched = reach::Stretch(distance, arm)) > 1.0f && !StretchArmBones(h, side, stretched, newW, baseW))
+                stretched = 1.0f;
+#endif
+            Reach(h, side, T, turn, c, s, baseW, newW, side==offArm&&in.leftShield, graft, stretched);
+#ifdef D2RVR_NATIVE_OPENXR
+            if (!graft && trackedNeckApplied) reachTally[side].Add(distance, arm, handsUpm, Len(Sub(Pos(newW[k]), T)) / handsUpm * 100.0f);
+#endif
             if (wr.ok) {
                 ApplyWrist(newW[k], wr);
                 std::vector<char> fromK(n, 0); fromK[k] = 1;
@@ -2171,6 +2317,9 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
             AimChain(h, u, l, k, E, T, baseW, newW);
         }
     }
+#ifdef D2RVR_NATIVE_OPENXR
+    ReportReach(reachTally, in.armStretch);
+#endif
 
     // Left-handed play, phase 3 (hand_swap_pose.h, MIRROR WORLD): from here to the end of the staff's
     // block the weapon code runs as written - right hand holds, left hand supports - on the reflection
@@ -3250,7 +3399,9 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
             const V3 origin=Pos(world),axis=Norm({world.m[4],world.m[5],world.m[6]}),player=Pos(model);
             g.melee={{origin.x,origin.y,origin.z},{axis.x,axis.y,axis.z},{player.x,player.y,player.z},in.poseStamp,in.worldEpoch,HeroGen()};
             if(g_flailLive.load(std::memory_order_relaxed)) {   // a flail's chain swings in the world this pose places him in
-                const FlailWorld here{upm*Len({model.m[0],model.m[1],model.m[2]}),model.m[13],in.worldEpoch,HeroGen(),GetTickCount64()};
+                FlailWorld here{upm*Len({model.m[0],model.m[1],model.m[2]}),model.m[13],{},in.worldEpoch,HeroGen(),GetTickCount64()};
+                const V3 eyes=Pos(Mul(Mat{{1,0,0,0, 0,1,0,0, 0,0,1,0, head.x,head.y,head.z,1}},model));   // his eyes in the world
+                here.eyes[0]=eyes.x;here.eyes[1]=eyes.y;here.eyes[2]=eyes.z;
                 AcquireSRWLockExclusive(&g_flailWorldLock);g_flailWorld=here;ReleaseSRWLockExclusive(&g_flailWorldLock);
             }
             g.melee.weaponType=in.weaponType;
@@ -4080,33 +4231,42 @@ void PoseMotionBow(Posed& p) {
 #ifdef D2RVR_NATIVE_OPENXR
 // ---- A flail's chain swings (steamvr/flail_chain.h; [hands] flail_chain) ----
 // After the game has posed a held flail's own skeleton (its class's animation of the chain), the chain's bones are laid
-// where a rope of them hangs and swings from the handle in the world, as PoseMotionBow lays a bow's string. Only the
+// where the chain and ball hang and swing from the handle in the world, as PoseMotionBow lays a bow's string. Only the
 // local hero's held item (its transform's parent is his entity), only bones named as a flail's chain, and only while
-// a flail is in a hand in first person (g_flailLive); anything not usable leaves the game's own pose.
+// a flail is in a hand in first person (g_flailLive); anything not usable leaves the game's own pose, and says why once.
 struct FlailRig {
     uintptr_t bones=0;
     framevr::flail::Rig rig;
-    uint32_t entity=0;bool entityKnown=false,told=false;ULONGLONG lookupAt=0;
-    std::unique_ptr<std::array<framevr::flail::Swing,framevr::flail::MaxChains>> swing;   // a flail's only
+    uint32_t entity=0;bool entityKnown=false,toldLaid=false,toldLeft=false;ULONGLONG lookupAt=0,leftSince=0;
+    std::unique_ptr<framevr::flail::Swing> swing;   // a flail's only: its chains swing together (Khalim's balls meet)
 };
 SRWLOCK g_flailLock=SRWLOCK_INIT;   // the rigs, their swings and the report
 framevr::AgedCache<std::pair<uintptr_t,uintptr_t>,FlailRig,framevr::PairHash> g_flailRigs{Remembered,RememberedFor,SweepEvery};
-struct FlailReport {framevr::flail::Stats stats;unsigned chains=0,flails=0,notHeld=0,noWorld=0;ULONGLONG windowAt=0;};
+struct FlailReport {framevr::flail::Stats stats;unsigned flails=0,notHeld=0,noWorld=0;ULONGLONG windowAt=0,lastAt=0;};
 FlailReport g_flailReport;   // under g_flailLock
-// Ten seconds of the swing while a flail is out: how often it was laid and stepped, the fresh starts and why, the snap
-// turns carried, what was left to the game, and the ball's fastest.
+// Ten seconds of the swing while a flail is out (or up to its last pose, put away): how often it was laid and stepped,
+// hung afresh and carried and why, what was left to the game and why, the ball's fastest about the hand, its widest
+// swing from hanging straight, and the links' worst stretch. Nothing while no flail is posed.
 void TellFlails(ULONGLONG now) {
     FlailReport& r=g_flailReport;
-    if(!r.windowAt){r.windowAt=now;return;}
-    if(now-r.windowAt<10000)return;
-    const auto& s=r.stats;
-    char line[420];
-    std::snprintf(line,sizeof line,"Frame flail chain: ten seconds: %u flail poses, %u chains laid %u times, %u steps; fresh starts %u (first %u, "
-        "pauses %u, jumps %u, new sizes %u), snap turns carried %u; left to the game %u (not ours %u, no world %u, unusable %u); "
-        "the ball up to %.1f m/s",r.flails,r.chains,s.poses,s.steps,s.starts+s.pauses+s.jumps+s.resized,s.starts,s.pauses,s.jumps,s.resized,s.turns,
-        r.notHeld+r.noWorld+s.refused,r.notHeld,r.noWorld,s.refused,s.fastest);
-    framevr::logging::Write(line);
-    r={};r.windowAt=now;
+    if(!r.windowAt){r.windowAt=r.lastAt=now;return;}
+    const bool idle=now-r.lastAt>2000;
+    if(!idle&&now-r.windowAt<10000){r.lastAt=now;return;}
+    if(r.flails||r.notHeld||r.noWorld) {
+        const auto& s=r.stats;
+        const double seconds=double((idle?r.lastAt:now)-r.windowAt)/1000;
+        char line[900];
+        std::snprintf(line,sizeof line,"Frame flail chain: %.0f seconds: %u flail poses, %u laid (%u chains); %u flail frames (a stereo pair one), "
+            "%u steps (%.2f a frame), %u laid again for the other eye (the item read moved up to %.1f cm between a frame's eyes); hung afresh %u "
+            "(first %u, new sizes %u, lost %u), carried %u (pauses %u, jumps %u, snap turns %u); left to the game %u (not ours %u, no world %u, "
+            "unusable %u%s%s); the ball up to %.1f m/s about the hand, swung out up to %.0f deg from hanging, links within %.1f%% of length",
+            seconds,r.flails,s.poses,s.chains,s.frames,s.steps,s.frames?double(s.steps)/s.frames:0.0,s.again,s.eyesApart*100,
+            s.starts+s.resized+s.lost,s.starts,s.resized,s.lost,s.pauses+s.jumps+s.turns,s.pauses,s.jumps,
+            s.turns,r.notHeld+r.noWorld+s.refused,r.notHeld,r.noWorld,s.refused,s.refused?": ":"",s.refused?framevr::flail::Text(s.why):"",
+            s.fastest,s.widest,s.stretch*100);
+        framevr::logging::Write(line);
+    }
+    r={};r.windowAt=r.lastAt=now;
 }
 void PoseFlailChain(Posed& p) {
     namespace fc=framevr::flail;
@@ -4119,7 +4279,6 @@ void PoseFlailChain(Posed& p) {
     if(note&&note->notFlailAt&&note->flailSkeleton==skeleton&&note->flailBones==bones&&now-note->notFlailAt<NotedFor)return;
     AcquireSRWLockExclusive(&g_flailLock);
     struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&g_flailLock);}} unlock;
-    TellFlails(now);
     const auto key=std::make_pair(self,skeleton);
     FlailRig* rig=g_flailRigs.Find(key,now);
     if(!rig||rig->bones!=bones) {
@@ -4132,7 +4291,10 @@ void PoseFlailChain(Posed& p) {
             valid=Get(at,&boneName)&&Get(at+8,&parents[i])&&!(names[i]=Str(boneName)).empty();views[i]=names[i];
         }
         if(valid)learned.rig=fc::Find({views.data(),size_t(count)},{parents.data(),size_t(count)});
-        if(learned.rig.Valid())learned.swing=std::make_unique<std::array<fc::Swing,fc::MaxChains>>();
+        if(learned.rig.Valid())learned.swing=std::make_unique<fc::Swing>();
+        else if(learned.rig.why!=fc::RigWhy::NoLinks) {   // chain bones, but no chain the swing may move: for WatchFlails
+            g_flailBroken.fetch_add(1,std::memory_order_relaxed);g_flailBrokenWhy.store(uint8_t(learned.rig.why),std::memory_order_relaxed);
+        }
         framevr::CacheSweep swept;
         rig=&g_flailRigs.Put(key,std::move(learned),now,&swept);
         hookstats::Forgot(hookstats::FlailRigs,swept,now);
@@ -4142,6 +4304,7 @@ void PoseFlailChain(Posed& p) {
         if(note){note->flailSkeleton=skeleton;note->flailBones=bones;note->notFlailAt=now?now:1;}
         return;
     }
+    TellFlails(now);
     // The local hero's own held item only (a monster's or another player's flail has the same bones), and where the
     // game placed it in the world: its transform's world matrix, as the last evaluation left it.
     HeroXform hero;
@@ -4162,40 +4325,98 @@ void PoseFlailChain(Posed& p) {
            !Get(components+uintptr_t(index)*kTransformSize+0xC0,&parent)||parent!=hero.entity||
            !SafeCopy(&item,reinterpret_cast<const void*>(components+uintptr_t(index)*kTransformSize+0x40),sizeof item)) {
             // A monster's flail, another player's or one on the ground: this thread leaves it alone for NotedFor.
-            ++g_flailReport.notHeld;
+            ++g_flailReport.notHeld;g_flailOthers.fetch_add(1,std::memory_order_relaxed);
             if(note){note->flailSkeleton=skeleton;note->flailBones=bones;note->notFlailAt=now?now:1;}
             return;
         }
     }
+    g_flailHeldAt.store(now,std::memory_order_relaxed);
     FlailWorld world;
     AcquireSRWLockShared(&g_flailWorldLock);world=g_flailWorld;ReleaseSRWLockShared(&g_flailWorldLock);
-    if(!world.at||now<world.at||now-world.at>200||world.generation!=HeroGen()){++g_flailReport.noWorld;return;}
+    if(!world.at||now<world.at||now-world.at>200||world.generation!=HeroGen()) {
+        ++g_flailReport.noWorld;g_flailNoWorld.fetch_add(1,std::memory_order_relaxed);return;
+    }
     uintptr_t matrices=0;int worldCount=0;
     if(!Get(p.worldPose,&worldCount)||worldCount!=count||!Get(p.worldPose+4,&matrices)||!matrices)return;
     static LARGE_INTEGER frequency{};if(!frequency.QuadPart)QueryPerformanceFrequency(&frequency);
     LARGE_INTEGER counter;QueryPerformanceCounter(&counter);
     const double time=double(counter.QuadPart)/double(frequency.QuadPart);
     ++g_flailReport.flails;
+    // Every chain read first, then all swung together (Khalim's three balls keep apart), then all written.
+    std::array<std::array<fc::Mat,fc::MaxLinks>,fc::MaxChains> native,out;
+    fc::Bones chains;chains.chains=held.rig.chains;
     for(int c=0;c<held.rig.chains;++c) {
         const fc::Chain& chain=held.rig.chain[size_t(c)];
-        std::array<fc::Mat,fc::MaxLinks> native,out;bool read=true;
-        for(int k=0;k<chain.count&&read;++k)read=chain.bone[size_t(k)]<count&&
-            SafeCopy(&native[size_t(k)],reinterpret_cast<const void*>(matrices+uintptr_t(chain.bone[size_t(k)])*sizeof(fc::Mat)),sizeof(fc::Mat));
-        if(!read)continue;
-        fc::Stats stats;
-        if((*held.swing)[size_t(c)].Pose({native.data(),size_t(chain.count)},item,world.unitsPerMetre,world.floor,time,world.turn,
-                                          {out.data(),size_t(chain.count)},stats))
-            for(int k=0;k<chain.count;++k)
-                SafeWrite(reinterpret_cast<void*>(matrices+uintptr_t(chain.bone[size_t(k)])*sizeof(fc::Mat)),&out[size_t(k)],sizeof(fc::Mat));
-        g_flailReport.stats.Add(stats);++g_flailReport.chains;
+        for(int k=0;k<chain.count;++k)
+            if(chain.bone[size_t(k)]>=count||
+               !SafeCopy(&native[size_t(c)][size_t(k)],reinterpret_cast<const void*>(matrices+uintptr_t(chain.bone[size_t(k)])*sizeof(fc::Mat)),sizeof(fc::Mat)))
+                return;
+        chains.native[size_t(c)]={native[size_t(c)].data(),size_t(chain.count)};
+        chains.out[size_t(c)]={out[size_t(c)].data(),size_t(chain.count)};
     }
-    if(!held.told) {
-        held.told=true;
-        char line[240];
-        std::snprintf(line,sizeof line,"Frame flail chain: the held flail's rig - %d chain(s), %d links; its chain and ball hang from the handle and swing "
-            "with the hand ([hands] flail_chain=1; 0 leaves the game's animation)",held.rig.chains,held.rig.links);
+    fc::World there;
+    there.unitsPerMetre=world.unitsPerMetre;there.floor=world.floor;there.turn=world.turn;
+    there.head={world.eyes[0],world.eyes[1],world.eyes[2]};
+    fc::Stats stats;
+    // One step a game frame: both eyes of a stereo pair are posed inside one draw of the game (vrcam's GameDrawSpan), the
+    // second a pass later with the frame time held; it lays the first eye's very bones again (flail_chain.h Pose).
+    uint32_t serial=0;
+    const uint64_t frame=gamedraw::Now(&serial)?(uint64_t(serial)<<1|1u):0;
+    const bool laid=held.swing->Pose(chains,item,there,time,stats,frame);
+    if(laid)
+        for(int c=0;c<held.rig.chains;++c) {
+            const fc::Chain& chain=held.rig.chain[size_t(c)];
+            for(int k=0;k<chain.count;++k)
+                SafeWrite(reinterpret_cast<void*>(matrices+uintptr_t(chain.bone[size_t(k)])*sizeof(fc::Mat)),&out[size_t(c)][size_t(k)],sizeof(fc::Mat));
+        }
+    g_flailReport.stats.Add(stats);
+    // Once for each held flail: its rig and the chain it swings, or why the game's animation keeps it (once that has
+    // lasted a second, never laid: a flail just taken up may not be placed in its first frame).
+    if(!laid&&!held.toldLaid&&!held.leftSince)held.leftSince=now?now:1;
+    if(laid&&!held.toldLaid) {
+        held.toldLaid=true;
+        const fc::Swing& s=*held.swing;
+        char line[400];
+        std::snprintf(line,sizeof line,"Frame flail chain: the held flail's rig - %d chain(s) of %d links (%.2f m to the last joint, the ball %.2f m round "
+            "%.2f m on; the item at %.0f %.0f %.0f in the world); its chain and ball swing from the handle ([hands] flail_chain=1; 0 leaves the "
+            "game's animation)",held.rig.chains,held.rig.chain[0].count,s.ChainLength(0),s.BallSize(0),fc::BallReach*s.ChainLength(0),
+            item.m[12],item.m[13],item.m[14]);
+        framevr::logging::Write(line);
+    } else if(!laid&&!held.toldLeft&&!held.toldLaid&&now-held.leftSince>=1000) {
+        held.toldLeft=true;
+        char line[400];
+        std::snprintf(line,sizeof line,"Frame flail chain: the held flail's rig - %d chain(s), %d links - left to the game's animation: %s "
+            "(the item at %g %g %g in the world, %.2f units a metre)",held.rig.chains,held.rig.links,fc::Text(stats.why),item.m[12],item.m[13],
+            item.m[14],world.unitsPerMetre);
         framevr::logging::Write(line);
     }
+}
+// A flail in hand and, five seconds on, no posed skeleton was the hero's own held flail: one line why, each time one is
+// taken up. (Once one is found, PoseFlailChain says whether its chain swings.)
+void WatchFlails(bool live) {
+    static SRWLOCK lock=SRWLOCK_INIT;static bool was=false,told=false;static ULONGLONG since=0;
+    AcquireSRWLockExclusive(&lock);
+    struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&lock);}} unlock;
+    const ULONGLONG now=GetTickCount64();
+    if(live&&!was) {
+        since=now;told=false;
+        g_flailHeldAt.store(0);g_flailBroken.store(0);g_flailOthers.store(0);g_flailNoWorld.store(0);
+    }
+    was=live;
+    if(!live||told||now-since<5000)return;
+    told=true;
+    if(g_flailHeldAt.load()>=since)return;
+    const unsigned broken=g_flailBroken.load(),others=g_flailOthers.load(),noWorld=g_flailNoWorld.load();
+    char line[500];
+    if(!broken&&!others&&!noWorld)
+        std::snprintf(line,sizeof line,"Frame flail chain: a flail is in hand, but in 5 s no item skeleton with a flail's chain bones (chain_bnd_jnt_NN, "
+            "L_/C_/R_chain_NN) was posed - the game's animation moves its chain");
+    else
+        std::snprintf(line,sizeof line,"Frame flail chain: a flail is in hand, but in 5 s none of the posed flail skeletons was the hero's own - the "
+            "game's animation moves its chain: %u with chain bones but no chain (%s), %u flail rigs not held by him (their transform's parent is "
+            "not his entity), %u poses without his world",broken,broken?framevr::flail::Text(framevr::flail::RigWhy(g_flailBrokenWhy.load())):"none",
+            others,noWorld);
+    framevr::logging::Write(line);
 }
 #endif
 
@@ -4217,6 +4438,7 @@ bool PoseRemoteUpper(uintptr_t self,const Hero&h,const float*local) {
     int match=upperbodyrender::Match(candidates.data(),candidates.size(),h.cls,pos,local);
     if(match<0)return false;
     const auto&r=targets[match];
+    if(r.nativeAttack){upperbodyskin::ForgetOwner(self);return true;} // native animation owns this actor only, for this attack
     uintptr_t world=0,mats=0,previous=0;int n=0;
     if(!Get(self+0x20,&world)||!Get(world,&n)||n!=h.count||!Get(world+4,&mats)||!mats)return true;
     std::vector<Mat> oldW(n);if(!SafeCopy(oldW.data(),reinterpret_cast<void*>(mats),sizeof(Mat)*n))return true;
@@ -4381,15 +4603,17 @@ void HeldReport(const framevr::held::Gate& gate,const framevr::held::Reach& reac
     // Told while a pair is held too, touching or not (owner 2026-11-12: a Paladin's mace "just passes through" the
     // shield, and nothing was logged): what kept them apart is the question.
     if(s.contacts[0]||s.contacts[1]||gate.pair!=hc::Pair::None) {
-        char why[200];hc::Reasons(s.why,why,sizeof why);char line[640];
+        char why[200];hc::Reasons(s.why,why,sizeof why);char line[800];
         const HeldItems& items=g_heldItems;   // HeldCollide holds g_heldLock
         const float bladeLength=hc::BladeLength(gate.type[0]);   // the first item's (the one that yields)
         char nearest[32];
         if(s.nearest<1e8f)snprintf(nearest,sizeof nearest,"%.1f cm",s.nearest*100);else snprintf(nearest,sizeof nearest,"never measured");
         snprintf(line,sizeof line,"Frame held collisions: %u contacts (weapon-shield %u, weapon-weapon %u), deepest %.1f cm, pushes capped %u, "
-            "haptic clanks %u; ten seconds: %u steps, %u acting, %u with no usable shape, nearest %s; items %llu ms old: blade right=%d left=%d "
+            "haptic clanks %u, sounds %u (a knock of %.1f m/s, %.1f s apart), fastest touch %.1f m/s; ten seconds: %u steps, %u acting, %u with no "
+            "usable shape, nearest %s; items %llu ms old: blade right=%d left=%d "
             "(length %.2f m), shield=%d on arm %d (box %.1f x %.1f x %.1f cm half; 2 measured, 3 guessed), shield mesh capture reached 0x%x of 0x3fff; excluded: %s",
-            s.contacts[0]+s.contacts[1],s.contacts[0],s.contacts[1],s.deepest*100,s.capped,s.clanks,s.steps,s.acting,s.badShapes,nearest,
+            s.contacts[0]+s.contacts[1],s.contacts[0],s.contacts[1],s.deepest*100,s.capped,s.clanks,s.sounds,hc::KnockSoundSpeed,hc::KnockSoundGap,
+            s.fastest,s.steps,s.acting,s.badShapes,nearest,
             items.at?(unsigned long long)(now-items.at):0ull,int(items.blade[0]),int(items.blade[1]),bladeLength,items.shield,items.shieldArm,
             hc::Length(items.plate.right)*100,hc::Length(items.plate.up)*100,hc::Length(items.plate.out)*100,g_shieldStagesSeen.exchange(0),why);
         framevr::logging::Write(line);
@@ -4520,10 +4744,12 @@ void HeldCollide(Input& in,Posed& posed,const Hero& hero) {
             if(length>hc::Cap)push=push*(hc::Cap/length);   // the hand never drawn farther than Cap off its controller
             g_heldStep.push[arm][0]=push.x;g_heldStep.push[arm][1]=push.y;g_heldStep.push[arm][2]=push.z;
         }
-        // A clank: both hands when the two items met, the hand whose item struck the world when that did.
-        unsigned arms=out.clank?3u:0u;float strength=out.clank?out.strength:0.f,speed=out.clank?out.speed:0.f;
-        if(worldOut.clankArms){arms|=worldOut.clankArms;if(worldOut.strength>strength)strength=worldOut.strength;speed=std::max(speed,worldOut.speed);}
-        if(arms)g_heldClank={true,strength,speed,arms,now};
+        // A clank: both hands when the two items met, the hand whose item struck the world when that did. The sound only
+        // with the two items' hard knock (the solver's own rule and gap), or the world's from SoundSpeed; one not yet
+        // played is kept.
+        unsigned arms=out.clank?3u:0u;float strength=out.clank?out.strength:0.f;bool sound=out.sound;
+        if(worldOut.clankArms){arms|=worldOut.clankArms;if(worldOut.strength>strength)strength=worldOut.strength;sound=sound||worldOut.speed>=hc::SoundSpeed;}
+        if(arms)g_heldClank={true,strength,arms,sound||(g_heldClank.waiting&&g_heldClank.sound),now};
         HeldReport(gate,reach,now);
         LARGE_INTEGER done;QueryPerformanceCounter(&done);
         const uint64_t spent=uint64_t(done.QuadPart-counter.QuadPart);
@@ -4675,6 +4901,21 @@ void Arms(Posed& posed) {
     // form's is still drawn: back from a form, the sample trails the swap as it did going in
     else if(in.shapeForm&&framevr::shapeshift::RigDrawn(GetTickCount64(),g_formPosedAt.load()))return;
     else g_rigPosedAt[0].store(GetTickCount64());
+#endif
+#ifdef D2RVR_NATIVE_OPENXR
+    if(offlinedifficulty::ClientMode()>0){
+        static upperbodyrender::LocalRig owner;
+        const auto now=GetTickCount64(),session=gamestate::LocalPlayer();
+        AcquireSRWLockExclusive(&g_remoteLock);
+        bool ambiguous=false;
+        if(now-g_remoteAt<=500)for(const auto& peer:g_remoteBodies){
+            if(upperbodyrender::Distance(position,peer.worldPosition)<=16.f){ambiguous=true;break;}
+        }
+        const bool mine=owner.Accept(session,self,posed.hero.entity,hero.form,now,ambiguous);
+        if(mine)NoteHero(self);
+        ReleaseSRWLockExclusive(&g_remoteLock);
+        if(!mine)return; // Leave an overlapping non-owner to its native pose, not local head/hands.
+    }else
 #endif
     NoteHero(self);
 #ifdef D2RVR_NATIVE_OPENXR
@@ -5529,11 +5770,11 @@ bool ShieldWeapon(MeleeWeaponPose& out) {
     if(!at||GetTickCount64()-at>100||pose.heroGeneration!=HeroGen())return false;
     out=pose;return true;
 }
-bool TakeHeldClank(float& strength,float& speed,unsigned& arms) {
+bool TakeHeldClank(float& strength,unsigned& arms,bool& sound) {
     AcquireSRWLockExclusive(&g_heldLock);const HeldClank clank=g_heldClank;g_heldClank={};ReleaseSRWLockExclusive(&g_heldLock);
     const auto now=GetTickCount64();
     if(!clank.waiting||now<clank.at||now-clank.at>150)return false;
-    strength=clank.strength;speed=clank.speed;arms=clank.arms;return true;
+    strength=clank.strength;arms=clank.arms;sound=clank.sound;return true;
 }
 bool ClawGuardPose(framevr::guard::Pose& out,bool& crossed,float& apart) {
     AcquireSRWLockShared(&g_gunBoneLock);const auto claw=g_clawGuard;ReleaseSRWLockShared(&g_gunBoneLock);
@@ -5653,6 +5894,9 @@ void Set(const Input& in) {
     g_flailLive.store(in.flailChain, std::memory_order_relaxed);
 #endif
     ReleaseSRWLockExclusive(&g_inLock);
+#ifdef D2RVR_NATIVE_OPENXR
+    WatchFlails(in.flailChain);
+#endif
 }
 
 using ComputeFn = void (*)(uintptr_t self, float a, float b, bool c);

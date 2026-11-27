@@ -14,8 +14,11 @@
 // bounce and roll on the floor under the player and against the game's wall
 // cells. The level's own small props near the player (props.h) share the
 // world: frozen where the game placed them until a weapon or a moving body
-// reaches them, then simulated until they rest again. Nothing here reaches
-// the game. Positions are rendered world metres (interaction::Stage::World), y up.
+// reaches them, then simulated until they rest again. A frozen prop is plain
+// data, with no Box3D body, until something reaches it or something moving
+// comes near it; at rest the world takes no step and holds no weapon bodies.
+// Nothing here reaches the game. Positions are rendered world metres
+// (interaction::Stage::World), y up.
 namespace framevr::bottles {
 using math::Vec;
 using math::Quat;
@@ -213,20 +216,31 @@ public:
     bool Prepare(uint64_t session,float floor,float unitsPerMetre,Vec around);
     // Where a ball of this radius thrown from p at v (world metres, m/s)
     // first meets anything here (the floor, walls, surfaces, props or
-    // bottles; never weapons), within maxTime: the ball's centre then.
-    bool Trace(Vec p,Vec v,float radius,double maxTime,Vec& hit) const;
+    // bottles; never weapons), within maxTime: the ball's centre then. The
+    // frozen props and surfaces along the arc get their bodies for it, until
+    // the world is next at rest.
+    bool Trace(Vec p,Vec v,float radius,double maxTime,Vec& hit);
     // The game's wall cells; a patch from another game is ignored.
     void Walls(const Patch&);
     // Advance in fixed steps to time. Bottles older than Lifetime, or farther
     // than Range from the player, are removed. Beyond the sampled cells there
-    // are no walls, only the floor. With nothing that can move (no bottle, no
-    // thrown one, every prop frozen and no weapon reaching one) no step is taken.
+    // are no walls, only the floor. With nothing that can move (no thrown
+    // bottle, every bottle asleep, every prop frozen and no weapon reaching a
+    // prop or a bottle) no step is taken, no weapon has a body and a frozen
+    // prop has none unless a bottle lies next to it. Before each step, the
+    // frozen props and surfaces that something moving could meet in it get
+    // theirs.
     void Advance(double time,Vec player);
     uint64_t Steps() const;     // world steps taken so far
     void StepAtRest(bool);      // tests: step with nothing to move too, as it used to
+    // Tests: every listed prop and surface a body at once, kept while
+    // listed, as it was before props were bodies only on contact. Set before
+    // the first Props.
+    void Eager(bool);
     // Where the weapons are now. The next Advance moves each one there over
     // the steps it takes, pushing and waking the bottles in its way; a slot
-    // without a valid collider is removed. Only while bottles lie in the world.
+    // without a valid collider is removed. Its bodies exist only while the
+    // world steps; at rest it is a pose the next sweep starts from.
     void Weapons(const std::array<Collider,Colliders>&);
     // Props' weight (prop_heft.h; [interactions] prop_heft, on by default).
     // On: each prop weighs what its kind and size say, and a weapon is a
@@ -248,9 +262,10 @@ public:
     struct Pushed {unsigned props=0,bottles=0;};
     Pushed Push(const spellimpacts::Push&,double time);
     // The level props near the player. New ones are added frozen where the
-    // game has them; frozen ones no longer listed (out of reach) are removed;
-    // moving ones stay until they rest. Lost entities are removed at once.
-    // Another game, floor or scale restarts the world once nothing moves.
+    // game has them, as data: no Box3D body is made for them here; frozen ones
+    // no longer listed (out of reach) are removed; moving ones stay until they
+    // rest. Lost entities are removed at once. Another game, floor or scale
+    // restarts the world once nothing moves.
     void Props(const PropScan&);
     // Interpolated poses between the last two steps.
     unsigned Show(std::array<Shown,MaxBottles>& out) const;
@@ -259,12 +274,13 @@ public:
     // Props set going since the last call, cleared.
     unsigned Knocks(std::array<Knock,props::MaxMoving>& out);
     unsigned Frozen() const;   // props waiting where they are
-    unsigned Supports() const; // static surfaces under them
+    unsigned Supports() const; // surfaces under them (listed; each a body only when needed)
+    unsigned Bodies() const;   // Box3D bodies the props and their surfaces hold now (moving, near something moving)
     bool Idle() const;         // no bottles, thrown bottle or props
     bool WallsWanted(WallRequest&) const;
     unsigned Count() const; // bottles
     unsigned Shapes() const; // static wall boxes, for diagnostics
-    unsigned Pushers() const; // weapon bodies in the world
+    unsigned Pushers() const; // weapons with bodies in the world now (none at rest)
     void Reset();
 };
 }

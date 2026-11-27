@@ -1,5 +1,125 @@
 # VR performance investigations
 
+## Game-thread target scans, November 22
+
+The November 22 SteamVR session on game build 3.4.95041 recorded about 21
+target scans per second in combat, averaging 0.39–0.48 ms per scan. The
+offline and host-assisted scans now read each monster's header, data pointer,
+path pointer and next bucket link in one guarded copy. The pointers and
+coordinates are read fresh on every scan.
+
+A Windows benchmark ran the old and new offline scans over the same 128
+synthetic unit records using the production guarded reader. Both selected
+the same 64 targets in order, with identical coordinates and visibility,
+and made 92 relation and 64 line-of-sight calls to test doubles. Guarded
+reads fell from 723 to 402 per scan. Across 31 alternating batches of 20
+scans, median batch time per scan fell from 355 to 199 microseconds.
+In-game scan time and headset frame rate still need a matched run.
+
+## Map and chat draw callbacks, November 22
+
+In the Players 7 Rocky Waste headset run the two eye passes averaged 23.6 ms
+combined. Both passes call the HUD filter for ordinary world and interface
+draws. The filter now tracks which command lists have entered a map or chat
+scissor. Ordinary draws can return after one membership check. A possible
+match takes the HUD lock once and verifies the list and its region.
+
+A single-thread Windows fixture ran the old and new draw and scissor callbacks
+with a mock render-target bind. Each group included 80 world draws, 16 ordinary
+HUD draws, two map draws and two private chat draws, alternating indexed and
+non-indexed calls. Each sample timed 50,000 such groups including scissor
+changes. Median CPU time across nine samples per build was:
+
+| Map in the fixture | Before, µs per 100 draws | After, µs per 100 draws |
+| --- | ---: | ---: |
+| Corner | 1.39 | 0.48 |
+| Full | 1.68 | 0.51 |
+
+Both versions suppressed the same draws and selected the same chat history.
+
+Two headset sessions used the same offline Paladin in the Players 7 Rocky
+Waste, with SteamVR/OpenXR 2.18.4, 3072 × 3072 eyes and NVIDIA Medium frame
+generation at 50% scale. The comparison uses complete ten-second intervals
+wholly in the area. Stage times are weighted by native stereo pair count.
+
+| Rocky Waste gameplay | Before | With the HUD change |
+| --- | ---: | ---: |
+| Native pairs measured | 7,571 | 5,952 |
+| Both eye passes, ms per pair | 23.62 | 20.85 |
+| Full cycle, ms per pair | 29.08 | 25.21 |
+| Native stereo pairs per second | 34.4 | 39.7 |
+| Pairs taking at least 30 ms | 36.7% | 17.5% |
+
+The newer session also spent less time in XR end (2.05 to 1.21 ms per pair).
+The encounters varied and the headset logs time the complete eye passes.
+Only the synthetic benchmark isolates the HUD callbacks' contribution.
+
+## Draw thread: props only on contact, November 24
+
+**Measured in the test only; not yet in a headset.** The owner asked to "only
+activate physics objects in the world when/if contacted". What ran for props
+nobody touched, before this change:
+
+- every prop the scan listed (the 160 nearest within 3 m) and every surface
+  under them became a static Box3D body as soon as it was listed, on the draw
+  thread, and was destroyed when it left reach. The world took no step with
+  nothing moving (November 10), so these bodies cost little per frame, but
+  making them did: entering an area, or walking among props;
+- while any prop was listed, each held weapon (hand, blade and motor joint
+  with weight on) was a body, placed every frame;
+- a bottle let go of kept the world stepping at 120 Hz for the 20 s it lay
+  there, asleep or not.
+
+Now a prop is data until a weapon, spell or moving thing reaches it, or
+something moving comes near it (see
+[Bodies only on contact](../docs/KNOCKABLE_PROPS.md#bodies-only-on-contact));
+at rest the weapons are poses, frozen props and surfaces let their bodies go,
+and sleeping bottles take no steps. `prop-rest-cost-test` builds a room with a
+prop every 30 cm on six tables and the floor (160 listed within 3 m: cups,
+plates, books, apples, pails), then times the draw thread's calls into the
+bottle and prop world (Release, -O3, the test machine, three runs each):
+
+| | before | after |
+| --- | --- | --- |
+| entering an area: 160 props listed | 1.44-1.58 ms (worst 2.4 ms) | 68-72 us (worst 124 us) |
+| the same 160 scanned again (twice a second, standing) | 9.5 us | 11.8-12.1 us |
+| walking among them: a scan (twice a second) | 150-154 us (worst 218 us) | 25-26 us (worst 33 us) |
+| walking, swinging over them: a frame | 1.82-1.88 us | 1.35-1.36 us |
+| standing, swinging over them: a frame | 1.70-1.76 us | 1.31 us |
+| a bottle let go of among them, its first 10 s: a frame | 12.9 us, 1198 steps | 3.7 us, 169 steps |
+| the same bottle with no props about | 11.4 us, 1198 steps | 2.1 us, 169 steps |
+
+The bodies made on contact cost what they did before once something moves:
+`prop-heft-test`'s twelve cups and three weapons stepping were 45.0/45.7 us
+a frame (weight on/off) before and 44.4/46.8 us after, the same within noise,
+and its whole table of knocks, masses, thuds and slips is identical.
+
+Still running for props nobody touches, unchanged here:
+
+- **The scan** (`vr/prop_scan.cpp`), on its own worker thread every half
+  second while physical melee is on: it reads the renderer's transform,
+  id and bounds storages. The field log of November 23 (Rocky Waste) gave
+  0.6-2.1 ms a scan; it does not touch the draw thread. It is how a prop
+  near the player is found at all.
+- **Wall cells** (`vr/wall_cells.cpp`) around the player while any prop is
+  listed, so walls are there before the first knock: one 32 x 32 sample on
+  the game thread every half second, 36-106 us each in that log (about
+  0.08 ms a second).
+- **Per frame** the weapons' sweeps are tested against every listed prop's
+  bounds (the 1.3 us above).
+- **Hanging fixtures** are the game's own partial-ragdoll physics; the mod
+  only stops the second eye of a pair from stepping them again
+  ([hanging fixtures](../docs/HANGING_FIXTURE_PHYSICS.md)), which saves work.
+  Nothing of the mod's runs for them while untouched. The monsters' bodies
+  (`limb_physics.cpp`) already made ragdolls only for a weapon within 0.6 m
+  and took no step without one.
+
+**What to read in the next log.** `Frame props: ten seconds: ...` now has
+`Box3D bodies most=N`: the most bodies the props and their surfaces held at
+once in those ten seconds. Standing or fighting among props without touching
+one, it should be 0; after a knock, a few, and 0 again ten seconds after
+everything is still.
+
 ## Draw thread: props with weight, November 12
 
 **Measured in the test only; not yet in a headset.** Props with weight
@@ -14,6 +134,83 @@ within noise. Per frame, each weapon touching nothing reads its contacts
 once (`b3Body_GetContactData`, one entry) and may set its mass data, and after
 the frame's steps what the blades touch is listed (8 entries each) for freezing. No
 allocation beyond the `pressed` list, which keeps its capacity.
+
+## Scene depth on the recording threads, November 22
+
+The Rocky Waste headset log shows the private 3072 × 3072 scene depth copy
+active. While tracking depth, the plugin checked every resource barrier under
+one mutex. Recording threads now read a shared mask once per batch. They take
+the mutex only if a resource might be tracked, then verify the device and
+resource and apply transitions in order. Binding a depth view also resolves
+its resource once for both the description and the tracker.
+
+A Windows CPU fixture replayed both barrier callbacks with four tracked
+depth resources. Every eighth four-resource batch contained a depth
+transition. Out of 256 batches, the old callback took the mutex 256 times and
+the new callback took it 84 times, including hash collisions. Both selected
+the same depth resource and state after each batch. The original headset log
+did not count barrier batches or time this callback individually.
+
+The follow-up headset run was slower. Both runs used an offline Paladin in
+the Players 7 Rocky Waste with 3072 × 3072 eyes, SteamVR/OpenXR 2.18.4 and
+NVIDIA Medium frame generation at 50% scale. Each mean below covers complete
+ten-second intervals within the area. Stage times are weighted by pair count.
+
+| Rocky Waste gameplay | Previous dev build | With the depth filter |
+| --- | ---: | ---: |
+| Native pairs measured | 5,952 | 4,518 |
+| Native stereo pairs per second | 39.7 | 34.7 |
+| Both eye passes, ms per pair | 20.85 | 23.90 |
+| Full cycle, ms per pair | 25.21 | 28.80 |
+| Pairs taking at least 30 ms | 17.5% | 39.8% |
+
+One interval in the new run included the exit menu. Excluding it gives
+34.1 native pairs per second over 4,100 pairs. The runs used different live
+encounters. Those two runs alone could not isolate the depth filter.
+
+The last complete town interval before the Rocky Waste measured 16.75 ms for
+both eyes on the previous build and 16.53 ms with the filter. The field routes
+differed. Of 480 camera samples in the new run's menu-free timing windows,
+11% had a sample in the earlier run within 10 game units and 15 degrees of
+horizontal view direction. With menus excluded, the two eye passes took
+3.57 ms longer. The logged effects and Present portions together accounted
+for 0.03 ms of that difference.
+
+To measure the filter within one encounter, configure a diagnostic build
+with `-DD2RVR_COMPARE_DEPTH_BARRIERS=ON` (default off). The two-eye renderer
+alternates blocks of 32 native pairs in always-lock, filtered, filtered,
+always-lock order. Both modes maintain the same depth table and use the same
+depth-view lookup. Each block's first four pairs allow the pipeline to settle.
+`Frame depth compare` reports the mean cycle and eye time for the remaining
+28 pairs and samples recording-thread callbacks at randomized intervals
+averaging one sample per 64.5 batches. The reported callback time includes
+lock waits and clock overhead. Use complete four-block groups inside one area
+with menus closed, and compare the two modes within each group.
+
+On November 23 the same offline Paladin ran this comparison in the Players 7
+Rocky Waste. With menus and transitions excluded, 74 complete four-block
+groups provided 4,144 native stereo pairs per mode.
+
+| Within the same encounter | Always lock | Filter enabled |
+| --- | ---: | ---: |
+| Samples taking the lock | 100% | 12.6% |
+| Mean sampled callback time, ns | 206 | 115 |
+| Mean time for both eyes, ms | 19.07 | 19.31 |
+| Mean full stereo cycle, ms | 23.53 | 23.79 |
+| Native stereo pairs per second | 42.51 | 42.03 |
+
+The filter saved about 0.019 ms of estimated recording-thread time per
+pair, summed across threads. It produced a shorter full cycle in 36 of
+74 groups. The median paired cycle difference was 0.07 ms slower, with the
+middle half of groups ranging from 0.95 ms faster to 1.26 ms slower. This
+run shows cheaper barrier callbacks and no consistent frame-rate gain. It
+did not reproduce the earlier 3.57 ms increase in eye time.
+
+The draw thread used a median 98% of one core over 21 complete field
+intervals. The mod's skeleton pose hook averaged 35,798 calls and 81,961
+guarded reads per second over 20 complete intervals. Its time summed
+across threads averaged 170 ms per second. The share of that work that
+holds up the draw thread remains to be measured.
 
 ## Frame generation's wait, November 10
 

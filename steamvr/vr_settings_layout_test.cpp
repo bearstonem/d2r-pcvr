@@ -110,6 +110,9 @@ static const GoldenRow Golden[]={
     {"interactions.leather_menu",View::Menus,0,content::RowKind::Stepper,"Hold menu",0,3},   // main's #360, drawn inside Menu distance's row; Off / On / Menu only (2026-10-29)
     {"hud.tooltip_timing",View::Menus,0,content::RowKind::Choice,"Item details delay",3,0},
     {"interactions.controller_menu_size",View::Menus,1,content::RowKind::Slider,"Controller menu size",0,0},
+    {"interactions.detached_map_placement",View::Menus,1,content::RowKind::Choice,"Detached map",2,0},
+    {"interactions.ground_map_size",View::Menus,1,content::RowKind::Slider,"Floor map width",0,0},
+    {"interactions.ground_map_distance_cm",View::Menus,1,content::RowKind::Slider,"Ground map distance",0,0},
     {"hud.labels_size",View::Labels,0,content::RowKind::Slider,"Loot name size",0,0},
     {"interactions.loot_pick",View::Labels,0,content::RowKind::Toggle,"Loot pick",0,0},   // #257: Loot pick, Off / On
     {"hud.monster_names",View::Labels,0,content::RowKind::Choice,"Monster names",3,0},   // All / Bosses and elites / None (2026-11-11; the Weak monster bars toggle before)
@@ -258,7 +261,7 @@ int main(int argc,char** argv){
         for(size_t i=0;i<tables.rowCount;++i)Check(content::PageOf(tables.rows[i].page).settings,"rows live on settings pages");
     }
     // ---- the idle card: the page's intro when the page did not draw it, then a sentence that stands alone ----
-    for(int view=0;view<int(View::Count);++view)if(content::PageOf(View(view)).settings&&View(view)!=View::More){
+    for(int view=0;view<int(View::Count);++view)if(content::PageOf(View(view)).settings&&View(view)!=View::More&&View(view)!=View::Voice){
         Model m;m.Open(Ready());L::Press(m,{Kind::Open,view,-1},0);
         const auto l=L::Build(m,{},{});const auto* text=FindRole(l,L::Role::CardText);
         const std::string what="A setting's help shows here, with Undo and Default when they apply.",intro=content::PageOf(View(view)).intro;
@@ -266,12 +269,12 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==130,"130 settings including Psychic Ward, Assassin charges, Controller menu size and Ally health bars");   // + Controller menu size, Ally health bars (#519)   // + Enemy activation distance (#576)   // + seven Effects rows (#582)   // + Map grab hint (grab_hint.h)   // + Floating map background   // + Props have weight (2026-11-12)   // + Weapons hit walls (2026-11-12)   // + Sticks stay right-handed (2026-11-11)   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
+        Check(tables.rowCount==133,"130 existing settings plus three detached map controls");
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};
         const std::vector<Want> rail={
-            {content::Group::Gameplay,"Gameplay",{"Combat","Targeting","Shield","Monsters","Physics"}},
+            {content::Group::Gameplay,"Gameplay",{"Combat","Targeting","Shield","Monsters","Physics","Voice"}},
             {content::Group::Comfort,"Comfort",{"Moving","Body"}},
             {content::Group::Controls,"Controls",{"Hands","Vibration"}},
             {content::Group::Interface,"Interface",{"Wrist","Menus","Labels","Outlines","Warnings"}},
@@ -389,7 +392,7 @@ int main(int argc,char** argv){
             for(int saving=0;saving<2;++saving){
                 L::LayoutInput in;
                 const auto layout=L::Build(m,m.context,in);CheckLayout(layout,where);
-                if(content::PageOf(View(view)).settings&&view!=int(View::Performance))Check(FindRole(layout,L::Role::PendingEntry)||FindRole(layout,L::Role::ChangeLine),where+": the idle card lists what is not applied");
+                if(content::PageOf(View(view)).settings&&view!=int(View::Performance)&&view!=int(View::Voice))Check(FindRole(layout,L::Role::PendingEntry)||FindRole(layout,L::Role::ChangeLine),where+": the idle card lists what is not applied");
                 for(const auto& e:layout.elements){
                     if(e.role==L::Role::Row||e.role==L::Role::Tab||e.role==L::Role::GroupTab||e.role==L::Role::PresetCard){
                         L::LayoutInput p;p.card=e.help;p.hover=e.hit;CheckLayout(L::Build(m,m.context,p),where+" card "+std::to_string(e.help));
@@ -600,7 +603,7 @@ int main(int argc,char** argv){
             L::LayoutInput in;in.card=HelpGroupFirst+int(Group::Gameplay);
             const auto c=L::Build(m,{},in);CheckLayout(c,"Gameplay's card with a change");
             Check(FindRole(c,L::Role::CardState)&&FindRole(c,L::Role::CardState)->text=="1 not applied","its card counts what is not applied");
-            Check(FindRole(c,L::Role::CardText)->text=="Its pages: Combat, Targeting, Shield, Monsters and Physics. Press to open Combat.","its card names its pages and the page a press opens");
+            Check(FindRole(c,L::Role::CardText)->text=="Its pages: Combat, Targeting, Shield, Monsters, Physics and Voice. Press to open Combat.","its card names its pages and the page a press opens");
             L::Press(m,groupHit(Group::Gameplay),0);l=L::Build(m,{},{});
             Check(L::Find(l,groupHit(Group::Gameplay))->Has(L::Changed)&&L::Find(l,{Kind::Open,int(View::Shield),-1})->Has(L::Changed)&&
                   !L::Find(l,{Kind::Open,int(View::Combat),-1})->Has(L::Changed),"open: the row and the changed page");

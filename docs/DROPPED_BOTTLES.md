@@ -33,7 +33,11 @@ for dropped bottles and thrown potions alike.
   per-eye stepping problem in [hanging fixtures](HANGING_FIXTURE_PHYSICS.md).
   Each bottle is a 24-sided cylinder hull, 18 cm tall, whose radius is the
   loaded model's widest horizontal extent. Simulation runs near a local
-  origin so float precision does not depend on map coordinates.
+  origin so float precision does not depend on map coordinates. Once every
+  bottle has come to rest (Box3D puts it to sleep, about half a second
+  still) and nothing else moves, the world takes no step until a weapon is
+  about to reach one, a spell pushes one, or something else is set going: a
+  bottle no longer keeps the world stepping for the whole 20 s it lies there.
 - **Floor.** The world's single static ground box has its top at the floor
   under the player at release. Thrown potions use the same flat floor. A
   release on a different floor, in another game, or more than 20 m away
@@ -57,9 +61,13 @@ for dropped bottles and thrown potions alike.
   warp or recentre), is placed without sweeping. Radii are clamped to
   2-8 cm, which thins the shield's 15 cm creature capsule. Box3D hit events
   report the approach speed; above 1 m/s that hand gets a short Melee-category
-  tick, at most every 80 ms. The weapons exist only while bottles or
-  [knockable props](KNOCKABLE_PROPS.md) are in the world. Those props
-  share this world, so bottles and props knock each other too.
+  tick, at most every 80 ms. The weapons' bodies exist only while the world
+  steps: with everything at rest a weapon is only its pose. The weapon sweep
+  that sets a frozen prop going also wakes a sleeping bottle it is about to
+  reach; on that frame the weapon's bodies are made where it was the frame
+  before, with the mass its swing has built up, and the steps sweep it on as
+  if it had been there all along. [Knockable props](KNOCKABLE_PROPS.md) share
+  this world, so bottles and props knock each other too.
 - **Thrown potions.** A Health, Rejuvenation, Antidote or Thawing bottle
   thrown toward the hireling flies in this world too while bottle physics is
   on. The engine hands the release over (`Output::toss`, an id with the same
@@ -105,7 +113,9 @@ cell mapping at several floor heights, release validation, a dropped bottle
 bouncing and settling on the floor, a throw stopping at a wall and coming back,
 unchanged/foreign/opened wall patches, the six-bottle cap, floor change,
 range, lifetime and pause handling. Weapon cases: a blade swept through a
-sleeping bottle pushes it ahead and reports one hit; putting the weapon away
+sleeping bottle wakes it as it reaches it (no step and no weapon body
+before), pushes it ahead and reports one hit, and the steps stop again once
+it sleeps; putting the weapon away
 removes it; a 4 m warp passes a bottle untouched; a weapon whose pose stops
 changing stays put; malformed capsules are refused. `interaction-test` covers the release
 hand-off: world pose, velocity and spin through a turned stage frame, a still

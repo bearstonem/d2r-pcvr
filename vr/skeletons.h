@@ -33,6 +33,8 @@ struct Input {
     float scale = 1.0f;         // arm reach on top of the hero/user height ratio
     float userHeadM = 1.7f;     // the user's head above the floor
     float armSpanM = 0;        // calibrated grip-to-grip T-pose span; zero keeps authored proportions
+    bool armStretch = true;     // [arms] stretch: an arm too short for its controller is drawn longer (vr/hand_reach.h)
+    float handAlongM = 0;       // [arms] hand_along: the hand moved along itself on its controller, + toward the fingers (m)
     // Druid shapeshift form the player is in (framevr::shapeshift: 1 Werewolf, 2 Werebear,
     // from states 139/140), and [shapeshift] wolf_height / bear_height as fractions.
     int shapeForm = 0;
@@ -166,6 +168,7 @@ void Set(const Input& in);
 // Fresh remote hero snapshot. worldPosition is in game renderer units;
 // ECS entity ids are deliberately not exposed as game unit ids.
 struct RemoteUpperBody {
+    bool nativeAttack=false;
     upperbody::Resolved resolved{};
     uint64_t unit = 0;
     float worldPosition[3] = {};
@@ -270,10 +273,11 @@ bool CrossbowPose(framevr::crossbow::Pose& out);
 // Called after the game's complete attachment/world transform is evaluated.
 void CrossbowRendered(uint32_t entity,uintptr_t component,uintptr_t matrix);
 void ShieldRendered(uint32_t entity,uintptr_t component,uintptr_t matrix);
-// Held items collide: the last first touch that clanked, once - its strength 0..1, the closing speed (m/s) and the
-// controllers it is felt in (bit 0 right, bit 1 left: both when the two items met, one when an item struck the
-// world). False when none waits or it is older than 150 ms. Any thread.
-bool TakeHeldClank(float& strength,float& speed,unsigned& arms);
+// Held items collide: the last first touch that clanked, once - its strength 0..1, the controllers it is felt in
+// (bit 0 right, bit 1 left: both when the two items met, one when an item struck the world), and whether the game's
+// metal sound goes with it (the two items: a hard knock, held::KnockSoundSpeed, at most every held::KnockSoundGap;
+// the world: held::SoundSpeed). False when none waits or it is older than 150 ms. Any thread.
+bool TakeHeldClank(float& strength,unsigned& arms,bool& sound);
 #endif
 #endif
 // Where the game's own pose points the hero, in model space (deg, atan2 of each bone's z row):

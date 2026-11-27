@@ -555,6 +555,8 @@ def main():
         raise dependency_io_error(archive, 'read', error) from error
     payload[mod_identity.RESHADE] = read_dependency(reshade)
     payload[mod_identity.PLUGIN] = args.plugin.read_bytes()
+    import voice_payload
+    payload.update(voice_payload.payload(args.plugin.parent, mod_identity.PLUGIN.parent))
     if compiler.is_file():
         payload[Path('d2rloader/runtime/d3dcompiler_47.dll')] = compiler.read_bytes()
     if args.openxr_loader:

@@ -100,6 +100,7 @@ void Publish(uintptr_t cur,uintptr_t prev,const float*m,int n,uintptr_t skeleton
  s.skeleton=skeleton;s.owner=owner;s.matrices[0]=matrices[0];s.matrices[1]=matrices[1];
  ReleaseSRWLockExclusive(&lock);
 }
+void ForgetOwner(uintptr_t owner){AcquireSRWLockExclusive(&lock);for(auto&s:slots)if(s.owner==owner){s.cur=s.prev=0;s.count=0;s.at=0;}ReleaseSRWLockExclusive(&lock);}
 void Clear(){AcquireSRWLockExclusive(&lock);for(auto&s:slots){s.cur=s.prev=0;s.count=0;s.at=0;}ReleaseSRWLockExclusive(&lock);}
 void Shutdown(){
  enabled=false;Clear();

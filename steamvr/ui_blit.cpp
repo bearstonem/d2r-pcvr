@@ -20,12 +20,12 @@ bool UiBlit::Initialize(ID3D12Device* device,void (*log)(const char*)) {
     constexpr char shader[]=R"(
 Texture2D<float4> nativeUi : register(t0);
 SamplerState mapSampler : register(s0);
-cbuffer Options : register(b0) {uint blackBackground;uint mapSide;uint mapFlags;float bearing;float wallAlpha;float zoom;float mapSpan;float xReach;float2 xShift;uint mapTop;float backAlpha;int4 undim;float frameAlpha;};
+cbuffer Options : register(b0) {uint blackBackground;uint mapSide;uint mapFlags;float bearing;float wallAlpha;float zoom;float mapSpan;float xReach;float2 xShift;uint mapTop;float backAlpha;int4 undim;float frameAlpha;float floorArrow;};
 // mapTop, backAlpha, frameAlpha (square map): the map's square starts mapTop rows down the target;
 // its dark backing, margins and the frame's dark bands at backAlpha (1 solid, as before; below 1
 // the floating map's see-through copy); the walls, markers, labels, the arrow and the frame's gold
 // stay solid. Its frame (the bevel and the corner cuts) at frameAlpha over the map beneath it (1
-// shown, as before; 0 hidden: the floating copy while it is not pointed at).
+// shown, as before; 0 hidden: the floating copy while it is not pointed at). The floor map (mapFlags 32) has none.
 // xReach, xShift (the full map, xReach > 0; wrist_full_map.h XSearchAt): the X's search square,
 // xReach source pixels each way from the source's center moved by xShift, where the game draws
 // the hero's X on its full map at the game zoom the share was drawn at; sized to that X, so other
@@ -237,7 +237,7 @@ float4 Square(float4 position) {
     if(mapSpan>0)arrowR=seen?clamp(x.w*mapSide/mapSpan*(topDown?TopDownXGain:1)*ArrowOverX,mapSide*ArrowMin,mapSide*ArrowMax):mapSide*ArrowSize;
     float arrow=0;
     float2 heroAt=0;float markerReach=0;
-    if(mapSide&&(mapFlags&1))arrow=ArrowCoverage(position.xy,mapSide,turning?0:heading,arrowR);
+    if(mapSide&&(mapFlags&1))arrow=ArrowCoverage(position.xy,mapSide,(mapFlags&32u)?floorArrow:(turning?0:heading),arrowR);
     if(arrow>1.5)return float4(1,.62,.12,1);   // the arrow: a gold dart (linear light)
     if(arrow>.5)return float4(.006,.006,.006,1);   // its dark rim
     if(mapSide) {
@@ -291,6 +291,14 @@ float4 Square(float4 position) {
 }
 float4 PS(float4 position:SV_Position):SV_Target {
     position.y-=mapTop;   // the square's own pixels (0 but for the floating copy's own square)
+    // The floor map: no frame, pointed at or not (owner 2026-11-25: "for HUD map, it's fine, for floor map, no frame");
+    // its edge fades out into the ground.
+    if(mapFlags&32u){
+        float4 ground=Square(position);
+        ground.a*=.55*(1-smoothstep(.62,1.,length(position.xy*(2./mapSide)-1.)));
+        ground.rgb*=ground.a; // the OpenXR floor layer takes premultiplied color
+        return ground;
+    }
     // The frame first (the arrow, at the centre, never reaches it): shown (frameAlpha 1), as ever;
     // fading, over the map beneath it (premultiplied, out unassociated); hidden, the map alone.
     float4 frame=0;
@@ -316,7 +324,7 @@ float4 PS(float4 position:SV_Position):SV_Target {
     parameter.DescriptorTable={1,&range};parameter.ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
     parameters[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     // Options: its 12 values (undim starts a register), undim's 4, frameAlpha
-    parameters[1].Constants={0,0,17};parameters[1].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+    parameters[1].Constants={0,0,18};parameters[1].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
     D3D12_ROOT_SIGNATURE_DESC desc{};desc.NumParameters=2;desc.pParameters=parameters;
     D3D12_STATIC_SAMPLER_DESC sampler{};sampler.Filter=D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
     sampler.AddressU=sampler.AddressV=sampler.AddressW=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
@@ -348,7 +356,7 @@ float4 PS(float4 position:SV_Position):SV_Target {
     return true;
 }
 bool UiBlit::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D12Resource* source,ID3D12Resource* target,bool blackBackground,bool squareMap,uint32_t mapFlags,float bearing,float wallAlpha,float zoom,float mapSpan,float xReach,float xShiftRight,float xShiftDown,const int32_t* undimBand,
-                    uint32_t copyTop,float backAlpha,float frameAlpha) {
+                    uint32_t copyTop,float backAlpha,float frameAlpha,uint32_t groundTop,float groundBearing,float groundSpan) {
     if(!pipeline||!source||!target)return false;
     const auto s=source->GetDesc(),t=target->GetDesc();
     if(!RenderTargetCompatible(s.Format,DXGI_FORMAT_R16G16B16A16_FLOAT)||
@@ -453,6 +461,18 @@ bool UiBlit::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D12R
         rows(copyTop-1,std::min<UINT>(t.Height,copyTop+UINT(t.Width)+1));
         UINT backBits=0,frameBits=0;std::memcpy(&backBits,&backAlpha,sizeof backBits);std::memcpy(&frameBits,&frameAlpha,sizeof frameBits);
         list->SetGraphicsRoot32BitConstant(1,copyTop,10);list->SetGraphicsRoot32BitConstant(1,backBits,11);list->SetGraphicsRoot32BitConstant(1,frameBits,16);
+        list->DrawInstanced(3,1,0,0);
+    }
+    if(squareMap&&groundTop>=UINT(t.Width)+2&&uint64_t(groundTop)+t.Width<=t.Height){
+        rows(groundTop-1,groundTop+UINT(t.Width));
+        UINT backBits,angleBits;std::memcpy(&backBits,&backAlpha,4);std::memcpy(&angleBits,&groundBearing,4);   // no frame on the floor
+        // A glance may reposition the floor panel, but must not turn the dungeon underfoot.
+        // Compensate for the panel yaw, independent of the wrist/HUD turn setting; the arrow turns separately.
+        const float arrow=bearing-groundBearing;UINT arrowBits;std::memcpy(&arrowBits,&arrow,4);
+        list->SetGraphicsRoot32BitConstant(1,arrowBits,17);
+        UINT spanBitsGround;std::memcpy(&spanBitsGround,&groundSpan,4);list->SetGraphicsRoot32BitConstant(1,spanBitsGround,6);
+        list->SetGraphicsRoot32BitConstant(1,mapFlags|32u|4u,2);list->SetGraphicsRoot32BitConstant(1,angleBits,3);
+        list->SetGraphicsRoot32BitConstant(1,groundTop,10);list->SetGraphicsRoot32BitConstant(1,backBits,11);
         list->DrawInstanced(3,1,0,0);
     }
     if(findHero) {

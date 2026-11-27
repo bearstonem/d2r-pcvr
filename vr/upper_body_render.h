@@ -36,6 +36,18 @@ inline bool UnpackFrame(const float*f,const float*eye,float upm,float yaw,float*
  }
  return true;
 }
+// Distance admits a candidate, not a change of ownership. Keep the instance and
+// generation-bearing renderer entity together; never compare entity to network unit ID.
+struct LocalRig {
+ uint64_t session=0,seen=0;uintptr_t self=0;uint32_t entity=0;int form=0;
+ bool Accept(uint64_t s,uintptr_t rig,uint32_t e,int shape,uint64_t now,bool ambiguous){
+  if(s!=session){*this={};session=s;}
+  if(!s||!rig)return false;
+  if(self==rig&&entity==e&&form==shape){seen=now;return true;}
+  if(ambiguous||(self&&form==shape&&now>=seen&&now-seen<=2000))return false;
+  self=rig;entity=e;form=shape;seen=now;return true;
+ }
+};
 struct Candidate {uint64_t unit;int cls;float position[3];};
 inline float Distance(const float*a,const float*b){float x=a[0]-b[0],z=a[2]-b[2];return x*x+z*z;}
 // Game unit IDs are not renderer ECS IDs. Match only a unique nearby hero of

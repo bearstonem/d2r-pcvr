@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <string>
 using namespace framevr::interaction;
 namespace math=framevr::math;
 static void Check(bool b,const char* s){if(!b){std::fprintf(stderr,"FAIL: %s\n",s);std::exit(1);}}
@@ -148,11 +149,9 @@ int main(){
         Check(gait.out.request.action==Action::None&&gait.out.feedback==0&&!gait.out.block,"idle: no request, no buzz, motion input free");
         auto c=Context(s.in.snapshot,s.out,true);s.in.snapshot.quick.items[0].quantity--;
         Check(c!=Context(s.in.snapshot,s.out,true),"count changes invalidate paint and old click eligibility");
-        for(auto page:{MenuPage::Spells,MenuPage::Equipment}) {
-            Check(WheelCell(.1f,.1f,-1,page,1)==QuickUseCell,"quick slot shares hit and paint bounds");
-            // The RUN / WALK box's corner (now VR Settings > Comfort > Moving > Movement speed) holds the GLYPHS box (glyph casting).
-            Check(WheelCell(.85f,.14f,-1,page,1)==GlyphsCell,"no RUN / WALK box or movement slider on the wheel; the GLYPHS box in its corner");
-        }
+        Check(WheelCell(.1f,.1f,-1,MenuPage::Spells,1)==QuickUseCell,"quick slot shares hit and paint bounds");
+        // The RUN / WALK box's corner (now VR Settings > Comfort > Moving > Movement speed) holds the GLYPHS box (glyph casting).
+        Check(WheelCell(.85f,.14f,-1,MenuPage::Spells,1)==GlyphsCell,"no RUN / WALK box or movement slider on the wheel; the GLYPHS box in its corner");
         for(auto page:{MenuPage::Map,MenuPage::Developer,MenuPage::EditSlots,MenuPage::EditSkills,MenuPage::EditItems})
             Check(WheelCell(.1f,.1f,-1,page,1)!=QuickUseCell,"hidden quick control never intercepts another page");
     }
@@ -168,17 +167,17 @@ int main(){
         Check(other.out.leftStrikes<0&&!other.out.toggleLeftStrikes&&other.out.feedback==3,"another class: no box, and a stray click only buzzes");
         auto c=Context(s.in.snapshot,s.out,true);auto flipped=s.out;flipped.leftStrikes=0;
         Check(c!=Context(s.in.snapshot,flipped,true),"a changed choice repaints the box");
-        for(auto page:{MenuPage::Spells,MenuPage::Equipment})for(int hand:{-1,0,1}) {
-            Check(WheelCell(.1f,.77f,-1,page,hand,false,0,true)==LeftStrikesCell,"left claw box shares hit and paint bounds");
-            Check(WheelCell(.1f,.77f,-1,page,hand,false,0,false)!=LeftStrikesCell,"no box for other classes");
+        for(int hand:{-1,0,1}) {
+            Check(WheelCell(.1f,.77f,-1,MenuPage::Spells,hand,false,0,true)==LeftStrikesCell,"left claw box shares hit and paint bounds");
+            Check(WheelCell(.1f,.77f,-1,MenuPage::Spells,hand,false,0,false)!=LeftStrikesCell,"no box for other classes");
         }
         for(auto page:{MenuPage::Map,MenuPage::Developer,MenuPage::EditSlots,MenuPage::EditSkills,MenuPage::EditItems})
             Check(WheelCell(.1f,.77f,-1,page,1,false,0,true)!=LeftStrikesCell,"the left claw box never intercepts another page");
     }
     {   // Motions: the lower-right box opens the MOTIONS page; a card turns its motion on or off
-        for(auto page:{MenuPage::Spells,MenuPage::Equipment})for(int hand:{-1,0,1}) {
-            Check(WheelCell(.87f,.77f,-1,page,hand,false,0,false,true)==MotionsCell,"the MOTIONS box shares hit and paint bounds");
-            Check(WheelCell(.87f,.77f,-1,page,hand,false,0,false,false)!=MotionsCell,"no box without motion spells");
+        for(int hand:{-1,0,1}) {
+            Check(WheelCell(.87f,.77f,-1,MenuPage::Spells,hand,false,0,false,true)==MotionsCell,"the MOTIONS box shares hit and paint bounds");
+            Check(WheelCell(.87f,.77f,-1,MenuPage::Spells,hand,false,0,false,false)!=MotionsCell,"no box without motion spells");
         }
         for(const int count:{4,14,16})for(int i=0;i<MotionCards;++i){const auto b=MotionCardBounds(i,count);   // 16: the Warlock's, eight lower rows
             const int cell=WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Motions,0,false,0,false,false,count);
@@ -239,14 +238,16 @@ int main(){
         s.in.snapshot.devClass=-1;s.in.trigger=1;s.Step();
         Check(s.out.request.action==Action::None,"unknown/classic class cannot request mutations");
         s.in.trigger=0;s.Step();s.in.hover=9;s.in.trigger=1;s.Step();
-        Check(!s.out.developer&&!s.out.utility&&!s.out.map,"spells footer leaves dev page");
+        Check(!s.out.developer&&!s.out.map&&s.e.Page()==MenuPage::Spells,"spells footer leaves dev page");
         s.in.trigger=0;s.Step();s.in.hover=13;s.in.trigger=1;s.Step();
         s.in.wheel=false;s.Step();s.in.trigger=0;s.Step();s.in.wheel=true;s.in.hover=-1;s.Step();
         Check(s.out.developer&&s.e.Page()==MenuPage::Developer,"a plain close keeps the developer page for the next open");
         s.in.cancel=true;s.Step();s.in.cancel=false;s.in.wheel=false;s.Step();s.in.wheel=true;s.Step();
         Check(!s.out.developer&&s.e.Page()==MenuPage::Spells,"the engine's cancel (no button sends it in game) leaves the developer page, as before");
-        const auto tab=FooterBounds(5,MenuPage::Spells,true);
-        Check(WheelCell((tab.left+tab.right)/2,.93f,-1,MenuPage::Spells,0,true)==13,"developer footer hit matches paint bounds");
+        for(bool chat:{false,true}) {   // DEV last: the fifth tab, the sixth with CHAT (a multiplayer game)
+            const auto tab=FooterBounds(chat?5:4,MenuPage::Spells,true,chat);
+            Check(WheelCell((tab.left+tab.right)/2,.93f,-1,MenuPage::Spells,0,true,0,false,false,14,chat)==13,"developer footer hit matches paint bounds");
+        }
         Check(WheelCell(.5f,.45f,-1,MenuPage::Developer,0,true)==-1,"no hidden center spell behind developer page");
         Check(WheelCell(.25f,.27f,-1,MenuPage::Developer,0,true)==DeveloperCell(framevr::dev::Level10Choice),"developer rows share painter hit boxes");
         Check(WheelCell(.25f,.27f,-1,MenuPage::Developer,0,false)==-1,"disabled developer page has no actions");
@@ -652,12 +653,57 @@ int main(){
         }
     }
     for(int i=0;i<8;++i){float a=i*Pi/4+WheelPhase;Check(WheelCell(.5f+std::sin(a)*.28f,.45f-std::cos(a)*.28f)==i,"wedge centers agree");}
-    Check(WheelCell(.5f,.45f)==8&&WheelCell(.18f,.93f)==9,"weapon center and utility tab");
-    for(int i=0;i<FooterCount(MenuPage::Spells);++i){
-        const auto b=FooterBounds(i,MenuPage::Spells);
-        Check(WheelCell((b.left+b.right)/2,.93f)==FooterCell(i,MenuPage::Spells),"all five tabs hit their painted bounds");
+    Check(WheelCell(.5f,.45f)==8&&WheelCell(.18f,.93f)==9,"weapon center and the SPELLS tab");
+    {   // No EQUIPMENT page (owner, 2026-11-24): the first tab reads SPELLS on every page and is lit on the spells page, as MAP
+        // and DEV are on theirs; the editors keep BACK / DONE and PREVIOUS / NEXT / BACK.
+        for(auto page:{MenuPage::Spells,MenuPage::Map,MenuPage::Developer,MenuPage::Glyphs,MenuPage::Motions})
+            for(bool hand:{false,true})Check(std::string(FooterLabel(FooterCell(0,page),0,hand))=="SPELLS","the first tab is SPELLS on every page");
+        Check(std::string(FooterLabel(11,0,true))=="INVENTORY"&&std::string(FooterLabel(11,0,false))=="EDIT SKILLS"&&std::string(FooterLabel(12,0,true))=="MAP"&&
+              std::string(FooterLabel(10,0,true))=="VR SETTINGS"&&std::string(FooterLabel(217,0,true))=="CHAT"&&std::string(FooterLabel(13,0,true))=="DEV","the other tabs' labels");
+        Check(std::string(FooterLabel(9,1,true))=="BACK"&&std::string(FooterLabel(10,1,true)).empty()&&std::string(FooterLabel(11,1,true))=="DONE"&&
+              std::string(FooterLabel(9,2,true))=="PREVIOUS"&&std::string(FooterLabel(10,3,true))=="NEXT"&&std::string(FooterLabel(11,2,true))=="BACK","the editors' footers");
+        for(int i=0;i<FooterCount(MenuPage::Spells,true);++i)Check(std::string(FooterLabel(FooterCell(i,MenuPage::Spells),0,true))!="EQUIPMENT","no EQUIPMENT tab");
+        Check(FooterCurrent(9,MenuPage::Spells)&&FooterCurrent(12,MenuPage::Map)&&FooterCurrent(13,MenuPage::Developer)&&
+              !FooterCurrent(9,MenuPage::Map)&&!FooterCurrent(9,MenuPage::Glyphs)&&!FooterCurrent(9,MenuPage::EditSlots)&&!FooterCurrent(12,MenuPage::Spells),
+              "the page shown lights its own tab only");
+        for(int i=0;i<8;++i){const float a=i*Pi/4+WheelPhase;
+            Check(WheelCell(.5f+std::sin(a)*.28f,.45f-std::cos(a)*.28f,-1,MenuPage::Spells)==i,"the combined wheel's eight wedges, Journal's old one too");}
     }
-    Check(FooterCell(4,MenuPage::Spells)==217,"chat has its own tab without moving existing action IDs");
+    // CHAT (#598's wrist chat) only in a multiplayer game (owner, 2026-11-24), DEV only in developer mode: the row closes up,
+    // 4 tabs, 5 with either, 6 with both; the editors keep 3.
+    for(bool developer:{false,true})for(bool chat:{false,true}) {
+        const int tabs=FooterCount(MenuPage::Spells,developer,chat);
+        Check(tabs==4+int(developer)+int(chat),"4 tabs, 5 with CHAT or DEV, 6 with both");
+        for(auto page:{MenuPage::EditSlots,MenuPage::EditSkills,MenuPage::EditItems})Check(FooterCount(page,developer,chat)==3,"the editors keep 3 tabs");
+        bool hasChat=false,hasDev=false;
+        for(int i=0;i<tabs;++i) {
+            const auto b=FooterBounds(i,MenuPage::Spells,developer,chat);const int cell=FooterCell(i,MenuPage::Spells,chat);
+            Check(WheelCell((b.left+b.right)/2,.93f,-1,MenuPage::Spells,-1,developer,0,false,false,14,chat)==cell,"every tab hits its painted bounds");
+            Check(!i||b.left>FooterBounds(i-1,MenuPage::Spells,developer,chat).right,"the tabs in order, a gap between");
+            hasChat=hasChat||cell==217;hasDev=hasDev||cell==13;
+        }
+        Check(hasChat==chat&&hasDev==developer,"CHAT only in a multiplayer game, DEV only in developer mode");
+        Check(std::fabs(FooterBounds(0,MenuPage::Spells,developer,chat).left-.03f)<1e-5f&&std::fabs(FooterBounds(tabs-1,MenuPage::Spells,developer,chat).right-.97f)<1e-5f,
+              "the tabs fill the row: no hole where CHAT or DEV is not");
+        Check(FooterCell(0,MenuPage::Spells,chat)==9&&FooterCell(1,MenuPage::Spells,chat)==12&&FooterCell(2,MenuPage::Spells,chat)==10&&FooterCell(3,MenuPage::Spells,chat)==11,
+              "SPELLS, MAP, VR SETTINGS, INVENTORY keep their places and cells");
+    }
+    Check(FooterCell(4,MenuPage::Spells,true)==217&&FooterCell(5,MenuPage::Spells,true)==13&&FooterCell(4,MenuPage::Spells,false)==13,
+          "CHAT and DEV keep their own action IDs; without CHAT, DEV moves up a place");
+    {
+        const auto b=FooterBounds(4,MenuPage::Spells,false,true);const float u=(b.left+b.right)/2;
+        Check(WheelCell(u,.93f,-1,MenuPage::Spells,0,false,0,false,false,14,true)==217&&WheelCell(u,.93f,-1,MenuPage::Spells,0,false,0,false,false,14,false)!=217,
+              "the CHAT tab is there only while the game is a multiplayer one");
+        for(float x=.03f;x<.97f;x+=.005f)Check(WheelCell(x,.93f,-1,MenuPage::Spells,0,true,0,false,false,14,false)!=217,"no CHAT hit anywhere on a single-player footer");
+    }
+    {   // the engine: CHAT opens the chat in a multiplayer game only, and a change repaints the footer
+        Sim s;s.in.wheel=true;s.in.snapshot.multiplayer=true;s.Step();s.in.hover=217;s.in.trigger=1;
+        Check(s.Step().chat&&s.out.wheel&&s.out.request.action==Action::None,"a multiplayer game: CHAT opens the chat, the wheel stays open");
+        Sim offline;offline.in.wheel=true;offline.Step();offline.in.hover=217;offline.in.trigger=1;
+        Check(!offline.Step().chat&&offline.out.wheel&&offline.out.request.action==Action::None,"single-player or offline: even a stale CHAT hit opens nothing");
+        auto c=Context(s.in.snapshot,s.out,true);s.in.snapshot.multiplayer=false;
+        Check(c!=Context(s.in.snapshot,s.out,true),"leaving or joining a multiplayer game repaints the footer");
+    }
     Check(WheelCell(.5f,.57f)==-1,"dead zone cannot select");
     Check(WheelCell(FooterBounds(0,MenuPage::Spells).right+.005f,.94f)==-1&&WheelCell(.5f,.99f)==-1,"footer gap and outside frame cannot select");
     for(auto page:{MenuPage::EditSlots,MenuPage::EditSkills})
@@ -686,7 +732,7 @@ int main(){
         Check(s.out.wrist&&!MapWanted(s.in,s.out,s.in.at),"disabling wrist map retains watch vitals");
         s.in.wheel=true;click(12);
         Check(!NavigationWanted(s.in,s.out,s.in.at),"wheel hides wrist compass");
-        Check(s.out.wheel&&s.out.map&&!s.out.utility&&s.out.block&&s.out.select==-2&&s.out.request.action==Action::None&&
+        Check(s.out.wheel&&s.out.map&&s.out.block&&s.out.select==-2&&s.out.request.action==Action::None&&
             MapWanted(s.in,s.out,s.in.at)&&s.e.Page()==MenuPage::Map,"map tab opens without changing selected spell or requesting a native action");
         const auto mapContext=Context(s.in.snapshot,s.out,true);auto spells=s.out;spells.map=false;
         Check(mapContext!=Context(s.in.snapshot,spells,true),"map page invalidates a previously painted spell page");
@@ -694,9 +740,11 @@ int main(){
         for(int i=0;i<8;++i)Check(s.Step().map&&s.out.select==-2&&s.out.request.action==Action::None,"held map selection cannot cast");
         for(int cell:{0,4,8})Check(click(cell).map&&s.out.wheel&&s.out.select==-2&&s.out.request.action==Action::None,
             "even stale body hits cannot select a spell, potion or basic attack on map");
-        Check(!click(9).map&&!s.out.utility&&s.out.wheel&&s.out.select==-2&&s.e.Page()==MenuPage::Spells,
-            "SPELLS returns from map without toggling equipment or selecting a spell");
-        click(9);Check(s.out.utility,"equipment page still opens");click(12);Check(s.out.map&&!s.out.utility,"map can open from equipment page");
+        Check(!click(9).map&&s.out.wheel&&s.out.select==-2&&s.e.Page()==MenuPage::Spells,
+            "SPELLS returns from map without selecting a spell");
+        Check(!click(9).map&&s.out.wheel&&s.out.select==-2&&s.out.request.action==Action::None&&s.e.Page()==MenuPage::Spells,
+            "SPELLS on the spells page keeps it: no EQUIPMENT page, no request");
+        click(12);Check(s.out.map,"map opens from the spells page");
         Check(click(11).editor==1&&!s.out.map&&s.out.wheel,"map can open original skill editor");
         click(11);click(12);Check(click(10).settings&&!s.out.wheel&&!MapWanted(s.in,s.out,s.in.at),"settings closes map demand");
     }
@@ -750,10 +798,11 @@ int main(){
         reopen(s,1);Check(s.out.wheel&&s.out.map&&s.e.Page()==MenuPage::Map&&s.out.select==-2&&s.out.request.action==Action::None,
                           "a plain close (hand -1 while closed) keeps Map; reopening on it selects nothing");
         press(s,9);reopen(s,1);Check(s.e.Page()==MenuPage::Spells,"SPELLS from the map, then closed: Spells");
-        press(s,9);reopen(s,1);Check(s.e.Page()==MenuPage::Equipment,"Equipment kept");
+        press(s,9);reopen(s,1);Check(s.e.Page()==MenuPage::Spells,"SPELLS on the spells page, then closed: still Spells (no EQUIPMENT page)");
+        press(s,GlyphsCell);reopen(s,1);Check(s.e.Page()==MenuPage::Glyphs,"Glyphs kept");
         press(s,12);reopen(s,0);Check(!s.out.map&&s.e.Page()==MenuPage::Spells,"the other hand shows its own page (Spells, never opened)");
-        press(s,9);reopen(s,1);Check(s.out.map&&s.e.Page()==MenuPage::Map,"back on the first hand: its own Map");
-        reopen(s,0);Check(s.e.Page()==MenuPage::Equipment,"and the other hand its own Equipment");
+        press(s,GlyphsCell);reopen(s,1);Check(s.out.map&&s.e.Page()==MenuPage::Map,"back on the first hand: its own Map");
+        reopen(s,0);Check(s.e.Page()==MenuPage::Glyphs,"and the other hand its own Glyphs");
     }
     {   // a direct switch: the other stick clicked while a wheel is open (no closed frame between)
         Sim s;s.in.wheelHand=0;s.in.wheel=true;s.Step();press(s,12);Check(s.e.Page()==MenuPage::Map,"right wheel on Map");
@@ -768,7 +817,7 @@ int main(){
         Sim s;s.in.wheelHand=1;s.in.wheel=true;s.Step();press(s,12);
         join(s,0);reopen(s,1);Check(s.out.map,"character select (session 0) keeps the map");
         join(s,0);join(s,10);reopen(s,1);Check(s.out.map,"a loading blip (0, then the same session) keeps the map");
-        reopen(s,0);press(s,9);
+        reopen(s,0);press(s,GlyphsCell);
         join(s,0);join(s,11);reopen(s,1);Check(!s.out.map&&s.e.Page()==MenuPage::Spells,"a new game: the map is not kept");
         reopen(s,0);Check(s.e.Page()==MenuPage::Spells,"a new game: the other hand starts over too");
     }
@@ -824,11 +873,15 @@ int main(){
         s.in.wheel=false;s.Step();s.in.wheel=true;Check(s.Step().wheel,"Y release permits new wheel");
     }
     {
-        Sim s;s.in.wheel=true;s.in.hover=9;s.in.trigger=1;Check(s.Step().utility,"utility tab");
-        s.in.trigger=0;s.Step();s.in.hover=1;s.in.trigger=1;
-        const auto r=s.Step().request;Check(r.action==Action::Equip&&r.index==2,"desired set command");
-        s.in.trigger=0;s.in.wheel=false;Check(s.Step().block,"swap blocks until confirmed");
-        s.in.reply={r.sequence,10,Result::Applied};Check(s.Step().result==Result::Applied,"confirmed swap feedback");
+        // No EQUIPMENT page (2026-11-24): SPELLS on the spells page opens nothing, and a wedge after it is its skill,
+        // never a weapon set (the shoulder swaps those), a stow or a potion.
+        Sim s;s.in.wheel=true;s.in.hover=9;s.in.trigger=1;s.Step();
+        Check(s.out.wheel&&Page(s.out)==MenuPage::Spells&&s.out.request.action==Action::None&&s.out.select==-2,"SPELLS on the spells page: no page, no request");
+        for(int wedge:{1,3,4,7}) {
+            Sim w;w.in.wheel=true;w.Step();w.in.hover=9;w.in.trigger=1;w.Step();w.in.trigger=0;w.Step();
+            w.in.hover=wedge;w.in.trigger=1;w.Step();
+            Check(w.out.select==wedge&&w.out.request.action==Action::None&&w.out.bottle<0,"a wedge selects its skill: no weapon set, stow or potion");
+        }
     }
     // Optional trigger drinking uses the holding hand and the exact grabbed item.
     for(int hand=0;hand<2;++hand)for(bool enabled:{false,true}) {
@@ -998,7 +1051,7 @@ int main(){
         for(int i=0;i<30;++i)Check(s.Step().request.action==Action::None,"tracking/menu return cannot consume held object");
     }
     {
-        Sim s;s.in.wheel=true;s.in.hover=9;s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();s.in.hover=4;s.in.trigger=1;
+        Sim s;s.in.clickToDrink=true;s.in.hand[0].p=s.out.belt[0].p;s.Step();s.in.grip[0]=1;s.Step();s.in.bottleTrigger[0]=1;
         Check(s.Step().request.action==Action::Potion,"native time and pose time can have unrelated epochs");
         ++s.in.epoch;Check(s.Step().cancelPending,"recenter invalidates queued native transaction");
         for(int i=0;i<12;++i)Check(s.Step().request.action==Action::None,"held selection cannot replay after recenter");

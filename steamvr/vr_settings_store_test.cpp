@@ -49,6 +49,10 @@ int main(){
         Check(Int(path,L"custom",L"keep")==12345&&Changed(current.values,vrsettings::Read().values)==(ChangeMask{1}<<ControllerMenuSize),
               "controller-menu size preserves other preferences");
     }
+    Check(before.values[GroundMapDistance]==250,"old configs keep 250 cm floor distance");
+    { const auto current=vrsettings::Read();auto values=current.values;values[GroundMapDistance]=220;
+      const Request request{current.values,values,Changed(current.values,values),current.sequence+1};
+      Check(vrsettings::Submit(request)&&vrsettings::Poll(name)&&Int(path,L"interactions",L"ground_map_distance_cm")==220,"floor distance saves independently"); }
     Check(before.values[MapTopDown]==0&&before.values[MapRotate]==0,"missing map preferences retain the existing view");
     Check(WritePrivateProfileStringW(L"interactions",L"map_top_down",L"1",name)&&
           WritePrivateProfileStringW(L"interactions",L"map_rotate",L"1",name),"write existing wrist-map choices");

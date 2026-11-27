@@ -49,7 +49,8 @@ def main():
     else:
         paths += ['steamvr/setup_native.py']
     paths += ['steamvr/prepare_icons.py', 'steamvr/steam_assets.py', 'steamvr/game_assets.py',
-              'steamvr/game_install.py', 'steamvr/casc_assets.py', 'steamvr/enemy_health_layout.py']
+              'steamvr/game_install.py', 'steamvr/casc_assets.py', 'steamvr/enemy_health_layout.py',
+              'steamvr/area_banner_layout.py', 'steamvr/voice_payload.py', 'docs/voice-commands.md']
     paths += ['steamvr/prepare_potions.py', 'steamvr/potion_assets.py', 'steamvr/bone_pieces.py', 'steamvr/prepare_spell_sprites.py', 'steamvr/vendor/bitknit.py',
               'steamvr/prepare_arcane_sky.py', 'steamvr/prepare_monster_immunity.py', 'steamvr/prepare_sewer_backdrop.py', 'steamvr/prepare_kurast_dock.py',
               'steamvr/prepare_game_ceiling.py', 'steamvr/granny_write.py', 'steamvr/prepare_campfire_sky.py',
@@ -70,6 +71,10 @@ def main():
     if any('reshade/' + name not in files for name in wanted):
         raise SystemExit('reshade/D2R_DepthFog.fx includes a header that is missing from the source')
     files['bin/d2rl-pcvr.dll'] = args.build / 'd2rl-pcvr.dll'
+    if args.platform == 'native-windows':
+        from voice_payload import payload as speech_payload
+        for relative in speech_payload(args.build, Path('bin')):
+            files[relative.as_posix()] = args.build / relative.relative_to('bin')
     if args.platform == 'linux-proton':
         files['bin/openxr-probe.exe'] = args.build / 'openxr-probe.exe'
     files['bin/openxr_loader.dll'] = args.openxr_loader

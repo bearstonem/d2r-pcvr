@@ -11,12 +11,13 @@ using Microsoft::WRL::ComPtr;
 static void Check(HRESULT hr,const char* what){if(FAILED(hr)){std::fprintf(stderr,"%s: %08lx\n",what,(unsigned long)hr);throw std::runtime_error(what);}}
 static float Half(uint16_t x){const int e=(x>>10)&31,m=x&1023;return (x&0x8000?-1.f:1.f)*std::ldexp(e?1.f+m/1024.f:m/1024.f,e?e-15:-14);}
 int main(int argc,char** argv){try {
-    bool blackBackground=false,typeless=false,squareMap=false,portrait=false,undim=false,seeThrough=false;
+    bool ground=false;bool blackBackground=false,typeless=false,squareMap=false,portrait=false,undim=false,seeThrough=false;
     float back=1;   // --see-through <percent>: the floating map's backing, 0 see-through to 100 solid
     float frameShown=1;   // --frame <percent>: the floating map's frame, 0 hidden (not pointed at) to 100 shown (pointed at)
     for(int i=1;i<argc;++i) {if(!std::strcmp(argv[i],"--typeless"))typeless=true;
         else if(!std::strcmp(argv[i],"--square-map"))squareMap=true;
         else if(!std::strcmp(argv[i],"--see-through")&&i+1<argc){squareMap=seeThrough=true;back=float(std::atof(argv[++i]))/100;}
+        else if(!std::strcmp(argv[i],"--ground-map")){ground=true;squareMap=seeThrough=true;}
         else if(!std::strcmp(argv[i],"--frame")&&i+1<argc)frameShown=float(std::atof(argv[++i]))/100;
         else if(!std::strcmp(argv[i],"--undim"))undim=true;
         else if(!std::strcmp(argv[i],"--portrait"))portrait=true;else blackBackground=true;}
@@ -37,7 +38,7 @@ int main(int argc,char** argv){try {
     // SeeThroughTop rows down, 8 between them as panelatlas::Gap), at 32 wide; that square drawn only when it differs
     constexpr UINT SeeThroughTop=40;
     const bool copyDrawn=seeThrough&&(back<1||frameShown<1);
-    if(seeThrough)tex.Height=SeeThroughTop+32;
+    if(seeThrough)tex.Height=(ground?2:1)*SeeThroughTop+32;
     if(typeless)tex.Format=DXGI_FORMAT_R16G16B16A16_TYPELESS;
     Check(device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&tex,D3D12_RESOURCE_STATE_RENDER_TARGET,nullptr,IID_PPV_ARGS(&target)),"target");
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT outputFootprint{};UINT64 bytes=0;
@@ -79,7 +80,7 @@ int main(int argc,char** argv){try {
     barrier.Transition={source.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE};
     commands->ResourceBarrier(1,&barrier);
     if(!blit.Render(device.Get(),commands.Get(),source.Get(),target.Get(),blackBackground,squareMap,0,0,1.f,1.f,0.f,0.f,0.f,0.f,undim?band:nullptr,
-                    seeThrough?SeeThroughTop:0,back,frameShown))throw std::runtime_error("render");
+                    seeThrough?SeeThroughTop:0,back,frameShown,ground?2*SeeThroughTop:0,0))throw std::runtime_error("render");
     barrier.Transition={target.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_COPY_SOURCE};commands->ResourceBarrier(1,&barrier);
     from.pResource=target.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;from.SubresourceIndex=0;
     to.pResource=readback.Get();to.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;to.PlacedFootprint=outputFootprint;commands->CopyTextureRegion(&to,0,0,0,&from,nullptr);
@@ -161,7 +162,15 @@ int main(int argc,char** argv){try {
         float want[4]{};bool filtered=false,premultiplied=false,inFrame=false;float fore=0;
         if(!squareMap)std::memcpy(want,expected[y*sourceWidth+x],sizeof want);
         else if(!seeThrough||y<=32)squarePixel(x,int(y),1,1,want,filtered,fore,inFrame);   // the solid square, and the row under it
-        else if(y<SeeThroughTop-1||!copyDrawn) {
+        else if(ground&&y>=2*SeeThroughTop-1){
+            // the floor map: never a frame, whatever the copy's (--frame 100 too), its edge faded out
+            int row=int(y)-int(2*SeeThroughTop);squarePixel(x,row,back,0,want,filtered,fore,inFrame);
+            float r=std::hypot((x+.5f)/16-1,(row+.5f)/16-1),q=std::clamp((r-.62f)/.38f,0.f,1.f);
+            float cover=.55f*(1-q*q*(3-2*q));
+            want[3]*=cover;for(int lane=0;lane<3;++lane)want[lane]*=want[3];
+            for(int lane=0;lane<4;++lane)if(std::abs(Half(out[lane])-want[lane])>(filtered?.026f:.0008f)){correct=false;std::printf("floor %u,%d lane %d mismatch\n",x,row,lane);}
+            continue;
+        } else if(y<SeeThroughTop-1||!copyDrawn||(ground&&y>SeeThroughTop+32)) {
             // between the squares, and all below when the copy is the wrist's (100%, its frame shown): never drawn (a
             // committed resource starts zeroed)
             for(int c=0;c<4;++c)if(Half(out[c])!=0){correct=false;std::printf("pixel %u,%u lane %d = %f: drawn where nothing is\n",x,y,c,Half(out[c]));}

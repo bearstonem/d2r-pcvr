@@ -1,6 +1,6 @@
 // Held items collide (held_collision.h): closest points, the box's faces, the push and its cap, easing back,
-// the split between two weapons, the clank's speed and wait, what keeps the pair from colliding, and the
-// Assassin's crossed claws still guarding.
+// the split between two weapons, the clank's speed and wait, the sound only on a hard knock (and its own wait, never
+// resting, sliding or grinding), what keeps the pair from colliding, and the Assassin's crossed claws still guarding.
 #include "held_collision.h"
 #include "shield_guard.h"
 #include <cstdio>
@@ -217,8 +217,8 @@ int main(){
         Check(soft.category==haptics::Category::Melee&&soft.count==2&&Near(soft.steps[0].sample.amplitude,.3f)&&Near(hard.steps[0].sample.amplitude,1),"a two-step metal tap on the Melee strength");
         Check(hard.steps[1].at>hard.steps[0].sample.milliseconds,"the ring after the tap");
         Solver solver;Input in;in.gate=ShieldGate();in.plate=Shield();
-        double time=0;Output out;unsigned clanks=0;float strength=0,speed=0;
-        auto step=[&](float z){time+=Tick;in.time=time;in.a=Sword(z);out=solver.Step(in);if(out.clank){++clanks;strength=out.strength;speed=out.speed;}};
+        double time=0;Output out;unsigned clanks=0,sounds=0;float strength=0,speed=0;
+        auto step=[&](float z){time+=Tick;in.time=time;in.a=Sword(z);out=solver.Step(in);if(out.clank){++clanks;strength=out.strength;speed=out.speed;}sounds+=out.sound;};
         // Resting: 0.3 m/s into the face. Silent.
         for(float z=-.33f;z>-.37f;z-=.003f)step(z);
         Check(out.touching&&clanks==0,"a slow touch is silent");
@@ -231,7 +231,48 @@ int main(){
         for(int i=0;i<12;++i)step(-.30f);
         step(-.33f);step(-.36f);step(-.39f);
         Check(clanks==2,"after the wait it clanks again");
-        Check(solver.TakeStats().clanks==2,"clanks counted for the log");
+        const Stats st=solver.TakeStats();
+        Check(st.clanks==2,"clanks counted for the log");
+        Check(sounds==0&&st.sounds==0&&st.fastest>2.5f&&st.fastest<2.9f,"2.7 m/s strikes buzz but make no sound (it sounded from 1 m/s); the fastest touch logged");
+    }
+    {   // The sound (owner, 2026-11-24: "it takes a certain force to hit each other before it makes a sound"): only a
+        // hard knock, KnockSoundSpeed (3 m/s) or more, at most every KnockSoundGap (0.5 s); never a resting, sliding or
+        // grinding touch. The buzz is as it was.
+        Check(KnockSoundSpeed==FullClankSpeed&&KnockSoundSpeed>SoundSpeed&&KnockSoundGap>ClankGap,"a knock at the strongest clank's speed, with a longer gap of its own");
+        Solver solver;Input in;in.gate=ShieldGate();in.plate=Shield();
+        double time=0;Output out;unsigned clanks=0,sounds=0;float speed=0;
+        auto step=[&](float z,float x=0){time+=Tick;in.time=time;in.a=Sword(z,x);out=solver.Step(in);
+            if(out.clank)++clanks;
+            if(out.sound){++sounds;speed=out.speed;}
+            Check(!out.sound||out.clank,"a sound only ever comes with a clank");};
+        auto clear=[&](int ticks){for(int i=0;i<ticks;++i)step(-.25f);};
+        // A knock from 10 cm clear, d metres a pose (90 a second), to the first touch; then back. Whether it sounded.
+        auto knock=[&](float d){float z=-.25f;bool sounded=false;while(z>-.6f){z-=d;step(z);if(out.touching){sounded=out.sound;break;}}step(-.25f);return sounded;};
+        // Resting: 0.27 m/s into the face, then slid 30 cm along it.
+        for(float z=-.33f;z>-.37f;z-=.003f)step(z);
+        for(int i=0;i<30;++i)step(-.37f,-.01f*i);
+        Check(out.touching&&clanks==0&&sounds==0,"resting on the face and sliding along it: silent");
+        // Grinding: the blade chattering on the face, 1.5 cm off and back each pose (1.35 m/s), for a second.
+        for(int i=0;i<90;++i)step(i%2?-.36f:-.345f,-.002f*i);
+        Check(clanks>0&&sounds==0,"a blade chattering on the face at 1.35 m/s still buzzes, as before, but never sounds (it did from 1 m/s)");
+        clear(45);
+        // Hard knocks: 3.24 m/s sounds; another 0.3 s later buzzes but is silent; one 0.5 s after the first sounds again.
+        unsigned before=clanks;
+        Check(knock(.036f)&&sounds==1&&speed>3.1f&&speed<3.4f&&clanks==before+1,"a 3.24 m/s knock clanks and sounds");
+        clear(27);before=clanks;
+        Check(!knock(.036f)&&sounds==1&&clanks==before+1,"another 0.3 s later still buzzes, but makes no sound");
+        clear(45);
+        Check(knock(.036f)&&sounds==2,"0.5 s on, a knock sounds again");
+        clear(45);before=clanks;
+        Check(!knock(.032f)&&sounds==2&&clanks==before+1,"just under 3 m/s (2.88): a buzz, no sound");
+        const Stats st=solver.TakeStats();
+        Check(st.sounds==2&&st.clanks==clanks&&st.fastest>3.1f&&st.fastest<3.4f,"sounds and the fastest touch counted for the log");
+        // Two weapons knocked together hard sound too.
+        Solver two;Input both;both.gate=TwoGate();
+        const Capsule still{{0,-.2f,-.45f},{0,.45f,-.45f},BladeRadius};
+        bool sounded=false;float z=-.25f;
+        for(int i=0;i<10&&!sounded;++i){z-=.04f;both.time=(i+1)*Tick;both.a=Sword(z);both.b=still;const Output o=two.Step(both);sounded=o.sound&&o.clank&&o.speed>3.5f;}
+        Check(sounded,"two weapons knocked together at 3.6 m/s: a clank and the sound");
     }
     {   // The Assassin's crossed claws: held apart a blade's width, still within the claw guard's reach.
         Solver solver;Input in;

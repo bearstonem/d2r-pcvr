@@ -1,4 +1,5 @@
 #include "dropped_bottles.h"
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <limits>
@@ -33,6 +34,43 @@ std::vector<Moved> Moves(const World& world) {
     std::array<Moved,props::MaxMoving> m{};const unsigned n=world.Moving(m);return {m.begin(),m.begin()+n};
 }
 Collider Blade(Vec base,Vec tip,float radius=.03f) {Collider c;c.active=true;c.base=base;c.tip=tip;c.radius=radius;return c;}
+// What a scene did: the props set going (sorted), where each was last drawn,
+// and the most bodies the props and surfaces held at once.
+struct Outcome {
+    std::vector<uint32_t> knocked;
+    std::vector<std::pair<uint32_t,Vec>> last;
+    unsigned bodiesMost=0;
+};
+// The props listed, then frames at 90 Hz; each frame the script may set the
+// weapons, push a spell or drop a bottle first.
+template<class Script> Outcome Play(World& world,const PropScan& scan,int frames,Vec player,Script&& script) {
+    Outcome o;world.Props(scan);double t=0;
+    std::array<Knock,props::MaxMoving> knocks{};
+    for(int f=0;f<frames;++f) {
+        std::array<Collider,Colliders> weapons{};
+        script(world,f,t,weapons);
+        world.Weapons(weapons);t+=1/90.;world.Advance(t,player);
+        for(unsigned i=0,n=world.Knocks(knocks);i<n;++i)o.knocked.push_back(knocks[i].entity);
+        for(const auto& m:Moves(world)) {
+            auto it=std::find_if(o.last.begin(),o.last.end(),[&](const auto& e){return e.first==m.entity;});
+            if(it==o.last.end())o.last.push_back({m.entity,m.p});else it->second=m.p;
+        }
+        o.bodiesMost=std::max(o.bodiesMost,world.Bodies());
+    }
+    std::sort(o.knocked.begin(),o.knocked.end());
+    return o;
+}
+// The farthest any prop came to rest from where it did in the other run.
+float Apart(const Outcome& a,const Outcome& b) {
+    if(a.last.size()!=b.last.size())return 1e9f;
+    float most=0;
+    for(const auto& [entity,p]:a.last) {
+        auto it=std::find_if(b.last.begin(),b.last.end(),[&](const auto& e){return e.first==entity;});
+        if(it==b.last.end())return 1e9f;
+        const Vec d=p-it->second;most=std::max(most,std::sqrt(math::Dot(d,d)));
+    }
+    return most;
+}
 }
 int main() {
     // Merged walls cover each blocked cell exactly once.
@@ -155,16 +193,27 @@ int main() {
         std::array<Collider,Colliders> weapons{};
         float x=rest.p.x-.6f;
         weapons[0]=blade(x);world.Weapons(weapons);t+=1/90.;world.Advance(t,start);
-        assert(world.Pushers()==1);
+        const auto asleep=world.Steps();
+        assert(world.Pushers()==0);   // the bottle asleep, nothing in reach: no step, no weapon body
         assert(std::hypot(First(world).p.x-rest.p.x,First(world).p.z-rest.p.z)<.01f); // placed, not swept from nowhere
-        float struck=0;
-        for(int i=0;i<30;++i){x+=4/90.f;weapons[0]=blade(x);world.Weapons(weapons);t+=1/90.;world.Advance(t,start);struck=std::max(struck,world.Struck(0).speed);}
+        float struck=0;int woken=-1;
+        for(int i=0;i<30;++i) {
+            x+=4/90.f;weapons[0]=blade(x);world.Weapons(weapons);t+=1/90.;world.Advance(t,start);struck=std::max(struck,world.Struck(0).speed);
+            if(woken<0&&world.Steps()>asleep){woken=i;assert(world.Pushers()==1);}
+        }
+        // Woken as the blade reaches it (6.5 cm blade, 4.5 cm bottle, from 60 cm at 4 cm a frame).
+        assert(woken>=9&&woken<=12);
         assert(First(world).p.x>rest.p.x+.15f); // pushed ahead of the blade
         assert(struck>1);                    // a hit worth a haptic tick
         assert(world.Struck(0).speed==0);    // reported once
         // Put away: the weapon leaves the world.
         weapons[0]={};world.Weapons(weapons);t+=1/90.;world.Advance(t,start);
         assert(world.Pushers()==0);
+        // Asleep again: the steps stop.
+        t=Run(world,t,4,start);
+        const auto settled=world.Steps();
+        Run(world,t,1,start);
+        assert(world.Steps()==settled);
     }
     // A warp moves a weapon without sweeping it through the bottles between.
     {
@@ -440,7 +489,7 @@ int main() {
         // The thrower's own weapon never stops it.
         World open;assert(open.Prepare(7,0,Upm,{0,0,0}));
         std::array<Collider,Colliders> weapons{};weapons[0]=Blade({.2f,1.3f,-.3f},{.2f,1.6f,.3f},.05f);
-        open.Props(Scan({0,0,0},{Cup(96,{0,0,10})})); // something in the world, so the weapon is made
+        assert(open.Drop(At({0,1,10}))); // something falling in the world, so the weapon is made
         open.Weapons(weapons);open.Advance(1/90.,{0,0,0});open.Advance(2/90.,{0,0,0});
         assert(open.Pushers()==1);
         assert(open.Trace({0,1.5f,0},{5,0,0},r,3,hit)&&hit.x>2);
@@ -551,7 +600,7 @@ int main() {
             x=10.05f+.1f*float(i%2);weapons[0]=blade(x);
             t+=1/90.;for(World* w:{&rest,&always}){w->Weapons(weapons);w->Advance(t,player);}
         }
-        assert(rest.Steps()==0&&rest.Pushers()==1&&rest.Knocks(knocks)==0&&always.Knocks(knocks)==0&&Moves(rest).empty());
+        assert(rest.Steps()==0&&rest.Pushers()==0&&rest.Bodies()==0&&rest.Knocks(knocks)==0&&always.Knocks(knocks)==0&&Moves(rest).empty());
         // Swept along +x at 3 m/s through the near cup.
         int knockFrame[2]={-1,-1};float knockSpeed[2]={};
         uint64_t before=0;
@@ -573,7 +622,9 @@ int main() {
             assert(a.size()==b.size());
             for(size_t j=0;j<a.size();++j) {
                 const Vec d=a[j].p-b[j].p;
-                assert(a[j].entity==b[j].entity&&std::sqrt(math::Dot(d,d))<.01f);
+                // The weapon's bodies are made on that frame, where it was, at the mass its swing
+                // had built up: the same path to the millimetre (1 cm before they were made then).
+                assert(a[j].entity==b[j].entity&&std::sqrt(math::Dot(d,d))<.001f);
             }
         }
         assert(knockFrame[0]>=0&&knockFrame[0]==knockFrame[1]&&std::fabs(knockSpeed[0]-knockSpeed[1])<.05f);
@@ -585,12 +636,147 @@ int main() {
         const auto settled=rest.Steps();
         Run(rest,t,1,player);
         assert(rest.Steps()==settled);
-        // A bottle lying in the world keeps it stepping (it can be pushed).
+        // A bottle let go of keeps it stepping while it falls and rolls (it can be pushed); lying
+        // asleep, no longer. On the floor below the table it is near neither cup nor the table's
+        // plate: they hold no bodies for it.
         assert(rest.Drop(At({10,.3f,19.5f})));
-        Run(rest,t+1,.5,player);
+        t=Run(rest,t+1,.5,player);
         assert(rest.Steps()>settled+30);
+        t=Run(rest,t,4,player);
+        const auto asleep=rest.Steps();
+        Run(rest,t,2,player);
+        assert(rest.Steps()==asleep&&rest.Count()==1&&rest.Bodies()==0);
         std::printf("dropped bottles: at rest 0 steps in 2 s (%llu before); knock on frame %d either way\n",
             static_cast<unsigned long long>(used),knockFrame[0]);
+    }
+    // Props are bodies only on contact. The same scenes with every listed prop and surface a body
+    // from the start (Eager, as before) and with bodies made only for what something reaches or
+    // moves near: the same props move, and they come to rest in the same places.
+    {
+        const Vec player{20,0,29};
+        const props::Support table{false,.75f,19.4f,29.6f,20.6f,30.4f};
+        // A crowded table: a 4 x 3 block of cups, plates and books, and a row of cups along its far edge.
+        auto crowded=[&]{
+            PropScan s=Scan(player,{});
+            for(int i=0;i<4;++i)for(int j=0;j<3;++j) {
+                Prop p=Cup(700+i*3+j,{19.7f+i*.12f,.75f,29.85f+j*.12f},table);
+                if((i+j)%3==1){p.bounds={{-.05f,0,-.05f},{.05f,.025f,.05f}};}                                          // a plate
+                if((i+j)%3==2){p.shape=props::Shape::Box;p.material=props::Material::Paper;p.bounds={{-.04f,0,-.05f},{.04f,.03f,.05f}};}   // a book
+                s.props[s.count++]=p;
+            }
+            for(int i=0;i<6;++i)s.props[s.count++]=Cup(720+i,{19.6f+i*.15f,.75f,30.3f},table);
+            return s;
+        };
+        // A sword through the near column at cup height, along +z at 3 m/s, then away.
+        auto sword=[](World&,int f,double,std::array<Collider,Colliders>& w){
+            if(f<40)w[0]=Blade({19.55f,.8f,29.55f+f*(3/90.f)},{19.85f,.8f,29.55f+f*(3/90.f)});
+        };
+        Outcome eager,lazy;
+        {World w;w.Eager(true);eager=Play(w,crowded(),90*8,player,sword);assert(w.Bodies()==19);}
+        {
+            World w;const auto scan=crowded();
+            w.Props(scan);assert(w.Frozen()==18&&w.Supports()==1&&w.Bodies()==0);   // listed, no bodies
+            lazy=Play(w,scan,90*8,player,sword);
+            assert(w.Bodies()==0&&w.Pushers()==0&&Moves(w).empty());                 // at rest again: none
+        }
+        const float table1=Apart(lazy,eager);const size_t tableKnocked=lazy.knocked.size();
+        assert(!lazy.knocked.empty()&&lazy.knocked==eager.knocked);
+        assert(table1<.02f);
+        // The last two cups of the far row, knocked off the table's end: bodies for them, what they
+        // pass near and the table's plate while they move; none for the rest of the table.
+        auto flick=[](World&,int f,double,std::array<Collider,Colliders>& w){
+            if(f<12)w[0]=Blade({20.2f+f*(3/90.f),.8f,30.15f},{20.2f+f*(3/90.f),.8f,30.45f});
+        };
+        {World w;w.Eager(true);eager=Play(w,crowded(),90*6,player,flick);}
+        {World w;lazy=Play(w,crowded(),90*6,player,flick);assert(w.Bodies()==0);}
+        const float end=Apart(lazy,eager);const unsigned endBodies=lazy.bodiesMost;
+        assert((lazy.knocked==std::vector<uint32_t>{724,725})&&eager.knocked==lazy.knocked);
+        assert(endBodies>=3&&endBodies<=8&&end<.02f);
+        // A cup on a plate: the plate swept out from under it, the cup falls.
+        auto stacked=[&]{
+            props::Support onPlate{false,.77f};onPlate.onProp=true;
+            Prop plate=Cup(731,{20,.75f,30},table);plate.bounds={{-.1f,0,-.1f},{.1f,.02f,.1f}};
+            return Scan(player,{plate,Cup(732,{20.02f,.77f,30},onPlate),Cup(733,{20.4f,.75f,30.3f},table)});
+        };
+        auto low=[](World&,int f,double,std::array<Collider,Colliders>& w){
+            if(f<20)w[0]=Blade({19.75f+f*(4/90.f),.76f,29.7f},{19.75f+f*(4/90.f),.76f,30.3f},.02f);
+        };
+        {World w;w.Eager(true);eager=Play(w,stacked(),90*6,player,low);}
+        {World w;lazy=Play(w,stacked(),90*6,player,low);assert(w.Bodies()==0);}
+        const float plate=Apart(lazy,eager);
+        assert(lazy.knocked==eager.knocked&&std::find(lazy.knocked.begin(),lazy.knocked.end(),732)!=lazy.knocked.end());
+        assert(plate<.02f);
+        // A bottle let go of over the table lands on it among the cups, stays there asleep, and
+        // the props and the plate around it keep their bodies while it lies there (taking one
+        // would wake it): the world takes no step.
+        float landed[2]{};
+        for(int e=0;e<2;++e) {
+            World w;w.Eager(e==1);w.Props(crowded());
+            assert(w.Drop(At({20.3f,1.1f,29.75f},{},0)));
+            const double t=Run(w,0,5,player);
+            landed[e]=First(w).p.y;
+            const auto still=w.Steps();
+            Run(w,t,2,player);
+            assert(w.Steps()==still&&std::fabs(First(w).p.y-landed[e])<1e-4f);
+            if(!e)assert(w.Bodies()>=1&&w.Bodies()<19);
+        }
+        assert(landed[0]>.75f&&std::fabs(landed[0]-landed[1])<.01f);
+        // A bottle rolled at a heavy barrel standing on the floor bounces off it, the barrel unmoved.
+        float back[2]{};unsigned barrelKnocks[2]{};
+        for(int e=0;e<2;++e) {
+            World w;w.Eager(e==1);
+            Prop barrel=Cup(741,{21,0,29});barrel.shape=props::Shape::Round;barrel.material=props::Material::Wood;
+            barrel.bounds={{-.3f,0,-.3f},{.3f,.9f,.3f}};barrel.mass=48;
+            w.Props(Scan(player,{barrel}));
+            assert(w.Drop(At({20,.1f,29},{3,0,0},0)));
+            double t=0;std::array<Knock,props::MaxMoving> knocks{};
+            for(int i=0;i<180;++i){t+=1/90.;w.Advance(t,player);barrelKnocks[e]+=w.Knocks(knocks);}
+            back[e]=First(w).p.x;
+        }
+        assert(barrelKnocks[0]==0&&barrelKnocks[1]==0&&back[0]<20.7f&&std::fabs(back[0]-back[1])<.01f);
+        // A spell bolt into the crowded table: four props kicked and five more they bump, the same
+        // ones, moving alike at first. Nine props tumbling together are chaotic: the same bolt
+        // 0.01% stronger, every prop a body from the start, lands them as far from the first run
+        // as bodies on contact do. So the start is compared, and the end against that.
+        auto bolt=[](float strength){
+            return [strength](World& w,int f,double t,std::array<Collider,Colliders>&){
+                if(f!=10)return;
+                spellimpacts::Push p;p.a={19.4f,.8f,29.85f};p.b={19.75f,.8f,29.85f};p.radius=spellimpacts::BoltRadius;p.impulse=spellimpacts::Light*strength;
+                w.Push(p,t);
+            };
+        };
+        {World w;w.Eager(true);eager=Play(w,crowded(),13,player,bolt(1));}
+        {World w;lazy=Play(w,crowded(),13,player,bolt(1));}
+        const float spellStart=Apart(lazy,eager);
+        assert(lazy.knocked.size()>=9&&lazy.knocked==eager.knocked&&spellStart<.003f);   // 0.03 s after the bolt
+        Outcome nudged;
+        {World w;w.Eager(true);eager=Play(w,crowded(),90*6,player,bolt(1));}
+        {World w;w.Eager(true);nudged=Play(w,crowded(),90*6,player,bolt(1.0001f));}
+        {World w;lazy=Play(w,crowded(),90*6,player,bolt(1));assert(w.Bodies()==0);}
+        const float spell=Apart(lazy,eager),chaos=Apart(nudged,eager);
+        assert(lazy.knocked==eager.knocked);
+        assert(chaos<1e8f&&spell<=chaos*1.5f+.02f);
+        // A throw traced at a 50 cm vase on the floor, which has no body: it meets the vase's side
+        // at the same point.
+        Vec hits[2]{};
+        for(int e=0;e<2;++e) {
+            World w;w.Eager(e==1);
+            Prop vase=Cup(751,{21.2f,0,29});vase.bounds={{-.1f,0,-.1f},{.1f,.5f,.1f}};
+            w.Props(Scan(player,{vase}));
+            assert(e||w.Bodies()==0);
+            assert(w.Trace({20,.3f,29},{5,1.5f,0},.06f,2,hits[e])&&hits[e].x<21.1f-.05f&&hits[e].x>21.f&&hits[e].y>.3f);
+            if(!e) {
+                assert(w.Bodies()==1);                       // made for the trace
+                w.Advance(1/90.,player);w.Advance(2/90.,player);
+                assert(w.Bodies()==0);                       // and let go at rest
+            }
+        }
+        const Vec dh=hits[0]-hits[1];
+        assert(std::sqrt(math::Dot(dh,dh))<1e-4f);
+        std::printf("dropped bottles: bodies on contact, from eager - crowded table %zu knocked, %.1f mm; two cups off the end "
+            "(%u bodies at most of 19), %.1f mm; plate %.1f mm; bottle on the table %.1f mm; spell into the table %.1f mm "
+            "after 0.03 s, %.0f mm at rest (a 0.01%% stronger bolt: %.0f mm)\n",
+            tableKnocked,table1*1000,endBodies,end*1000,plate*1000,std::fabs(landed[0]-landed[1])*1000,spellStart*1000,spell*1000,chaos*1000);
     }
     std::puts("dropped bottles: ok");
 }

@@ -171,6 +171,7 @@ add_executable(active-effects-test active_effects_test.cpp)
 target_link_libraries(active-effects-test PRIVATE framevr-runtime)
 target_link_libraries(companions-test PRIVATE framevr-runtime)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/companion_ai.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/whirl_turn_native.cpp)   # Whirlwind on: a whirl under way turned with the walk stick
 add_executable(companion-ai-test companion_ai_test.cpp)
 target_include_directories(companion-ai-test PRIVATE ${ROOT}/cleanroom/sigscan ${CMAKE_CURRENT_SOURCE_DIR} ${D2RL_SDK}/include)
 target_link_libraries(companion-ai-test PRIVATE framevr-runtime)
@@ -251,6 +252,7 @@ add_executable(crossbow-pose-test crossbow_pose_test.cpp ${ROOT}/vr/crossbow.cpp
 target_include_directories(crossbow-pose-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${ROOT}/shared)
 target_link_libraries(crossbow-pose-test PRIVATE framevr-runtime)
 add_executable(body-tracking-test body_tracking_test.cpp)
+add_executable(hand-reach-test hand_reach_test.cpp)   # the drawn hand on its controller and the arm that reaches it, every class's rig
 add_executable(shield-steady-test shield_steady_test.cpp)
 add_executable(shapeshift-form-test shapeshift_form_test.cpp)
 add_executable(head-shadow-test head_shadow_test.cpp)   # the head kept for its shadow: the decision, the cut by pitch, the near
@@ -332,9 +334,11 @@ add_executable(hit-reactions-test hit_reactions_test.cpp)   # Hit reactions: a s
 add_executable(held-collision-test held_collision_test.cpp)   # Held items collide: closest points, the push, its cap and ease, the split, the clank, exclusions
 add_executable(held-world-test held_world_test.cpp)   # Held items meet the world: the hands' frame, wall cells and the floor, slides, corners, the cap, no trap, cost
 add_executable(weapon-reach-test weapon_reach_test.cpp)   # Melee contact by weapon kind; a flail reaches its head, each hand by its own item
-add_executable(flail-chain-test flail_chain_test.cpp)   # A flail's chain swings: its bones by name, hanging and swinging, fresh starts, snap turns, the floor
+add_executable(flail-chain-test flail_chain_test.cpp)   # A flail's chain swings: the five flails' rigs, far from the world's origin, hanging, a swing's lag and overshoot, long runs, head, handle, floor, twist, one step a stereo pair
 add_executable(walk-direction-test walk_direction_test.cpp)   # Walk direction: the stick turned to where the left controller points
 add_executable(whirl-steer-test whirl_steer_test.cpp)   # Whirlwind aimed along the walk stick: its dead zone, the way as walked, the T's spot
+add_executable(whirl-on-test whirl_on_test.cpp)   # Whirlwind on: its time by level, a whirl's mana and length, the chain, starts and stops
+add_executable(whirl-turn-test whirl_turn_test.cpp)   # Whirlwind on: a whirl under way turned with the stick, ended short when let go, the client following
 add_executable(room-scale-test room_scale_test.cpp)   # room-scale: a turn pivots at the head
 add_executable(room-steps-test room_steps_test.cpp)   # Room follows you: the neck, the dead zone, pauses, walls, the origin follow
 add_executable(sewer-interaction-test sewer_interaction_test.cpp)
@@ -398,6 +402,10 @@ target_link_libraries(show-items-command-test PRIVATE framevr-runtime)
 add_executable(native-hud-test native_hud_test.cpp)
 target_sources(d2rl-pcvr PRIVATE render_resolution.cpp)
 target_sources(d2rl-pcvr PRIVATE scene_depth.cpp)
+option(D2RVR_COMPARE_DEPTH_BARRIERS "Alternate depth barrier filtering in a diagnostic build" OFF)
+if(D2RVR_COMPARE_DEPTH_BARRIERS)
+  set_property(SOURCE scene_depth.cpp ${ROOT}/vr/vrcam.cpp APPEND PROPERTY COMPILE_DEFINITIONS D2RVR_COMPARE_DEPTH_BARRIERS=1)
+endif()
 target_sources(d2rl-pcvr PRIVATE light_bounds.cpp)
 add_executable(light-bounds-test light_bounds_test.cpp)
 target_link_libraries(light-bounds-test PRIVATE d3d11 d3dcompiler framevr-runtime)
@@ -439,6 +447,8 @@ add_executable(props-test props_test.cpp)
 target_link_libraries(props-test PRIVATE framevr-runtime)
 add_executable(prop-heft-test prop_heft_test.cpp dropped_bottles.cpp)   # Props' weight: masses by kind and size, the weapon's strike, the hand's thud
 target_link_libraries(prop-heft-test PRIVATE box3d framevr-runtime)
+add_executable(prop-rest-cost-test prop_rest_cost_test.cpp dropped_bottles.cpp)   # What props nobody touches cost the draw thread, printed
+target_link_libraries(prop-rest-cost-test PRIVATE box3d framevr-runtime)
 add_executable(limb-rig-test limb_rig_test.cpp)
 add_executable(aged-cache-test aged_cache_test.cpp)     # What the skeleton hook remembers of each instance: forgotten by age, never all at once
 add_executable(ecs-storage-test ecs_storage_test.cpp)   # A registry storage read as one block: an entity's dense index in four guarded reads
@@ -492,6 +502,31 @@ add_dependencies(vr-settings-preview release-notes-generated)
 target_include_directories(vr-settings-preview PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(vr-settings-preview PRIVATE user32 gdi32 d2d1 dwrite windowscodecs ole32 framevr-runtime)
 
+# Speech recognition is built and staged with the game, controlled by VR Settings > Gameplay > Voice.
+if(CMAKE_HOST_WIN32)
+  find_program(VOICE_CSC csc.exe PATHS "$ENV{WINDIR}/Microsoft.NET/Framework64/v4.0.30319" NO_DEFAULT_PATH)
+  if(VOICE_CSC)
+    file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/voice_recognition.cs" VOICE_SOURCE)
+    file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/sound_commands.cs" SOUND_SOURCE)
+    file(TO_NATIVE_PATH "${CMAKE_CURRENT_BINARY_DIR}/voice/voice-recognition.exe" VOICE_OUTPUT)
+    add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/voice/voice-recognition.exe"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/voice"
+      COMMAND "${VOICE_CSC}" /nologo /target:winexe /platform:x64 /optimize+
+      /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll
+      "/out:${VOICE_OUTPUT}" "${VOICE_SOURCE}" "${SOUND_SOURCE}" DEPENDS voice_recognition.cs sound_commands.cs VERBATIM)
+    add_custom_target(voice-recognition ALL DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/voice/voice-recognition.exe")
+    add_dependencies(d2rl-pcvr voice-recognition)
+  else()
+    message(FATAL_ERROR "The .NET Framework C# compiler is required for integrated voice recognition")
+  endif()
+endif()
+add_executable(voice-commands-test voice_commands_test.cpp)
+add_test(NAME voice-commands-test COMMAND voice-commands-test)
+if(MSVC)
+  target_compile_options(voice-commands-test PRIVATE /UNDEBUG)
+else()
+  target_compile_options(voice-commands-test PRIVATE -UNDEBUG)
+endif()
 add_executable(math-test math_test.cpp)
 add_executable(environment-cutaway-test environment_cutaway_test.cpp)
 add_executable(roof-materials-test roof_materials_test.cpp)
@@ -582,9 +617,9 @@ set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 
 foreach(test_target IN ITEMS client-combat-test native-client-input-test memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test draw-sampler-test game-patch-plan-test cull-volume-test
     spell-impacts-test
-    gameplay-test weapon-skills-test quick-cast-test hand-controls-test hand-role-test hand-swap-mirror-test hand-text-test elemental-hands-test elemental-particles-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test head-skip-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
-    portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test prop-heft-test limb-rig-test aged-cache-test ecs-storage-test look-at-test limb-physics-test limb-worker-test leather-menu-test stash-buttons-test stats-button-test menu-drop-test arcane-decay-test respec-button-test vr-keyboard-test
-    combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test guard-strain-test heartbeat-test haptic-impact-test haptic-heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test whirl-steer-test logging-test log-rotation-test melee-contact-test bow-bash-test weapon-heft-test hit-reactions-test held-collision-test held-world-test weapon-reach-test flail-chain-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-warlock-test motions-assassin-test motions-paladin-test motions-druid-test bone-graft-test
+    gameplay-test weapon-skills-test quick-cast-test hand-controls-test hand-role-test hand-swap-mirror-test hand-text-test elemental-hands-test elemental-particles-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test hand-reach-test shapeshift-form-test head-shadow-test head-skip-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
+    portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test prop-heft-test prop-rest-cost-test limb-rig-test aged-cache-test ecs-storage-test look-at-test limb-physics-test limb-worker-test leather-menu-test stash-buttons-test stats-button-test menu-drop-test arcane-decay-test respec-button-test vr-keyboard-test
+    combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test guard-strain-test heartbeat-test haptic-impact-test haptic-heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test whirl-steer-test whirl-on-test whirl-turn-test logging-test log-rotation-test melee-contact-test bow-bash-test weapon-heft-test hit-reactions-test held-collision-test held-world-test weapon-reach-test flail-chain-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-warlock-test motions-assassin-test motions-paladin-test motions-druid-test bone-graft-test
     interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test floating-map-test grab-hint-test navigation-info-test area-banner-test companions-test summon-commander-test active-effects-test skill-cooldowns-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test sheet-walk-test room-stitch-test ceiling-top-test loot-beams-test
     vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test loot-aim-test telegraph-test aim-reach-test aim-rules-test teleport-arc-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test light-radius-test world-sound-test frame-generation-test late-wait-test turn-capture-test panel-atlas-test atlas-dirty-test far-objects-test drawdist-runtime-test render-distance-status-test collection-model-test collection-panel-test collection-view-test collection-pointer-test collection-ui-image-test collection-tooltip-test)
   # These fixtures use assert for their checks, including in Release builds.
@@ -613,6 +648,8 @@ add_test(NAME ui-blit-typeless COMMAND ui-blit-test --typeless)
 add_test(NAME ui-blit-typeless-black COMMAND ui-blit-test black --typeless)
 add_test(NAME ui-blit-undim COMMAND ui-blit-test --undim)
 add_test(NAME ui-blit-square-map COMMAND ui-blit-test --square-map --typeless)
+add_test(NAME ui-blit-ground-map COMMAND ui-blit-test --ground-map --see-through 50 --frame 0)
+add_test(NAME ui-blit-ground-map-pointed COMMAND ui-blit-test --ground-map --see-through 50 --frame 100)
 add_test(NAME ui-blit-portrait-map COMMAND ui-blit-test --square-map --portrait)
 # the floating map's see-through copy under the solid square, its backing at 0, 50 and 100% (VR Settings > Interface > Wrist > Floating map background)
 add_test(NAME ui-blit-see-through-0 COMMAND ui-blit-test --see-through 0 --typeless)
@@ -754,3 +791,24 @@ add_executable(multiplayer-fields-test multiplayer_fields_test.cpp)
 target_include_directories(multiplayer-fields-test PRIVATE ${D2RL_SDK}/include)
 target_compile_options(multiplayer-fields-test PRIVATE -UNDEBUG)
 add_test(NAME multiplayer-fields-test COMMAND multiplayer-fields-test)
+
+target_link_libraries(d2rl-pcvr PRIVATE winmm)
+
+add_executable(voice-integration-test voice_integration_test.cpp)
+set_target_properties(voice-integration-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/voice-test")
+target_link_libraries(voice-integration-test PRIVATE winmm)
+if(MSVC)
+  target_compile_options(voice-integration-test PRIVATE /UNDEBUG)
+else()
+  target_compile_options(voice-integration-test PRIVATE -UNDEBUG)
+endif()
+add_test(NAME voice-integration-test COMMAND voice-integration-test)
+add_test(NAME voice-payload-test COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/voice_payload_test.py")
+
+if(CMAKE_HOST_WIN32)
+  add_test(NAME voice-embedded-test COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/voice_embedded_test.py" "${CMAKE_CURRENT_BINARY_DIR}/voice/voice-recognition.exe")
+endif()
+
+if(CMAKE_HOST_WIN32)
+  add_test(NAME recorded-sound-matcher-test COMMAND "${CMAKE_CURRENT_BINARY_DIR}/voice/voice-recognition.exe" --sound-test)
+endif()
