@@ -164,6 +164,8 @@ void SetCollectionInUi(bool on);
 void SetUiShotGrips(bool on);
 // [dev] collection_log: the stash's and the Collection page's timed diagnostic lines (off by default).
 void SetCollectionLog(bool on);
+// The last CopyUi put the Collection page into the UI image (it covers the stash's grid).
+bool CollectionCoversStash();
 bool StashMenuWorld();
 // The campfire's caption: the part of the game's menu band (shares of it: left, top, right, bottom) where the
 // game writes the picked hero's class and words, on a board of its own above the heroes (width, distance

@@ -1216,6 +1216,44 @@ std::string CarriedIconKey() {
 }
 uint32_t CarriedCode() { return g_carriedCode.load(); }
 
+namespace {
+struct CellQuery {
+    int x = 0, y = 0;
+    uint64_t handle = 0;
+    InventoryClick block;
+    uint32_t quality = 0;
+};
+D2RL::Inventory::IterationAction __cdecl FindAtCell(const D2RL::PluginContext*, const D2RL::Items::ItemInfo* info, void* userData) noexcept {
+    auto& q = *static_cast<CellQuery*>(userData);
+    if (info == nullptr || info->container != D2RL::Items::ItemContainer::Inventory) return D2RL::Inventory::IterationAction::Continue;
+    const auto [w, h] = SizeOf(info->code);
+    if (q.x >= info->x && q.x < info->x + w && q.y >= info->y && q.y < info->y + h) {
+        q.handle = info->handle;
+        q.block  = InventoryClick {info->x, info->y, w, h, 0};
+        q.quality = uint32_t(info->quality);
+        return D2RL::Inventory::IterationAction::Stop;
+    }
+    return D2RL::Inventory::IterationAction::Continue;
+}
+}   // namespace
+
+bool InventoryItemAt(int x, int y, uint64_t& handle, InventoryClick& block, uint32_t* quality) {
+    handle = 0;
+    D2RL::PlayerHandle player {};
+    if (g_ctx == nullptr || g_inventory == nullptr || g_inventory->getLocalPlayer(g_ctx, &player) != D2RL::Inventory::Result::Success) return false;
+    CellQuery q;
+    q.x = x; q.y = y;
+    D2RL::Inventory::ItemFilter filter {};
+    filter.structSize    = D2RL::Inventory::ItemFilterSize;
+    filter.containerMask = D2RL::Items::ContainerBit(D2RL::Items::ItemContainer::Inventory);
+    g_inventory->forEachInventoryItem(g_ctx, player, &filter, &FindAtCell, &q);
+    if (q.handle == 0) return false;
+    handle = q.handle;
+    block  = q.block;
+    if (quality != nullptr) *quality = q.quality;
+    return true;
+}
+
 void StoreReport() {
     char line[192];
     std::snprintf(line, sizeof(line), "Frame collection: affinity %s, collection tabs %d..%d, %d moved so far",

@@ -92,4 +92,8 @@ std::string CarriedIconKey();
 // Read with CarriedIconKey.
 uint32_t CarriedCode();
 
+// The inventory item covering cell x, y of the 10 x 4 grid: its handle and its whole block.
+// Game or UI thread only (an item iteration). False for an empty cell.
+bool InventoryItemAt(int x, int y, uint64_t& handle, InventoryClick& block, uint32_t* quality = nullptr);
+
 }   // namespace framevr::collection

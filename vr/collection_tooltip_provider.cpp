@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "collection_store.h"
 #include "collection_tooltip.h"
 #include "logging.h"
 
@@ -30,6 +31,11 @@ bool        g_queued          = false;
 std::string g_resultText;
 std::string g_resultRanges;
 uint64_t    g_resultRevision  = 0;
+// The pointed inventory cell (RequestInventory) and its answer.
+int             g_invX = -1, g_invY = -1;
+uint64_t        g_invRequestRevision = 0;
+bool            g_invPending = false;
+InventoryAnswer g_invResult;
 
 // The live handles the scan kept, keyed by (category << 32) | recordId. Only the
 // UI thread touches this map (the scan and the fetch both run there).
@@ -97,7 +103,29 @@ Answer Fetch(const Entry& entry) {
     return answer;
 }
 
+void FetchInventory() {
+    int x = -1, y = -1;
+    uint64_t revision = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (!g_invPending) return;
+        x = g_invX; y = g_invY; revision = g_invRequestRevision;
+        g_invPending = false;
+    }
+    InventoryAnswer answer;
+    answer.revision = revision;
+    uint64_t handle = 0;
+    InventoryClick block;
+    if (x >= 0 && y >= 0 && g_ctx != nullptr && g_items != nullptr && InventoryItemAt(x, y, handle, block, &answer.quality)) {
+        answer.text = ReadItemTooltip(handle);
+        answer.x = block.x; answer.y = block.y; answer.w = block.w; answer.h = block.h;
+    }
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (revision == g_invRequestRevision) g_invResult = std::move(answer);
+}
+
 void __cdecl OnUiThread(const D2RL::PluginContext*, void*) noexcept {
+    FetchInventory();
     Entry    entry;
     uint64_t revision = 0;
     {
@@ -164,6 +192,20 @@ uint64_t Request(const Entry& entry) {
     return g_requestRevision;
 }
 
+uint64_t RequestInventory(int x, int y) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_invX = x; g_invY = y;
+    g_invRequestRevision = ++g_generation;
+    g_invPending = x >= 0 && y >= 0;
+    if (!g_invPending) g_invResult = InventoryAnswer {{}, 0, 0, 0, 0, 0, g_invRequestRevision};
+    return g_invRequestRevision;
+}
+
+InventoryAnswer CurrentInventory() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g_invResult;
+}
+
 Answer Current() {
     std::lock_guard<std::mutex> lock(g_mutex);
     return {g_resultText, g_resultRanges, g_resultRevision};
@@ -173,7 +215,7 @@ void Tick() {
     bool queue = false;
     {
         std::lock_guard<std::mutex> lock(g_mutex);
-        if (g_pending && !g_queued) { g_queued = true; queue = true; }
+        if ((g_pending || g_invPending) && !g_queued) { g_queued = true; queue = true; }
     }
     if (!queue) return;
     if (g_threads != nullptr && g_threads->runOnUiThread != nullptr &&

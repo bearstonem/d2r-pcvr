@@ -390,14 +390,15 @@ void RichLine(Painter& p, const std::string& text, float size, const RectF& box,
     }
 }
 
-void DrawTooltip(Painter& p, const panel::Rect& card, const tooltip::Tooltip& tip, Category category, const std::string& base) {
+void DrawTooltip(Painter& p, const panel::Rect& card, const tooltip::Tooltip& tip, Category category, const std::string& base,
+                 uint32_t nameRgb = 0) {
     if (tip.Empty()) return;
     // 10% and then 20% larger than the first cut, box and text alike (owner 2026-11-22: the game's
     // own tooltips are much bigger)
     constexpr float K = 1.1f * 1.2f * 1.3f;   // +10%, +20%, +30% (owner 2026-11-22)
     struct Line { std::string text; uint32_t rgb; float size; bool runes = false; };
     std::vector<Line> lines;
-    lines.push_back({tip.title, NameColor(category), 16.f * K});
+    lines.push_back({tip.title, nameRgb != 0 ? nameRgb : NameColor(category), 16.f * K});
     // the kind of item, grey, between the name and its text (owner: Harlequin Crest - Shako)
     if (!base.empty()) lines.push_back({base, Grey, 13.f * K});
     for (const std::string& line : tip.body) {
@@ -450,7 +451,7 @@ void DrawTooltip(Painter& p, const panel::Rect& card, const tooltip::Tooltip& ti
 }   // namespace
 
 void Paint(Painter& painter, const Library& library, const ViewState& view, const IconLookup& icons,
-           std::string_view gameText, std::string_view rangeText, const Carried& carried) {
+           std::string_view gameText, std::string_view rangeText, const Carried& carried, const InventoryTip& inventory) {
     Painter& p = painter;
     const auto          visible = VisibleSlots(library, view);
     const int           pages   = panel::PagesFor(int(visible.size()), view.size);
@@ -745,6 +746,18 @@ void Paint(Painter& painter, const Library& library, const ViewState& view, cons
             DrawTooltip(p, layout.groups[view.hover.index],
                         tooltip::SetTooltip(std::string(set.name), bonus, int(set.found), int(set.total)), Category::Sets, "");
         }
+    }
+
+    // The inventory item under the laser (the game's own tooltip is held back over the page): its
+    // card at the page's right edge, under or over the item's row, as the game's reached left.
+    if (!inventory.text.empty() && carried.key.empty()) {
+        const auto all = tooltip::SplitLines(inventory.text);
+        tooltip::Tooltip tip;
+        for (const std::string& line : all) {
+            if (tip.title.empty()) tip.title = line;
+            else tip.body.push_back(line);
+        }
+        DrawTooltip(p, panel::Rect {inventory.x, inventory.y, inventory.w, inventory.h}, tip, Category::Uniques, "", inventory.nameRgb);
     }
 
     // The item in the hand, at the laser, over everything (as the game draws a carried item):

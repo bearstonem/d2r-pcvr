@@ -40,12 +40,22 @@ using IconLookup = std::function<const IconPixels*(const std::string& key)>;
 // The item in the player's hand while the laser is on the page: the game's own cursor
 // (with the item on it) is kept under the page there, so the page draws the item itself,
 // at the laser, from the icon cache. x, y are canvas pixels; empty key: nothing in hand.
+// The inventory item under the laser while the page covers the stash: the game's own tooltips
+// are held back then ([collection] game_tooltips=0), so the page draws this one at its right
+// edge, beside the item's row. text: the game's item text (first line its name); x, y, w, h:
+// the item's block in canvas pixels (right of the page); nameRgb: its quality's colour.
+struct InventoryTip {
+    std::string text;
+    float       x = 0, y = 0, w = 0, h = 0;
+    uint32_t    nameRgb = 0xFFFFFF;
+};
 struct Carried {
     std::string key;
     float       x = -1, y = -1;
 };
 
 void Paint(settings::draw::Painter& painter, const Library& library, const ViewState& view, const IconLookup& icons,
-           std::string_view gameText = {}, std::string_view rangeText = {}, const Carried& carried = {});
+           std::string_view gameText = {}, std::string_view rangeText = {}, const Carried& carried = {},
+           const struct InventoryTip& inventory = InventoryTip {});
 
 }   // namespace framevr::collection::draw

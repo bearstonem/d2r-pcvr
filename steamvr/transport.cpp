@@ -695,6 +695,7 @@ struct CollectionPaintJob {
     std::string tooltipRanges;   // the same item's possible ranges, for a found entry
     int uiW = 0, uiH = 0;        // the page's rectangle in the game's UI image (variant B); 0: none
     collection::draw::Carried carried;   // the item in the hand, at the laser
+    collection::draw::InventoryTip inventory;   // the inventory item under the laser (its card at the page's edge)
 };
 struct CollectionPainted {
     std::vector<uint8_t> pixels;
@@ -721,7 +722,7 @@ LatestWorker<CollectionPaintJob,CollectionPainted> collectionPainter([](const Co
     if(!painter)painter=std::make_unique<settings::draw::Painter>();
     if(!painter->Ready())return CollectionPainted{{},painter->Error(),0.0};
     if(!painter->Begin())return CollectionPainted{{},painter->Error(),0.0};
-    collection::draw::Paint(*painter,job.library,job.view,CollectionIcon,job.tooltip,job.tooltipRanges,job.carried);
+    collection::draw::Paint(*painter,job.library,job.view,CollectionIcon,job.tooltip,job.tooltipRanges,job.carried,job.inventory);
     CollectionPainted out{painter->End(),{},0.0};
     if(job.uiW>0&&job.uiH>0&&!out.pixels.empty()) {   // variant B: ready for the UI image, off the render thread
         out.ui=collection::uiimage::Convert(out.pixels,panelatlas::Collection.w,int(collection::panel::CanvasWidth),
@@ -803,6 +804,8 @@ int collectionUiW=0,collectionUiH=0,collectionPaintedUiW=0,collectionPaintedUiH=
 std::vector<uint16_t> collectionUiPixels;int collectionUiPixelsW=0,collectionUiPixelsH=0;
 uint64_t collectionUiSerial=0;
 bool collectionInUiShown=false;   // the last CopyUi put the page into the UI image
+std::atomic<bool> collectionCoversStash{false};   // the same, for the game's threads (its tooltips held back)
+std::atomic<uint64_t> collectionCoversAt{0};      // when it last did (a menu closed stops CopyUi: the flag goes stale)
 int collectionUiX=0,collectionUiY=0;   // where it went (UI image pixels), for the UI shot
 collection::draw::Carried collectionCarried,collectionPaintedCarried;   // the item in the hand at the laser, and as last painted
 struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};UINT rows=0;
@@ -4005,10 +4008,33 @@ int TakeCollectionPicture() {
 }
 // Paints the panel again when nothing is outstanding and the picture would
 // change: another tab or page, or an icon that finished decoding since.
+// The inventory item's card for the page: its block from the 10 x 4 grid (1244,668 of the
+// 2244 x 2352 UI image, 57.2 px a cell) in canvas pixels, and its name in its quality's colour.
+collection::draw::InventoryTip InventoryTipOf(const collection::tooltip::InventoryAnswer& a) {
+    collection::draw::InventoryTip tip;
+    if(a.text.empty()||a.w<=0||a.h<=0)return tip;
+    tip.text=a.text;
+    const float sx=(CollectionPageRight-CollectionPageLeft)*2244.f,sy=(CollectionPageBottom-CollectionPageTop)*2352.f;   // the page in shot pixels
+    const float x0=1244.f+float(a.x)*57.2f-CollectionPageLeft*2244.f,y0=668.f+float(a.y)*57.2f-CollectionPageTop*2352.f;
+    tip.x=x0/sx*collection::panel::CanvasWidth;tip.y=y0/sy*collection::panel::CanvasHeight;
+    tip.w=float(a.w)*57.2f/sx*collection::panel::CanvasWidth;tip.h=float(a.h)*57.2f/sy*collection::panel::CanvasHeight;
+    switch(a.quality){   // D2RL::Items::Quality: the game's name colours
+        case 4:tip.nameRgb=0x6969FF;break;   // magic
+        case 5:tip.nameRgb=0x4ED24E;break;   // set
+        case 6:tip.nameRgb=0xFFFF64;break;   // rare
+        case 7:tip.nameRgb=0xC7B377;break;   // unique
+        case 8:tip.nameRgb=0xFFA800;break;   // crafted
+        default:tip.nameRgb=0xFFFFFF;break;
+    }
+    return tip;
+}
 void RequestCollectionPaint(bool force=false) {
     if(collectionPaintRequest)return;
     const uint64_t revision=interaction::icons::Revision();
     const collection::tooltip::Answer answer=collection::tooltip::Current();   // the pointed entry's text and ranges
+    const auto inventoryAnswer=collection::tooltip::CurrentInventory();   // the inventory item under the laser
+    static uint64_t paintedInventory=0;
+    if(inventoryAnswer.revision!=paintedInventory){paintedInventory=inventoryAnswer.revision;force=true;}
     // What is found: an item stored or taken out lights or greys its card at once, not only
     // when the laser next moves to another card (owner 2026-11-20).
     static uint64_t collectionPaintedFound=~0ull;
@@ -4042,7 +4068,7 @@ void RequestCollectionPaint(bool force=false) {
     collectionRequestAt=GetTickCount64();   // for the "reached the atlas N ms after the click" report
     collectionPaintRequest=collectionPainter.Submit({collection::TabLibrary(),collection::TabView(),
         noRoom?std::string("No room in your inventory\n")+answer.text:answer.text,answer.ranges,
-        collectionInUi.load()?collectionUiW:0,collectionInUi.load()?collectionUiH:0,collectionCarried});
+        collectionInUi.load()?collectionUiW:0,collectionInUi.load()?collectionUiH:0,collectionCarried,InventoryTipOf(inventoryAnswer)});
     if(!collectionPaintRequest){
         static ULONGLONG reportAt=0;const auto now=GetTickCount64();
         if(now>=reportAt){Say("Frame collection: the background painter did not take the request");reportAt=now+5000;}
@@ -4198,6 +4224,18 @@ void CollectionPointer(bool grip) {
             collectionCarried.x=(uiCursorU-CollectionPageLeft)/(CollectionPageRight-CollectionPageLeft)*collection::panel::CanvasWidth;
             collectionCarried.y=(uiCursorV-CollectionPageTop)/(CollectionPageBottom-CollectionPageTop)*collection::panel::CanvasHeight;
         }
+    }
+    {   // The inventory item under the laser while the page covers the stash and the game's own
+        // tooltips are held back ([collection] game_tooltips=0): its text is fetched, and the page
+        // draws its card (InventoryTipOf). The grid: 10 x 4 cells from 1244,668, 57.2 px apart.
+        static int askedX=-1,askedY=-1;
+        int cx=-1,cy=-1;
+        if(collectionDocked&&collectionInUiShown&&pointerHit&&!keyboardPointer&&stashImageSized.load()&&
+           !gamestate::CursorItemHeld()&&canvasX<0) {
+            const float gx=(uiCursorU*2244.f-1244.f)/57.2f,gy=(uiCursorV*2352.f-668.f)/57.2f;
+            if(gx>=0&&gx<10&&gy>=0&&gy<4){cx=int(gx);cy=int(gy);}
+        }
+        if(cx!=askedX||cy!=askedY){askedX=cx;askedY=cy;collection::tooltip::RequestInventory(cx,cy);}
     }
     collectionTriggerWas=collectionTriggerDown;
     collection::TabSetHover(collectionHover);   // the picture lights what the laser is over
@@ -9370,6 +9408,8 @@ bool CopyUi(reshade::api::command_queue* rq) {
     {   // the Collection page into the same image (variant B, [collection] in_ui)
         stashImageSized.store(ShotSized(w,h,crop));
         const bool shown=CopyCollectionIntoUi(e.commands.Get(),dest,w,h,crop);
+        collectionCoversStash.store(shown,std::memory_order_relaxed);
+        if(shown)collectionCoversAt.store(GetTickCount64(),std::memory_order_relaxed);
         if(shown!=collectionInUiShown){collectionInUiShown=shown;
             Say(shown?"Frame collection: the page is drawn into the game's UI image":"Frame collection: the page is no longer in the UI image");}
         CopyInventoryMask(e.commands.Get(),dest,w,h,crop);
@@ -9642,6 +9682,9 @@ void SetStashWorld(bool on){stashWorld.store(on);}
 void SetCollectionInUi(bool on){collectionInUi.store(on);}
 void SetUiShotGrips(bool on){uiShotGrips.store(on,std::memory_order_relaxed);}
 void SetCollectionLog(bool on){collectionLog.store(on,std::memory_order_relaxed);}
+bool CollectionCoversStash(){
+    return collectionCoversStash.load(std::memory_order_relaxed)&&GetTickCount64()-collectionCoversAt.load(std::memory_order_relaxed)<250;
+}
 // The stash keeps the world behind it (stash_world) like the leather: the game's own
 // black backdrop behind management menus must then be lifted round the stash.
 bool StashMenuWorld(){return stashWorld.load()&&gamestate::StashButtonsShown();}

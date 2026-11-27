@@ -42,6 +42,18 @@ struct Answer {
 };
 Answer Current();
 
+// The inventory item under the laser while the Collection page covers the stash (the game's own
+// tooltips are held back then, and the page draws this one): the item covering cell x, y of the
+// 10 x 4 grid. Call only when the pointed cell changed; returns the answer's revision.
+uint64_t RequestInventory(int x, int y);
+struct InventoryAnswer {
+    std::string text;            // the item's own text (getItemTooltip); empty for an empty cell
+    int         x = 0, y = 0, w = 0, h = 0;   // the item's block in the grid
+    uint32_t    quality = 0;                   // D2RL::Items::Quality
+    uint64_t    revision = 0;
+};
+InventoryAnswer CurrentInventory();
+
 // Queues a pending request on the UI thread. Once a frame is enough.
 void Tick();
 
