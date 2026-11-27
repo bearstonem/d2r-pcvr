@@ -1021,6 +1021,8 @@ void TellSheetRects(const char* opened);   // below
 // tab keeps the stash open and shows the Collection page in its place. UI thread
 // only; the widget exists only after the panel is built, so callers defer it.
 framevr::CallbackTicket g_collectionTabTicket;
+// The prepared layout's sixth tab was found on the stash bar the last time the stash opened.
+std::atomic<bool> g_collectionTabOnBar{false};
 void MaintainCollectionTab(const PluginContext* ctx) {
     if (!g_widgets || !g_widgets->findPanel || !g_widgets->findWidget) {
         Log("gamestate: no widget service; the Collection tab cannot be routed");
@@ -1037,9 +1039,11 @@ void MaintainCollectionTab(const PluginContext* ctx) {
     }
     Widgets::WidgetHandle button = 0;
     if (g_widgets->findWidget(ctx, panel, framevr::collection::TabWidgetName, &button) != Widgets::Result::Success || !button) {
+        g_collectionTabOnBar.store(false);
         Log("gamestate: the Collection tab button is not on the stash bar");
         return;
     }
+    g_collectionTabOnBar.store(true);
     const auto result = g_widgets->setWidgetEventMessage(ctx, button, Widgets::EventKind::Click,
                                                          framevr::collection::TabTarget, framevr::collection::TabCommand);
     Log(result == Widgets::Result::Success
@@ -1112,7 +1116,8 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         else if (!strcmp(command, "ClosePanel") || !strcmp(command, "UnloadPanel")) g_panels.erase(text);
         else if (!strcmp(command, "UnloadAll") || !strcmp(command, "CloseAll")) g_panels.clear();
         // An old layout's TogglePanel (the tab before the runtime routing) still means "show the page".
-        else if (!strcmp(command, "TogglePanel") && *text) { if (!g_panels.erase(text)) g_panels.insert(text); }
+        // (A TogglePanel is not tracked in the set, as on main: one the game ignored left a stale
+        // entry, and the old layout's toggle took the open stash out of it - review of #608, point 9.)
         if (!strcmp(command, "TogglePanel") && !strcmp(text, "BankExpansionLayout")) {
             framevr::collection::TabSetWanted(true);
             Log("gamestate: the Collection tab on the stash bar was chosen (old layout message)");
@@ -1145,6 +1150,10 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         g_leatherMenu.store(framevr::leather::OnSheet(g_panels));
         g_statsButton.store(framevr::statsbutton::Shown(g_panels));
         g_stashButtons.store(framevr::stashbuttons::Shown(g_panels));
+        if (!g_stashButtons.load() && framevr::collection::TabWanted()) {   // CloseAll / UnloadAll too (review of #608, point 2)
+            framevr::collection::TabSetWanted(false);
+            Log("gamestate: no stash panel left; the Collection page goes");
+        }
         g_respecButton.store(framevr::respecbutton::Shown(g_panels));
         {
             // CandidateListPanel: the game's list for a text box's input method - opened with character creation's name
@@ -1428,7 +1437,10 @@ bool RespecButtonShown(){return false;}   // the reset engine is in the native O
 uint32_t PanelChanges(){return g_panelChanges.load();}
 bool KeyboardShown(){return g_keyboard.load();}
 bool KeyboardText(){return g_keyboardText.load();}
-bool GoldBoxShown(){return g_goldBox.load();}
+// The stash's own gold box only (Withdraw / Deposit): the inventory's drop-gold box and any other
+// "Gold" panel keep the game's own controls (bearstonem's review of #608, point 4).
+bool GoldBoxShown(){return g_goldBox.load()&&g_stashButtons.load();}
+bool CollectionTabOnBar(){return g_collectionTabOnBar.load();}
 bool FrontSettingsOpen(){return g_frontSettings.load();}
 bool FrontOverlayOpen(){return g_frontOver.load();}
 bool FrontMultiplayerOpen(){return g_frontMultiplayer.load();}

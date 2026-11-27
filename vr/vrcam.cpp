@@ -397,6 +397,8 @@ struct Settings {
     std::atomic<float> stashScale{2.0f};   // [interaction] stash_scale: the stash window's own scale (isolated to it)
     std::atomic<float> stashDrop{0.0f};    // [interaction] stash_drop: extra metres to lower the stash window
     std::atomic<float> stashDistance{0.25f}; // [interaction] stash_distance: extra metres to push the stash away
+    std::atomic<bool> uiShotGrips{false};     // [dev] ui_shot_grips
+    std::atomic<bool> collectionLog{false};   // [dev] collection_log
     std::atomic<bool> collectionInUi{true};   // [collection] in_ui: the Collection page drawn into the game's UI image
     std::atomic<bool> stashWorld{false};    // [interaction] stash_world: keep the world behind the stash (experimental)
     std::atomic<bool>  campfireCaption{true};   // [campfire] caption: the picked hero's class and words on a board over the heroes
@@ -1735,6 +1737,8 @@ void LoadSettings() {
         g_set.stashDistance.store(std::clamp(IniF(L"interactions", L"stash_distance", 0.25f), -0.5f, 1.5f));
         g_set.stashWorld.store(IniB(L"interactions", L"stash_world", false));
         g_set.collectionInUi.store(IniB(L"collection", L"in_ui", true));   // the page drawn into the game's UI image (variant B)
+        g_set.uiShotGrips.store(IniB(L"dev", L"ui_shot_grips", false));     // both grips: a UI shot (developer's tool)
+        g_set.collectionLog.store(IniB(L"dev", L"collection_log", false));  // the stash's timed diagnostic lines
         g_set.campfireMenuTop.store(std::clamp(IniF(L"campfire", L"menu_top", 0.78f), 0.0f, 0.98f));
         {   // [frontend]
             const bool front = IniB(L"frontend", L"scene", true);   // the menu in 3D: on by default (2026-11-17)
@@ -8052,6 +8056,8 @@ void CampfireTick() {
     framevr::SetStashDistance(g_set.stashDistance.load());   // and how far it is pushed away ([interaction] stash_distance)
     framevr::SetStashWorld(g_set.stashWorld.load());         // and whether the world stays behind it ([interaction] stash_world)
     framevr::SetCollectionInUi(g_set.collectionInUi.load()); // the Collection page in the game's UI image ([collection] in_ui)
+    framevr::SetUiShotGrips(g_set.uiShotGrips.load());       // [dev] ui_shot_grips
+    framevr::SetCollectionLog(g_set.collectionLog.load());   // [dev] collection_log
     {   // the caption over the heroes ([campfire] caption...)
         const float rect[4] = { g_set.campfireCaptionRect[0].load(), g_set.campfireCaptionRect[1].load(), g_set.campfireCaptionRect[2].load(), g_set.campfireCaptionRect[3].load() };
         framevr::SetCampfireCaption(g_campfire.load() && !g_frontend3d.load() && g_set.campfireMenuBoard.load() && g_set.campfireCaption.load(), rect,
@@ -13375,7 +13381,9 @@ DWORD WINAPI UpdateThread(void*) {
         const bool focus = GameFocused();
         if (f12.Pressed(focus)) Toggle();
 #ifdef D2RVR_NATIVE_OPENXR
-        if (f7.Pressed(focus)) {
+        // F7 (a test shortcut) only at the stash: anywhere else the page would dock on another menu
+        // (bearstonem's review of #608, point 2). The game keeps getting the key either way.
+        if (f7.Pressed(focus) && gamestate::StashButtonsShown()) {
             framevr::collection::TabSetWanted(!framevr::collection::TabWanted());   // the Collection panel
             LogF("vrcam: collection panel %s (F7)", framevr::collection::TabWanted() ? "asked for" : "put away");
         }

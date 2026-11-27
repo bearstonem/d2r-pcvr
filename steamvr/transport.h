@@ -160,6 +160,10 @@ void SetStashDistance(float metres);
 void SetStashWorld(bool on);
 // The Collection page drawn into the game's own UI image (variant B, [collection] in_ui), not on a quad of its own.
 void SetCollectionInUi(bool on);
+// [dev] ui_shot_grips: both grips held half a second take a UI shot (a developer's tool; off by default).
+void SetUiShotGrips(bool on);
+// [dev] collection_log: the stash's and the Collection page's timed diagnostic lines (off by default).
+void SetCollectionLog(bool on);
 bool StashMenuWorld();
 // The campfire's caption: the part of the game's menu band (shares of it: left, top, right, bottom) where the
 // game writes the picked hero's class and words, on a board of its own above the heroes (width, distance
