@@ -19,6 +19,8 @@ uint32_t KeyboardEpoch(); // changes each time a box comes up anew (a closed key
 void MultiplayerField(int x,int y);
 int MultiplayerFocus(); // -1 none, -2 older loader
 uint32_t MultiplayerFocusEpoch();
+bool CollectionTabOnBar();   // the prepared layout's sixth (Collection) tab is on the stash bar
+bool GoldBoxShown();      // the game's box for an amount of gold (drop / deposit / withdraw): the gold pad
 bool CloseLeatherMenu();  // queue: close the tabbed menu if only it and its pages are open, the cursor empty
 bool StowLeatherMenu();   // queue: the held menu put away over the left shoulder (any page or dialog; not with an item on the cursor)
 bool NpcChoicesOnly();

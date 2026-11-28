@@ -58,6 +58,9 @@ struct MonsterPlates {int names=1;uint32_t anchorsHidden=0,panelsHidden=0,panels
 MonsterPlates TakeMonsterPlates();
 // Trial: paint the monster health panel after current-eye tooltip updates.
 void SetMonsterDrawOrder(bool on);
+// The game's TooltipsPanel left unpainted (the Collection page covers the stash and the mod
+// draws the tooltips over it). Any thread; the hook goes in with the camera's.
+void SetHideGameTooltips(bool on);
 // Main rendering thread only; -1 outside paired gameplay.
 void SetStereoUiEye(int eye);
 // Bounded one-pair diagnostic; -1 disables, 0/1 identify the rendered eye.

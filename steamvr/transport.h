@@ -150,6 +150,25 @@ void OpenCampfireFrame();   // the campfire: the headset frame opened before an 
 // The campfire's menu (name, Create, Back, the checkboxes) as a board in the scene: its width,
 // how far ahead of the eyes and how far below them it stands when the scene begins (metres).
 void SetCampfireMenu(float width, float distance, float drop);
+// The stash window's own scale, isolated to it ([interaction] stash_scale).
+void SetStashScale(float scale);
+// Extra metres to lower the stash window, on top of its band centring ([interaction] stash_drop).
+void SetStashDrop(float drop);
+// Extra metres to push the whole stash window away from the eyes ([interaction] stash_distance).
+void SetStashDistance(float metres);
+// Keep the world behind the stash (experimental, [interaction] stash_world) - like the leather.
+void SetStashWorld(bool on);
+// The Collection page drawn into the game's own UI image (variant B, [collection] in_ui), not on a quad of its own.
+void SetCollectionInUi(bool on);
+// [dev] ui_shot_grips: both grips held half a second take a UI shot (a developer's tool; off by default).
+void SetUiShotGrips(bool on);
+// [dev] collection_log: the stash's and the Collection page's timed diagnostic lines (off by default).
+void SetCollectionLog(bool on);
+// [collection] tooltip_hole: the page leaves out the block where the game's tooltip reaches over it (on by default).
+void SetTooltipHole(bool on);
+// The last CopyUi put the Collection page into the UI image (it covers the stash's grid).
+bool CollectionCoversStash();
+bool StashMenuWorld();
 // The campfire's caption: the part of the game's menu band (shares of it: left, top, right, bottom) where the
 // game writes the picked hero's class and words, on a board of its own above the heroes (width, distance
 // ahead and rise over the eyes, metres). on=false: none.

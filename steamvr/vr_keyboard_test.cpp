@@ -284,5 +284,22 @@ int main(){
         static_assert(drag.move&&!drag.jump,"parked with a button held: it follows (a drag), then stays where let go");
         Check(true,"parked pointer");
     }
+    {   // the gold pad: digits, 000, Back, Select all, Max, Enter in the middle five columns
+        const auto& g=keyboard::Gold;
+        const auto at=[&](float col,float row){return keyboard::KeyAt(g,(col+.5f)/keyboard::Columns,(row+.5f)/float(g.rows));};
+        keyboard::Typist t;
+        Check(at(0,0)<0&&at(9,3)<0,"the gold pad leaves the board's sides empty");
+        const auto seven=t.Press(g,at(2.5f,0));
+        Check(seven.send==keyboard::Send::Char&&seven.ch==L'7',"7 types 7");
+        const auto thousands=t.Press(g,at(4.f,3));
+        Check(thousands.send==keyboard::Send::Text&&thousands.text==L"000","000 types three zeros");
+        const auto all=t.Press(g,at(6.f,1));
+        Check(all.selectAll&&all.send==keyboard::Send::None,"Select all selects the box's text");
+        const auto max=t.Press(g,at(6.f,2));
+        Check(max.selectAll&&max.send==keyboard::Send::Text&&!max.text.empty(),"Max replaces it with more than there is");
+        Check(t.Press(g,at(6.f,0)).send==keyboard::Send::Backspace&&t.Press(g,at(6.f,3)).send==keyboard::Send::Enter,"Back and Enter");
+        for(int i=0;i<g.count;++i){const auto r=keyboard::KeyTexelRect(g,i);
+            Check(r.x>=0&&r.y>=0&&r.x+r.w<=keyboard::TexelWidth&&r.y+r.h<=keyboard::TexelHeight(g),"a gold pad key inside its picture");}
+    }
     std::puts("VR keyboards (name and multiplayer) layout, laser hits, typing, picture and when they show passed");
 }

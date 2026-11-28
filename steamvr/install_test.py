@@ -132,6 +132,13 @@ class InstallationTests(unittest.TestCase):
             sewers = {name: b'local sewer fixture' for name in install.prepare_sewer_backdrop.install_names('D2R-PCVR')}
             sewers[install.prepare_sewer_backdrop.INSTALL_RECEIPT] = json.dumps({'version': 1, 'sha256': {
                 name: hashlib.sha256(data).hexdigest() for name, data in sewers.items()}}).encode()
+            collection = {f'D2R-PCVR.mpq/{install.prepare_collection_tab.LAYOUT}': b'local stash layout fixture'}
+            collection[install.prepare_collection_tab.RECEIPT] = json.dumps({'version': 1, 'sha256': {
+                name: hashlib.sha256(data).hexdigest() for name, data in collection.items()}}).encode()
+            catalog_line = b'# collection 1\nuniques\tam7\t282\tFixture\t50\tabow\t\n'
+            def collection_catalog(_game, out_dir, casclib=None):
+                (Path(out_dir) / 'collection.tsv').write_bytes(catalog_line)
+                return {'uniques': 1, 'sets': 0, 'runewords': 0, 'materials': 0, 'source': 'fixture'}
             with patch.object(install, 'require_game_closed'), contextlib.redirect_stdout(io.StringIO()), \
                     patch('casc_assets.CascAssets', side_effect=ValueError('Fixture has no game archives')), \
                     patch.object(install, 'COMPILER_HASH', hashlib.sha256(compiler.read_bytes()).hexdigest()), \
@@ -140,7 +147,9 @@ class InstallationTests(unittest.TestCase):
                     patch.object(install, 'prepare_potions', side_effect=potions), \
                     patch.object(install, 'prepare_spell_sprites', side_effect=spell_sprites),                     patch.object(install, 'prepare_props', side_effect=prop_catalog), \
                     patch.object(install.prepare_arcane_sky, 'prepare', return_value=arcane), \
-                    patch.object(install.prepare_sewer_backdrop, 'prepare', return_value=sewers):
+                    patch.object(install.prepare_sewer_backdrop, 'prepare', return_value=sewers), \
+                    patch.object(install.prepare_collection_tab, 'prepare', return_value=collection), \
+                    patch.object(install.prepare_collection, 'prepare', side_effect=collection_catalog):
                 unapproved_hashes = ('0' * 64, '1' * 64)
                 with patch.object(sys, 'argv', common), patch.object(install, 'LOADER_HASHES', unapproved_hashes):
                     with self.assertRaises(SystemExit) as caught:
@@ -186,6 +195,12 @@ class InstallationTests(unittest.TestCase):
                     self.assertEqual((mod / name).read_bytes(), data)
                 for name, data in sewers.items():
                     self.assertEqual((mod / name).read_bytes(), data)
+                for name, data in collection.items():
+                    self.assertEqual((mod / name).read_bytes(), data)
+                # The panel's catalog sits beside the plugin; the loader is set to add
+                # the shared stash tabs the collection stores in.
+                self.assertEqual((mod_plugins / 'collection.tsv').read_bytes(), catalog_line)
+                self.assertIn('add_shared_tabs = 40', (game / 'd2rloader/config/d2rloader.toml').read_text())
                 journal = json.loads((snapshot / 'manifest.json').read_text())
                 health_layout = mod_identity.MODINFO.parent / install.enemy_health_layout.RELATIVE_PATH
                 self.assertEqual((game / health_layout).read_bytes(), install.enemy_health_layout.payload())
@@ -273,7 +288,9 @@ class InstallationTests(unittest.TestCase):
                 self.assertEqual((saves / 'Settings.json').read_bytes(), custom_video)
                 self.assertEqual((mod / 'reshade/ReShade.ini').read_bytes(), b'custom reshade settings')
                 self.assertEqual((ofxr_dir / 'ofxr_bridge.ini').read_bytes(), b'[ofxr]\r\nbackend=nvidia\r\n')
-                self.assertEqual((game / 'd2rloader/config/d2rloader.toml').read_text(), 'default_mod = "D2R-VR"')
+                loader_toml = (game / 'd2rloader/config/d2rloader.toml').read_text()
+                self.assertIn('default_mod = "D2R-VR"', loader_toml)   # the loader's own settings stay
+                self.assertIn('add_shared_tabs = 40', loader_toml)     # the collection's shared tabs are added
                 self.assertEqual((mod_plugins / 'd2rl-pcvr.dll').read_bytes(), b'updated fixture plugin')
                 for name, data in sewers.items():
                     self.assertEqual((mod / name).read_bytes(), data)
@@ -472,6 +489,7 @@ class RenameMigrationTests(unittest.TestCase):
                 patch.object(install, 'prepare_spell_sprites', side_effect=ValueError('fixture: no game archives')),                 patch.object(install, 'prepare_props', side_effect=ValueError('fixture: no game archives')), \
                 patch.object(install.prepare_arcane_sky, 'prepare', side_effect=ValueError('fixture: no game archives')), \
                 patch.object(install.prepare_sewer_backdrop, 'prepare', side_effect=ValueError('fixture: no game archives')), \
+                patch.object(install.prepare_collection_tab, 'prepare', side_effect=ValueError('fixture: no game archives')), \
                 patch.object(sys, 'argv', self.argv + list(extra)), contextlib.redirect_stdout(output):
             install.main()
         return output.getvalue()

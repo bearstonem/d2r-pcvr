@@ -100,7 +100,9 @@ inline Want Wanted(const NameBox& name,const MultiplayerPanel& multiplayer) {
 // What a key does. Char types its letter; Shift makes the next letter a
 // capital (once), or a digit its symbol; Close hides the keyboard until the
 // text box comes up anew.
-enum class Action : uint8_t {Char,Backspace,Enter,Shift,Close};
+// Text: the key's label typed whole ("000"); SelectAll: Ctrl+A in the box; Max: all of it
+// replaced by more gold than anyone holds - the game's gold box keeps it to what there is.
+enum class Action : uint8_t {Char,Backspace,Enter,Shift,Close,Text,SelectAll,Max};
 struct Key {
     float col,row,span;   // in key units from the keyboard's top left
     Action action;
@@ -157,6 +159,19 @@ struct Layout {const Key* keys;int count;int rows;};
 inline constexpr Layout Name{NameKeys,int(sizeof NameKeys/sizeof NameKeys[0]),4};
 inline constexpr Layout Text{TextKeys,int(sizeof TextKeys/sizeof TextKeys[0]),5};
 constexpr float Columns=10;
+// The gold pad (owner 2026-11-22): the game's box for an amount of gold (drop, deposit,
+// withdraw) - digits, 000, Back, Select all, Max, Enter - in the middle five columns.
+inline constexpr Key GoldKeys[]={
+    {2.5f,0,1,Action::Char,'7',L"7"},{3.5f,0,1,Action::Char,'8',L"8"},{4.5f,0,1,Action::Char,'9',L"9"},
+    {5.5f,0,2,Action::Backspace,0,L"Back"},
+    {2.5f,1,1,Action::Char,'4',L"4"},{3.5f,1,1,Action::Char,'5',L"5"},{4.5f,1,1,Action::Char,'6',L"6"},
+    {5.5f,1,2,Action::SelectAll,0,L"Select all"},
+    {2.5f,2,1,Action::Char,'1',L"1"},{3.5f,2,1,Action::Char,'2',L"2"},{4.5f,2,1,Action::Char,'3',L"3"},
+    {5.5f,2,2,Action::Max,0,L"Max"},
+    {2.5f,3,1,Action::Char,'0',L"0"},{3.5f,3,2,Action::Text,0,L"000"},
+    {5.5f,3,2,Action::Enter,0,L"Enter"},
+};
+inline constexpr Layout Gold{GoldKeys,int(sizeof GoldKeys/sizeof GoldKeys[0]),4};
 
 // The picture: KeyTexels a key unit, Pad texels of stone-free gap round each
 // key, so the lit copy's crop never shows a neighbour's edge.
@@ -181,6 +196,18 @@ inline Rect KeyTexelRect(const Layout& l,int i) {
 // panel, and growing with the menu distance, so a key stays as easy to hit.
 constexpr float WidthOfWorkspace=.5f,GapOfWorkspace=.02f,TiltDegrees=30;
 struct Board {math::Vec position{};math::Quat orientation{0,0,0,1};float width=0,height=0;};
+// The gold pad in the menu's own plane just under the game's gold box (owner 2026-11-22: under the
+// whole menu it was out of sight - the stash's window is scaled up). topU / topV: the pad's top
+// middle on the surface (0-1 from its top left), read off the UI image (GoldBox*). The board is
+// twice the pad's width (the pad takes its middle five columns).
+constexpr float PadWidthOfSurface=.36f,PadLift=.012f;
+constexpr float GoldBoxCentreX=1120,GoldBoxBottom=745;   // in the 2244 x 2352 UI image (owner's shot 2026-11-22 23:53)
+inline Board PlaceGoldPad(math::Vec surface,math::Quat facing,float width,float height,float topU=.5f,float topV=.5f) {
+    if(!(width>0)||!(height>0))return {};
+    const float w=PadWidthOfSurface*width,h=w*float(Gold.rows)/Columns;
+    const math::Vec centre{(topU-.5f)*width,(.5f-topV)*height-h*.5f,PadLift};
+    return {surface+math::Rotate(facing,centre),facing,w,h};
+}
 inline Board Place(const Layout& l,math::Vec surface,math::Quat facing,float width,float height,float tiltDegrees=TiltDegrees) {
     if(!(width>0)||!(height>0))return {};
     const float workspace=std::max(width,height*16.f/9.f);
@@ -272,8 +299,9 @@ inline std::wstring Label(const Layout& l,int i,bool capitals,bool chat=false,bo
 
 // What a press sends: a character (ch), Backspace or Enter (key), or nothing
 // (Shift, Close). close: hide the keyboard.
-enum class Send : uint8_t {None,Char,Backspace,Enter};
-struct Output {Send send=Send::None;wchar_t ch=0;bool close=false;};
+// selectAll goes first (Ctrl+A), then the send; Text types text whole.
+enum class Send : uint8_t {None,Char,Backspace,Enter,Text};
+struct Output {Send send=Send::None;wchar_t ch=0;bool close=false;bool selectAll=false;std::wstring text;};
 class Typist {
     bool shift=false,symbols=false;
 public:
@@ -296,6 +324,9 @@ public:
             case Action::Backspace:out.send=Send::Backspace;break;
             case Action::Enter:out.send=Send::Enter;shift=false;break;
             case Action::Close:out.close=true;shift=false;break;
+            case Action::Text:out.send=Send::Text;out.text=k.label;break;
+            case Action::SelectAll:out.selectAll=true;break;
+            case Action::Max:out.selectAll=true;out.send=Send::Text;out.text=L"99999999";break;
         }
         return out;
     }

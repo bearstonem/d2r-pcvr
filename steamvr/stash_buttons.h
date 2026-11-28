@@ -16,17 +16,25 @@ template<class Names> inline bool Shown(const Names& open) {
 }
 constexpr int Width=240,Height=144;
 constexpr int LabelHeight=26;
-inline constexpr const wchar_t* Labels[]={L"< Previous tab",L"Next tab >"};
+// The tab buttons, then the Collection panel's own button (collection_tab.h):
+// the same plaques, one per action.
+inline constexpr const wchar_t* Labels[]={L"< Previous tab",L"Next tab >",L"Collection"};
+inline constexpr int ButtonCount=3;
+// Shown: the two tab plaques. The Collection plaque stays painted but unused - the stash
+// bar's own sixth tab opens the Collection (owner 2026-11-20: bring the plaques back).
+inline constexpr int TabButtonCount=2;
 // Inset into the native recesses flanking the stash gold field. Estimated
 // from the in-game screenshot against the previous known button positions.
 // Rendered faces and pointer hit boxes share this 16:9-band placement.
 constexpr float ButtonWidth=.076f,ButtonHeight=.082f,CenterY=.715f;
-constexpr float PreviousX=.218f,NextX=.404f;
-inline respecbutton::Spot Place(float width,float height,int direction) {
+constexpr float PreviousX=.218f,NextX=.404f,CollectionX=.590f;
+inline constexpr float Spots[ButtonCount]={PreviousX,NextX,CollectionX};
+inline respecbutton::Spot Place(float width,float height,int index) {
     if(!(width>0)||!(height>0))return {};
     const float band=std::min(height,width*9.f/16.f),bandWidth=band*16.f/9.f;
     const float h=ButtonHeight*band;
-    return {((direction?NextX:PreviousX)-.5f)*bandWidth,
+    const int at=std::clamp(index,0,ButtonCount-1);
+    return {(Spots[at]-.5f)*bandWidth,
         height*.5f-CenterY*band,ButtonWidth*bandWidth,h};
 }
 // Dark inset stone with nearly square corners and a thin, muted bevel.
@@ -68,22 +76,38 @@ inline std::vector<uint8_t> PaintFace(int width,int height,bool highlighted) {
     }
     return pixels;
 }
-// One fresh pull owns one direction until release, even if the ray crosses
-// to the other button. Cancel immediately when the stash/focus is lost.
+// What a pull on a plaque does. The two tab buttons pulse the game's bumpers
+// (transport turns that into LeftBumper / RightBumper); the Collection button
+// opens or closes the Collection panel.
+enum class Action : uint32_t {
+    None = 0,
+    Previous,
+    Next,
+    Collection,
+};
+
+// One fresh pull owns one action until release, even if the ray crosses to
+// another button. Cancel immediately when the stash or the focus is lost.
 class Input {
     statsbutton::Press press;
     int selected=-1;
     uint64_t pulseUntil=0;
 public:
     void Reset(){press.Reset();selected=-1;pulseUntil=0;}
-    uint16_t Step(bool active,int hover,bool trigger,uint64_t now) {
-        if(!active){Reset();return 0;}
+    Action Step(bool active,int hover,bool trigger,uint64_t now) {
+        if(!active){Reset();return Action::None;}
         if(press.Step(hover>=0,trigger,now)) {
             selected=hover;
             pulseUntil=now+statsbutton::MinMs;
         }
         // A short pulse lets the game poll the bumper without auto-repeat.
-        return press.Held()&&now<pulseUntil?(selected==0?menus::LeftBumper:menus::RightBumper):0;
+        if(!(press.Held()&&now<pulseUntil))return Action::None;
+        switch(selected) {
+        case 0:  return Action::Previous;
+        case 1:  return Action::Next;
+        case 2:  return Action::Collection;
+        default: return Action::None;
+        }
     }
     bool Held() const{return press.Held();}
 };

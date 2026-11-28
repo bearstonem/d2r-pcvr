@@ -127,6 +127,20 @@
 #include "menu_drop.h"
 #include "respec_button.h"
 #include "stash_buttons.h"
+#include "collection_tab_button.h"
+#include "collection_draw.h"
+#include "collection_ui_image.h"
+#include "collection_art.h"
+#include "collection_pointer.h"
+#include "stash_nav.h"
+#include "stash_plaque_art.h"
+#include "stash_slots.h"
+#include "stash_stick_art.h"
+#include "stash_tab_hover_art.h"
+#include "../vr/collection_tab.h"
+#include "../vr/collection_store.h"
+#include "../vr/collection_tooltip_provider.h"
+#include "../vr/screenshot.h"
 #include "vr_keyboard.h"
 #include "wrist_chat.h"
 #include "wrist_chat_ui.h"
@@ -671,6 +685,53 @@ LatestWorker<SettingsPaintJob,SettingsPainted> settingsPainter([](const Settings
     }
     return SettingsPainted{std::move(picture.pixels),std::move(picture.layout),double(hookmetrics::Nanos()-start)/1e6,std::move(picture.error)};
 });
+// The Collection panel (collection_draw.h): the same background-painter pattern
+// as VR Settings. It is the stash's own page, so it is opened from the stash and
+// painted while it is open.
+struct CollectionPaintJob {
+    collection::Library library;
+    collection::ViewState view;
+    std::string tooltip;         // the pointed entry's game item text (empty until fetched)
+    std::string tooltipRanges;   // the same item's possible ranges, for a found entry
+    int uiW = 0, uiH = 0;        // the page's rectangle in the game's UI image (variant B); 0: none
+    collection::draw::Carried carried;   // the item in the hand, at the laser
+    collection::draw::InventoryTip inventory;   // the inventory item under the laser (its card at the page's edge)
+};
+struct CollectionPainted {
+    std::vector<uint8_t> pixels;
+    std::string          error;
+    double               ms = 0;   // how long the paint took, for the repaint-lag report
+    std::vector<uint16_t> ui;      // the picture in the UI image's own format, uiW x uiH (collection_ui_image.h)
+    int uiW = 0, uiH = 0;
+};
+// One icon of the mod's own cache by cache key ("u122", "t0"). The picture is a
+// view into the cache's buffer, which stays alive for the whole paint.
+const collection::draw::IconPixels* CollectionIcon(const std::string& key) {
+    static thread_local std::shared_ptr<const interaction::icons::Image> held;
+    static thread_local collection::draw::IconPixels                      view;
+    held = interaction::icons::Get(key);
+    if (!held || held->rgba.empty()) return nullptr;
+    view.rgba   = held->rgba.data();
+    view.width  = int(held->width);
+    view.height = int(held->height);
+    return &view;
+}
+LatestWorker<CollectionPaintJob,CollectionPainted> collectionPainter([](const CollectionPaintJob& job) {
+    const double start=hookmetrics::Nanos();
+    thread_local std::unique_ptr<settings::draw::Painter> painter;
+    if(!painter)painter=std::make_unique<settings::draw::Painter>();
+    if(!painter->Ready())return CollectionPainted{{},painter->Error(),0.0};
+    if(!painter->Begin())return CollectionPainted{{},painter->Error(),0.0};
+    collection::draw::Paint(*painter,job.library,job.view,CollectionIcon,job.tooltip,job.tooltipRanges,job.carried,job.inventory);
+    CollectionPainted out{painter->End(),{},0.0};
+    if(job.uiW>0&&job.uiH>0&&!out.pixels.empty()) {   // variant B: ready for the UI image, off the render thread
+        out.ui=collection::uiimage::Convert(out.pixels,panelatlas::Collection.w,int(collection::panel::CanvasWidth),
+                                            int(collection::panel::CanvasHeight),job.uiW,job.uiH);
+        if(!out.ui.empty()){out.uiW=job.uiW;out.uiH=job.uiH;}
+    }
+    out.ms=(hookmetrics::Nanos()-start)/1e6;
+    return out;
+});
 // What a picture shows. Everything that changes the look is compared as is
 // (hover, pressed, the card), and the clock only through buckets: the confirm
 // row's and Undo reset's guards arming, Undo reset ending, and its drain bar
@@ -696,6 +757,127 @@ uint64_t performanceSerial=0;ULONGLONG performanceAt=0;
 uint64_t settingsPaintRequest=0;
 XrPosef settingsPose{};
 constexpr float settingsWidth=.95f,settingsHeight=settingsWidth*settings::Height/settings::Width;
+// The Collection panel's own state: the open tab and page, the picture asked of
+// the painter and the pose it is shown at. collectionOpen follows the stash.
+collection::ViewState collectionView;
+uint64_t collectionPaintRequest=0;
+ULONGLONG collectionRequestAt=0;   // when the open page's picture was last asked for (the lag report)
+bool collectionAtlasPending=false;
+bool collectionOpen=false;
+bool collectionImageReady=false;
+collection::ViewState collectionPaintedView;   // the tab and page the picture shows
+uint64_t collectionIconRevision=~0ull;          // the icon cache's revision the picture shows
+collection::panel::Hit collectionHover{};                   // the slot or control the laser is over
+collection::panel::Hit collectionPaintedHover{};            // the hover the picture shows
+uint64_t collectionTooltipRevision=~0ull;                   // the item text's revision the picture shows
+uint64_t collectionTooltipKey=~0ull;                        // the pointed entry the card was last asked for
+collection::pointer::Filter collectionPointer;              // the laser's rules (collection_pointer.h)
+bool collectionDocked=false;                                // shown inside the stash panel, not floating
+// The Collection page's own place on the stash panel, measured in the headset
+// (owner 2026-11-19): u 0.184..0.443, v 0.101..0.349 of the stash quad. The page is
+// drawn there, over the stash's grid; the stash's own tab bar (with the Collection
+// tab) stays above it.
+// The page covers the WHOLE stash window's content, below its tab bar, so the game's own tab
+// (whatever is active under it) is neither seen nor clicked. Measured from the owner's UI shot
+// (2026-11-20): the stash window is u 0.126..0.499, v 0.026..0.462 of the surface; the tab bar
+// ends about v 0.10. The page keeps the tab bar free, so the bar still switches tabs.
+// (2026-11-20, later) The owner's accepted mock-up was drawn on that same shot with the page at
+// 393,230 - 1013,976 of its 2244 x 2352 pixels: the stash's content under its tab bar, no more.
+// The earlier .135-.495 / .105-.455 ran over the stash's frame ("the grid is too big").
+constexpr float CollectionPageLeft=(280.f+collection::panel::MockLeft)/2244.f,CollectionPageRight=(280.f+collection::panel::MockRight)/2244.f,
+                CollectionPageTop=(50.f+collection::panel::MockTop)/2352.f,CollectionPageBottom=(50.f+collection::panel::MockBottom)/2352.f;
+bool collectionTriggerDown=false;
+bool collectionTriggerWas=false;   // the previous frame's trigger, for the press-edge click
+std::atomic<bool> collectionLog{false};   // [dev] collection_log: the stash's and the Collection's timed diagnostic lines (review point 10)
+std::atomic<bool> uiShotGrips{false};    // [dev] ui_shot_grips: both grips held take a UI shot (off by default)
+std::atomic<bool> uiShotWanted{false};   // both grips held: write the captured UI layer as a PNG in pcvr_shots
+bool collectionWasOpen=false;
+XrPosef collectionPose{};
+constexpr float collectionWidth=.95f,collectionHeight=collectionWidth*collection::panel::CanvasHeight/collection::panel::CanvasWidth;
+float collectionShownWidth=collectionWidth,collectionShownHeight=collectionHeight;   // the size it is drawn at
+// Variant B ([collection] in_ui): the page drawn into the game's own UI image in CopyUi,
+// over the stash's grid, instead of on a quad of its own. collectionUiW/H: the page's
+// rectangle in that image (from the last CopyUi), asked of the painter; collectionUiPixels:
+// its last picture at that size; collectionUiSerial counts them; the upload buffer holds the
+// copy the GPU takes into the UI image (CopyCollectionIntoUi).
+int collectionUiW=0,collectionUiH=0,collectionPaintedUiW=0,collectionPaintedUiH=0;
+std::vector<uint16_t> collectionUiPixels;int collectionUiPixelsW=0,collectionUiPixelsH=0;
+uint64_t collectionUiSerial=0;
+bool collectionInUiShown=false;   // the last CopyUi put the page into the UI image
+std::atomic<bool> collectionCoversStash{false};   // the same, for the game's threads (its tooltips held back)
+std::atomic<uint64_t> collectionCoversAt{0};      // when it last did (a menu closed stops CopyUi: the flag goes stale)
+int collectionUiX=0,collectionUiY=0;   // where it went (UI image pixels), for the UI shot
+collection::draw::Carried collectionCarried,collectionPaintedCarried;   // the item in the hand at the laser, and as last painted
+struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};UINT rows=0;
+        int w=0,h=0;uint64_t serial=~0ull;} collectionUiUpload;
+// The stash's tab bar with Collection as the active tab (collection_art.h, cut from the owner's
+// shot as the mock-up did), in the UI image's format, laid over the bar while the page is shown.
+struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};bool tried=false;} collectionTabsUpload;
+// The same bar with the hand's item painted on it, where the laser holds it over or near the bar
+// (the bar's art otherwise covers the game's own item there). Rebuilt when the item or its spot moves.
+struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;std::string key;int x=-1,y=-1;bool ready=false;} collectionTabsCarriedUpload;
+float collectionCarriedBarU=-1,collectionCarriedBarV=-1;   // the laser in the UI image (0..1) while an item is held by the bar; -1: none
+// The inventory cells an item passes through on its way in or out of the collection: drawn
+// empty over the UI image while it does (owner 2026-11-21: the item flashed there). Packed
+// x | y<<4 | w<<8 | h<<12 (cells), and until when (GetTickCount64).
+std::atomic<uint32_t> inventoryMaskBlock{0};std::atomic<uint64_t> inventoryMaskUntil{0};
+struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+        int w=0,h=0;uint32_t block=~0u;} inventoryMaskUpload;
+// The stash's tab bar and shared page counter, read back from the game's UI image every frame
+// (stash_nav.h): a ring of three, each with its two strips, and the fence its copy waits on.
+struct StashStrip {Microsoft::WRL::ComPtr<ID3D12Resource> buffer;D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp{};int w=0,h=0;};
+struct StashRead {StashStrip tabs,counter,plaques,page;uint64_t fence=0;bool pending=false,pageRead=false,pageRef=false,holeOk=false;};
+// The game's tooltip over the Collection page (an inventory or equipment item's, reaching left):
+// found on the game's own picture under the page (the page's rectangle read back with the stash's
+// strips) as the block that darkened against the same rectangle read while the laser was on the
+// page (no tooltip then). The page leaves that block out, so the game's tooltip shows whole
+// (owner 2026-11-28). Page-relative pixels of the 2244 x 2352 picture; x1 <= x0: none.
+std::atomic<int> tooltipHoleX0{0},tooltipHoleY0{0},tooltipHoleX1{0},tooltipHoleY1{0};
+std::atomic<bool> pageRefNow{false};      // the frame thread: the laser on the page, the hand empty (no game tooltip)
+std::atomic<bool> tooltipHoleOn{true};    // [collection] tooltip_hole
+std::vector<uint8_t> pageRef;             // the reference, a byte of brightness per 2 x 2 pixels (render thread)
+int pageRefW=0,pageRefH=0;
+std::array<std::vector<uint8_t>,8> pageRefs;   // one per stash tab under the page (stashnav tab 0..7)
+std::atomic<bool> holeAllowed{false};          // the frame thread: the laser on the inventory / equipment side
+std::array<StashRead,3> stashReads;int stashReadNext=0,stashReadRecorded=-1;unsigned stashReadsDone=0,stashReadsRecorded=0;
+// "Page N / 5" (stash_counter_art.h) in the UI image's format, laid over the game's counter.
+struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp[5]{};bool tried=false;} counterUpload;
+// The tab plaques (stash_plaque_art.h) set into the stash's two carved recesses on the game's own
+// tabs: Previous / Next, idle and lit. plaqueLit: the one under the laser, side | 2 for the upper
+// half (the shared page, on the Shared tab only); -1 none. plaqueCover: per side, the 8 x 8 cells
+// where the game's picture is not the bare carving (a tooltip, an item on the cursor) - those stay
+// the game's (owner 2026-11-22: tooltips over the plaques).
+struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp[2*stashplaques::Variants]{};bool tried=false;} plaqueUpload;
+std::atomic<int> plaqueLit{-1};
+// 16 x 16 cells a side, four words of bits each (owner 2026-11-22: a comparison tooltip's last
+// line still went under the plaque with 8 x 8).
+constexpr int PlaqueCells=16,PlaqueWords=PlaqueCells*PlaqueCells/64;
+std::atomic<uint64_t> plaqueCover[2][PlaqueWords]{};
+// The shared counter's cells (11 columns x 4 rows) a tooltip covers (CollectStashReads): those
+// stay the game's.
+std::atomic<uint64_t> counterCover{0};constexpr int CounterColumns=11,CounterRows=4;
+// Whether a cell of the game's picture differs from the bare reference: a fifth of its pixels
+// off by more than 40 (RGB summed). rgba: 4 bytes a pixel; ref: refStride bytes a pixel.
+bool CellCovered(const uint8_t* rgba,int stride,const uint8_t* ref,int refStride,int refRow,int x0,int y0,int x1,int y1) {
+    int off=0,n=0;
+    for(int y=y0;y<y1;++y)for(int x=x0;x<x1;++x) {
+        const uint8_t* g=rgba+(size_t(y)*size_t(stride)+size_t(x))*4;
+        const uint8_t* b=ref+(size_t(y)*size_t(refRow)+size_t(x))*size_t(refStride);
+        off+=std::abs(int(g[0])-b[0])+std::abs(int(g[1])-b[1])+std::abs(int(g[2])-b[2])>40?1:0;++n;
+    }
+    return n>0&&off*5>n;
+}
+bool PlaquesShown();
+bool PlaquesSplit();
+// A gem, rune or material pulled on the Collection page: its code, for the frame thread to
+// take it to the game's own tab and slot (0 none).
+std::atomic<uint32_t> nativeSlotRequest{0};
+// The UI picture held still while the mod clicks the game's tabs for such an item: until when
+// (GetTickCount64), and whether to keep each finished picture meanwhile (an item in the hand).
+// uiFreezeFrom: when the freeze began; a kept picture older than that by more than a moment is
+// stale (from an earlier item) and the freeze is skipped rather than show it.
+std::atomic<uint64_t> uiFreezeUntil{0},uiFreezeFrom{0};std::atomic<bool> uiSnapshotWanted{false};
+Microsoft::WRL::ComPtr<ID3D12Resource> uiFrozen;uint32_t uiFrozenW=0,uiFrozenH=0;bool uiFrozenValid=false;uint64_t uiFrozenAt=0;
 DXGI_FORMAT atlasFormat=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
 uint32_t layerLimit=16;
 // What each place in the submitted layer list showed last (composition::StablePlaces).
@@ -932,6 +1114,13 @@ std::recursive_mutex mutex;
 std::atomic<bool> rightPickHeld{false};   // RightPickHeld
 std::atomic<bool> campfirePointer{false};std::atomic<float> campfirePointerM{4.f};   // SetCampfirePointer
 std::atomic<float> campfireMenuWidth{1.1f},campfireMenuDistance{1.0f},campfireMenuDrop{.9f};   // SetCampfireMenu
+// The stash window's own scale, isolated to it: the owner wants the whole stash 2x,
+// its centre at eye level ([interaction] stash_scale). Other native menus keep theirs.
+std::atomic<float> stashScale{2.0f};   // SetStashScale
+std::atomic<float> stashDrop{0.f};     // SetStashDrop: extra metres down, on top of the band centring
+std::atomic<float> stashDistance{0.25f}; // SetStashDistance: extra metres the stash is pushed away
+std::atomic<bool> stashWorld{false};   // SetStashWorld: keep the world behind the stash (experimental)
+std::atomic<bool> collectionInUi{true};   // SetCollectionInUi: the Collection page drawn into the game's UI image (CopyUi)
 std::atomic<bool> campfireCaption{false};std::atomic<float> campfireCaptionRect[4]{{0.f},{0.f},{1.f},{.2f}};   // SetCampfireCaption
 std::atomic<float> campfireCaptionWidth{3.f},campfireCaptionDistance{5.5f},campfireCaptionRise{1.f};
 std::atomic<bool> campfireMenuHit{false};   // the laser on the campfire's menu board (MenuPointer)
@@ -1247,9 +1436,15 @@ bool SwapHandHoldsMenu(){return interactionConfigured&&interactionConfig.dominan
 bool leatherHudVitals=false;
 // Stash navigation plaques share the Character button's art and pointer path.
 bool stashArtReady=false,stashShown=false;
+bool stashTabHighlightReady=false;   // the active-tab mark painted into the static atlas
 int stashHover=-1;
 uint16_t stashPad=0;
 stashbuttons::Input stashInput;
+// The Collection tab on the stash bar (collection_tab_button.h): the mod takes the
+// laser on the sixth tab; shown and lit this frame, a pull on it shows the page.
+bool collectionTabShown=false,collectionTabLit=false;
+collectiontab::Spot collectionTabSpot{};
+collectiontab::Press collectionTabPress;
 // Reset Skills & Stats on the Character page (respec_button.h): its faces painted
 // into the static image; shown and lit this frame (MenuPointer); two pulls on it
 // ask vr/respec.cpp for the game's own reset. No game input is sent.
@@ -1273,6 +1468,7 @@ leather::Back leatherBack;   // Right B the game leaves unanswered closes the le
 leather::Art leatherArt=leather::PlaceholderArt();
 uint32_t uiWidth=0,uiHeight=0;
 int32_t uiCrop[4]{};
+float uiCursorU=0.5f,uiCursorV=0.5f;   // the laser's place on the surface, for the held item's patch
 XrPosef uiPose{};
 float uiSize=.46f;
 
@@ -1343,7 +1539,8 @@ float beamLength=0;
 // keeps its own free grab, relative to where you face when it opens.
 panels::Grab panelGrab;
 panels::Offset menuOffset,settingsOffset;
-panels::Placement uiBase{},menuBase{},settingsBase{},captionBase{};
+panels::Offset collectionOffset;   // the Collection panel's own place, moved by its grip
+panels::Placement uiBase{},menuBase{},settingsBase{},captionBase{},collectionBase{};
 
 math::Quat Q(XrQuaternionf q) { return {q.x,q.y,q.z,q.w}; }
 math::Vec V(XrVector3f p) { return {p.x,p.y,p.z}; }
@@ -1462,7 +1659,21 @@ void PanelModifier(WORD key,bool wanted,bool& held) {
     input.ki.dwFlags=KEYEVENTF_SCANCODE|(wanted?0:KEYEVENTF_KEYUP);input.ki.dwExtraInfo=panels::InjectedKeyTag;
     if(SendInput(1,&input,sizeof input)==1)held=wanted;
 }
+// The mod's own clicks on the stash (a take-out, a deposit's held button): where they are in their
+// steps, so that leaving the menu (ReleasePanelInput, VR Settings opening) never leaves the game's
+// left button down (bearstonem's review of #608, point 7).
+int handClickStep=0;          // 0 idle, 1 the cursor going, 3 resting on a control, 2 the button down
+bool depositUpOwed=false;     // a deposit holds the game's button until the item has left the cursor
+// The stash's picture is the size its fixed positions were measured at (2244 x 2352): the render
+// thread's ShotSized, kept for the frame thread (review point 3).
+std::atomic<bool> stashImageSized{false};
+bool modStashSequence=false;  // a take-out through the personal stash is under way (the picture held still)
+void ReleaseModClicks() {
+    if(handClickStep==2||depositUpOwed){INPUT up{};up.type=INPUT_MOUSE;up.mi.dwFlags=MOUSEEVENTF_LEFTUP;SendInput(1,&up,sizeof up);}
+    handClickStep=0;depositUpOwed=false;
+}
 void ReleasePanelInput() {
+    ReleaseModClicks();
     panelinput::ItemHover(false);
     if(mouseDown||rightMouseDown||controlDown||shiftDown)panelinput::OwnPointer();
     for(int i=0;i<2;++i) {
@@ -2264,6 +2475,7 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
     if(!noticePainter.Start())Say("Frame notices: background painter unavailable; quest and level-up cards stay hidden");
     if(!strainPainter.Start())Say("Frame guard strain: background painter unavailable; the light stays hidden");
     if(!settingsPainter.Start())Say("Frame VR settings: background painter unavailable; VR Settings and calibration cannot be shown");
+    if(!collectionPainter.Start())Say("Frame collection: background painter unavailable; the panel cannot be shown");
     using namespace panelatlas;
     std::vector<uint8_t> pixels(size_t(StaticWidth)*StaticHeight*4);
     const auto put=[&](const std::vector<uint8_t>& from,Region r) {
@@ -2307,7 +2519,7 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
         return ok;
     }();
     bool stashPainted=true;
-    for(int i=0;i<4;++i) {
+    for(int i=0;i<stashbuttons::ButtonCount*2;++i) {
         const bool lit=(i%2)!=0;
         auto px=stashbuttons::PaintFace(stashbuttons::Width,stashbuttons::Height,lit);
         const auto label=RespecLabel(stashbuttons::Labels[i/2],stashbuttons::Width,stashbuttons::Height,stashbuttons::LabelHeight);
@@ -2321,11 +2533,11 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
         bool ok=true;
         // 0-7: the name's and the multiplayer panel's (KeyboardPicture); 8-13: the wrist chat's on the name layout
         // (wrist_chat.h, panelatlas::ChatKeyboard): small, capitals, symbols, each plain then lit.
-        for(int picture=0;picture<14&&ok;++picture) {
-            const bool chat=picture>=8,lit=(picture&1)!=0,digits=!chat&&(picture&4)!=0;
+        for(int picture=0;picture<16&&ok;++picture) {   // 14-15: the gold pad, plain / lit
+            const bool gold=picture>=14,chat=picture>=8&&!gold,lit=(picture&1)!=0,digits=!chat&&!gold&&(picture&4)!=0;
             const int chatPicture=picture-8;
-            const bool capitals=chat?(chatPicture==2||chatPicture==3):(picture&2)!=0,symbols=chat&&chatPicture>=4;
-            const auto& layout=digits?keyboard::Text:keyboard::Name;
+            const bool capitals=gold?false:chat?(chatPicture==2||chatPicture==3):(picture&2)!=0,symbols=chat&&chatPicture>=4;
+            const auto& layout=gold?keyboard::Gold:digits?keyboard::Text:keyboard::Name;
             auto board=keyboard::PaintKeys(layout,lit,capitals);
             for(int i=0;i<layout.count&&ok;++i) {
                 const auto r=keyboard::KeyTexelRect(layout,i);
@@ -2336,10 +2548,14 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
                 respecbutton::Stamp(face,text,r.w,r.h,lit||(capitals&&layout.keys[i].action==keyboard::Action::Shift));
                 for(int y=0;y<r.h;++y)std::memcpy(&board[(size_t(r.y+y)*keyboard::TexelWidth+r.x)*4],&face[size_t(y)*r.w*4],size_t(r.w)*4);
             }
-            ok=ok&&put(board,chat?ChatKeyboard(chatPicture):KeyboardPicture(digits,capitals,lit));
+            ok=ok&&put(board,gold?(lit?DigitsLit:Digits):chat?ChatKeyboard(chatPicture):KeyboardPicture(digits,capitals,lit));
         }
         return ok;
     }();
+    // The active-tab mark for the mod's own sixth tab (the game draws its own on
+    // whichever tab it holds; the mod cannot set that, so it redraws the mark).
+    // Painted BEFORE the atlas upload, or it never reaches the texture.
+    const bool tabHighlightPainted=put(tabhighlight::Paint(),TabHighlight);
     // The floating map's grab hint (grab_hint.h): its sign's frames, the glow reaching out and the border's strips,
     // premultiplied (in linear light when the image is sRGB). Its border corners are painted for the wrist map's size.
     static_assert(grabhint::MapSideM==interaction::WristMapSize,"the grab hint's border corners fit the wrist map");
@@ -2351,6 +2567,7 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
     if(!hintPainted)Say("Frame map hint: its pictures could not be painted; the grab hint stays hidden");
     else if(hintArt.empty())Say("Frame map hint: its sign could not be decoded; the grab hint shows its glow only");
     stashArtReady=stashPainted;
+    stashTabHighlightReady=tabHighlightPainted;
     statsIconReady=statsPainted;
     keyboardArtReady=keyboardPainted;
     if(!keyboardPainted)Say("Frame panels: the VR keyboard could not be painted; it stays hidden");
@@ -2558,12 +2775,25 @@ panels::Size UiSurfaceSize() {
     if(leatherMode){const auto sheet=leather::Measure(leatherArt,leatherMenuWidth.load());return {sheet.menuWidth,sheet.menuHeight};}
     // The campfire's menu board: the menu's lower strip only (hud's workspace band), its own width.
     if(campfirePointer.load()&&uiCrop[2]>0&&uiCrop[3]>0){const float w=campfireMenuWidth.load();return {w,w*float(uiCrop[3])/float(uiCrop[2])};}
-    return panels::Fit(uiCrop[2]>0?unsigned(uiCrop[2]):0,uiCrop[3]>0?unsigned(uiCrop[3]):0);
+    // The stash window is scaled on its own (SetStashScale); other native menus fit Width.
+    const float maxWidth=panels::Width*(gamestate::StashButtonsShown()?stashScale.load():1.f);
+    return panels::Fit(uiCrop[2]>0?unsigned(uiCrop[2]):0,uiCrop[3]>0?unsigned(uiCrop[3]):0,maxWidth);
 }
 XrPosef UiSurfacePose() {
     auto pose=uiPose;
     if(upperBandMenuMode&&!journalMode&&!leatherMode) {
         const auto p=V(pose.position)+math::Rotate(Q(pose.orientation),{0,panels::UpperBandOffset(UiSurfaceSize()),0});
+        pose.position={p.x,p.y,p.z};
+    } else if(gamestate::StashButtonsShown()&&!journalMode&&!leatherMode) {
+        // The stash is the same tall inventory canvas the tabbed menu is: its window
+        // sits in the upper widescreen band over a large blank lower canvas, so centre
+        // that band on the anchor (not the blank). UiSurfaceSize already carries
+        // SetStashScale, so the centring follows the window's own size. stash_drop
+        // ([interaction], metres) nudges it further down on top of that; stash_distance
+        // pushes the whole window further away (local -z is away from the eyes).
+        const float drop=-panels::UpperBandOffset(UiSurfaceSize())+stashDrop.load();
+        const float back=stashDistance.load();
+        const auto p=V(pose.position)+math::Rotate(Q(pose.orientation),{0,-drop,-back});
         pose.position={p.x,p.y,p.z};
     }
     return pose;
@@ -2573,8 +2803,11 @@ XrPosef UiSurfacePose() {
 // multiplayer panel's over the main menu's board in its 3D scene, which stands low and leans back
 // by its drop over its distance (keyboard::PlaceAbove). The name keyboard keeps its place under the
 // campfire's low strip.
-const keyboard::Layout& KeyboardLayout(){return keyboardText?keyboard::Text:keyboard::Name;}
+bool keyboardGold=false;   // the gold pad (keyboard::Gold) for the game's gold box, not the name's / the panel's keyboard
+float GoldPadU();float GoldPadV();
+const keyboard::Layout& KeyboardLayout(){return keyboardGold?keyboard::Gold:keyboardText?keyboard::Text:keyboard::Name;}
 keyboard::Board KeyboardBoard(const XrPosef& at,panels::Size size) {
+    if(keyboardGold)return keyboard::PlaceGoldPad(V(at.position),Q(at.orientation),size.width,size.height,GoldPadU(),GoldPadV());
     if(keyboardText&&spatialMode&&campfirePointer.load())
         return keyboard::PlaceAbove(keyboard::Text,V(at.position),Q(at.orientation),size.width,size.height,
                                     std::atan2(campfireMenuDrop.load(),std::max(.1f,campfireMenuDistance.load())));
@@ -2585,6 +2818,33 @@ keyboard::Board KeyboardBoard(const XrPosef& at,panels::Size size) {
 // scan code (the game reads keys by scan code, SendShift), Shift round it when the layout wants
 // it, all tagged KeyboardKeyTag - typing, so TypedKeys lets the game's keyboard layout in and
 // the name box takes the letter.
+// The game's gold box on the shown surface (the UI image cropped to uiCrop): the pad's top middle.
+float GoldPadU(){return uiCrop[2]>0?(keyboard::GoldBoxCentreX-float(uiCrop[0]))/float(uiCrop[2]):.5f;}
+float GoldPadV(){return uiCrop[3]>0?(keyboard::GoldBoxBottom-float(uiCrop[1]))/float(uiCrop[3]):.5f;}
+bool SendKeyboard(const keyboard::Output& out);
+// The gold pad's All (and Max before its digits): Ctrl+A in the game's box.
+bool SendSelectAll() {
+    const HKL layout=GetKeyboardLayout(gameWindow?GetWindowThreadProcessId(gameWindow,nullptr):0);
+    const WORD ctrl=WORD(MapVirtualKeyExW(VK_LCONTROL,MAPVK_VK_TO_VSC,layout)),a=WORD(MapVirtualKeyExW('A',MAPVK_VK_TO_VSC,layout));
+    if(!ctrl||!a)return false;
+    INPUT in[4]{};
+    const WORD codes[4]={ctrl,a,a,ctrl};const bool ups[4]={false,false,true,true};
+    for(int i=0;i<4;++i){in[i].type=INPUT_KEYBOARD;in[i].ki.wScan=codes[i];
+        in[i].ki.dwFlags=KEYEVENTF_SCANCODE|(ups[i]?KEYEVENTF_KEYUP:0);in[i].ki.dwExtraInfo=panels::KeyboardKeyTag;}
+    return SendInput(4,in,sizeof(INPUT))==4;
+}
+// A press as the game should get it: Ctrl+A first when asked, then the key, or each
+// character of a Text key's text.
+bool SendTyped(const keyboard::Output& out) {
+    bool ok=true;
+    if(out.selectAll)ok=SendSelectAll();
+    if(out.send==keyboard::Send::Text) {
+        for(const wchar_t ch:out.text){keyboard::Output one;one.send=keyboard::Send::Char;one.ch=ch;ok=SendKeyboard(one)&&ok;}
+        return ok;
+    }
+    if(out.send!=keyboard::Send::None)ok=SendKeyboard(out)&&ok;
+    return ok;
+}
 bool SendKeyboard(const keyboard::Output& out) {
     const HKL layout=GetKeyboardLayout(gameWindow?GetWindowThreadProcessId(gameWindow,nullptr):0);
     WORD vk=0;bool shift=false;
@@ -2725,7 +2985,7 @@ void ChatStep(){
 void MenuPointer(const menus::Pad& controls) {
     nativeMenuPad={};
     pointerVisible=pointerHit=keyboardPointer=false;
-    if(settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked){panelinput::ItemHover(false);menuDrop.Reset();stashInput.Reset();stashShown=false;stashPad=0;respecShown=false;respecButton.Hide();keyboardShown=false;keyboardLit=-1;return;}
+    if(settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked){ReleaseModClicks();panelinput::ItemHover(false);menuDrop.Reset();stashInput.Reset();stashShown=false;stashPad=0;respecShown=false;respecButton.Hide();keyboardShown=false;keyboardLit=-1;return;}
     const bool spatialReady=spatialMode&&SurfacePlaced()&&uiCrop[2]>0;
     const bool uiActive=(panelMode&&menuPlaced)||spatialReady;
     const auto surfacePose=spatialMode?UiSurfacePose():menuPose;
@@ -2742,6 +3002,7 @@ void MenuPointer(const menus::Pad& controls) {
     if(aimTracked) {
         const auto ray=V(aim.pose.position),direction=math::Rotate(Q(aim.pose.orientation),{0,0,-1});
         pointerHit=math::IntersectPanel(ray,direction,V(surfacePose.position),Q(surfacePose.orientation),surface.width,surface.height,hit);
+        if(pointerHit){uiCursorU=hit.u;uiCursorV=hit.v;}
         beamLength=pointerHit?hit.distance:panelDistance*1.8f;
         const auto mid=ray+direction*(beamLength*.5f);
         const auto rot=math::BeamOrientation(direction,V(head.position)-mid);
@@ -2778,10 +3039,18 @@ void MenuPointer(const menus::Pad& controls) {
     // The multiplayer panel's keyboard: up while one of its boxes has the game's focus (the game window's
     // input method on, panels::TextKeyboardUp; owner 2026-11-17: "keyboard is always up anyway"), or with the
     // panel while the game has said nothing of it this session.
-    keyboardShown=keyboardArtReady&&uiActive&&!journalMode&&!leatherMode&&gamestate::KeyboardShown()&&!keyboardClosed&&
+    // The gold pad (owner 2026-11-22): while the game's box for an amount of gold is up. Decided before
+    // the change check, or the check reset the pad's press every frame and no key took (2026-11-23).
+    const bool goldWas=keyboardGold;
+    // At the stash only (GoldBoxShown), not on the hand-held leather, and only where its fixed place
+    // over the game's gold box is known (the 2244 x 2352 picture) - review of #608, point 4.
+    keyboardGold=keyboardArtReady&&uiActive&&!journalMode&&!leatherMode&&stashImageSized.load()&&gamestate::GoldBoxShown();
+    if(keyboardGold!=goldWas)Say(keyboardGold?"Frame panels: gold pad shown (the game's gold box is up)":"Frame panels: gold pad hidden");
+    keyboardShown=keyboardGold||(keyboardArtReady&&uiActive&&!journalMode&&!leatherMode&&gamestate::KeyboardShown()&&!keyboardClosed&&
         (!campfirePointer.load()||campfireKeyboardOpen||keyboardText)&&
-        (!keyboardText||field>=0||(field==-2&&panels::TextFocus(panelinput::TextFocusState())==panels::TextFocus::On));
-    if(keyboardShown!=keyboardWas||(keyboardShown&&keyboardText!=keyboardTextWas)) {
+        (!keyboardText||field>=0||(field==-2&&panels::TextFocus(panelinput::TextFocusState())==panels::TextFocus::On)));
+    if(keyboardGold!=goldWas){keyboardTypist.Reset();keyboardPress.Reset();}
+    else if(!keyboardGold&&(keyboardShown!=keyboardWas||(keyboardShown&&keyboardText!=keyboardTextWas))) {
         keyboardTypist.Reset();keyboardPress.Reset();
         Say(!keyboardShown?"Frame panels: VR keyboard hidden":
             !keyboardText?"Frame panels: VR keyboard shown (the name box is up)":
@@ -2840,12 +3109,70 @@ void MenuPointer(const menus::Pad& controls) {
             if(!respec::Request()){respecButton.Refused();Say("Frame panels: Reset Skills & Stats refused (not an offline game, or a reset already running)");}
         } else if(respecButton.Confirming())Say("Frame panels: Reset Skills & Stats - Confirm? shown");
     }
-    stashShown=stashArtReady&&spatialReady&&!journalMode&&gamestate::StashButtonsShown();
+    // The old tab plaques stay away: back in for a test (2026-11-20) they pulsed the bumpers,
+    // which turn the shared pages, not the tabs, covered the page's filters and left the page
+    // unable to take or give items (owner 2026-11-21). The mod's own tab plaques replace them.
+    // Where the mod's own plaques cannot show (a picture not 2244 x 2352: the tab is not read off
+    // it), main's Previous / Next plaques stay as they were (review of #608, point 3).
+    stashShown=stashArtReady&&spatialReady&&!journalMode&&gamestate::StashButtonsShown()&&!stashImageSized.load();
     stashHover=-1;
     if(stashShown&&focused&&aimTracked&&pointerHit&&!(mouseDown||rightMouseDown))
-        for(int i=0;i<2;++i)
+        for(int i=0;i<stashbuttons::TabButtonCount;++i)
             if(respecbutton::Hit(stashbuttons::Place(surface.width,surface.height,i),surface.width,surface.height,hit.u,hit.v))stashHover=i;
-    stashPad=stashInput.Step(stashShown&&uiActive&&focused,stashHover,pressed,respecNow);
+    const auto stashAction=stashInput.Step(stashShown&&uiActive&&focused,stashHover,pressed,respecNow);
+    stashPad=stashAction==stashbuttons::Action::Previous?menus::LeftBumper:
+             stashAction==stashbuttons::Action::Next?menus::RightBumper:0;
+    // With the Collection page up, a plaque takes it away: the game's own tab under it shows
+    // again, and the bumper the plaque sends moves on from there.
+    if((stashAction==stashbuttons::Action::Previous||stashAction==stashbuttons::Action::Next)&&collection::TabWanted()) {
+        collection::TabSetWanted(false);
+        Say("Frame panels: a tab plaque was pulled; the Collection page goes");
+    }
+    // The Collection tab on the stash bar (collection_tab_button.h): the mod takes the
+    // laser on the sixth tab itself, so choosing it shows the Collection page without
+    // closing the stash. A pull on it is never the game's.
+    // Only where the prepared layout put the sixth tab on the bar (review of #608, point 8).
+    collectionTabShown=spatialReady&&!journalMode&&gamestate::StashButtonsShown()&&gamestate::CollectionTabOnBar();
+    collectionTabSpot=collectionTabShown?collectiontab::Place(surface.width,surface.height):collectiontab::Spot{};
+    // The tab bar ends where the Collection page begins (the bar's measured rects reached 30 UI
+    // pixels down over the page's top, so a pull on Uniques / Sets / Runewords there read as
+    // "another tab" and closed the page - owner 2026-11-20).
+    const bool onTabBar=hit.v<CollectionPageTop;
+    const bool onCollectionTab=collectionTabShown&&stashHover<0&&aimTracked&&pointerHit&&!(mouseDown||rightMouseDown)&&onTabBar&&
+        collectiontab::Hit(collectionTabSpot,surface.width,surface.height,hit.u,hit.v);
+    collectionTabLit=onCollectionTab;
+    if(collectionTabPress.Step(onCollectionTab&&uiActive,pressed,respecNow)) {
+        collection::TabSetWanted(true);
+        Say("Frame panels: the Collection tab on the stash bar was chosen");
+    }
+    // A click on one of the game's own five tabs closes the page: the bar carries no
+    // index, and this loader has no widget API to read the chosen tab.
+    static bool otherTabWasDown=false;
+    const bool onOtherTab=collectionTabShown&&aimTracked&&pointerHit&&!(mouseDown||rightMouseDown)&&onTabBar&&
+        collectiontab::HitOthers(collectionTabSpot,surface.width,surface.height,hit.u,hit.v);
+    if(onOtherTab&&pressed&&!otherTabWasDown&&collection::TabWanted()) {
+        collection::TabSetWanted(false);
+        Say("Frame panels: another stash tab was chosen; the Collection page goes");
+    }
+    otherTabWasDown=pressed;
+    {   // diagnostic: where the stash surface sits, to centre the window
+        static ULONGLONG reportAt=0;const auto now=GetTickCount64();
+        if(collectionLog.load()&&collectionTabShown&&now>=reportAt) {
+            const auto sp=UiSurfacePose();const auto ss=UiSurfaceSize();
+            char line[200];std::snprintf(line,sizeof line,"Frame panels: stash surface y=%.2f size %.2f x %.2f, head y=%.2f, upper=%d",
+                sp.position.y,ss.width,ss.height,head.position.y,int(upperBandMenuMode));
+            Say(line);reportAt=now+2000;
+        }
+    }
+    {   // diagnostic: log where the laser sits on the stash panel at each trigger pull,
+        // so the tab's rect is calibrated by clicking its four corners
+        static bool wasDown=false;
+        if(collectionTabShown&&aimTracked&&pointerHit&&pressed&&!wasDown) {
+            char line[160];std::snprintf(line,sizeof line,"Frame panels: stash click u=%.3f v=%.3f onTab=%d",hit.u,hit.v,int(onCollectionTab));
+            Say(line);
+        }
+        wasDown=pressed;
+    }
     // A pull on a VR keyboard key (the board under the menu, above).
     if(keyboardPress.Step(onKeyboard&&uiActive,pressed,GetTickCount64())&&keyboardLit>=0) {
         const auto typed=keyboardTypist.Press(KeyboardLayout(),keyboardLit);
@@ -2853,9 +3180,9 @@ void MenuPointer(const menus::Pad& controls) {
             keyboardClosed=true;keyboardClosedEpoch=keyboardEpoch;
             Say(keyboardText?"Frame panels: VR keyboard closed until a box takes the focus again, the panel's next view or its reopening":
                              "Frame panels: VR keyboard closed until the name box comes up anew");
-        } else if(typed.send!=keyboard::Send::None) {
+        } else if(typed.send!=keyboard::Send::None||typed.selectAll) {
             if(!focused)Say("Frame panels: VR keyboard key not sent - the game window is not focused");
-            else if(!SendKeyboard(typed))Say("Frame panels: VR keyboard key could not be sent (not on this keyboard layout, or SendInput refused)");
+            else if(!SendTyped(typed))Say("Frame panels: VR keyboard key could not be sent (not on this keyboard layout, or SendInput refused)");
             else {
                 static bool told=false;
                 if(!told){told=true;Say("Frame panels: VR keyboard typing into the game");}
@@ -2863,9 +3190,143 @@ void MenuPointer(const menus::Pad& controls) {
             }
         }
     }
+    // The page covers the whole stash content, and is NOT clickable to the game there: the game's
+    // cursor and click are withheld over the whole rect (the game would otherwise act on whatever
+    // tab is active underneath - Runes, Gems, a personal tab - and the deposit would go wrong).
+    // The click is the mod's: CollectionPress stores the held item in the collection.
+    // The hand's item on its way in or out of the collection (collection_store.h): the game's own
+    // click on an inventory cell puts it down there or lifts it up. While that click is made the
+    // game's cursor is the click's, not the laser's.
+    static ULONGLONG handClickAt=0;static collection::InventoryClick handClick;   // handClickStep: file scope (ReleaseModClicks)
+    // The same click for the stash's own controls (a tab, a page arrow) when the pad turns them
+    // with the laser in charge: the game takes no pad then (owner 2026-11-21: "still A first").
+    static bool uiClickPending=false,handIsUi=false;static float uiClickU=0,uiClickV=0;
+    const bool handClicking=handClickStep!=0;
+    const bool overCollectionPage=collection::TabWanted()&&spatialReady&&pointerHit&&
+        hit.u>=CollectionPageLeft&&hit.u<=CollectionPageRight&&hit.v>=CollectionPageTop&&hit.v<=CollectionPageBottom;
+    const bool onCollectionPage=overCollectionPage;
+    {   // The laser onto the page with the hand empty: the game's cursor, which the page withholds,
+        // leaves the item it was on (owner 2026-11-28: the gloves' tooltip stayed up while the laser
+        // roamed the page) - once, to the stash's title over the tab bar, where no item is.
+        static bool wasOnPage=false;
+        if(onCollectionPage&&!wasOnPage&&!gamestate::CursorItemHeld()) {
+            RECT client{};math::Vec native{};POINT pixel{};
+            const float u=(CollectionPageLeft+CollectionPageRight)*.5f,v=120.f/2352.f;
+            if(GetClientRect(gameWindow,&client)&&journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},u,v,uiWidth,uiHeight,native)) {
+                pixel=POINT{LONG(native.x*(client.right-1)),LONG(native.y*(client.bottom-1))};
+                if(ClientToScreen(gameWindow,&pixel))SetCursorPos(pixel.x,pixel.y);
+            }
+        }
+        wasOnPage=onCollectionPage;
+    }
+    // The shared page arrows (the LB / RB marks either side of the counter) stop at the player's
+    // five pages: past them the collection keeps its items (stash_nav.h). A pull there is then
+    // nobody's - no game cursor, no click.
+    bool onBlockedArrow=false;
+    {
+        const auto& read=stashnav::Last();
+        const int page=read.page.load();
+        if(pointerHit&&spatialReady&&gamestate::StashButtonsShown()&&read.tab.load()==stashnav::Shared&&
+           GetTickCount64()-read.at.load()<400&&page!=stashnav::PageUnknown) {
+            const float px=hit.u*2244.f,py=hit.v*2352.f;
+            const bool row=py>=838.f&&py<=884.f;
+            const bool left=row&&px>=564.f&&px<=604.f,right=row&&px>=791.f&&px<=830.f;
+            onBlockedArrow=(left&&page==1)||(right&&page>=stashnav::PlayerPages);
+        }
+    }
+    // The tab plaques set into the stash's carved recesses (CopyPlaqueArt): a pull turns the tab
+    // the way the pad does, the Collection in the cycle (owner 2026-11-21).
+    int plaqueHover=-1;
+    if(pointerHit&&spatialReady&&aimTracked&&!(mouseDown||rightMouseDown)&&PlaquesShown()) {
+        const float px=hit.u*2244.f,py=hit.v*2352.f;
+        if(py>=float(stashplaques::Y)&&py<float(stashplaques::Y+stashplaques::Height)) {
+            if(px>=float(stashplaques::PreviousX)&&px<float(stashplaques::PreviousX+stashplaques::Width))plaqueHover=0;
+            else if(px>=float(stashplaques::NextX)&&px<float(stashplaques::NextX+stashplaques::Width))plaqueHover=1;
+            // on the Shared tab the upper half turns the shared page (owner 2026-11-22)
+            if(plaqueHover>=0&&PlaquesSplit()&&py<float(stashplaques::Y+stashplaques::Half))plaqueHover|=2;
+        }
+    }
+    plaqueLit.store(plaqueHover);
+    static bool plaqueWasDown=false;
+    const int plaquePull=plaqueHover>=0&&uiActive&&focused&&pressed&&!plaqueWasDown?plaqueHover:-1;
+    plaqueWasDown=pressed;
+    // A gem, rune or material in the hand over the Gems / Materials / Runes slots: a pull puts it
+    // in its own slot, on its own tab (owner 2026-11-21) - the mod clicks the game's tab first when
+    // the item is another tab's, then the slot. The loader writes nothing into these tabs, so the
+    // game's own click does it.
+    bool onNativeSlots=false;
+    {
+        static float slotU=0,slotV=0;static ULONGLONG slotAt=0;static bool slotQueued=false;
+        const ULONGLONG now=GetTickCount64();
+        const auto& read=stashnav::Last();
+        // The read drops to -1 for a frame or two while the laser lights a tab (the log): the last
+        // good one holds for a second.
+        static int goodTab=-1;static ULONGLONG goodAt=0;
+        const int fresh=now-read.at.load()<400?read.tab.load():-1;
+        if(fresh>=0){goodTab=fresh;goodAt=now;}
+        const int tab=fresh>=0?fresh:(now-goodAt<1000?goodTab:-1);
+        const auto* slot=stashslots::Find(collection::CarriedCode());
+        if(slot&&pointerHit&&spatialReady&&aimTracked&&!(mouseDown||rightMouseDown)&&gamestate::StashButtonsShown()&&
+           !collection::TabWanted()&&gamestate::CursorItemHeld()&&tab>=stashnav::Gems&&tab<=stashnav::Runes) {
+            const float px=hit.u*2244.f,py=hit.v*2352.f;
+            onNativeSlots=plaqueHover<0&&stashslots::InArea(px,py);
+        }
+        // The way in: a pull over the stash page, or one on the Collection page (CollectionPress).
+        static int returnTab=-1;static bool returnOwed=false;static ULONGLONG returnAt=0;
+        static bool slotWasDown=false;
+        const stashslots::Slot* start=nullptr;
+        if(onNativeSlots&&uiActive&&focused&&pressed&&!slotWasDown&&!handClicking&&!uiClickPending)start=slot;
+        slotWasDown=pressed;
+        if(!start&&!handClicking&&!uiClickPending)if(const uint32_t asked=nativeSlotRequest.exchange(0))start=stashslots::Find(asked);
+        if(start&&!slotQueued&&!returnOwed) {
+            slotU=float(start->x)/2244.f;slotV=float(start->y)/2352.f;
+            // The picture holds still from the frame before the first click (owner 2026-11-22:
+            // the screen must not change), and the Collection page stays up and unmoved.
+            uiFreezeUntil.store(now+400);uiFreezeFrom.store(now);
+            if(collection::TabWanted())collection::TabKeepUntil(now+2500);
+            if(tab==start->tab){uiClickU=slotU;uiClickV=slotV;uiClickPending=true;returnTab=-1;}
+            else {
+                returnTab=tab;
+                uiClickU=(float(stashnav::TabsX+stashnav::TabStep*start->tab)+stashnav::TabStep*.5f)/2244.f;uiClickV=200.f/2352.f;
+                uiClickPending=true;slotQueued=true;slotAt=now+350;
+            }
+            char line[128];std::snprintf(line,sizeof line,"Frame stash: the hand's %.3s to its own slot (tab %d, from tab %d)",start->code,start->tab,tab);
+            Say(line);
+        }
+        // The slot's click once the game shows the item's tab (or give up after a second).
+        if(slotQueued&&now>=slotAt&&!uiClickPending&&!handClicking) {
+            const auto* held=stashslots::Find(collection::CarriedCode());
+            if(held&&tab==held->tab){
+                uiClickU=slotU;uiClickV=slotV;uiClickPending=true;slotQueued=false;
+                if(returnTab>=0){returnOwed=true;returnAt=now+250;}
+            }
+            else if(now>slotAt+1000){slotQueued=false;returnOwed=returnTab>=0;returnAt=now;Say("Frame stash: the item's tab did not come up; its slot was not clicked");}
+        }
+        // Then the game's own tab goes back to what it was.
+        if(returnOwed&&now>=returnAt&&!uiClickPending&&!handClicking) {
+            returnOwed=false;
+            if(returnTab>=0&&returnTab<stashnav::Collection) {
+                if(collection::TabWanted())collection::TabKeepUntil(now+1500);
+                uiClickU=(float(stashnav::TabsX+stashnav::TabStep*returnTab)+stashnav::TabStep*.5f)/2244.f;uiClickV=200.f/2352.f;
+                uiClickPending=true;
+            }
+            returnTab=-1;
+        }
+        const bool busy=slotQueued||returnOwed||returnTab>=0;
+        if(busy||(start&&uiClickPending))uiFreezeUntil.store(std::max(uiFreezeUntil.load(),now+300));
+        // The picture is kept while a freeze may come: a gem, rune or material in the hand, or the
+        // laser on a card of the Collection page with the hand empty (a take-out may go through
+        // the personal stash).
+        uiSnapshotWanted.store(gamestate::StashButtonsShown()&&!busy&&
+            (slot!=nullptr||(collection::TabWanted()&&collectionHover.kind==collection::panel::HitKind::Slot&&!gamestate::CursorItemHeld())));
+        // While the item is on its way the game gets no click of the laser's (the trigger still
+        // held would drop it on whatever tab shows meanwhile).
+        if(slotQueued)onNativeSlots=true;
+    }
+    // Over the slots the game's cursor still follows the laser with the item (owner 2026-11-21:
+    // "it must reach everywhere"); only the game's click is the mod's there (gamePointer below).
     // The multiplayer panel's box lengths a moment after a key (gamestate logs a change only): did it land?
-
-    const bool onButton=onStats||onRespec||stashHover>=0||onKeyboard;   // a stamped button: no game cursor, no game trigger
+    const bool onButton=onStats||onRespec||stashHover>=0||onKeyboard||onCollectionTab||onCollectionPage||onBlockedArrow||plaqueHover>=0;   // a stamped button: no game cursor, no game trigger
     // An item on the game's cursor and a trigger pull begun off the menu's art (past or on the
     // hide, or the band's see-through margins): the pad's X, the controller menu's own Drop for
     // the item held (menu_drop.h). The tabbed menu (and its cube) only; never without an item on
@@ -2896,11 +3357,25 @@ void MenuPointer(const menus::Pad& controls) {
     // navigation" / "laser navigation" every second while walking and turning), hiding it.
     menus::Pad navigation=controls;
     if(leatherMode&&leatherShown.load())navigation.lx=navigation.ly=navigation.rx=navigation.ry=0;
-    if(onButton||statsPress.Held()||respecPress.Held()||stashInput.Held()||keyboardPress.Held()||dropOwns)navigation.rt=0;   // a button's or the drop's trigger is never the game's RT
+    if(onButton||onNativeSlots||statsPress.Held()||respecPress.Held()||stashInput.Held()||keyboardPress.Held()||dropOwns)navigation.rt=0;   // a button's or the drop's trigger is never the game's RT
+    // At the stash a stick pushed left or right turns the tab (below), so it does not take the
+    // laser's place either (owner 2026-11-21).
+    // Only with the laser: once navigation is the game's own (A / B / X / Y), its sticks, triggers
+    // and bumpers stay the game's, so its focus moves and LT / RT turn its tabs as on main
+    // (bearstonem's review of #608, point 1).
+    // And only where the stash's tab and page are read off its picture (2244 x 2352, review point 3):
+    // at any other size the pad stays as on main.
+    const bool stashControls=spatialReady&&!journalMode&&gamestate::StashButtonsShown()&&!wasNative&&stashImageSized.load();
+    // At the stash the sticks are the tabs' and nothing else's, laser or no laser (owner
+    // 2026-11-22: no stick walking the inventory's or the stash's items).
+    if(stashControls)navigation.lx=navigation.ly=navigation.rx=navigation.ry=0;
     nativeMenuPad=menuNavigation.Step(uiActive&&focused,navigation,pointerHit&&!onButton,hit.u,hit.v,mouseDown||rightMouseDown);
     nativeMenuPad.buttons|=stashPad;
     if(statsPress.Held())nativeMenuPad.buttons|=menus::Back;   // View: Advanced Stats (Start closes the menu)
     if(menuDrop.Down())nativeMenuPad.buttons|=menus::X;   // X: the controller menu's Drop for the item on the cursor
+    // The game's own navigation works its own focus, which is hidden under the Collection page:
+    // the page gives way to the stash tab under it (review point 6).
+    if(!wasNative&&menuNavigation.Native()&&collection::TabWanted()){collection::TabSetWanted(false);Say("Frame stash: controller navigation - the Collection page closed");}
     if(wasNative!=menuNavigation.Native()&&uiActive&&focused)
         Say(menuNavigation.Native()?"Frame panels: native controller navigation":"Frame panels: laser navigation");
     const bool laser=!menuNavigation.Native();
@@ -2915,6 +3390,144 @@ void MenuPointer(const menus::Pad& controls) {
     const bool grabbing=GrabPanel(spatialMode?uiPose:menuPose,spatialMode?uiBase:menuBase,menuOffset,
         grip,pointerHit,pressed||mouseDown||rightMouseDown,aim.pose,
         panels::MenuDistance(int(vrsettings::Read().values[settings::MenuDistance]),!spatialMode));
+    // The stash's tabs and shared pages from the pad, with no A first (owner 2026-11-21). The
+    // mod takes the four buttons and the sticks while the stash is up and sends the game short
+    // pulses of its own, so it can (stash_nav.h, the tab and page read off the UI image):
+    //  - put the Collection between Runes and Personal (the game's own cycle skips it);
+    //  - keep the shared pages at the player's five;
+    //  - leave the laser its trigger: RT / LT turn the tab only where the laser points at nothing
+    //    (the trigger is the laser's click everywhere else) and no item is in the hand; a bumper
+    //    turns the page on a short press of its own (not with the trigger, not a grip's drag, not
+    //    on an item - the bumper is the grip and the right-click there).
+    {
+        static bool rtWas=true,ltWas=true,lbWas=true,rbWas=true,lbSpoiled=false,rbSpoiled=false;
+        static int stickWas=0;
+        static ULONGLONG lbAt=0,rbAt=0,pulseUntil=0,nextPulseAt=0;
+        static stashnav::Pulse pulse;
+        static int queued=0;static bool queuedNext=true;
+        const ULONGLONG now=GetTickCount64();
+        const auto& read=stashnav::Last();
+        const bool fresh=now-read.at.load()<400;
+        const int tab=fresh?read.tab.load():-1,page=fresh?read.page.load():stashnav::PageUnknown;
+        const bool native=menuNavigation.Native();
+        const bool up=stashControls&&uiActive&&focused;
+        const bool rt=controls.rt>140,lt=controls.lt>140;
+        const bool lb=(controls.buttons&menus::LeftBumper)!=0,rb=(controls.buttons&menus::RightBumper)!=0;
+        bool tabNext=false,tabPrev=false,pageNext=false,pagePrev=false;
+        if(up) {
+            // Owner 2026-11-22: the sticks turn the tabs and the bumpers the shared pages, and
+            // nothing else does (no RT / LT), wherever the laser is or whether it shows at all.
+            // A bumper held with the trigger (a right-click) or for a grip's drag is not a page.
+            if(lb&&!lbWas){lbAt=now;lbSpoiled=false;}
+            if(rb&&!rbWas){rbAt=now;rbSpoiled=false;}
+            if(lb&&(pressed||mouseDown||rightMouseDown))lbSpoiled=true;
+            if(rb&&(pressed||grabbing||mouseDown||rightMouseDown))rbSpoiled=true;
+            if(!lb&&lbWas&&!lbSpoiled&&now-lbAt<400)pagePrev=true;
+            if(!rb&&rbWas&&!rbSpoiled&&now-rbAt<400)pageNext=true;
+            {
+                const int x=std::abs(int(controls.lx))>std::abs(int(controls.rx))?controls.lx:controls.rx;
+                const int y=std::abs(int(controls.lx))>std::abs(int(controls.rx))?controls.ly:controls.ry;
+                const int dir=std::abs(x)>20000&&std::abs(x)*2>std::abs(y)*3?(x>0?1:-1):std::abs(x)<8000?0:stickWas;
+                if(dir!=0&&stickWas==0){if(dir>0)tabNext=true;else tabPrev=true;}
+                stickWas=dir;
+            }
+            {   // On the Collection page a stick up / down scrolls its grid a page, again while held
+                // (owner 2026-11-22).
+                static int scrollWas=0,scrollSteps=0;static ULONGLONG scrollAt=0;
+                const int y=std::abs(int(controls.ly))>std::abs(int(controls.ry))?controls.ly:controls.ry;
+                const int x=std::abs(int(controls.ly))>std::abs(int(controls.ry))?controls.lx:controls.rx;
+                const int dir=!collection::TabWanted()?0:
+                    std::abs(y)>20000&&std::abs(y)*2>std::abs(x)*3?(y>0?-1:1):std::abs(y)<8000?0:scrollWas;
+                if(dir!=scrollWas)scrollSteps=0;
+                if(dir!=0&&(scrollSteps==0||now-scrollAt>=(scrollSteps==1?450u:250u))) {
+                    collection::TabStep(dir);
+                    scrollAt=now;++scrollSteps;
+                }
+                scrollWas=dir;
+            }
+        } else {
+            lbSpoiled=rbSpoiled=true;stickWas=0;queued=0;
+            static ULONGLONG toldAt=0;
+            const int x=std::abs(int(controls.lx))>std::abs(int(controls.rx))?controls.lx:controls.rx;
+            if(gamestate::StashButtonsShown()&&std::abs(x)>20000&&now-toldAt>1000) {
+                toldAt=now;char line[200];
+                std::snprintf(line,sizeof line,"Frame stash: a stick push turns no tab - controls %d (spatial %d journal %d native %d image %d), menu %d, focused %d",
+                    int(stashControls),int(spatialReady),int(journalMode),int(wasNative),int(stashImageSized.load()),int(uiActive),int(focused));
+                Say(line);
+            }
+        }
+        rtWas=rt;ltWas=lt;lbWas=lb;rbWas=rb;
+        if(plaquePull==0)tabPrev=true;
+        else if(plaquePull==1)tabNext=true;
+        else if(plaquePull==2)pagePrev=true;
+        else if(plaquePull==3)pageNext=true;
+        // With controller navigation the game takes the pad: a pulse. With the laser it takes no
+        // pad (the "A first" the owner met), so the mod clicks the game's own tab or page arrow.
+        const auto send=[&](bool next,bool isTab){
+            pulse={};
+            if(isTab){if(next)pulse.rt=255;else pulse.lt=255;}
+            else pulse.buttons=next?menus::RightBumper:menus::LeftBumper;
+            pulseUntil=now+80;nextPulseAt=now+170;
+        };
+        const auto clickTab=[&](int to){
+            uiClickU=(float(stashnav::TabsX+stashnav::TabStep*to)+stashnav::TabStep*.5f)/2244.f;uiClickV=200.f/2352.f;uiClickPending=true;
+        };
+        // The shared pages: the stash's controller layout has no arrows to click (LB / RB are
+        // only legends - bankexpansionlayouthd's controller file), so the game gets a bumper of
+        // the mod's. With the laser up the game's first pad press only wakes its controller mode
+        // (the "A first" the owner met), so the page is read back and the bumper sent once more
+        // if it did not turn (owner 2026-11-22: LB / RB and the upper plaques did nothing).
+        static int pageWant=0;static bool pageNextWant=true;static int pageTries=0;static ULONGLONG pageCheckAt=0;
+        const auto turnPage=[&](bool next){
+            if(page<1||page>stashnav::PlayerPages){send(next,false);return;}
+            pageWant=page+(next?1:-1);pageNextWant=next;pageTries=1;pageCheckAt=now+300;send(next,false);
+            Say(next?"Frame stash: the next shared page (a bumper sent)":"Frame stash: the previous shared page (a bumper sent)");
+        };
+        if(pageWant>0&&now>=pageCheckAt) {
+            if(tab!=stashnav::Shared||page==pageWant)pageWant=0;
+            else if(pageTries<3){++pageTries;pageCheckAt=now+300;send(pageNextWant,false);}
+            else {pageWant=0;Say("Frame stash: the shared page did not turn for the bumper");}
+        }
+        if(tabNext||tabPrev) {
+            const bool next=tabNext;
+            const int under=tab>=0&&tab<stashnav::Collection?tab:-1;
+            if(collection::TabWanted()) {
+                // Out of the Collection: to Personal going on, to Runes going back.
+                collection::TabSetWanted(false);
+                const int to=next?stashnav::Personal:stashnav::Runes;
+                if(native){const int from=under>=0?under:(next?stashnav::Runes:stashnav::Personal);queued=next?(5-from)%5:(from+1)%5;queuedNext=next;}
+                else if(under!=to)clickTab(to);
+                Say(next?"Frame stash: on from the Collection":"Frame stash: back from the Collection");
+            } else if((next&&under==stashnav::Runes)||(!next&&under==stashnav::Personal)) {
+                collection::TabSetWanted(true);   // the Collection is the sixth tab, between Runes and Personal
+                Say("Frame stash: the Collection, by the pad");
+            } else if(native) {queued=1;queuedNext=next;}
+            else if(under>=0)clickTab(next?under+1:under-1);
+            else Say("Frame stash: the chosen tab is not read off the image; the pad cannot turn it");
+        }
+        if(pageNext||pagePrev) {
+            const bool allowed=tab!=stashnav::Shared||page==stashnav::PageUnknown||
+                (pageNext&&page<stashnav::PlayerPages)||(pagePrev&&page>1);
+            if(allowed&&!collection::TabWanted()&&pageWant==0){if(native)send(pageNext,false);else if(tab==stashnav::Shared)turnPage(pageNext);}
+            else if(!allowed)Say("Frame stash: the shared pages stop at the player's five");
+        }
+        if(queued>0&&now>=nextPulseAt){send(queuedNext,true);--queued;}
+        // The game's own bumpers and triggers stay out while the stash is up: the pulses above
+        // stand for them. With controller navigation none of this runs (stashControls): the sticks,
+        // triggers and bumpers stay the game's.
+        if(up) {
+            nativeMenuPad.lt=nativeMenuPad.rt=0;
+            nativeMenuPad.buttons&=uint16_t(~(menus::LeftBumper|menus::RightBumper));
+        }
+        // On the Collection page (the laser's) A does not reach the game: it acted on the controller
+        // focus hidden under the page (bearstonem's review of #608, point 6). B stays the game's and
+        // closes the stash (owner 2026-11-28).
+        if(up&&collection::TabWanted())nativeMenuPad.buttons&=uint16_t(~menus::A);
+        if(now<pulseUntil) {
+            nativeMenuPad.buttons|=pulse.buttons;
+            nativeMenuPad.lt=std::max(nativeMenuPad.lt,pulse.lt);nativeMenuPad.rt=std::max(nativeMenuPad.rt,pulse.rt);
+        }
+    }
     const bool active=uiActive&&focused&&aimTracked&&laser;
     // The campfire: the board owns the game's pointer only while the laser is on it - owned, a
     // pointer event no menu takes never reaches the scene, and the heroes could not be picked.
@@ -2929,7 +3542,7 @@ void MenuPointer(const menus::Pad& controls) {
     static bool pointerParkTold=false;
     if(parkPointer&&!pointerParkTold){pointerParkTold=true;Say("Frame panels: multiplayer panel - the game's pointer stays where the laser last clicked (passing over a button would take a box's focus)");}
     int fieldX=-1,fieldY=-1;
-    if(active&&pointerHit&&!onButton&&!dropOwns) {
+    if(active&&pointerHit&&!onButton&&!dropOwns&&!handClicking) {
         RECT client{};
         if(GetClientRect(gameWindow,&client)) {
             math::Vec native{hit.u,hit.v,0};
@@ -2942,23 +3555,165 @@ void MenuPointer(const menus::Pad& controls) {
             else pointerHit=false;
         } else pointerHit=false;
     }
+    // Over the Collection page the game's own cursor may not stay where the laser left the
+    // stash: frozen at the page's edge it held a carried item stuck there in sight, and over
+    // an item of the game's tab underneath it showed that item's tooltip past the page (owner
+    // 2026-11-20). With an item in the hand it follows the laser under the page, which hides
+    // it (the page draws the item itself); empty-handed it rests on the stash's title bar,
+    // where nothing is pointed at. The game's click stays withheld either way (onButton).
+    // The same on the mod's own controls at the stash (the tab bar, the plaques, the gold pad): the
+    // cursor off the last item, and the game told it is the pointer's (ItemHover below), or it went
+    // back to its controller focus and kept that item's tooltip up (owner 2026-11-28).
+    const bool parkOnTitle=active&&!dropOwns&&!handClicking&&
+        (overCollectionPage||(onButton&&pointerHit&&gamestate::StashButtonsShown()&&!gamestate::CursorItemHeld()));
+    if(parkOnTitle) {
+        RECT client{};
+        if(GetClientRect(gameWindow,&client)) {
+            const bool holding=gamestate::CursorItemHeld();
+            const float u=holding?hit.u:.370f,v=holding?hit.v:.059f;   // the title "Stash": 830,138 of the 2244 x 2352 image
+            math::Vec native{u,v,0};
+            if(journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},u,v,uiWidth,uiHeight,native)) {
+                POINT pixel{LONG(native.x*(client.right-1)),LONG(native.y*(client.bottom-1))};
+                if(ClientToScreen(gameWindow,&pixel))SetCursorPos(pixel.x,pixel.y);
+            }
+        }
+    }
+    // The click itself: the cursor onto the block's middle, the game's left button down, up, and
+    // the store told, a few frames apart so the game sees each step. The inventory grid sits at
+    // 1244,668 of the 2244 x 2352 UI image, 10 x 4 cells of 57.2 px (ui_20261120_201146_378.png).
+    // The point is 0.15 of a cell past the block's middle, so an even-sized item rounds onto the
+    // block whichever way the game rounds.
+    {   // the cells it passes through drawn empty (CopyInventoryMask) until a moment after it left
+        collection::InventoryClick passing;
+        if(collection::PassingBlock(passing)&&passing.grid==0) {
+            inventoryMaskBlock.store(uint32_t(passing.x&15)|uint32_t(passing.y&15)<<4|uint32_t(passing.w&15)<<8|uint32_t(passing.h&15)<<12);
+            inventoryMaskUntil.store(GetTickCount64()+200);
+        }
+    }
+    // A take-out with a full inventory comes through the personal stash (collection_store): the
+    // game's Personal tab under the Collection page first, then the item's cell, then the tab
+    // that was up - the picture held still meanwhile.
+    {
+        static bool stashLift=false,stashReturn=false;static int stashFrom=-1;static ULONGLONG stashAt=0;
+        static collection::InventoryClick stashCell;
+        const ULONGLONG now=GetTickCount64();
+        const auto& read=stashnav::Last();
+        const int tabNow=now-read.at.load()<400?read.tab.load():-1;
+        if(handClickStep==0&&!stashLift&&!stashReturn&&collection::TakeInventoryClick(handClick)) {
+            if(handClick.grid==1) {
+                stashLift=true;stashCell=handClick;stashAt=now;stashFrom=tabNow;
+                if(collection::TabWanted())collection::TabKeepUntil(now+3000);
+                uiFreezeUntil.store(now+500);uiFreezeFrom.store(now);
+                if(tabNow!=stashnav::Personal) {
+                    uiClickU=(float(stashnav::TabsX)+stashnav::TabStep*.5f)/2244.f;uiClickV=200.f/2352.f;uiClickPending=true;
+                }
+            } else {handClickStep=1;handIsUi=false;handClickAt=now;}
+        }
+        if(stashLift) {
+            uiFreezeUntil.store(std::max(uiFreezeUntil.load(),now+300));
+            if(handClickStep==0&&!uiClickPending&&tabNow==stashnav::Personal&&now-stashAt>=150) {
+                handClick=stashCell;handClickStep=1;handIsUi=false;handClickAt=now;
+                stashLift=false;stashReturn=stashFrom>=0&&stashFrom!=stashnav::Personal;stashAt=now;
+            } else if(now-stashAt>1500) {
+                stashLift=false;stashReturn=stashFrom>=0&&stashFrom!=stashnav::Personal;stashAt=now;
+                Say("Frame collection: the Personal tab did not come up; the item stays in the personal stash");
+            }
+        }
+        modStashSequence=stashLift||stashReturn;   // the laser's own clicks wait meanwhile (review point 7)
+        if(stashReturn) {
+            uiFreezeUntil.store(std::max(uiFreezeUntil.load(),now+300));
+            if(handClickStep==0&&!uiClickPending&&now-stashAt>=200) {
+                if(collection::TabWanted())collection::TabKeepUntil(now+1500);
+                uiClickU=(float(stashnav::TabsX+stashnav::TabStep*stashFrom)+stashnav::TabStep*.5f)/2244.f;uiClickV=200.f/2352.f;
+                uiClickPending=true;stashReturn=false;
+            }
+        }
+    }
+    if(handClickStep==0&&uiClickPending){uiClickPending=false;handClickStep=1;handIsUi=true;handClickAt=GetTickCount64();}
+    if(handClickStep!=0) {
+        const ULONGLONG now=GetTickCount64();
+        // the inventory's cells from 1244,668, the personal stash's from 414,242, 57.2 apart
+        const float gx=handClick.grid==1?414.f:1244.f,gy=handClick.grid==1?242.f:668.f;
+        const float u=handIsUi?uiClickU:(gx+(float(handClick.x)+float(handClick.w)*.5f+.15f)*57.2f)/2244.f;
+        const float v=handIsUi?uiClickV:(gy+(float(handClick.y)+float(handClick.h)*.5f+.15f)*57.2f)/2352.f;
+        RECT client{};math::Vec native{u,v,0};POINT pixel{};
+        // Only at the size the cells and tabs were measured at: elsewhere the point could be another
+        // item's cell (review of #608, point 3).
+        const bool placed=stashImageSized.load()&&GetClientRect(gameWindow,&client)&&
+            journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},u,v,uiWidth,uiHeight,native)&&
+            ((pixel=POINT{LONG(native.x*(client.right-1)),LONG(native.y*(client.bottom-1))}),ClientToScreen(gameWindow,&pixel))&&
+            SetCursorPos(pixel.x,pixel.y);
+        // As quick as the game takes it (owner 2026-11-20: the item showed in the inventory for
+        // half a second): the down in the frame the cursor gets there, the up a frame or two later,
+        // and the store told at once - it moves the item on as soon as the game has landed it.
+        if(!placed&&handClickStep==1) {
+            Say("Frame collection: the inventory cell could not be pointed at; the hand's item stays where it is");
+            handClickStep=0;
+        } else if(handClickStep==1&&handIsUi) {
+            // A control of the stash's own (a page arrow, a tab, a slot): the cursor rests on it a
+            // moment first - the page arrows took no click that came with no hover (owner
+            // 2026-11-22: LB / RB and the plaques' upper halves did nothing).
+            handClickStep=3;handClickAt=now;
+        } else if(handClickStep==1||(handClickStep==3&&now-handClickAt>=60)) {
+            INPUT button{};button.type=INPUT_MOUSE;button.mi.dwFlags=MOUSEEVENTF_LEFTDOWN;SendInput(1,&button,sizeof button);
+            handClickStep=2;handClickAt=now;
+        } else if(handClickStep==2&&now-handClickAt>=25) {
+            INPUT button{};button.type=INPUT_MOUSE;button.mi.dwFlags=MOUSEEVENTF_LEFTUP;SendInput(1,&button,sizeof button);
+            if(!handIsUi)collection::InventoryClickDone();
+            handClickStep=0;
+        }
+    }
     // On a button, or off the art with an item to drop, the dot shows and no game click is made there.
-    const bool gamePointer=pointerHit&&!onButton&&!dropOwns&&!(offArt&&cursorItem);
+    // While the mod clicks for itself (or holds the picture still for a take-out) the laser makes no
+    // click of its own: it would land on a tab the player cannot see (review of #608, point 7).
+    const bool modClicking=handClickStep!=0||uiClickPending||modStashSequence||depositUpOwed;
+    const bool gamePointer=pointerHit&&!onButton&&!onNativeSlots&&!dropOwns&&!(offArt&&cursorItem)&&!modClicking;
     const bool modifiers=active&&(gamePointer||mouseDown||rightMouseDown);
     PanelModifier(VK_CONTROL,modifiers&&controls.lt>140,controlDown);
     PanelModifier(VK_SHIFT,modifiers&&!grabbing&&(controls.buttons&menus::RightBumper),shiftDown);
     laserClick.Step(pressed&&!grabbing&&!parkJump,(controls.buttons&menus::LeftBumper)!=0);   // a Jump's click the frame after
     const auto edges=panelMouse.Step(active,gamePointer,laserClick.Left(),laserClick.Right());
-    panelinput::ItemHover(active,gamePointer,panelMouse.down[0]||panelMouse.down[1]);
+    panelinput::ItemHover(active,gamePointer||parkOnTitle,panelMouse.down[0]||panelMouse.down[1]);
+    if(collectionLog.load()&&gamestate::StashButtonsShown()) {   // [dev] the stuck inventory tooltip (2026-11-28)
+        static ULONGLONG hoverLogAt=0;const ULONGLONG nowLog=GetTickCount64();
+        if(nowLog>=hoverLogAt) {
+            hoverLogAt=nowLog+500;POINT cursor{};GetCursorPos(&cursor);
+            char stats[200];panelinput::HoverStats(stats,sizeof stats);
+            char line[400];std::snprintf(line,sizeof line,"Frame collection hover: active=%d hit=%d onButton=%d page=%d park=%d gamePointer=%d uv=%.3f,%.3f cursor=%ld,%ld %s",
+                int(active),int(pointerHit),int(onButton),int(overCollectionPage),int(parkOnTitle),int(gamePointer),
+                hit.u,hit.v,cursor.x,cursor.y,stats);
+            Say(line);
+        }
+    }
+    // A held item released over the Collection page: the page takes it (DepositCarried), not
+    // the stash cell under it. The game's button is left down for a moment - the item has to
+    // leave the cursor first - and the up follows below, once the move has had its moment.
+    static ULONGLONG depositUpAt=0;   // depositUpOwed: file scope (ReleaseModClicks)
     for(int i=0;i<2;++i) {
         bool& held=i?rightMouseDown:mouseDown;
-        if(edges.release[i]&&held) {INPUT up{};up.type=INPUT_MOUSE;up.mi.dwFlags=i?MOUSEEVENTF_RIGHTUP:MOUSEEVENTF_LEFTUP;SendInput(1,&up,sizeof up);held=false;}
+        if(edges.release[i]&&held) {
+            if(i==0&&overCollectionPage&&gamestate::CursorItemHeld()) {
+                collection::DepositCarried();
+                depositUpOwed=true;depositUpAt=GetTickCount64();
+            } else {
+                INPUT up{};up.type=INPUT_MOUSE;up.mi.dwFlags=i?MOUSEEVENTF_RIGHTUP:MOUSEEVENTF_LEFTUP;SendInput(1,&up,sizeof up);
+            }
+            held=false;
+        }
         if(edges.press[i]) {
             INPUT down{};down.type=INPUT_MOUSE;down.mi.dwFlags=i?MOUSEEVENTF_RIGHTDOWN:MOUSEEVENTF_LEFTDOWN;
             held=SendInput(1,&down,sizeof down)==1;
             if(held&&!i&&keyboardDigits&&fieldX>=0)gamestate::MultiplayerField(fieldX,fieldY);
             if(!held)panelMouse.down[i]=false;
         }
+    }
+    // The game's button is released once the item has left the cursor (the store put it away) or
+    // after a second, whichever comes first: releasing it earlier would drop the item into the
+    // stash tab under the page.
+    if(depositUpOwed&&(!gamestate::CursorItemHeld()||GetTickCount64()-depositUpAt>1000)) {
+        INPUT up{};up.type=INPUT_MOUSE;up.mi.dwFlags=MOUSEEVENTF_LEFTUP;SendInput(1,&up,sizeof up);
+        depositUpOwed=false;
+        Say("Frame collection: the game's click released");
     }
     if(drop.press)Say(focused?"Frame panels: item let go outside the menu - X (the menu's Drop) sent to the game":
                               "Frame panels: item let go outside the menu - X sent (game window not focused)");
@@ -3264,6 +4019,305 @@ int TakeSettingsPicture() {
             painted.paintMs,Milliseconds()-uploadStart);Say(message);reportAt=now+5000;
     }
     return uploaded?1:0;
+}
+// The Collection panel's picture, taken like the settings page's: the painter's
+// finished picture is uploaded into the shared atlas region once.
+int TakeCollectionPicture() {
+    CollectionPainted painted;
+    if(!collectionPaintRequest||collectionAtlasPending||atlasUploads.size()>=3||!collectionPainter.Take(collectionPaintRequest,painted))return 0;
+    collectionPaintRequest=0;
+    if(painted.pixels.empty()){
+        static ULONGLONG failedAt=0;const auto now=GetTickCount64();
+        if(now>=failedAt){Say(("Frame collection: the panel could not be painted: "+(painted.error.empty()?std::string("unknown error"):painted.error)).c_str());failedAt=now+5000;}
+        collectionImageReady=false;
+        collectionOpen=false;
+        return -1;
+    }
+    if(!painted.ui.empty()) {   // variant B: the picture for the UI image (CopyCollectionIntoUi)
+        collectionUiPixels=std::move(painted.ui);collectionUiPixelsW=painted.uiW;collectionUiPixelsH=painted.uiH;++collectionUiSerial;
+    }
+    const bool uploaded=UploadShared(panelatlas::Collection,painted.pixels,&collectionAtlasPending);
+    if(uploaded)collectionImageReady=true;
+    if(uploaded){   // the owner sees a lag from a click to the repaint; report both the paint and the whole trip
+        static ULONGLONG at=0;const auto now=GetTickCount64();
+        if(collectionLog.load()&&now>=at&&painted.ms>=1.0){at=now+1000;char b[128];
+            std::snprintf(b,sizeof b,"Frame collection: the page painted in %.0f ms, %llu ms after the change",
+                painted.ms,collectionRequestAt?(unsigned long long)(now-collectionRequestAt):0ull);Say(b);}
+    }
+    else {
+        static ULONGLONG reportAt=0;const auto now=GetTickCount64();
+        if(now>=reportAt){Say("Frame collection: the panel's picture did not reach the shared atlas");reportAt=now+5000;}
+    }
+    return uploaded?1:0;
+}
+// Paints the panel again when nothing is outstanding and the picture would
+// change: another tab or page, or an icon that finished decoding since.
+// The inventory item's card for the page: its block from the 10 x 4 grid (1244,668 of the
+// 2244 x 2352 UI image, 57.2 px a cell) in canvas pixels, and its name in its quality's colour.
+collection::draw::InventoryTip InventoryTipOf(const collection::tooltip::InventoryAnswer& a) {
+    collection::draw::InventoryTip tip;
+    if(a.text.empty()||a.w<=0||a.h<=0)return tip;
+    tip.text=a.text;
+    const float sx=(CollectionPageRight-CollectionPageLeft)*2244.f,sy=(CollectionPageBottom-CollectionPageTop)*2352.f;   // the page in shot pixels
+    const float x0=1244.f+float(a.x)*57.2f-CollectionPageLeft*2244.f,y0=668.f+float(a.y)*57.2f-CollectionPageTop*2352.f;
+    tip.x=x0/sx*collection::panel::CanvasWidth;tip.y=y0/sy*collection::panel::CanvasHeight;
+    tip.w=float(a.w)*57.2f/sx*collection::panel::CanvasWidth;tip.h=float(a.h)*57.2f/sy*collection::panel::CanvasHeight;
+    switch(a.quality){   // D2RL::Items::Quality: the game's name colours
+        case 4:tip.nameRgb=0x6969FF;break;   // magic
+        case 5:tip.nameRgb=0x4ED24E;break;   // set
+        case 6:tip.nameRgb=0xFFFF64;break;   // rare
+        case 7:tip.nameRgb=0xC7B377;break;   // unique
+        case 8:tip.nameRgb=0xFFA800;break;   // crafted
+        default:tip.nameRgb=0xFFFFFF;break;
+    }
+    return tip;
+}
+void RequestCollectionPaint(bool force=false) {
+    if(collectionPaintRequest)return;
+    const uint64_t revision=interaction::icons::Revision();
+    const collection::tooltip::Answer answer=collection::tooltip::Current();   // the pointed entry's text and ranges
+    const auto inventoryAnswer=collection::tooltip::CurrentInventory();   // the inventory item under the laser
+    static uint64_t paintedInventory=0;
+    if(inventoryAnswer.revision!=paintedInventory){paintedInventory=inventoryAnswer.revision;force=true;}
+    // What is found: an item stored or taken out lights or greys its card at once, not only
+    // when the laser next moves to another card (owner 2026-11-20).
+    static uint64_t collectionPaintedFound=~0ull;
+    const auto& foundLibrary=collection::TabLibrary();
+    const uint64_t found=uint64_t(foundLibrary.Found(collection::Category::Uniques))|
+        uint64_t(foundLibrary.Found(collection::Category::Sets))<<16|uint64_t(foundLibrary.Found(collection::Category::Runewords))<<32|
+        uint64_t(foundLibrary.Found(collection::Category::Materials))<<48;
+    if(found!=collectionPaintedFound){collectionPaintedFound=found;force=true;}
+    // A take-out with a full inventory is refused; the card says why for 3 s (owner 2026-11-21).
+    static bool paintedNoRoom=false;
+    const bool noRoom=collection::NoRoomRecently();
+    if(noRoom!=paintedNoRoom){paintedNoRoom=noRoom;force=true;}
+    if(!force&&collectionImageReady&&collectionPaintedView.category==collectionView.category&&
+       collectionPaintedView.page==collectionView.page&&collectionPaintedView.size==collectionView.size&&
+       collectionIconRevision==revision&&collectionPaintedHover.kind==collectionHover.kind&&
+       collectionPaintedHover.index==collectionHover.index&&collectionTooltipRevision==answer.revision&&
+       collectionPaintedUiW==collectionUiW&&collectionPaintedUiH==collectionUiH&&
+       collectionPaintedView.show==collectionView.show&&collectionPaintedView.sort==collectionView.sort&&
+       collectionPaintedView.group==collectionView.group&&collectionPaintedView.band==collectionView.band&&
+       collectionPaintedView.kind==collectionView.kind&&
+       collectionPaintedView.open==collectionView.open&&
+       collectionPaintedCarried.key==collectionCarried.key&&
+       (collectionCarried.key.empty()||(std::fabs(collectionPaintedCarried.x-collectionCarried.x)<4.f&&
+                                        std::fabs(collectionPaintedCarried.y-collectionCarried.y)<4.f)))return;
+    collectionPaintedCarried=collectionCarried;
+    collectionPaintedUiW=collectionUiW;collectionPaintedUiH=collectionUiH;
+    collectionPaintedView=collectionView;
+    collectionPaintedHover=collectionHover;
+    collectionIconRevision=revision;
+    collectionTooltipRevision=answer.revision;
+    collectionRequestAt=GetTickCount64();   // for the "reached the atlas N ms after the click" report
+    collectionPaintRequest=collectionPainter.Submit({collection::TabLibrary(),collection::TabView(),
+        noRoom?std::string("No room in your inventory\n")+answer.text:answer.text,answer.ranges,
+        collectionInUi.load()?collectionUiW:0,collectionInUi.load()?collectionUiH:0,collectionCarried,InventoryTipOf(inventoryAnswer)});
+    if(!collectionPaintRequest){
+        static ULONGLONG reportAt=0;const auto now=GetTickCount64();
+        if(now>=reportAt){Say("Frame collection: the background painter did not take the request");reportAt=now+5000;}
+    } else {
+        static ULONGLONG reportAt=0;const auto now=GetTickCount64();
+        if(now>=reportAt){
+            char message[160];
+            std::snprintf(message,sizeof message,"Frame collection: repainting (page %d, %s, size %d, hover %d/%d, text %u B, ranges %u B)",
+                collectionView.page,collection::CategoryName(collectionView.category),int(collectionView.size),
+                int(collectionHover.kind),collectionHover.index,unsigned(answer.text.size()),unsigned(answer.ranges.size()));
+            if(collectionLog.load())Say(message);
+            reportAt=now+3000;
+        }
+    }
+}
+// What a click on the panel does: another tab, another page, another slot size,
+// or a slot. The slot's entry is reported until deposit and withdraw land.
+void CollectionPress(const collection::panel::Hit& hit) {
+    using collection::panel::HitKind;
+    // An item in the hand: the click stores it in the collection (its own slot, by the
+    // item's identity) wherever on the page it was clicked. A click on a real control,
+    // empty-handed, works the control. The click path is the one the log proved runs.
+    // The page's own controls work with an item in the hand too, as on the game's tabs (owner
+    // 2026-11-22): only a pull on a card or on no control puts the item away.
+    const bool control=hit.kind!=HitKind::None&&hit.kind!=HitKind::Slot;
+    if(gamestate::CursorItemHeld()&&!control&&stashslots::Find(collection::CarriedCode())) {
+        // A gem, rune or material is never the collection's (owner 2026-11-21): it goes to its
+        // own slot on the game's tab under the page, and the page stays up and where it was.
+        nativeSlotRequest.store(collection::CarriedCode());
+        Say("Frame collection: a gem, rune or material pulled on the page - to its own tab's slot");
+        return;
+    }
+    if(gamestate::CursorItemHeld()&&!control) {
+        Say("Frame collection: a pull on the page with an item in the hand - storing it");
+        collection::DepositCarried();
+        return;
+    }
+    // An open Sort / Show list: a pull on one of its options chooses it, on its box closes
+    // it, anywhere else only closes it (as the game's own lists do).
+    if(collection::TabView().open!=collection::panel::Drop::None&&hit.kind!=HitKind::Sort&&hit.kind!=HitKind::Show&&
+       hit.kind!=HitKind::SortBox&&hit.kind!=HitKind::ShowBox) {
+        collection::TabToggleDrop(collection::TabView().open);
+        return;
+    }
+    switch(hit.kind) {
+    case HitKind::SortBox:  collection::TabToggleDrop(collection::panel::Drop::Sort); break;
+    case HitKind::ShowBox:  collection::TabToggleDrop(collection::panel::Drop::Show); break;
+    case HitKind::Tab:      collection::TabSelectCategory(static_cast<collection::Category>(hit.index)); break;
+    case HitKind::Page:     collection::TabSetPage(hit.index); break;
+    case HitKind::Previous: collection::TabStep(-1); break;
+    case HitKind::Next:     collection::TabStep(1); break;
+    case HitKind::Size:     collection::TabSetSize(static_cast<collection::panel::Size>(hit.index)); break;
+    case HitKind::Show:     collection::TabSetShow(static_cast<collection::panel::Show>(hit.index)); break;
+    case HitKind::Sort:     collection::TabSetSort(static_cast<collection::panel::Sort>(hit.index)); break;
+    case HitKind::Group:    collection::TabToggleGroup(hit.index); break;
+    case HitKind::Band:     collection::TabSelectBand(hit.index); break;
+    case HitKind::Kind:     collection::TabToggleKind(hit.index); break;
+    case HitKind::Slot: {
+        const auto& library=collection::TabLibrary();const auto& view=collection::TabView();
+        const auto visible=collection::VisibleSlots(library,view);
+        const collection::Entry* entry=collection::SlotEntry(library,view,visible,hit.index);
+        if(entry==nullptr)break;
+        char message[224];
+        std::snprintf(message,sizeof message,"Frame collection: slot %d is %s (%s, id %u), %s",hit.index,
+            entry->name.c_str(),collection::CategoryName(view.category),entry->recordId,
+            collection::SlotFound(library,view,visible,hit.index)?"in the stash":"still missing");
+        Say(message);
+        // An empty hand on a lit card lifts the stored copy into the hand (collection_store.h).
+        // A grey card does nothing: only the hand stores (owner 2026-11-20).
+        if(!collection::SlotFound(library,view,visible,hit.index))break;
+        const uint32_t identity=view.category==collection::Category::Materials?entry->code:entry->recordId;
+        collection::RequestSlotAction(view.category,identity);
+        break;
+    }
+    default: break;
+    }
+}
+// The panel's own laser: the aim ray onto its quad, the pointer the headset
+// shows, and a click through collection_pointer.h. The shared pointer visuals
+// belong to VR Settings while that is open.
+void CollectionPointer(bool grip) {
+    if(!collectionOpen){collectionHover={};return;}
+    if(settingsModel.open||bodyCalibration.Active())return;
+    // Right B puts the panel away, like every other panel the mod draws.
+    if(Bool(secondary,0)){collection::TabSetWanted(false);collectionHover={};pointerVisible=pointerHit=false;return;}
+    // The page owns the laser only where the page is. Over it the mod's pointer and
+    // click take over (and MenuPointer withholds the game cursor, onCollectionPage);
+    // off it, MenuPointer's beam, cursor and click are left untouched, so the inventory
+    // and the stash's own tabs keep working while the page is open.
+    float canvasX=-1,canvasY=-1;
+    if(collectionDocked&&collectionInUiShown) {
+        // Variant B: the page is part of the stash's own picture, so the menu's own laser
+        // (MenuPointer, this frame) is the page's too - its beam and dot stay as they are;
+        // only where it points is read, as a point of the page's canvas.
+        if(pointerHit&&!keyboardPointer&&uiCursorU>=CollectionPageLeft&&uiCursorU<=CollectionPageRight&&
+           uiCursorV>=CollectionPageTop&&uiCursorV<=CollectionPageBottom) {
+            canvasX=(uiCursorU-CollectionPageLeft)/(CollectionPageRight-CollectionPageLeft)*collection::panel::CanvasWidth;
+            canvasY=(uiCursorV-CollectionPageTop)/(CollectionPageBottom-CollectionPageTop)*collection::panel::CanvasHeight;
+        }
+    } else {
+    XrSpaceLocation aim{XR_TYPE_SPACE_LOCATION};
+    const auto needed=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT|
+                      XR_SPACE_LOCATION_POSITION_TRACKED_BIT|XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
+    if(motionHeadTracked&&XR_SUCCEEDED(pLocateSpace(UiAimSpace(),space,frameState.predictedDisplayTime,&aim))&&(aim.locationFlags&needed)==needed){
+        const auto ray=V(aim.pose.position),direction=math::Rotate(Q(aim.pose.orientation),{0,0,-1});math::PanelHit hit;
+        const bool onPanel=math::IntersectPanel(ray,direction,V(collectionPose.position),Q(collectionPose.orientation),collectionShownWidth,collectionShownHeight,hit);
+        const bool grabbing=!collectionDocked&&GrabPanel(collectionPose,collectionBase,collectionOffset,grip,onPanel,UiFloat(trigger,0)>.2f,aim.pose);
+        if(grabbing){collectionTriggerDown=UiFloat(trigger,0)>.2f;collectionHover={};return;}
+        if(onPanel){
+            pointerHit=pointerVisible=true;
+            canvasX=hit.u*collection::panel::CanvasWidth;canvasY=hit.v*collection::panel::CanvasHeight;
+            beamLength=hit.distance;const auto mid=ray+direction*(beamLength*.5f);
+            beamPose=XrPose({mid,math::BeamOrientation(direction,V(head.position)-mid)});
+            dotPose=collectionPose;
+            const auto p=hit.point+math::Rotate(Q(collectionPose.orientation),{0,0,.004f});dotPose.position={p.x,p.y,p.z};
+        }
+    }
+    }   // the page's own laser (a floating page, or in_ui=0)
+    const uint64_t ms=MenuMs();
+    collectionTriggerDown=UiFloat(trigger,0)>(collectionTriggerDown?.20f:.55f);
+    collection::panel::Layout layout=collection::panel::Build(collectionView.page,
+        collectionView.Pages(collection::TabLibrary()),
+        int(collection::TabCategoryCount),collectionView.size,collectionView.open);
+    if(collectionView.category==collection::Category::Sets)collection::panel::AddBands(layout);
+    if(collectionView.category==collection::Category::Runewords)collection::panel::UseKindRows(layout);
+    collectionPointer.Step(canvasX,canvasY,layout,collectionTriggerDown,ms);   // hover, hysteresis, the pre-trigger lock
+    collectionHover=collectionPointer.Hover();
+    // A menu of buttons answers on the PRESS, not the release: waiting for the trigger
+    // to come back up made every size/filter click feel late. The pointed control acts
+    // at once. With an item in the hand, CollectionPress stores it (its own slot) rather
+    // than working the control - see CollectionPress.
+    // With an item in the hand a pull anywhere on the page stores it (not only on a card or
+    // a control: the owner's pulls between the cards did nothing - 2026-11-20).
+    // The tab plaques on the page's bare bottom are the plaques' (MenuPointer), not the page's.
+    const bool holding=canvasX>=0&&gamestate::CursorItemHeld()&&plaqueLit.load()<0;
+    if(collectionTriggerDown&&!collectionTriggerWas&&(collectionHover.kind!=collection::panel::HitKind::None||holding))
+        CollectionPress(collectionHover);
+    // What the hand holds, drawn by the page at the laser (the game's own cursor is hidden under
+    // the page there - MenuPointer).
+    collectionCarried.key=canvasX>=0&&collectionDocked&&collectionInUiShown?collection::CarriedIconKey():std::string();
+    collectionCarried.x=canvasX;collectionCarried.y=canvasY;
+    // Held by the tab bar (on it, or close enough for the item to reach it): the bar's art takes the
+    // item painted on it (CopyCollectionIntoUi), and the page the part reaching down onto it -
+    // canvas coordinates off the page's top or sides, which only the carried item uses.
+    collectionCarriedBarU=collectionCarriedBarV=-1;
+    if(collectionDocked&&collectionInUiShown&&pointerHit&&!keyboardPointer&&gamestate::CursorItemHeld()&&uiCursorV<CollectionPageTop) {
+        using namespace collection::art;
+        constexpr float reach=130.f;   // shot pixels: half a 4-cell item at the stash's scale, and some
+        const float sx=uiCursorU*float(ShotWidth),sy=uiCursorV*float(ShotHeight);
+        if(sx>=float(TabsX)-reach&&sx<=float(TabsX+TabsWidth)+reach&&sy>=float(TabsY)-reach) {
+            collectionCarriedBarU=uiCursorU;collectionCarriedBarV=uiCursorV;
+            collectionCarried.key=collection::CarriedIconKey();
+            collectionCarried.x=(uiCursorU-CollectionPageLeft)/(CollectionPageRight-CollectionPageLeft)*collection::panel::CanvasWidth;
+            collectionCarried.y=(uiCursorV-CollectionPageTop)/(CollectionPageBottom-CollectionPageTop)*collection::panel::CanvasHeight;
+        }
+    }
+    {   // The inventory item under the laser while the page covers the stash and the game's own
+        // tooltips are held back ([collection] game_tooltips=0): its text is fetched, and the page
+        // draws its card (InventoryTipOf). The grid: 10 x 4 cells from 1244,668, 57.2 px apart.
+        static int askedX=-1,askedY=-1;
+        int cx=-1,cy=-1;
+        if(collectionDocked&&collectionInUiShown&&pointerHit&&!keyboardPointer&&stashImageSized.load()&&
+           !gamestate::CursorItemHeld()&&canvasX<0) {
+            const float gx=(uiCursorU*2244.f-1244.f)/57.2f,gy=(uiCursorV*2352.f-668.f)/57.2f;
+            if(gx>=0&&gx<10&&gy>=0&&gy<4){cx=int(gx);cy=int(gy);}
+        }
+        if(cx!=askedX||cy!=askedY){askedX=cx;askedY=cy;collection::tooltip::RequestInventory(cx,cy);}
+    }
+    {   // The picture under the page: the laser on the stash side (page, tab bar) for 300 ms, nothing in
+        // hand and no item tooltip let through for 400 ms. The game keeps drawing a tooltip between its
+        // calls (owner 2026-11-28 14:19: the picture was taken with it, the hole only 58x24), so the
+        // calls alone do not say none is drawn. The hole: the laser on the inventory / equipment side.
+        static ULONGLONG stashSideSince=0;
+        const ULONGLONG now=GetTickCount64();
+        const bool inventorySide=pointerHit&&!keyboardPointer&&uiCursorU>CollectionPageRight+.01f;
+        const bool stashSide=(canvasX>=0||(pointerHit&&!keyboardPointer&&!inventorySide))&&!gamestate::CursorItemHeld();
+        if(!stashSide)stashSideSince=0;else if(stashSideSince==0)stashSideSince=now;
+        pageRefNow.store(stashSide&&now-stashSideSince>=300&&panelinput::TooltipShownAgo()>=400);
+        holeAllowed.store(inventorySide);
+    }
+    collectionTriggerWas=collectionTriggerDown;
+    collection::TabSetHover(collectionHover);   // the picture lights what the laser is over
+    // The pointed slot's card: ask the UI thread for the game's own item text
+    // when the pointed entry changes, and queue it once a frame.
+    if(collectionHover.kind==collection::panel::HitKind::Slot) {
+        const auto& library=collection::TabLibrary();const auto& view=collection::TabView();
+        const auto visible=collection::VisibleSlots(library,view);
+        if(const collection::Entry* entry=collection::SlotEntry(library,view,visible,collectionHover.index)) {
+            const uint64_t key=(uint64_t(view.category)<<32)|
+                (view.category==collection::Category::Materials?entry->code:entry->recordId);
+            if(key!=collectionTooltipKey){collectionTooltipKey=key;collection::tooltip::Request(*entry);}
+        }
+    }
+    collection::tooltip::Tick();
+    if(collectionLog.load()){   // one line a second while the panel is open: a laser that never hits, or a
+        // trigger that never rises, says so here
+        static ULONGLONG reportAt=0;const auto now=GetTickCount64();
+        if(now>=reportAt){
+            char message[208];
+            std::snprintf(message,sizeof message,"Frame collection: pointer hit=%d hover=%d/%d trigger=%d canvas=%.0f,%.0f panel=%.2f,%.2f,%.2f",
+                int(pointerHit),int(collectionHover.kind),collectionHover.index,int(collectionTriggerDown),canvasX,canvasY,
+                collectionPose.position.x,collectionPose.position.y,collectionPose.position.z);
+            Say(message);reportAt=now+1000;
+        }
+    }
 }
 // One frame of the T cross (body_calibration_gesture.h). Runs where the first-load prompt
 // opens, so the prompt owns this frame's input the same way. The hands are last frame's
@@ -4354,6 +5408,21 @@ void Input() {
     const auto axis=[](float value){return int16_t(std::clamp(value,-1.f,1.f)*32767.f);};
     physical.lx=axis(physicalLeft.x);physical.ly=axis(physicalLeft.y);
     physical.rx=axis(physicalRight.x);physical.ry=axis(physicalRight.y);
+    // An in-headset screenshot: both grips held together for half a second take a picture
+    // of the game's own frame (RequestScreenshot), saved as a PNG in pcvr_shots\ beside the
+    // plugin. A single grip stays the pad's bumper (native tab switching); only the pair,
+    // held, counts, so an ordinary grip press is untouched.
+    {
+        static uint64_t bothSince=0;static bool taken=false;
+        // A developer's tool, off unless [dev] ui_shot_grips=1: both grips are the class motions'
+        // (CONTROLS.md), and the shot waits on the GPU (bearstonem's review of #608, point 5).
+        const bool both=uiShotGrips.load(std::memory_order_relaxed)&&
+            (physical.buttons&(menus::LeftBumper|menus::RightBumper))==(menus::LeftBumper|menus::RightBumper);
+        const uint64_t now=GetTickCount64();
+        if(!both){bothSince=0;taken=false;}
+        else if(bothSince==0)bothSince=now;
+        else if(!taken&&now-bothSince>=500){taken=true;uiShotWanted.store(true);Say("Frame panels: UI screenshot requested (both grips held)");}
+    }
     const bool modUi=settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked;
     auto controls=menuControls.Step(modUi?menus::Mode::Blocked:nativeUi?menus::Mode::Native:menus::Mode::World,inputEpoch,physical);
     // The laser's pad (MenuPointer, SettingsPointer): RT and RB are the laser hand's own trigger and grip
@@ -4498,6 +5567,7 @@ void Input() {
                         gamestate::PanelChanges(),GetTickCount64())&&gamestate::CloseLeatherMenu())
         Say("Frame leather: Right B left the menu open; asking the game to close it");
     SettingsPointer((laserPad(controls).buttons&menus::RightBumper)!=0);
+    CollectionPointer((laserPad(controls).buttons&menus::RightBumper)!=0);
     settingsOwned=settingsOwned||bodyCalibration.Active();
     auto& s=*tracking.data;s.version=D2RVR_SHARED_VERSION;s.headValid=1;
     const auto q=Q(head.orientation);
@@ -7026,7 +8096,7 @@ bool Begin(bool pair=false) {
     leatherMode=sheet;leatherShown=sheet&&leatherWorld.load();
     // The game's stencil hole behind its menu, filled - on the leather, and at the campfire: its
     // menu's boxes cut dark holes into the scene there (where the board's strip is drawn by the game).
-    uiworld::ShowWorldBehindMenu(leatherShown.load()||campfirePointer.load());
+    uiworld::ShowWorldBehindMenu(leatherShown.load()||campfirePointer.load()||StashMenuWorld());
     spatialMode=spatial;journalMode=book;npcChoicesMode=npc;opaqueMenuMode=opaque;upperBandMenuMode=spatial&&gamestate::UpperBandMenuOpen();uiEye.copied=false;
     mapEye.copied=false;hud::MapFrame();hud::ChatFrame(chatSourceRequested||chatShown||wristchatnative::Ready(),chatModel.editing&&wristchatnative::Typing(),chatShown,chatModel.session);
     // The campfire draws no pair (no BeginEye): this frame begins at the present, after the menu
@@ -7736,6 +8806,647 @@ bool CopyMap(reshade::api::command_queue* rq) {
     if(FAILED(queue->Signal(fence.Get(),++fenceValue)))return false;
     e.copyFence=fenceValue;e.copied=true;mapCopyOwn=own;return true;
 }
+// Variant B: the Collection page copied into the game's UI image (dest, w x h, the quad shows
+// crop of it) over the stash's grid, after UiBlit wrote it this frame. The painter's picture is
+// already in the image's format at the page's size (collection_ui_image.h); here the page's
+// rectangle is measured for the next paint, the picture staged in an upload buffer when it is
+// new, and one CopyTextureRegion records it. The swapchain image is in the render-target state
+// (as UiBlit leaves it), so it goes to copy-dest and back. Returns whether the page went in.
+bool CopyCollectionIntoUi(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,uint32_t w,uint32_t h,const int32_t crop[4]) {
+    const int cx=crop[2]>0?crop[0]:0,cy=crop[3]>0?crop[1]:0,cw=crop[2]>0?crop[2]:int(w),ch=crop[3]>0?crop[3]:int(h);
+    const int x0=std::clamp(cx+int(CollectionPageLeft*float(cw)+.5f),0,int(w)),x1=std::clamp(cx+int(CollectionPageRight*float(cw)+.5f),0,int(w));
+    const int y0=std::clamp(cy+int(CollectionPageTop*float(ch)+.5f),0,int(h)),y1=std::clamp(cy+int(CollectionPageBottom*float(ch)+.5f),0,int(h));
+    collectionUiW=x1-x0;collectionUiH=y1-y0;   // what the next paint is sized to
+    if(!collectionInUi.load()||!collectionOpen||!collectionDocked||collectionUiW<8||collectionUiH<8)return false;
+    if(collectionUiPixels.empty()||collectionUiPixelsW!=collectionUiW||collectionUiPixelsH!=collectionUiH)return false;   // a picture at this size is coming
+    auto& u=collectionUiUpload;
+    if(!u.upload||u.w!=collectionUiW||u.h!=collectionUiH) {
+        u={};
+        D3D12_RESOURCE_DESC td{};td.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;td.Width=UINT64(collectionUiW);td.Height=UINT(collectionUiH);
+        td.DepthOrArraySize=td.MipLevels=1;td.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;td.SampleDesc.Count=1;
+        UINT64 rowBytes=0,total=0;
+        device->GetCopyableFootprints(&td,0,1,0,&u.footprint,&u.rows,&rowBytes,&total);
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
+        D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=total;bd.Height=bd.DepthOrArraySize=bd.MipLevels=1;
+        bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        if(FAILED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&u.upload)))) {
+            u={};static bool told=false;if(!told){told=true;Say("Frame collection: no upload buffer for the page in the UI image");}
+            return false;
+        }
+        u.w=collectionUiW;u.h=collectionUiH;u.serial=~0ull;
+        char b[160];std::snprintf(b,sizeof b,"Frame collection: the page goes into the UI image at %d,%d %dx%d (of %ux%u)",x0,y0,u.w,u.h,w,h);Say(b);
+    }
+    if(u.serial!=collectionUiSerial) {   // a new picture: its rows into the buffer (the copy before it finished: CopyUi waited for it)
+        uint8_t* mapped=nullptr;const D3D12_RANGE none{0,0};
+        if(FAILED(u.upload->Map(0,&none,reinterpret_cast<void**>(&mapped)))||!mapped)return false;
+        const size_t row=size_t(u.w)*8;
+        for(int y=0;y<u.h;++y)std::memcpy(mapped+u.footprint.Offset+size_t(y)*u.footprint.Footprint.RowPitch,
+                                         reinterpret_cast<const uint8_t*>(collectionUiPixels.data())+size_t(y)*row,row);
+        u.upload->Unmap(0,nullptr);
+        u.serial=collectionUiSerial;
+    }
+    D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.pResource=dest;
+    b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b.Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;b.Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+    list->ResourceBarrier(1,&b);
+    D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=dest;to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;to.SubresourceIndex=0;
+    D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=u.upload.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;from.PlacedFootprint=u.footprint;
+    {   // round the game's tooltip, when one reaches over the page (tooltipHole*): up to four pieces
+        int hx0=std::clamp(tooltipHoleX0.load(),0,u.w),hx1=std::clamp(tooltipHoleX1.load(),0,u.w);
+        int hy0=std::clamp(tooltipHoleY0.load(),0,u.h),hy1=std::clamp(tooltipHoleY1.load(),0,u.h);
+        if(!(tooltipHoleOn.load()&&stashImageSized.load()&&hx1>hx0&&hy1>hy0))list->CopyTextureRegion(&to,UINT(x0),UINT(y0),0,&from,nullptr);
+        else {
+            const auto piece=[&](int a0,int b0,int a1,int b1){
+                if(a1<=a0||b1<=b0)return;
+                const D3D12_BOX box{UINT(a0),UINT(b0),0,UINT(a1),UINT(b1),1};
+                list->CopyTextureRegion(&to,UINT(x0+a0),UINT(y0+b0),0,&from,&box);
+            };
+            piece(0,0,u.w,hy0);          // above
+            piece(0,hy1,u.w,u.h);        // below
+            piece(0,hy0,hx0,hy1);        // left
+            piece(hx1,hy0,u.w,hy1);      // right
+        }
+    }
+    // The tab bar: Collection lit, the game's tabs idle (only at the shot's own size, where the
+    // art's place is known).
+    auto& t=collectionTabsUpload;
+    if(!t.tried) {
+        t.tried=true;
+        using namespace collection::art;
+        D3D12_RESOURCE_DESC td{};td.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;td.Width=UINT64(TabsWidth);td.Height=UINT(TabsHeight);
+        td.DepthOrArraySize=td.MipLevels=1;td.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;td.SampleDesc.Count=1;
+        UINT rows=0;UINT64 rowBytes=0,total=0;
+        device->GetCopyableFootprints(&td,0,1,0,&t.footprint,&rows,&rowBytes,&total);
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
+        D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=total;bd.Height=bd.DepthOrArraySize=bd.MipLevels=1;
+        bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        uint8_t* mapped=nullptr;const D3D12_RANGE none{0,0};
+        if(SUCCEEDED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&t.upload)))&&
+           SUCCEEDED(t.upload->Map(0,&none,reinterpret_cast<void**>(&mapped)))&&mapped) {
+            const std::vector<uint8_t> art(Tabs,Tabs+sizeof Tabs);
+            const auto half=collection::uiimage::Convert(art,TabsWidth,TabsWidth,TabsHeight,TabsWidth,TabsHeight);
+            for(int y=0;y<TabsHeight;++y)std::memcpy(mapped+t.footprint.Offset+size_t(y)*t.footprint.Footprint.RowPitch,
+                                                    reinterpret_cast<const uint8_t*>(half.data())+size_t(y)*TabsWidth*8,size_t(TabsWidth)*8);
+            t.upload->Unmap(0,nullptr);
+            Say("Frame collection: the tab bar with Collection lit is ready");
+        } else {t.upload.Reset();Say("Frame collection: no upload buffer for the tab bar");}
+    }
+    if(t.upload&&w==uint32_t(collection::art::ShotWidth)&&h==uint32_t(collection::art::ShotHeight)) {
+        ID3D12Resource* tabsSource=t.upload.Get();
+        if(collectionCarriedBarU>=0&&!collectionCarried.key.empty()) {   // the hand's item on the bar
+            auto& c=collectionTabsCarriedUpload;
+            using namespace collection::art;
+            const int px=int(collectionCarriedBarU*float(ShotWidth)+.5f)-TabsX,py=int(collectionCarriedBarV*float(ShotHeight)+.5f)-TabsY;
+            if(!c.upload) {
+                D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
+                D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;
+                bd.Width=t.footprint.Offset+UINT64(t.footprint.Footprint.RowPitch)*UINT64(TabsHeight);
+                bd.Height=bd.DepthOrArraySize=bd.MipLevels=1;bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+                if(FAILED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&c.upload)))) {
+                    c.upload.Reset();static bool told=false;if(!told){told=true;Say("Frame collection: no upload buffer for the tab bar with the hand's item");}
+                }
+            }
+            if(c.upload&&(c.key!=collectionCarried.key||c.x!=px||c.y!=py)) {   // rebuilt only when the item or its spot moves
+                c.ready=false;
+                const auto icon=interaction::icons::Get(collectionCarried.key);
+                std::vector<uint8_t> art(Tabs,Tabs+sizeof Tabs);   // straight RGBA, TabsWidth a row
+                if(icon&&!icon->rgba.empty()&&icon->width>0&&icon->height>0) {
+                    // the stash's scale: an inventory cell is 57 UI pixels, the icons 98 a cell (collection_draw.cpp)
+                    const float s=57.f/98.f,iw=float(icon->width)*s,ih=float(icon->height)*s;
+                    const float left=float(px)-iw*.5f,top=float(py)-ih*.5f;
+                    const int x0=std::max(0,int(std::floor(left))),x1=std::min(TabsWidth,int(std::ceil(left+iw)));
+                    const int y0=std::max(0,int(std::floor(top))),y1=std::min(TabsHeight,int(std::ceil(top+ih)));
+                    const int W=int(icon->width),H=int(icon->height);const uint8_t* src=icon->rgba.data();
+                    for(int y=y0;y<y1;++y)for(int x=x0;x<x1;++x) {
+                        // the icon pixels under this bar pixel, averaged (a box: the icon is ~1.7x larger)
+                        const int sx0=std::clamp(int((float(x)-left)/s),0,W-1),sx1=std::clamp(int((float(x+1)-left)/s),sx0+1,W);
+                        const int sy0=std::clamp(int((float(y)-top)/s),0,H-1),sy1=std::clamp(int((float(y+1)-top)/s),sy0+1,H);
+                        float a=0,c3[3]={0,0,0};int n=0;
+                        for(int v=sy0;v<sy1;++v)for(int u=sx0;u<sx1;++u,++n) {
+                            const uint8_t* q=src+(size_t(v)*size_t(W)+size_t(u))*4;const float qa=q[3]/255.f;
+                            a+=qa;for(int k=0;k<3;++k)c3[k]+=q[k]*qa;
+                        }
+                        if(n==0||a<=0)continue;
+                        uint8_t* d=art.data()+(size_t(y)*size_t(TabsWidth)+size_t(x))*4;
+                        const float ia=a/float(n),da=d[3]/255.f,oa=ia+da*(1-ia);
+                        if(oa<=0)continue;
+                        for(int k=0;k<3;++k)d[k]=uint8_t(std::clamp((c3[k]/a*ia+d[k]*da*(1-ia))/oa,0.f,255.f)+.5f);
+                        d[3]=uint8_t(std::clamp(oa*255.f+.5f,0.f,255.f));
+                    }
+                }
+                const auto half=collection::uiimage::Convert(art,TabsWidth,TabsWidth,TabsHeight,TabsWidth,TabsHeight);
+                uint8_t* mapped=nullptr;const D3D12_RANGE none{0,0};
+                if(!half.empty()&&SUCCEEDED(c.upload->Map(0,&none,reinterpret_cast<void**>(&mapped)))&&mapped) {
+                    for(int y=0;y<TabsHeight;++y)std::memcpy(mapped+t.footprint.Offset+size_t(y)*t.footprint.Footprint.RowPitch,
+                                                            reinterpret_cast<const uint8_t*>(half.data())+size_t(y)*TabsWidth*8,size_t(TabsWidth)*8);
+                    c.upload->Unmap(0,nullptr);
+                    c.key=collectionCarried.key;c.x=px;c.y=py;c.ready=icon!=nullptr;
+                }
+            }
+            if(c.upload&&c.ready)tabsSource=c.upload.Get();
+        }
+        D3D12_TEXTURE_COPY_LOCATION tabsFrom{};tabsFrom.pResource=tabsSource;tabsFrom.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;tabsFrom.PlacedFootprint=t.footprint;
+        list->CopyTextureRegion(&to,UINT(collection::art::TabsX),UINT(collection::art::TabsY),0,&tabsFrom,nullptr);
+    } else {
+        static bool told=false;
+        if(!told){told=true;char line[160];std::snprintf(line,sizeof line,"Frame collection: UI image %ux%u is not the shot's %dx%d; the tab bar is left as the game draws it",
+            w,h,collection::art::ShotWidth,collection::art::ShotHeight);Say(line);}
+    }
+    std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
+    list->ResourceBarrier(1,&b);
+    collectionUiX=x0;collectionUiY=y0;
+    return true;
+}
+// Empty inventory cells over the block an item is passing through (inventoryMaskBlock). The
+// grid in the 2244 x 2352 UI image: cell interiors from 1245,670, 53 px, every 57 px; between
+// them 4 px rules in the frame's browns (read off ui_20261120_201146_378.png).
+void CopyInventoryMask(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,uint32_t w,uint32_t h,const int32_t crop[4]) {
+    if(GetTickCount64()>=inventoryMaskUntil.load())return;
+    const uint32_t block=inventoryMaskBlock.load();
+    const int bx=int(block&15),by=int((block>>4)&15),bw=std::max(1,int((block>>8)&15)),bh=std::max(1,int((block>>12)&15));
+    const int cx=crop[2]>0?crop[0]:0,cy=crop[3]>0?crop[1]:0,cw=crop[2]>0?crop[2]:int(w),ch=crop[3]>0?crop[3]:int(h);
+    const float sx0=1245.f+57.f*float(bx),sy0=670.f+57.f*float(by),sx1=1245.f+57.f*float(bx+bw)-4.f,sy1=670.f+57.f*float(by+bh)-4.f;
+    const int x0=std::clamp(cx+int(sx0/2244.f*float(cw)+.5f),0,int(w)),x1=std::clamp(cx+int(sx1/2244.f*float(cw)+.5f),0,int(w));
+    const int y0=std::clamp(cy+int(sy0/2352.f*float(ch)+.5f),0,int(h)),y1=std::clamp(cy+int(sy1/2352.f*float(ch)+.5f),0,int(h));
+    const int tw=x1-x0,th=y1-y0;
+    if(tw<4||th<4)return;
+    auto& m=inventoryMaskUpload;
+    if(!m.upload||m.w!=tw||m.h!=th||m.block!=block) {
+        m={};
+        D3D12_RESOURCE_DESC td{};td.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;td.Width=UINT64(tw);td.Height=UINT(th);
+        td.DepthOrArraySize=td.MipLevels=1;td.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;td.SampleDesc.Count=1;
+        UINT rows=0;UINT64 rowBytes=0,total=0;
+        device->GetCopyableFootprints(&td,0,1,0,&m.footprint,&rows,&rowBytes,&total);
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
+        D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=total;bd.Height=bd.DepthOrArraySize=bd.MipLevels=1;
+        bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        uint8_t* mapped=nullptr;const D3D12_RANGE none{0,0};
+        if(FAILED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&m.upload)))||
+           FAILED(m.upload->Map(0,&none,reinterpret_cast<void**>(&mapped)))||!mapped){m={};return;}
+        static const uint8_t ruleX[4][3]={{86,72,65},{66,56,47},{46,39,34},{98,84,77}},ruleY[4][3]={{114,99,79},{112,96,81},{70,60,47},{162,146,136}};
+        for(int y=0;y<th;++y) {
+            uint16_t* row=reinterpret_cast<uint16_t*>(mapped+m.footprint.Offset+size_t(y)*m.footprint.Footprint.RowPitch);
+            const float sy=sy0+(float(y)+.5f)*(sy1-sy0)/float(th);
+            const int py=int(sy-670.f)%57;
+            for(int x=0;x<tw;++x) {
+                const float sx=sx0+(float(x)+.5f)*(sx1-sx0)/float(tw);
+                const int px=int(sx-1245.f)%57;
+                float rgb[3];
+                if(px>=53&&py>=53){for(int k=0;k<3;++k)rgb[k]=(ruleX[px-53][k]+ruleY[py-53][k])*.5f;}
+                else if(px>=53){for(int k=0;k<3;++k)rgb[k]=ruleX[px-53][k];}
+                else if(py>=53){for(int k=0;k<3;++k)rgb[k]=ruleY[py-53][k];}
+                else {   // the cell's own black, a shade darker at its edges
+                    const int edge=std::min({px,py,52-px,52-py});
+                    const float v=edge<1?3.f:edge<3?5.f:edge<6?7.f:8.f;
+                    rgb[0]=rgb[1]=rgb[2]=v;
+                }
+                for(int k=0;k<3;++k)row[x*4+k]=collection::uiimage::Half(collection::uiimage::Linear(rgb[k]/255.f));
+                row[x*4+3]=collection::uiimage::Half(1.f);
+            }
+        }
+        m.upload->Unmap(0,nullptr);
+        m.w=tw;m.h=th;m.block=block;
+    }
+    D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.pResource=dest;
+    b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b.Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;b.Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+    list->ResourceBarrier(1,&b);
+    D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=dest;to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;to.SubresourceIndex=0;
+    D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=m.upload.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;from.PlacedFootprint=m.footprint;
+    list->CopyTextureRegion(&to,UINT(x0),UINT(y0),0,&from,nullptr);
+    std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
+    list->ResourceBarrier(1,&b);
+}
+// The UI image is the owner's shots' size (2244 x 2352 inside the crop): the strips and the
+// counter art are measured there, pixel for pixel.
+bool ShotSized(uint32_t w,uint32_t h,const int32_t crop[4]) {
+    const int cw=crop[2]>0?crop[2]:int(w),ch=crop[3]>0?crop[3]:int(h);
+    return cw==collection::art::ShotWidth&&ch==collection::art::ShotHeight;
+}
+// Stash strips whose copies have finished: read (stash_nav.h) and published. CopyUi, before
+// recording this frame's.
+void CollectStashReads() {
+    for(auto& r:stashReads) {
+        if(!r.pending||fence->GetCompletedValue()<r.fence)continue;
+        r.pending=false;
+        const auto read=[](StashStrip& s,std::vector<uint8_t>& out)->bool{
+            // The whole buffer: its last row is only as long as the strip, so a range of full row
+            // pitches ran past its end and every Map failed (owner's test 2026-11-21: no reading).
+            void* mapped=nullptr;
+            const HRESULT hr=s.buffer->Map(0,nullptr,&mapped);
+            if(FAILED(hr)||!mapped) {
+                static ULONGLONG toldAt=0;
+                if(GetTickCount64()-toldAt>3000){toldAt=GetTickCount64();char line[96];std::snprintf(line,sizeof line,"Frame stash: a strip did not map (0x%08lx)",long(hr));Say(line);}
+                return false;
+            }
+            out.resize(size_t(s.w)*size_t(s.h)*4);
+            for(int y=0;y<s.h;++y) {
+                const auto* row=reinterpret_cast<const uint16_t*>(static_cast<const uint8_t*>(mapped)+s.fp.Offset+size_t(y)*s.fp.Footprint.RowPitch);
+                for(int x=0;x<s.w;++x)for(int c=0;c<4;++c)out[(size_t(y)*s.w+x)*4+c]=stashnav::HalfToByte(row[x*4+c]);
+            }
+            const D3D12_RANGE none{0,0};s.buffer->Unmap(0,&none);
+            return true;
+        };
+        std::vector<uint8_t> tabs,counter,plaques;
+        if(!read(r.tabs,tabs)||!read(r.counter,counter))continue;
+        if(r.pageRead) {
+            std::vector<uint8_t> page;
+            if(read(r.page,page)) {
+                const int W=r.page.w/2,H=r.page.h/2;
+                std::vector<uint8_t> lum(size_t(W)*size_t(H));
+                for(int y=0;y<H;++y)for(int x=0;x<W;++x) {
+                    int sum=0;
+                    for(int dy=0;dy<2;++dy)for(int dx=0;dx<2;++dx) {
+                        const uint8_t* p=page.data()+((size_t(y*2+dy)*size_t(r.page.w))+size_t(x*2+dx))*4;
+                        sum+=p[0]*3+p[1]*6+p[2];
+                    }
+                    lum[size_t(y)*W+x]=uint8_t(sum/40);
+                }
+                const int under=stashnav::Last().tab.load();
+                auto* ref=under>=0&&under<int(pageRefs.size())?&pageRefs[size_t(under)]:nullptr;
+                pageRefW=W;pageRefH=H;
+                bool found=false;int hx0=0,hy0=0,hx1=0,hy1=0;
+                // No game tooltip drawn: the picture under the page, taken fresh each look (an item moved
+                // in the stash under it is in the next one).
+                if(r.pageRef){if(ref)*ref=std::move(lum);}
+                else if(r.holeOk&&ref&&ref->size()==lum.size()) {
+                    // The first search (owner 2026-11-28: "it cut the hole well"): a cell counts where it
+                    // darkened by 24 or more; the box is the rows and columns holding at least 6 such cells.
+                    std::vector<int> rows(static_cast<size_t>(H)),cols(static_cast<size_t>(W));
+                    for(int y=0;y<H;++y)for(int x=0;x<W;++x)
+                        if(int((*ref)[size_t(y)*W+x])-int(lum[size_t(y)*W+x])>=24){++rows[size_t(y)];++cols[size_t(x)];}
+                    int x0=W,x1=-1,y0=H,y1=-1;
+                    for(int y=0;y<H;++y)if(rows[size_t(y)]>=6){y0=std::min(y0,y);y1=y;}
+                    for(int x=0;x<W;++x)if(cols[size_t(x)]>=6){x0=std::min(x0,x);x1=x;}
+                    const bool box=x1>=x0&&y1>=y0&&(x1-x0)>=10&&(y1-y0)>=6;
+                    found=box&&(x1-x0+1)*(y1-y0+1)*100<=W*H*45;
+                    if(found){hx0=x0*2-4;hy0=y0*2-4;hx1=x1*2+6;hy1=y1*2+6;}
+                    else if(box)ref->clear();   // most of the page changed: the picture under it is another now
+                } else if(r.holeOk&&collectionLog.load()) {
+                    static ULONGLONG toldAt=0;
+                    if(GetTickCount64()-toldAt>2000){toldAt=GetTickCount64();char line[120];
+                        std::snprintf(line,sizeof line,"Frame collection: no picture of tab %d under the page yet (taken with the laser on the stash side)",under);Say(line);}
+                }
+                {
+                    // Held a moment: the search misses the box on some reads (owner 2026-11-28: the hole came
+                    // and went within 100 ms), so a found box stays left out until 450 ms without one, or
+                    // until the laser leaves the inventory side.
+                    static ULONGLONG lastFound=0;
+                    const ULONGLONG nowMs=GetTickCount64();
+                    if(found)lastFound=nowMs;
+                    else if(false&&nowMs-lastFound<450) {
+                        hx0=tooltipHoleX0.load();hy0=tooltipHoleY0.load();hx1=tooltipHoleX1.load();hy1=tooltipHoleY1.load();found=true;
+                    }
+                    if(hx0!=tooltipHoleX0.load()||hy0!=tooltipHoleY0.load()||hx1!=tooltipHoleX1.load()||hy1!=tooltipHoleY1.load()) {
+                        tooltipHoleX0.store(hx0);tooltipHoleY0.store(hy0);tooltipHoleX1.store(hx1);tooltipHoleY1.store(hy1);
+                        char line[160];
+                        if(found)std::snprintf(line,sizeof line,"Frame collection: the game's tooltip over the page at %d,%d %dx%d (page pixels); the page leaves it out",
+                                               hx0,hy0,hx1-hx0,hy1-hy0);
+                        else std::snprintf(line,sizeof line,"Frame collection: no game tooltip over the page");
+                        if(collectionLog.load())Say(line);
+                    }
+                }
+            }
+        } else if(!collectionInUiShown){tooltipHoleX0.store(0);tooltipHoleX1.store(0);}
+        if(read(r.plaques,plaques)) {   // where the game draws something over the bare carving
+            using namespace stashplaques;
+            const auto bits=[](uint64_t v){int n=0;while(v){v&=v-1;++n;}return n;};
+            int counts[2]{};
+            for(int side=0;side<2;++side) {
+                uint64_t cover[PlaqueWords]{};
+                const int ox=side?NextX-PreviousX:0;
+                for(int cy=0;cy<PlaqueCells;++cy)for(int cx=0;cx<PlaqueCells;++cx) {
+                    const int x0=cx*Width/PlaqueCells,x1=(cx+1)*Width/PlaqueCells,y0=cy*Height/PlaqueCells,y1=(cy+1)*Height/PlaqueCells;
+                    if(CellCovered(plaques.data()+size_t(ox)*4,r.plaques.w,Background[side],3,Width,x0,y0,x1,y1)) {
+                        const int bit=cy*PlaqueCells+cx;cover[bit/64]|=uint64_t(1)<<(bit%64);
+                    }
+                }
+                for(int w=0;w<PlaqueWords;++w){plaqueCover[side][w].store(cover[w]);counts[side]+=bits(cover[w]);}
+            }
+            static int toldCounts[2]{};
+            if(toldCounts[0]!=counts[0]||toldCounts[1]!=counts[1]) {
+                toldCounts[0]=counts[0];toldCounts[1]=counts[1];
+                char line[120];std::snprintf(line,sizeof line,"Frame stash: the game draws over %d / %d plaque cells (left / right); those stay the game's",
+                    counts[0],counts[1]);Say(line);
+            }
+        }
+        auto& last=stashnav::Last();
+        float means[stashnav::TabCount]{};
+        int tab=stashnav::ActiveTab(tabs.data(),r.tabs.w,r.tabs.h,r.tabs.w,means);
+        // An item's tooltip over the tab bar hides which tab is up (owner 2026-11-22: the counter
+        // showed "/ 29" whenever a tooltip reached the bar - the log read tab -1 then). The tab
+        // cannot change while the bar is covered, so the last good read holds.
+        static int heldTab=-1;static ULONGLONG heldAt=0;
+        const ULONGLONG readAt=GetTickCount64();
+        if(tab>=0){heldTab=tab;heldAt=readAt;}
+        else if(heldTab>=0&&readAt-last.at.load()<2000)tab=heldTab;
+        int page=tab==stashnav::Shared?stashnav::SharedPage(counter.data(),r.counter.w,r.counter.h,r.counter.w):stashnav::PageUnknown;
+        // The counter as the game drew it at the last good read: where it still looks so, the
+        // tooltip leaves it bare and "Page N / 5" goes there; where it does not, the tooltip is
+        // over it and stays on top (counterCover, 11 columns of 15 px).
+        // A tooltip's see-through black still lets the digits read, so the page alone does not
+        // say the counter is bare (owner 2026-11-22: comparison tooltips went under it): each
+        // page's counter is kept at its brightest (the bare one - a tooltip only darkens) and
+        // the cells that differ from it are the tooltip's.
+        static std::vector<uint8_t> counterRefs[stashnav::PlayerPages+1];static long refLight[stashnav::PlayerPages+1]{};
+        static int refPage=stashnav::PageUnknown;
+        if(page>=1&&page<=stashnav::PlayerPages) {
+            long light=0;for(size_t i=0;i<counter.size();i+=4)light+=counter[i]+counter[i+1]+counter[i+2];
+            if(counterRefs[page].size()!=counter.size()||light>=refLight[page]){counterRefs[page]=counter;refLight[page]=light;}
+            refPage=page;
+        }
+        if(tab==stashnav::Shared&&page==stashnav::PageUnknown&&refPage>=1)page=refPage;   // read on from the bare cells below
+        if(tab==stashnav::Shared&&page>=1&&page<=stashnav::PlayerPages&&counterRefs[page].size()==counter.size()) {
+            uint64_t cover=0;
+            for(int cy=0;cy<CounterRows;++cy)for(int c=0;c<CounterColumns;++c)
+                if(CellCovered(counter.data(),r.counter.w,counterRefs[page].data(),4,r.counter.w,
+                               c*r.counter.w/CounterColumns,cy*r.counter.h/CounterRows,(c+1)*r.counter.w/CounterColumns,(cy+1)*r.counter.h/CounterRows))
+                    cover|=uint64_t(1)<<(cy*CounterColumns+c);
+            counterCover.store(cover);
+            if(cover==(uint64_t(1)<<(CounterRows*CounterColumns))-1)page=stashnav::PageUnknown;   // all of it under a tooltip
+        } else counterCover.store(0);
+        ++stashReadsDone;
+        static ULONGLONG toldAt=0;
+        if(tab!=last.tab.load()||page!=last.page.load()||(collectionLog.load()&&GetTickCount64()-toldAt>3000)) {
+            toldAt=GetTickCount64();
+            const uint8_t* c=counter.data()+(size_t(14)*size_t(r.counter.w)+70)*4;   // a pixel in the counter's digit
+            char line[260];std::snprintf(line,sizeof line,"Frame stash: tab %d, shared page %d (read off the UI image; %u read, %u recorded; plates %.0f %.0f %.0f %.0f %.0f %.0f; counter pixel %u,%u,%u)",
+                tab,page,stashReadsDone,stashReadsRecorded,means[0],means[1],means[2],means[3],means[4],means[5],c[0],c[1],c[2]);Say(line);
+        }
+        last.tab=tab;last.page=page;last.at=GetTickCount64();
+    }
+}
+// This frame's strips: copied out of the game's own UI image (src) into the next free slot.
+void RecordStashReads(ID3D12GraphicsCommandList* list,ID3D12Resource* src,uint32_t w,uint32_t h,const int32_t crop[4]) {
+    stashReadRecorded=-1;
+    static ULONGLONG toldAt=0;
+    const auto skip=[&](const char* why){
+        if(!collectionLog.load()||GetTickCount64()-toldAt<3000)return;
+        toldAt=GetTickCount64();
+        char line[200];std::snprintf(line,sizeof line,"Frame stash: no strip read this frame - %s (image %ux%u, crop %d,%d %dx%d)",why,w,h,crop[0],crop[1],crop[2],crop[3]);Say(line);
+    };
+    {   // diagnostic (owner's test 2026-11-21 read nothing and logged nothing): every 3 s, the gate
+        static ULONGLONG heardAt=0;
+        if(collectionLog.load()&&GetTickCount64()-heardAt>3000) {
+            heardAt=GetTickCount64();
+            char line[200];std::snprintf(line,sizeof line,"Frame stash: copy step - stash %d, %u recorded, %u read, slots pending %d%d%d",
+                int(gamestate::StashButtonsShown()),stashReadsRecorded,stashReadsDone,
+                int(stashReads[0].pending),int(stashReads[1].pending),int(stashReads[2].pending));
+            Say(line);
+        }
+    }
+    if(!gamestate::StashButtonsShown())return;
+    if(!ShotSized(w,h,crop)){skip("the image is not the shots' size");return;}
+    auto& r=stashReads[size_t(stashReadNext)];
+    if(r.pending){skip("the slot still waits for the GPU");return;}
+    const int cx=crop[2]>0?crop[0]:0,cy=crop[3]>0?crop[1]:0;
+    const auto make=[&](StashStrip& s,int sw,int sh)->bool{
+        if(s.buffer)return true;
+        D3D12_RESOURCE_DESC td=src->GetDesc();td.Width=UINT64(sw);td.Height=UINT(sh);td.DepthOrArraySize=td.MipLevels=1;
+        UINT rows=0;UINT64 rowBytes=0,total=0;
+        device->GetCopyableFootprints(&td,0,1,0,&s.fp,&rows,&rowBytes,&total);
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_READBACK;
+        D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=total;bd.Height=bd.DepthOrArraySize=bd.MipLevels=1;
+        bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        if(FAILED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&s.buffer)))){s={};return false;}
+        s.w=sw;s.h=sh;return true;
+    };
+    if(src->GetDesc().Format!=DXGI_FORMAT_R16G16B16A16_FLOAT){skip("the image is not R16G16B16A16_FLOAT");return;}
+    if(!make(r.tabs,stashnav::TabsW,stashnav::TabsH)||!make(r.counter,stashnav::CounterW,stashnav::CounterH)||
+       !make(r.plaques,stashplaques::NextX+stashplaques::Width-stashplaques::PreviousX,stashplaques::Height)){skip("no readback buffer");return;}
+    ++stashReadsRecorded;
+    D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    b.Transition={src,D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COPY_SOURCE};
+    list->ResourceBarrier(1,&b);
+    const auto copy=[&](StashStrip& s,int x,int y){
+        D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=s.buffer.Get();to.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;to.PlacedFootprint=s.fp;
+        D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=src;from.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;from.SubresourceIndex=0;
+        const D3D12_BOX box{UINT(cx+x),UINT(cy+y),0,UINT(cx+x+s.w),UINT(cy+y+s.h),1};
+        list->CopyTextureRegion(&to,0,0,0,&from,&box);
+    };
+    copy(r.tabs,stashnav::TabsX,stashnav::TabsY);
+    copy(r.counter,stashnav::CounterX,stashnav::CounterY);
+    copy(r.plaques,stashplaques::PreviousX,stashplaques::Y);
+    r.pageRead=false;
+    if(collectionInUiShown&&tooltipHoleOn.load()) {
+        const int px0=int(CollectionPageLeft*2244.f+.5f),px1=int(CollectionPageRight*2244.f+.5f);
+        const int py0=int(CollectionPageTop*2352.f+.5f),py1=int(CollectionPageBottom*2352.f+.5f);
+        if(make(r.page,px1-px0,py1-py0)){copy(r.page,px0,py0);r.pageRead=true;r.pageRef=pageRefNow.load();r.holeOk=holeAllowed.load();}
+    }
+    std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
+    list->ResourceBarrier(1,&b);
+    stashReadRecorded=stashReadNext;
+    stashReadNext=(stashReadNext+1)%int(stashReads.size());
+}
+// The plaques show on the game's own five tabs and on the Collection page (owner 2026-11-22: the
+// page was made small enough for them).
+bool PlaquesShown() {
+    const auto& last=stashnav::Last();
+    const int tab=last.tab.load();
+    return gamestate::StashButtonsShown()&&GetTickCount64()-last.at.load()<400&&
+           tab>=stashnav::Personal&&tab<=stashnav::Runes;
+}
+// On the Shared tab each plaque is two: the upper half turns the shared page.
+bool PlaquesSplit() {return PlaquesShown()&&!collection::TabWanted()&&stashnav::Last().tab.load()==stashnav::Shared;}
+// Previous / Next set into the carved recesses (stash_plaque_art.h), the lit face under the laser.
+// Where the game draws over the carving (plaqueCover: a tooltip, an item on the cursor) the
+// game's picture stays on top.
+void CopyPlaqueArt(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,uint32_t w,uint32_t h,const int32_t crop[4]) {
+    if(!PlaquesShown()||!ShotSized(w,h,crop))return;
+    using namespace stashplaques;
+    auto& u=plaqueUpload;
+    if(!u.tried) {
+        u.tried=true;
+        D3D12_RESOURCE_DESC td{};td.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;td.Width=UINT64(Width);td.Height=UINT(Height);
+        td.DepthOrArraySize=td.MipLevels=1;td.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;td.SampleDesc.Count=1;
+        UINT rows=0;UINT64 rowBytes=0,one=0;
+        device->GetCopyableFootprints(&td,0,1,0,&u.fp[0],&rows,&rowBytes,&one);
+        one=(one+D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT-1)/D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT*D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT;
+        constexpr int Faces2=2*Variants;
+        for(int i=1;i<Faces2;++i){u.fp[i]=u.fp[0];u.fp[i].Offset=u.fp[0].Offset+one*UINT64(i);}
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
+        D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=one*Faces2;bd.Height=bd.DepthOrArraySize=bd.MipLevels=1;
+        bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        uint8_t* mapped=nullptr;const D3D12_RANGE none{0,0};
+        if(SUCCEEDED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&u.upload)))&&
+           SUCCEEDED(u.upload->Map(0,&none,reinterpret_cast<void**>(&mapped)))&&mapped) {
+            for(int i=0;i<Faces2;++i) {
+                const uint8_t* face=Faces[i/Variants][i%Variants];
+                const std::vector<uint8_t> art(face,face+size_t(Width)*Height*4);
+                const auto half=collection::uiimage::Convert(art,Width,Width,Height,Width,Height);
+                for(int y=0;y<Height;++y)std::memcpy(mapped+u.fp[i].Offset+size_t(y)*u.fp[i].Footprint.RowPitch,
+                                                    reinterpret_cast<const uint8_t*>(half.data())+size_t(y)*Width*8,size_t(Width)*8);
+            }
+            u.upload->Unmap(0,nullptr);
+            Say("Frame stash: the tab plaques are ready");
+        } else {u.upload.Reset();Say("Frame stash: no upload buffer for the tab plaques");}
+    }
+    if(!u.upload)return;
+    const int cx=crop[2]>0?crop[0]:0,cy=crop[3]>0?crop[1]:0;
+    const int lit=plaqueLit.load();
+    const bool split=PlaquesSplit(),onPage=collection::TabWanted();
+    D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.pResource=dest;
+    b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b.Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;b.Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+    list->ResourceBarrier(1,&b);
+    D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=dest;to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;to.SubresourceIndex=0;
+    for(int side=0;side<2;++side) {
+        const bool here=lit>=0&&(lit&1)==side,upper=(lit&2)!=0;
+        const int variant=split?(here?(upper?4:3):2):(here?1:0);
+        D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=u.upload.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        from.PlacedFootprint=u.fp[side*Variants+variant];
+        const UINT x=UINT(cx+(side==0?PreviousX:NextX)),y=UINT(cy+Y);
+        uint64_t cover[PlaqueWords]{};bool any=false;
+        if(!onPage)for(int w=0;w<PlaqueWords;++w){cover[w]=plaqueCover[side][w].load();any=any||cover[w]!=0;}
+        if(!any){list->CopyTextureRegion(&to,x,y,0,&from,nullptr);continue;}
+        // row by row, each run of bare cells in one copy
+        for(int gy=0;gy<PlaqueCells;++gy)for(int gx=0;gx<PlaqueCells;) {
+            const auto covered=[&](int cx){const int bit=gy*PlaqueCells+cx;return (cover[bit/64]>>(bit%64))&1;};
+            if(covered(gx)){++gx;continue;}
+            int end=gx;while(end<PlaqueCells&&!covered(end))++end;
+            const UINT x0=UINT(gx*Width/PlaqueCells),x1=UINT(end*Width/PlaqueCells),y0=UINT(gy*Height/PlaqueCells),y1=UINT((gy+1)*Height/PlaqueCells);
+            const D3D12_BOX box{x0,y0,0,x1,y1,1};
+            list->CopyTextureRegion(&to,x+x0,y+y0,0,&from,&box);
+            gx=end;
+        }
+    }
+    std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
+    list->ResourceBarrier(1,&b);
+}
+// The bar's LT / RT marks as a stick pushed left / right (stash_stick_art.h): the sticks turn the
+// tabs now, the triggers do not (owner 2026-11-22).
+void CopyStickArt(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,uint32_t w,uint32_t h,const int32_t crop[4]) {
+    if(!gamestate::StashButtonsShown()||!ShotSized(w,h,crop))return;
+    using namespace stashsticks;
+    static Microsoft::WRL::ComPtr<ID3D12Resource> upload;static D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp[2]{};static bool tried=false;
+    if(!tried) {
+        tried=true;
+        D3D12_RESOURCE_DESC td{};td.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;td.Width=UINT64(Size);td.Height=UINT(Size);
+        td.DepthOrArraySize=td.MipLevels=1;td.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;td.SampleDesc.Count=1;
+        UINT rows=0;UINT64 rowBytes=0,one=0;
+        device->GetCopyableFootprints(&td,0,1,0,&fp[0],&rows,&rowBytes,&one);
+        one=(one+D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT-1)/D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT*D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT;
+        fp[1]=fp[0];fp[1].Offset=fp[0].Offset+one;
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
+        D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=one*2;bd.Height=bd.DepthOrArraySize=bd.MipLevels=1;
+        bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        uint8_t* mapped=nullptr;const D3D12_RANGE none{0,0};
+        if(SUCCEEDED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&upload)))&&
+           SUCCEEDED(upload->Map(0,&none,reinterpret_cast<void**>(&mapped)))&&mapped) {
+            for(int i=0;i<2;++i) {
+                const std::vector<uint8_t> art(Marks[i],Marks[i]+sizeof Marks[i]);
+                const auto half=collection::uiimage::Convert(art,Size,Size,Size,Size,Size);
+                for(int y=0;y<Size;++y)std::memcpy(mapped+fp[i].Offset+size_t(y)*fp[i].Footprint.RowPitch,
+                                                  reinterpret_cast<const uint8_t*>(half.data())+size_t(y)*Size*8,size_t(Size)*8);
+            }
+            upload->Unmap(0,nullptr);
+        } else upload.Reset();
+    }
+    if(!upload)return;
+    const int cx=crop[2]>0?crop[0]:0,cy=crop[3]>0?crop[1]:0;
+    D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.pResource=dest;
+    b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b.Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;b.Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+    list->ResourceBarrier(1,&b);
+    D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=dest;to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;to.SubresourceIndex=0;
+    for(int i=0;i<2;++i) {
+        D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=upload.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;from.PlacedFootprint=fp[i];
+        list->CopyTextureRegion(&to,UINT(cx+(i?RightX:LeftX)),UINT(cy+Y),0,&from,nullptr);
+    }
+    std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
+    list->ResourceBarrier(1,&b);
+}
+// The Collection tab hovered: the game's hover frame on it (stash_tab_hover_art.h). The game never
+// sees that tab hovered - its laser is the mod's - and letting its cursor there drew the tab's
+// pressed art instead (owner 2026-11-22), so the frame is laid in here.
+void CopyTabHoverArt(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,uint32_t w,uint32_t h,const int32_t crop[4]) {
+    if(!collectionTabLit||collection::TabWanted()||!gamestate::StashButtonsShown()||!ShotSized(w,h,crop))return;
+    using namespace stashtabhover;
+    static Microsoft::WRL::ComPtr<ID3D12Resource> upload;static D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp{};static bool tried=false;
+    if(!tried) {
+        tried=true;
+        D3D12_RESOURCE_DESC td{};td.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;td.Width=UINT64(Width);td.Height=UINT(Height);
+        td.DepthOrArraySize=td.MipLevels=1;td.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;td.SampleDesc.Count=1;
+        UINT rows=0;UINT64 rowBytes=0,total=0;
+        device->GetCopyableFootprints(&td,0,1,0,&fp,&rows,&rowBytes,&total);
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
+        D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=total;bd.Height=bd.DepthOrArraySize=bd.MipLevels=1;
+        bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        uint8_t* mapped=nullptr;const D3D12_RANGE none{0,0};
+        if(SUCCEEDED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&upload)))&&
+           SUCCEEDED(upload->Map(0,&none,reinterpret_cast<void**>(&mapped)))&&mapped) {
+            const std::vector<uint8_t> art(Tab,Tab+sizeof Tab);
+            const auto half=collection::uiimage::Convert(art,Width,Width,Height,Width,Height);
+            for(int y=0;y<Height;++y)std::memcpy(mapped+fp.Offset+size_t(y)*fp.Footprint.RowPitch,
+                                                reinterpret_cast<const uint8_t*>(half.data())+size_t(y)*Width*8,size_t(Width)*8);
+            upload->Unmap(0,nullptr);
+        } else upload.Reset();
+    }
+    if(!upload)return;
+    const int cx=crop[2]>0?crop[0]:0,cy=crop[3]>0?crop[1]:0;
+    D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.pResource=dest;
+    b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b.Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;b.Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+    list->ResourceBarrier(1,&b);
+    D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=dest;to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;to.SubresourceIndex=0;
+    D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=upload.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;from.PlacedFootprint=fp;
+    list->CopyTextureRegion(&to,UINT(cx+X),UINT(cy+Y),0,&from,nullptr);
+    std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
+    list->ResourceBarrier(1,&b);
+}
+// "Page N / 5" over the game's "Page N / 29" while the shared tab shows one of the player's five
+// pages (owner 2026-11-21: no one may see the 29 - the collection's own pages are not theirs).
+void CopyCounterArt(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,uint32_t w,uint32_t h,const int32_t crop[4]) {
+    const auto& last=stashnav::Last();
+    const int page=last.page.load();
+    if(!gamestate::StashButtonsShown()||last.tab.load()!=stashnav::Shared||page<1||page>stashnav::PlayerPages||
+       collectionInUiShown||!ShotSized(w,h,crop))return;
+    auto& u=counterUpload;
+    if(!u.tried) {
+        u.tried=true;
+        using namespace collection::counter;
+        D3D12_RESOURCE_DESC td{};td.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;td.Width=UINT64(Width);td.Height=UINT(Height);
+        td.DepthOrArraySize=td.MipLevels=1;td.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;td.SampleDesc.Count=1;
+        UINT rows=0;UINT64 rowBytes=0,one=0;
+        device->GetCopyableFootprints(&td,0,1,0,&u.fp[0],&rows,&rowBytes,&one);
+        one=(one+D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT-1)/D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT*D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT;
+        for(int i=1;i<5;++i){u.fp[i]=u.fp[0];u.fp[i].Offset=u.fp[0].Offset+one*UINT64(i);}
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
+        D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=one*5;bd.Height=bd.DepthOrArraySize=bd.MipLevels=1;
+        bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        uint8_t* mapped=nullptr;const D3D12_RANGE none{0,0};
+        if(SUCCEEDED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&u.upload)))&&
+           SUCCEEDED(u.upload->Map(0,&none,reinterpret_cast<void**>(&mapped)))&&mapped) {
+            for(int i=0;i<5;++i) {
+                const std::vector<uint8_t> art(Pages[i],Pages[i]+sizeof Pages[i]);
+                const auto half=collection::uiimage::Convert(art,Width,Width,Height,Width,Height);
+                for(int y=0;y<Height;++y)std::memcpy(mapped+u.fp[i].Offset+size_t(y)*u.fp[i].Footprint.RowPitch,
+                                                    reinterpret_cast<const uint8_t*>(half.data())+size_t(y)*Width*8,size_t(Width)*8);
+            }
+            u.upload->Unmap(0,nullptr);
+            Say("Frame stash: the page counter \"Page N / 5\" is ready");
+        } else {u.upload.Reset();Say("Frame stash: no upload buffer for the page counter");}
+    }
+    if(!u.upload)return;
+    const int cx=crop[2]>0?crop[0]:0,cy=crop[3]>0?crop[1]:0;
+    D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.pResource=dest;
+    b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b.Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;b.Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+    list->ResourceBarrier(1,&b);
+    D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=dest;to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;to.SubresourceIndex=0;
+    D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=u.upload.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;from.PlacedFootprint=u.fp[page-1];
+    const uint64_t cover=counterCover.load();
+    if(cover==0)list->CopyTextureRegion(&to,UINT(cx+stashnav::CounterX),UINT(cy+stashnav::CounterY),0,&from,nullptr);
+    else for(int r=0;r<CounterRows;++r)for(int c=0;c<CounterColumns;++c) {   // a tooltip over part of it: that part stays the game's
+        if(cover&(uint64_t(1)<<(r*CounterColumns+c)))continue;
+        using namespace collection::counter;
+        const UINT x0=UINT(c*Width/CounterColumns),x1=UINT((c+1)*Width/CounterColumns),y0=UINT(r*Height/CounterRows),y1=UINT((r+1)*Height/CounterRows);
+        const D3D12_BOX box{x0,y0,0,x1,y1,1};
+        list->CopyTextureRegion(&to,UINT(cx+stashnav::CounterX)+x0,UINT(cy+stashnav::CounterY)+y0,0,&from,&box);
+    }
+    std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
+    list->ResourceBarrier(1,&b);
+}
 bool CopyUi(reshade::api::command_queue* rq) {
     const bool chat=chatShown&&!spatialMode;
     if((!spatialMode&&!chat)||uiEye.copied)return true;
@@ -7749,6 +9460,7 @@ bool CopyUi(reshade::api::command_queue* rq) {
         return true;
     }
     uiMissingFrames=0;
+    CollectStashReads();
     static bool completeNpcLogged=false;
     if(npcChoicesMode) {
         const auto canvas=dialogue::Canvas(int(w),int(h));
@@ -7798,16 +9510,177 @@ bool CopyUi(reshade::api::command_queue* rq) {
     if(FAILED(e.allocator->Reset())||FAILED(e.commands->Reset(e.allocator.Get(),nullptr)))return false;
     ID3D12Resource* dest=e.images[e.index].texture;
     // On the leather the game's translucent backdrop under the menu is taken out, so the hide
-    // shows round the menu's art ([interactions] leather_backdrop=1 keeps it).
-    const bool undim=leatherMode&&!leatherBackdrop.load();
-    if(!uiBlit.Render(device.Get(),e.commands.Get(),src,dest,opaqueMenuMode,false,0,0,1.f,1.f,0.f,0.f,0.f,0.f,undim?crop:nullptr)) {
+    // shows round the menu's art ([interactions] leather_backdrop=1 keeps it). The stash wants
+    // the same when [interaction] stash_world is on: the game's dim round the window is taken
+    // out of the layer, so the world (which ShowWorldBehindMenu keeps behind it) shows through
+    // the black. The band is the crop the quad shows.
+    const bool undim=(leatherMode&&!leatherBackdrop.load())||StashMenuWorld();
+    if(StashMenuWorld()&&!leatherMode) {
+        static bool told=false;
+        if(!told){told=true;char b[160];
+            std::snprintf(b,sizeof b,"Frame collection: stash_world is on; the UI layer's backdrop is taken out over %d,%d %dx%d",
+                crop[0],crop[1],crop[2],crop[3]);
+            Say(b);}
+    }
+    // A gem, rune or material on its way to its slot: the picture stays as it was before the
+    // mod's clicks on the game's tabs (owner 2026-11-22: "the screen must not change").
+    const bool frozen=GetTickCount64()<uiFreezeUntil.load()&&uiFrozenValid&&uiFrozen&&uiFrozenW==w&&uiFrozenH==h&&
+                      uiFrozenAt+250>=uiFreezeFrom.load();
+    if(frozen) {
+        D3D12_RESOURCE_BARRIER b[2]{};
+        b[0].Type=b[1].Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        b[0].Transition.pResource=dest;b[0].Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        b[0].Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;b[0].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+        e.commands->ResourceBarrier(1,b);
+        e.commands->CopyResource(dest,uiFrozen.Get());
+        std::swap(b[0].Transition.StateBefore,b[0].Transition.StateAfter);
+        e.commands->ResourceBarrier(1,b);
+        RecordStashReads(e.commands.Get(),src,w,h,crop);
+    } else {
+    if(!uiBlit.Render(device.Get(),e.commands.Get(),src,dest,opaqueMenuMode&&!StashMenuWorld(),false,0,0,1.f,1.f,0.f,0.f,0.f,0.f,undim?crop:nullptr)) {
         e.commands->Close();uiSupported=false;
         Say("Frame panels: conversion rejected; native flat menu fallback next frame");return true;
     }
+    {   // the Collection page into the same image (variant B, [collection] in_ui)
+        stashImageSized.store(ShotSized(w,h,crop));
+        const bool shown=CopyCollectionIntoUi(e.commands.Get(),dest,w,h,crop);
+        collectionCoversStash.store(shown,std::memory_order_relaxed);
+        if(shown)collectionCoversAt.store(GetTickCount64(),std::memory_order_relaxed);
+        if(shown!=collectionInUiShown){collectionInUiShown=shown;
+            Say(shown?"Frame collection: the page is drawn into the game's UI image":"Frame collection: the page is no longer in the UI image");}
+        CopyInventoryMask(e.commands.Get(),dest,w,h,crop);
+        CopyCounterArt(e.commands.Get(),dest,w,h,crop);
+        CopyPlaqueArt(e.commands.Get(),dest,w,h,crop);
+        CopyStickArt(e.commands.Get(),dest,w,h,crop);
+        CopyTabHoverArt(e.commands.Get(),dest,w,h,crop);
+        RecordStashReads(e.commands.Get(),src,w,h,crop);
+    }
+    // While such an item is in the hand at the stash, each finished picture is kept, so the
+    // freeze above starts from the frame before the first click.
+    if(uiSnapshotWanted.load()) {
+        if(!uiFrozen||uiFrozenW!=w||uiFrozenH!=h) {
+            uiFrozen.Reset();uiFrozenValid=false;
+            D3D12_RESOURCE_DESC d=dest->GetDesc();d.Flags=D3D12_RESOURCE_FLAG_NONE;
+            D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_DEFAULT;
+            if(SUCCEEDED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_COPY_SOURCE,nullptr,IID_PPV_ARGS(&uiFrozen)))){uiFrozenW=w;uiFrozenH=h;}
+            else {uiFrozen.Reset();Say("Frame stash: no texture to hold the picture while an item goes to its slot");}
+        }
+        if(uiFrozen) {
+            D3D12_RESOURCE_BARRIER b[2]{};
+            b[0].Type=b[1].Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            b[0].Transition.pResource=dest;b[0].Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            b[0].Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;b[0].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_SOURCE;
+            b[1].Transition.pResource=uiFrozen.Get();b[1].Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            b[1].Transition.StateBefore=D3D12_RESOURCE_STATE_COPY_SOURCE;b[1].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+            e.commands->ResourceBarrier(2,b);
+            e.commands->CopyResource(uiFrozen.Get(),dest);
+            std::swap(b[0].Transition.StateBefore,b[0].Transition.StateAfter);std::swap(b[1].Transition.StateBefore,b[1].Transition.StateAfter);
+            e.commands->ResourceBarrier(2,b);
+            uiFrozenValid=true;uiFrozenAt=GetTickCount64();
+        }
+    }
+    }   // not frozen
     if(FAILED(e.commands->Close()))return false;
     ID3D12CommandList* lists[]={e.commands.Get()};queue->ExecuteCommandLists(1,lists);
     if(FAILED(queue->Signal(fence.Get(),++fenceValue)))return false;
+    if(stashReadRecorded>=0){auto& r=stashReads[size_t(stashReadRecorded)];r.fence=fenceValue;r.pending=true;stashReadRecorded=-1;}
     e.copyFence=fenceValue;e.copied=true;std::copy_n(crop,4,uiCrop);if(chat)chatNativeCaptured=true;return true;
+}
+// The in-headset "UI shot": transport binds it to both grips held (Input). The picture is
+// read back from the mod's own captured UI layer (hud::UiTexture) and saved by vrcam.
+// Half (R16) to an 8-bit channel, clamped.
+float HalfFloat(uint16_t h) {
+    const uint32_t sign=uint32_t(h&0x8000u)<<16;
+    uint32_t exp=(h>>10)&0x1Fu,mant=h&0x3FFu,bits=0;
+    if(exp==0) {
+        if(mant==0)bits=sign;
+        else {exp=113;while((mant&0x400u)==0){mant<<=1;--exp;}mant&=0x3FFu;bits=sign|(exp<<23)|(mant<<13);}
+    } else if(exp==31)bits=sign|0x7F800000u|(mant<<13);
+    else bits=sign|((exp-15+127)<<23)|(mant<<13);
+    float f;std::memcpy(&f,&bits,4);
+    return f;
+}
+uint8_t HalfByte(uint16_t h){return uint8_t(std::clamp(HalfFloat(h),0.f,1.f)*255.f+.5f);}
+// Read the captured UI image (the menu's own layer, hud::UiTexture) back to the CPU and hand
+// it to vrcam as a PNG. The game's own frame (shot::Take) has no UI; this is the layer the
+// stash, the tab bar and our page are drawn in, so it is how the interface can be seen off the
+// headset. The image is R16G16B16A16_FLOAT; only the crop the mod shows is read.
+void TakeUiShot(reshade::api::command_queue* rq) {
+    uint32_t w=0,h=0;int32_t crop[4]{};
+    auto* src=reinterpret_cast<ID3D12Resource*>(hud::UiTexture(w,h,crop));
+    if(!src||!w||!h){Say("Frame UI shot: no captured UI image (a menu must be open)");return;}
+    const D3D12_RESOURCE_DESC desc=src->GetDesc();
+    if(desc.Format!=DXGI_FORMAT_R16G16B16A16_FLOAT){Say("Frame UI shot: the UI image is not R16G16B16A16_FLOAT");return;}
+    const LONG x0=std::clamp<LONG>(crop[0],0,LONG(w)),y0=std::clamp<LONG>(crop[1],0,LONG(h));
+    const LONG cw=std::clamp<LONG>(crop[2],1,LONG(w)-x0),ch=std::clamp<LONG>(crop[3],1,LONG(h)-y0);
+    D3D12_RESOURCE_DESC td=desc;td.Width=UINT64(cw);td.Height=UINT(ch);
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp{};UINT rows=0;UINT64 rowBytes=0,total=0;
+    device->GetCopyableFootprints(&td,0,1,0,&fp,&rows,&rowBytes,&total);
+    D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=total;bd.Height=1;
+    bd.DepthOrArraySize=1;bd.MipLevels=1;bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    ComPtr<ID3D12Resource> readback;
+    if(FAILED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(readback.GetAddressOf())))){Say("Frame UI shot: no readback buffer");return;}
+    ComPtr<ID3D12CommandAllocator> allocator;ComPtr<ID3D12GraphicsCommandList> list;
+    if(FAILED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(allocator.GetAddressOf())))||
+       FAILED(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,allocator.Get(),nullptr,IID_PPV_ARGS(list.GetAddressOf())))){Say("Frame UI shot: no command list");return;}
+    D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    b.Transition={src,D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COPY_SOURCE};
+    list->ResourceBarrier(1,&b);
+    D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=readback.Get();to.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;to.PlacedFootprint=fp;
+    D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=src;from.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;from.SubresourceIndex=0;
+    const D3D12_BOX box{ULONG(x0),ULONG(y0),0,ULONG(x0+cw),ULONG(y0+ch),1};
+    list->CopyTextureRegion(&to,0,0,0,&from,&box);
+    std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
+    list->ResourceBarrier(1,&b);
+    list->Close();
+    ID3D12CommandList* lists[]={list.Get()};queue->ExecuteCommandLists(1,lists);
+    queue->Signal(fence.Get(),++fenceValue);
+    if(!WaitGpu()){Say("Frame UI shot: the GPU did not finish");return;}
+    void* mapped=nullptr;const D3D12_RANGE range{0,SIZE_T(total)};
+    if(FAILED(readback->Map(0,&range,&mapped))){Say("Frame UI shot: the readback did not map");return;}
+    std::vector<uint8_t> rgba(size_t(cw)*size_t(ch)*4);
+    const auto* base=static_cast<const uint8_t*>(mapped)+fp.Offset;
+    for(LONG y=0;y<ch;++y) {
+        const auto* row=reinterpret_cast<const uint16_t*>(base+size_t(y)*fp.Footprint.RowPitch);
+        for(LONG x=0;x<cw;++x) {
+            uint8_t* out=&rgba[(size_t(y)*size_t(cw)+size_t(x))*4];
+            out[0]=HalfByte(row[x*4+0]);out[1]=HalfByte(row[x*4+1]);out[2]=HalfByte(row[x*4+2]);out[3]=255;
+        }
+    }
+    const D3D12_RANGE none{0,0};readback->Unmap(0,&none);
+    // The game's own image has no Collection page: it is added on the way to the headset
+    // (CopyCollectionIntoUi). The shot gets the same pixels at the same place, so it shows
+    // what the headset shows. Those are linear and premultiplied; the shot is sRGB.
+    if(collectionInUiShown&&!collectionUiPixels.empty()) {
+        const auto encode=[](uint16_t h){
+            const float l=std::clamp(HalfFloat(h),0.f,1.f);
+            const float e=l<=.0031308f?l*12.92f:1.055f*std::pow(l,1.f/2.4f)-.055f;
+            return uint8_t(std::clamp(e,0.f,1.f)*255.f+.5f);
+        };
+        for(int y=0;y<collectionUiPixelsH;++y) {
+            const LONG oy=collectionUiY+y-y0;if(oy<0||oy>=ch)continue;
+            for(int x=0;x<collectionUiPixelsW;++x) {
+                const LONG ox=collectionUiX+x-x0;if(ox<0||ox>=cw)continue;
+                const uint16_t* p=&collectionUiPixels[(size_t(y)*size_t(collectionUiPixelsW)+size_t(x))*4];
+                const float a=float(HalfByte(p[3]))/255.f;
+                uint8_t* out=&rgba[(size_t(oy)*size_t(cw)+size_t(ox))*4];
+                for(int c=0;c<3;++c)out[c]=uint8_t(std::clamp(float(encode(p[c]))+float(out[c])*(1.f-a),0.f,255.f));
+            }
+        }
+        // and the tab bar laid over the game's (already sRGB)
+        if(w==uint32_t(collection::art::ShotWidth)&&h==uint32_t(collection::art::ShotHeight))
+            for(int y=0;y<collection::art::TabsHeight;++y) {
+                const LONG oy=collection::art::TabsY+y-y0;if(oy<0||oy>=ch)continue;
+                for(int x=0;x<collection::art::TabsWidth;++x) {
+                    const LONG ox=collection::art::TabsX+x-x0;if(ox<0||ox>=cw)continue;
+                    const uint8_t* s=&collection::art::Tabs[(size_t(y)*collection::art::TabsWidth+size_t(x))*4];
+                    std::memcpy(&rgba[(size_t(oy)*size_t(cw)+size_t(ox))*4],s,3);
+                }
+            }
+    }
+    framevr::SaveUiPicture(std::move(rgba),int(cw),int(ch));
+    char line[96];std::snprintf(line,sizeof line,"Frame UI shot: saved %dx%d (crop %d,%d)",int(cw),int(ch),int(x0),int(y0));Say(line);
 }
 void Capture(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     std::lock_guard lock(mutex);
@@ -7843,6 +9716,7 @@ void Capture(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     // loss, not the session's - failed stays off for good, and the scene never came back (only the
     // menu's board, over SteamVR's own background).
     const bool uiCopied=(!shared&&!chatShown)||CopyUi(rq);
+    if(uiShotWanted.exchange(false)) TakeUiShot(rq);   // both grips held: the captured UI to a PNG
     if(!uiCopied&&campfirePointer.load()){
         uiEye.copied=false;
         static ULONGLONG told=0;if(GetTickCount64()-told>2000){told=GetTickCount64();Say("Frame panels: campfire - the menu's copy refused this frame; retried on the next");}
@@ -7937,6 +9811,20 @@ void OpenCampfireFrame(){std::lock_guard lock(mutex);if(session&&running&&!faile
 void SetCampfirePointer(bool on,float metres){campfirePointer.store(on);campfirePointerM.store(metres);if(!on){campfireMenuHit.store(false);campfireBoardFailed.store(false);}}
 void SetCinemaScreen(float distance,float width){const auto screen=cinema::Clamped(distance,width);cinemaDistance.store(screen.distance);cinemaWidth.store(screen.width);}
 void SetCampfireMenu(float width,float distance,float drop){campfireMenuWidth.store(width);campfireMenuDistance.store(distance);campfireMenuDrop.store(drop);}
+void SetStashScale(float scale){stashScale.store(std::clamp(scale,0.5f,4.0f));}
+void SetStashDrop(float drop){stashDrop.store(std::clamp(drop,-1.5f,1.5f));}
+void SetStashDistance(float metres){stashDistance.store(std::clamp(metres,-0.5f,1.5f));}
+void SetStashWorld(bool on){stashWorld.store(on);}
+void SetCollectionInUi(bool on){collectionInUi.store(on);}
+void SetUiShotGrips(bool on){uiShotGrips.store(on,std::memory_order_relaxed);}
+void SetCollectionLog(bool on){collectionLog.store(on,std::memory_order_relaxed);}
+void SetTooltipHole(bool on){tooltipHoleOn.store(on,std::memory_order_relaxed);}
+bool CollectionCoversStash(){
+    return collectionCoversStash.load(std::memory_order_relaxed)&&GetTickCount64()-collectionCoversAt.load(std::memory_order_relaxed)<250;
+}
+// The stash keeps the world behind it (stash_world) like the leather: the game's own
+// black backdrop behind management menus must then be lifted round the stash.
+bool StashMenuWorld(){return stashWorld.load()&&gamestate::StashButtonsShown();}
 void SetCampfireCaption(bool on,const float rect[4],float width,float distance,float rise){
     for(int i=0;i<4;++i)campfireCaptionRect[i].store(rect[i]);
     campfireCaptionWidth.store(width);campfireCaptionDistance.store(distance);campfireCaptionRise.store(rise);campfireCaption.store(on);
@@ -8212,11 +10100,12 @@ void EndPair() {
     // The shared panels' pictures uploaded this frame, all in one copy (panelatlas).
     if(sharedDirty) {
         const bool flushed=FlushShared();
-        for(auto* p:{&settingsAtlasPending,&bloodAtlasPending,&strainAtlasPending,&bowLaserAtlasPending,&noticeAtlasPending,&arcaneAtlasPending,&glyphAtlasPending,&chatAtlasPending})if(*p) {
+        for(auto* p:{&settingsAtlasPending,&bloodAtlasPending,&strainAtlasPending,&bowLaserAtlasPending,&noticeAtlasPending,&arcaneAtlasPending,&glyphAtlasPending,&chatAtlasPending,&collectionAtlasPending})if(*p) {
             *p=false;
             if(p==&chatAtlasPending)chatImageReady=flushed;else if(p==&settingsAtlasPending)settingsImageReady=flushed;else if(p==&bloodAtlasPending)bloodImageReady=flushed;
             else if(p==&strainAtlasPending)strainImageReady=flushed;else if(p==&bowLaserAtlasPending)bowLaserImageReady=flushed;
-            else if(p==&arcaneAtlasPending)arcaneImageReady=flushed;else if(p==&glyphAtlasPending)glyphImageReady=flushed;else noticeImageReady=flushed;
+            else if(p==&arcaneAtlasPending)arcaneImageReady=flushed;else if(p==&glyphAtlasPending)glyphImageReady=flushed;
+            else if(p==&collectionAtlasPending)collectionImageReady=flushed;else noticeImageReady=flushed;
         }
     }
     // The native menus closed short of swapchains: their surface goes back for the map.
@@ -8239,7 +10128,9 @@ void EndPair() {
     // Tabbed, trade and waypoint menus use the same black background in both eyes.
     // Submit just their shared opaque quad: no different cached world per eye.
     // [interactions] leather_world=0: the leather against the same black (a test fallback).
-    const bool blackMenu=((opaqueMenuMode&&workspacePlaced)||(leatherMode&&!leatherShown.load()&&leatherHolder.Placed()))&&
+    // stash_world: the stash keeps the world behind it like the leather, so its black
+    // backdrop must not be dropped here either.
+    const bool blackMenu=((opaqueMenuMode&&!StashMenuWorld()&&workspacePlaced)||(leatherMode&&!leatherShown.load()&&leatherHolder.Placed()))&&
         uiEye.copied&&uiCrop[2]>0&&!settingsModel.open&&!bodyCalibration.Active();
     if(layer&&!blackMenu)layers[count++]=layer;
     const uint32_t capacity=std::min(uint32_t(layers.size()),layerLimit);
@@ -8503,7 +10394,7 @@ void EndPair() {
             pose.position={p.x,p.y,p.z};height=foot.height;shown.extent.height=foot.rect.h;
         }
         motionQuad(book,pose,size.width,height,shown,uiEye.chain);
-        book.layerFlags=opaqueMenuMode?0:XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        book.layerFlags=(opaqueMenuMode&&!StashMenuWorld())?0:XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
     }
     // The campfire's caption (SetCampfireCaption): the picked hero's class and words, which the game writes in
     // its menu band above the board's strip, on a board of its own over the heroes - from the same copied picture.
@@ -8550,13 +10441,16 @@ void EndPair() {
         motionQuad(respecQuad,XrPose({p,q}),spot.width,spot.height,Rect(panelatlas::Respec(picture)),staticChain);
         respecQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;   // premultiplied (SetupStatic)
     }
-    XrCompositionLayerQuad stashQuads[2]={{XR_TYPE_COMPOSITION_LAYER_QUAD},{XR_TYPE_COMPOSITION_LAYER_QUAD}};
+    XrCompositionLayerQuad stashQuads[stashbuttons::ButtonCount]={};
+    for(auto& quad:stashQuads)quad.type=XR_TYPE_COMPOSITION_LAYER_QUAD;
     if(book.subImage.swapchain&&stashShown&&staticChain) {
         const auto size=UiSurfaceSize();const auto at=UiSurfacePose();const auto q=Q(at.orientation);
-        for(int i=0;i<2;++i) {
+        for(int i=0;i<stashbuttons::TabButtonCount;++i) {
             const auto spot=stashbuttons::Place(size.width,size.height,i);
             const auto p=V(at.position)+math::Rotate(q,{spot.x,spot.y,.004f});
-            motionQuad(stashQuads[i],XrPose({p,q}),spot.width,spot.height,Rect(panelatlas::Stash(i*2+(stashHover==i))),staticChain);
+            // The Collection button stays lit while its panel is open.
+            const bool lit=stashHover==i||(i==2&&collection::TabWanted());
+            motionQuad(stashQuads[i],XrPose({p,q}),spot.width,spot.height,Rect(panelatlas::Stash(i*2+lit)),staticChain);
             stashQuads[i].layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
         }
     }
@@ -8571,20 +10465,108 @@ void EndPair() {
         const auto board=KeyboardBoard(at,size);
         const bool capitals=keyboardTypist.Shifted();
         const XrPosef boardPose{{board.orientation.x,board.orientation.y,board.orientation.z,board.orientation.w},{board.position.x,board.position.y,board.position.z}};
-        motionQuad(keyboardQuad,boardPose,board.width,board.height,Rect(panelatlas::KeyboardPicture(keyboardText,capitals,false)),staticChain);
+        motionQuad(keyboardQuad,boardPose,board.width,board.height,Rect(keyboardGold?panelatlas::Digits:panelatlas::KeyboardPicture(keyboardText,capitals,false)),staticChain);
         keyboardQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;   // premultiplied (SetupStatic)
         if(keyboardLit>=0&&keyboardQuad.subImage.swapchain) {
             const auto key=keyboard::KeySpot(KeyboardLayout(),board,keyboardLit);const auto r=keyboard::KeyTexelRect(KeyboardLayout(),keyboardLit);
-            const auto lit=panelatlas::KeyboardPicture(keyboardText,capitals,true);
+            const auto lit=keyboardGold?panelatlas::DigitsLit:panelatlas::KeyboardPicture(keyboardText,capitals,true);
             motionQuad(keyboardLitQuad,XrPose({board.position+math::Rotate(board.orientation,{key.x,key.y,.002f}),board.orientation}),key.width,key.height,
                 {{lit.x+r.x,lit.y+r.y},{r.w,r.h}},staticChain);
             keyboardLitQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
         }
     }
+    // The Collection panel: open with the stash's Collection tab; painted again
+    // when its tab, page, size, an icon or the pointed slot changed, its picture
+    // taken into the atlas. Opening places it, then the grip can move it.
+    // The page belongs to the stash alone: with the stash gone (closed, CloseAll / UnloadAll, F7
+    // or the console anywhere else) the flag goes, so no other menu takes the page, its withheld
+    // clicks or its laser (bearstonem's review of #608, point 2).
+    if(collection::TabWanted()&&!gamestate::StashButtonsShown()){collection::TabSetWanted(false);Say("Frame collection: no stash up - the page put away");}
+    collectionOpen=collection::TabWanted();
+    collectionView=collection::TabView();
+    if(collectionOpen!=collectionWasOpen){
+        Say(collectionOpen?"Frame collection: the panel is asked for":"Frame collection: the panel is put away");
+    }
+    if(collectionOpen){
+        if(!collectionWasOpen){collectionOffset={};collectionPointer.Reset(UiFloat(trigger,0)>.2f);collectionHover={};}
+        // Inside the stash window (a VR session with the stash up): the page sits on
+        // the stash panel itself, at its own place and size, so it reads as the
+        // stash's own page - the sixth tab. Otherwise it floats in front of the head.
+        collectionDocked=layer&&spatialMode&&SurfacePlaced();
+        if(collectionDocked){
+            // On the stash panel, at the page's own measured place (over the grid).
+            const auto at=UiSurfacePose();const auto size=UiSurfaceSize();const auto q=Q(at.orientation);
+            const float uc=(CollectionPageLeft+CollectionPageRight)*.5f,vc=(CollectionPageTop+CollectionPageBottom)*.5f;
+            const float uw=CollectionPageRight-CollectionPageLeft,uh=CollectionPageBottom-CollectionPageTop;
+            // Half a millimetre in front: at nought the page and the stash z-fight (the
+            // lower tab flickers through); half a millimetre removes it invisibly.
+            const auto offset=math::Rotate(q,{(uc-.5f)*size.width,(.5f-vc)*size.height,.0005f});
+            collectionPose=XrPose({V(at.position)+offset,q});
+            collectionShownWidth=uw*size.width;collectionShownHeight=uh*size.height;
+        } else {
+            const auto q=math::Yaw(math::Heading(Q(head.orientation)));
+            if(!collectionWasOpen)collectionBase={V(head.position)+math::Rotate(q,{0,-.06f,-1.05f}),q};
+            collectionPose=Placed(collectionBase,collectionOffset);
+            collectionShownWidth=collectionWidth;collectionShownHeight=collectionHeight;
+        }
+        if(collectionOpen&&!collectionWasOpen) {
+            char b[200];std::snprintf(b,sizeof b,"Frame collection: docked=%d pose=(%.2f,%.2f,%.2f) size=%.2fx%.2f spatial=%d",
+                int(collectionDocked),collectionPose.position.x,collectionPose.position.y,collectionPose.position.z,
+                collectionShownWidth,collectionShownHeight,int(spatialMode));
+            Say(b);
+        }
+        // The panel is an XR quad: with no layer (flat, no headset) it cannot be
+        // shown, so it is neither painted nor uploaded. That work, run every frame
+        // while the panel was "open" in flat, was what made the flat game stutter.
+        if(layer){RequestCollectionPaint();TakeCollectionPicture();}
+    }
+    collectionWasOpen=collectionOpen;
     XrCompositionLayerQuad settingsPanel{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(layer&&(settingsModel.open||bodyCalibration.Active())&&settingsImageReady){
         // The help card is inside the panel: its region is the panel, Width wide.
         motionQuad(settingsPanel,settingsPose,settingsWidth,settingsHeight,Rect(panelatlas::Settings),sharedChain);
+    }
+    // The Collection panel: the stash's own page (collection_draw.h), opened from
+    // the stash and shown where the stash panel is.
+    XrCompositionLayerQuad collectionPanel{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    // Variant B: once the page is in the game's own UI image (CopyCollectionIntoUi), no quad of its own.
+    // Docked with [collection] in_ui on, the quad never stands in while the page is on its way into
+    // the UI image: for the first frames after the tab was chosen it showed over the stash (owner
+    // 2026-11-20: a quarter-second flash on choosing the tab).
+    const bool collectionOnScreen=layer&&collectionOpen&&collectionImageReady&&!(collectionDocked&&(collectionInUiShown||collectionInUi.load()));
+    static bool collectionWasOnScreen=false;
+    if(collectionOnScreen!=collectionWasOnScreen){
+        Say(collectionOnScreen?"Frame collection: the panel is on screen (its quad is submitted)":"Frame collection: the panel is off screen");
+        collectionWasOnScreen=collectionOnScreen;
+    }
+    if(collectionOnScreen){
+        motionQuad(collectionPanel,collectionPose,collectionShownWidth,collectionShownHeight,
+            At(panelatlas::Collection,{{0,0},{int(collection::panel::CanvasWidth),int(collection::panel::CanvasHeight)}}),sharedChain);
+    }
+    // (No held-item patch: the game's cursor is withheld over the whole page, so the dragged
+    // item is drawn just OUTSIDE the page, where the cursor stopped - never under it.)
+    // The active-tab mark on the mod's own sixth tab while the Collection page is
+    // open: the game marks whichever of its own tabs is chosen, and the mod cannot
+    // set that, so it draws the same frame and blue diamond itself (stash_tab_highlight.h).
+    XrCompositionLayerQuad collectionTabMark{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    // (Not while the page is in the UI image: the tab bar itself is laid over there, with the
+    // game's own active-tab art on Collection - CopyCollectionIntoUi.)
+    if(collectionOpen&&collectionDocked&&!collectionInUiShown&&!collectionInUi.load()&&collectionTabShown&&stashTabHighlightReady&&staticChain&&book.subImage.swapchain) {
+        const auto at=UiSurfacePose();const auto q=Q(at.orientation);const auto size=UiSurfaceSize();
+        const auto spot=collectiontab::MarkPlace(size.width,size.height);
+        const auto p=V(at.position)+math::Rotate(q,{spot.x,spot.y,.0015f});
+        motionQuad(collectionTabMark,XrPose({p,q}),spot.w*0.94f,spot.h*0.94f,
+            Rect(panelatlas::TabHighlight),staticChain);
+        collectionTabMark.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        static bool markTold=false;
+        if(!markTold&&collectionTabMark.subImage.swapchain){markTold=true;
+            char b[160];std::snprintf(b,sizeof b,"Frame collection: the tab mark is drawn at %.2f,%.2f %.3fx%.3f m",spot.x,spot.y,spot.w,spot.h);Say(b);}
+    } else if(collectionOpen&&collectionDocked&&!collectionInUiShown&&!collectionInUi.load()) {
+        static ULONGLONG at=0;const auto now=GetTickCount64();
+        if(collectionLog.load()&&now>=at){at=now+2000;char b[176];
+            std::snprintf(b,sizeof b,"Frame collection: no tab mark - shown=%d ready=%d static=%d book=%d",
+                int(collectionTabShown),int(stashTabHighlightReady),int(staticChain!=XR_NULL_HANDLE),int(book.subImage.swapchain!=XR_NULL_HANDLE));
+            Say(b);}
     }
     // Glyph casting's trail, in the plane it was drawn in, the stroke's start in the middle (glyph_trail.h).
     XrCompositionLayerQuad glyphQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
@@ -8595,7 +10577,7 @@ void EndPair() {
         motionQuad(glyphQuad,pose,glyphtrail::Side,glyphtrail::Side,Rect(panelatlas::Glyph),sharedChain);
     }
     XrCompositionLayerQuad laser{XR_TYPE_COMPOSITION_LAYER_QUAD},dot{XR_TYPE_COMPOSITION_LAYER_QUAD};
-    if(layer&&(chatShown||settingsModel.open||panelMode||spatialMode||(interactionVisible&&interactionOutput.wheel))&&pointerChain&&pointerVisible&&
+    if(layer&&(chatShown||settingsModel.open||panelMode||spatialMode||(interactionVisible&&interactionOutput.wheel)||collectionOpen)&&pointerChain&&pointerVisible&&
        (settingsModel.open||!campfirePointer.load()||pointerHit||keyboardPointer)) {   // the campfire: off the board the ember beam points at the heroes
         // The pointer needs the same finite-pose checks and normalization as
         // every other optional layer: one bad laser must not hide the menu.

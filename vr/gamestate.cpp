@@ -34,6 +34,7 @@
 #include <D2RLPlugin/api.h>
 
 #include "d2r_vr_state.h"
+#include "collection_tab.h"
 #include "interactionstate.h"
 #include "target_lock.h"
 #include "journal_ui.h"
@@ -351,6 +352,7 @@ std::atomic<bool> g_respecButton{false};  // its Character page alone: Reset Ski
 framevr::keyboard::NameBox g_nameBox;
 framevr::keyboard::MultiplayerPanel g_multiplayer;
 std::atomic<bool> g_keyboard{false}, g_keyboardText{false};
+std::atomic<bool> g_goldBox{false};   // the game's box for an amount of gold (DropGoldModal and its kin): the gold pad
 // The main menu (owner 2026-11-14): what Right B may close over it. The cog's panel is D2RLoader's own
 // (D2RLoaderSettingsPanel) - Escape does not close it, the game asked whether to quit instead; it gets a
 // ClosePanel. So does D2RLoader's multiplayer panel (D2RLoaderMultiplayerPanel: Right B's Escape asked to
@@ -709,6 +711,35 @@ void ReadNoticeTexts() {
     std::lock_guard lock(noticeMutex);std::memcpy(noticeTexts,texts,sizeof texts);
 }
 
+// On the UI thread, diagnostic: which of the stash's own widgets this loader reports, and their
+// rects, while the stash is open - logged when they change. The Collection needs to know which
+// native tab is chosen (Gems / Materials / Runes have no grid) and the shared page; the loader
+// has no call for either, so this shows whether a hidden container reads differently.
+void ProbeStashWidgets(const PluginContext* ctx) {
+    static ULONGLONG at = 0;
+    const ULONGLONG now = GetTickCount64();
+    if (!g_stashButtons.load() || now - at < 500 || !g_widgets || !g_widgets->findPanel || !g_widgets->findWidget || !g_widgets->getWidgetRect) return;
+    at = now;
+    Widgets::WidgetHandle panel = 0;
+    if (g_widgets->findPanel(ctx, "BankExpansionLayout", &panel) != Widgets::Result::Success || !panel) return;
+    static const char* const names[] = {"grid", "basicstash_container", "advancedstash_gems", "advancedstash_materials",
+                                        "advancedstash_runes", "SharedStashTabContainer", "StashNavigation",
+                                        "StashLeftArrow", "StashRightArrow", "CurrentSharedStashText", "gold_amount"};
+    std::string line = "gamestate: stash widgets";
+    for (const char* name : names) {
+        Widgets::WidgetHandle widget = 0;
+        Widgets::Rect r {};
+        const auto found = g_widgets->findWidget(ctx, panel, name, &widget);
+        const auto read = found == Widgets::Result::Success && widget ? g_widgets->getWidgetRect(ctx, widget, &r) : found;
+        char part[96];
+        if (read == Widgets::Result::Success) std::snprintf(part, sizeof part, " | %s %d,%d %dx%d", name, int(r.x), int(r.y), int(r.width), int(r.height));
+        else std::snprintf(part, sizeof part, " | %s r%u", name, unsigned(read));
+        line += part;
+    }
+    static std::string last;
+    if (line != last) { last = line; Log(line.c_str()); }
+}
+
 // On the UI thread: the two hands of the active set.
 void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
     {std::lock_guard lock(g_readMutex);if(!g_readTicket.Claim(reinterpret_cast<uintptr_t>(token)))return;}
@@ -724,6 +755,7 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
             g_inventory->getCursorItem(ctx,player,&onCursor)==Inventory::Result::Success&&onCursor!=InvalidItemHandle);
         g_cursorItemAt.store(GetTickCount64());
     }
+    ProbeStashWidgets(ctx);
 #ifdef D2RVR_NATIVE_OPENXR
     respec::Poll();   // Reset Skills & Stats: the minted token's native use (respec.cpp)
     panelinput::MaintainWorldController(havePlayer,g_menu.load()!=0);
@@ -983,6 +1015,55 @@ void TellMultiplayerPanel(const char* command) {
     Log(b);
 }
 void TellSheetRects(const char* opened);   // below
+
+// The Collection page: route the CollectionTab button's click to our own message at
+// runtime (prepare_collection_tab leaves the button without one), so choosing the
+// tab keeps the stash open and shows the Collection page in its place. UI thread
+// only; the widget exists only after the panel is built, so callers defer it.
+framevr::CallbackTicket g_collectionTabTicket;
+// The prepared layout's sixth tab was found on the stash bar the last time the stash opened.
+std::atomic<bool> g_collectionTabOnBar{false};
+void MaintainCollectionTab(const PluginContext* ctx) {
+    if (!g_widgets || !g_widgets->findPanel || !g_widgets->findWidget) {
+        g_collectionTabOnBar.store(true);   // cannot be told: the laser keeps taking the sixth tab, as before
+        Log("gamestate: no widget service; the Collection tab cannot be routed");
+        return;
+    }
+    Widgets::WidgetHandle panel = 0;
+    if (g_widgets->findPanel(ctx, "BankExpansionLayout", &panel) != Widgets::Result::Success || !panel) {
+        Log("gamestate: the stash panel was not found to route the Collection tab");
+        return;
+    }
+    Widgets::WidgetHandle button = 0;
+    if (g_widgets->findWidget(ctx, panel, framevr::collection::TabWidgetName, &button) != Widgets::Result::Success || !button) {
+        g_collectionTabOnBar.store(false);
+        Log("gamestate: the Collection tab button is not on the stash bar");
+        return;
+    }
+    g_collectionTabOnBar.store(true);
+    // D2RLoader 1.3.1 cannot route the click: the mod's laser takes the tab itself (collection_tab_button.h).
+    if (!HasWidgetServiceField(g_widgets, WidgetServiceSetWidgetEventMessageFieldEnd)) {
+        Log("gamestate: the Collection tab is on the stash bar; this loader cannot route its click, the laser takes it");
+        return;
+    }
+    const auto result = g_widgets->setWidgetEventMessage(ctx, button, Widgets::EventKind::Click,
+                                                         framevr::collection::TabTarget, framevr::collection::TabCommand);
+    Log(result == Widgets::Result::Success
+            ? "gamestate: the Collection tab is wired to open the collection page"
+            : "gamestate: the Collection tab wiring failed");
+}
+void __cdecl WireCollectionTab(const PluginContext* ctx, void* token) noexcept {
+    if (g_collectionTabTicket.Claim(reinterpret_cast<uintptr_t>(token))) MaintainCollectionTab(ctx);
+}
+void ScheduleCollectionTab(const PluginContext* ctx) {
+    if (!g_threads || !g_threads->runOnUiThread) { MaintainCollectionTab(ctx); return; }
+    const auto now = GetTickCount64();
+    if (g_collectionTabTicket.Expired(now, 2000)) g_collectionTabTicket.Cancel();
+    const auto token = g_collectionTabTicket.Start(now);
+    if (token && g_threads->runOnUiThread(ctx, &WireCollectionTab, reinterpret_cast<void*>(token)) != Threads::Result::Success)
+        g_collectionTabTicket.Claim(token);
+}
+
 SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessageEvent* e, void*) noexcept {
     if (!e) return SharedEvents::UiMessageAction::Continue;
     const char* target = e->target ? e->target : "";
@@ -1016,16 +1097,54 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         // Either one's coming up anew brings a closed keyboard back.
         g_keyboardEpoch.store(g_nameBox.Epoch() + g_multiplayer.Epoch());
     }
+    // The Collection tab on the stash bar: a stock target (BankPanelMessage, whose own
+    // tabs send SelectTab) with the mod's own command, which the game ignores, so the
+    // stash stays open and the page shows in it.
+    if (!strcmp(target, framevr::collection::TabTarget)) {
+        if (!strcmp(command, framevr::collection::TabCommand)) {
+            framevr::collection::TabSetWanted(true);
+            Log("gamestate: the Collection page was chosen");
+        } else if (framevr::collection::TabWanted() && !framevr::collection::TabKept()) {
+            // Any other message from the stash bar means one of its own tabs was
+            // chosen: the Collection page goes.
+            framevr::collection::TabSetWanted(false);
+            Log("gamestate: a stash tab was switched; the Collection page goes with it");
+        }
+        return SharedEvents::UiMessageAction::Continue;
+    }
     if (strcmp(target, "PanelManager") == 0) {
         const bool before = g_menu.load() != 0;
         if (!strcmp(command, "OpenPanel") || !strcmp(command, "OpenExclusivePanel")) { if (*text) g_panels.insert(text); }
         else if (!strcmp(command, "ClosePanel") || !strcmp(command, "UnloadPanel")) g_panels.erase(text);
         else if (!strcmp(command, "UnloadAll") || !strcmp(command, "CloseAll")) g_panels.clear();
+        // An old layout's TogglePanel (the tab before the runtime routing) still means "show the page".
+        // (A TogglePanel is not tracked in the set, as on main: one the game ignored left a stale
+        // entry, and the old layout's toggle took the open stash out of it - review of #608, point 9.)
+        if (!strcmp(command, "TogglePanel") && !strcmp(text, "BankExpansionLayout")) {
+            framevr::collection::TabSetWanted(true);
+            Log("gamestate: the Collection tab on the stash bar was chosen (old layout message)");
+        }
+        // The stash opened: wire the Collection button (it exists only now).
+        if ((!strcmp(command, "OpenPanel") || !strcmp(command, "OpenExclusivePanel")) && !strcmp(text, "BankExpansionLayout"))
+            ScheduleCollectionTab(ctx);
+        // The stash closed: the Collection page goes with it.
+        if ((!strcmp(command, "ClosePanel") || !strcmp(command, "UnloadPanel")) && !strcmp(text, "BankExpansionLayout")) {
+            if (framevr::collection::TabWanted()) {
+                framevr::collection::TabSetWanted(false);
+                Log("gamestate: the stash closed; the Collection page goes with it");
+            }
+        }
         if (!strcmp(command, "OpenPanel") || !strcmp(command, "OpenExclusivePanel") || !strcmp(command, "ClosePanel") ||
-            !strcmp(command, "UnloadPanel") || !strcmp(command, "UnloadAll") || !strcmp(command, "CloseAll")) g_panelChanges.fetch_add(1);
+            !strcmp(command, "UnloadPanel") || !strcmp(command, "UnloadAll") || !strcmp(command, "CloseAll") ||
+            !strcmp(command, "TogglePanel")) g_panelChanges.fetch_add(1);
         g_autoMap.store(g_panels.count("AutoMap") ? 1 : 0);
         framevr::fullmap::g_panel.store(g_panels.count("AutoMap") != 0);
         g_noticePanel.store(g_panels.count("NotificationPanel") != 0);
+        {
+            const bool gold = std::any_of(g_panels.begin(), g_panels.end(),
+                [](const auto& name) { return name.find("Gold") != std::string::npos; });
+            if (g_goldBox.exchange(gold) != gold) Log(gold ? "gamestate: a gold box is up (the gold pad shows)" : "gamestate: the gold box is gone");
+        }
         g_upperBandMenu.store(std::any_of(g_panels.begin(),g_panels.end(),
             [](const auto& name){return framevr::panels::UpperBand(name);}));
         g_opaqueMenu.store(std::any_of(g_panels.begin(),g_panels.end(),
@@ -1033,6 +1152,10 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         g_leatherMenu.store(framevr::leather::OnSheet(g_panels));
         g_statsButton.store(framevr::statsbutton::Shown(g_panels));
         g_stashButtons.store(framevr::stashbuttons::Shown(g_panels));
+        if (!g_stashButtons.load() && framevr::collection::TabWanted()) {   // CloseAll / UnloadAll too (review of #608, point 2)
+            framevr::collection::TabSetWanted(false);
+            Log("gamestate: no stash panel left; the Collection page goes");
+        }
         g_respecButton.store(framevr::respecbutton::Shown(g_panels));
         {
             // CandidateListPanel: the game's list for a text box's input method - opened with character creation's name
@@ -1174,6 +1297,12 @@ void Init(const PluginContext* ctx) {
     g_threads = Query<ThreadService>(ctx);
     g_widgets = Query<WidgetService>(ctx);
     Log(g_widgets ? "gamestate: widgets ok - the map can be opened and closed directly" : "gamestate: widgets MISSING - the map cannot be set");
+    if (g_widgets) {
+        char b[160];
+        snprintf(b, sizeof b, "gamestate: widget service size %u, setWidgetEventMessage %s", g_widgets->serviceSize,
+                 HasWidgetServiceField(g_widgets, WidgetServiceSetWidgetEventMessageFieldEnd) ? "present" : "MISSING");
+        Log(b);
+    }
     g_inventory = Query<InventoryService>(ctx);
     g_items = Query<ItemService>(ctx);
     g_events = Query<SharedEventService>(ctx);
@@ -1310,6 +1439,10 @@ bool RespecButtonShown(){return false;}   // the reset engine is in the native O
 uint32_t PanelChanges(){return g_panelChanges.load();}
 bool KeyboardShown(){return g_keyboard.load();}
 bool KeyboardText(){return g_keyboardText.load();}
+// The stash's own gold box only (Withdraw / Deposit): the inventory's drop-gold box and any other
+// "Gold" panel keep the game's own controls (bearstonem's review of #608, point 4).
+bool GoldBoxShown(){return g_goldBox.load()&&g_stashButtons.load();}
+bool CollectionTabOnBar(){return g_collectionTabOnBar.load();}
 bool FrontSettingsOpen(){return g_frontSettings.load();}
 bool FrontOverlayOpen(){return g_frontOver.load();}
 bool FrontMultiplayerOpen(){return g_frontMultiplayer.load();}

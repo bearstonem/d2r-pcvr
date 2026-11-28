@@ -117,6 +117,8 @@ namespace hud { void SetWorkspaceBand(float top, float bottom); void SetBoardCle
 namespace gamecmd { void Init(const D2RL::PluginContext* ctx); void Tick(); }   // the game's key commands from BodyWalk (gamecmd.cpp)
 namespace spatialaudio { void SetLogger(void (*log)(const char*)); void SetViewYaw(float (*yaw)()); void Configure(bool headFollow, bool listenerTurn, float forwardSign, float depthScale); void Poll(); }   // head-relative sound (spatial_audio.cpp)
 namespace worldsound { void SetLogger(void (*log)(const char*)); void Init(const D2RL::PluginContext* ctx, bool soundLog, float echo, bool headset); void Poll(); }   // the game's reverb raised, sounds counted by channel (world_sound.cpp)
+namespace gamestate { bool StashButtonsShown(); }   // the stash panel is up (stash_buttons.h); the affinity sweep waits for it
+#include "collection_store.h"
 namespace nativeui { uint32_t DesktopPoseUnit(uint64_t session); }
 namespace gamestate { bool ToggleMenus(); }
 namespace gamestate { uint32_t MenuEpoch(); }
@@ -174,6 +176,9 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "../steamvr/client_attack_timing.h"
 
 #include "monster_immunity.h"
+#include "collection_scan.h"
+#include "collection_tab.h"
+#include "collection_tooltip_provider.h"
 #include "monster_position_signatures.h"
 #include "../steamvr/monster_position.h"
 
@@ -389,6 +394,15 @@ struct Settings {
     std::atomic<bool>  campfirePointerFit{true}; // [campfire] pointer_fit: the scene's picture fitted in the window (CampfirePointer)
     std::atomic<bool>  campfireMenuBoard{true}; // [campfire] menu_board: the menu's lower strip as a board in the scene, not over the eyes
     std::atomic<float> campfireMenuWidth{1.1f}, campfireMenuDistance{1.0f}, campfireMenuDrop{0.9f};   // [campfire] menu_width, menu_distance, menu_drop (metres)
+    std::atomic<float> stashScale{2.0f};   // [interaction] stash_scale: the stash window's own scale (isolated to it)
+    std::atomic<float> stashDrop{0.0f};    // [interaction] stash_drop: extra metres to lower the stash window
+    std::atomic<float> stashDistance{0.25f}; // [interaction] stash_distance: extra metres to push the stash away
+    std::atomic<bool> uiShotGrips{false};     // [dev] ui_shot_grips
+    std::atomic<bool> collectionLog{false};   // [dev] collection_log
+    std::atomic<bool> tooltipHole{true};      // [collection] tooltip_hole
+    std::atomic<bool> collectionGameTooltips{false};   // [collection] game_tooltips
+    std::atomic<bool> collectionInUi{true};   // [collection] in_ui: the Collection page drawn into the game's UI image
+    std::atomic<bool> stashWorld{false};    // [interaction] stash_world: keep the world behind the stash (experimental)
     std::atomic<bool>  campfireCaption{true};   // [campfire] caption: the picked hero's class and words on a board over the heroes
     std::atomic<float> campfireCaptionRect[4]{{0.25f},{0.0f},{0.75f},{0.33f}};   // [campfire] caption_left/top/right/bottom: shares of the menu band
     std::atomic<float> campfireCaptionWidth{3.0f}, campfireCaptionDistance{6.5f}, campfireCaptionRise{2.0f};   // [campfire] caption_width/distance/rise (metres)
@@ -407,7 +421,7 @@ struct Settings {
     std::atomic<float> campfireSnowChance{0.3f}, campfireSnowDensity{0.25f};
     std::atomic<float> campfireSnowTurn{40.0f};   // snow_turn: after this many seconds in the scene the snow begins or ends (0: never)
     std::atomic<bool>  campfirePano{false};      // [campfire] panorama: one picture round the scene (pano_file), in the void
-    std::atomic<float> campfirePanoYaw{0.0f}, campfirePanoLow{-90.0f}, campfirePanoHigh{90.0f}, campfirePanoBright{1.0f};   // [campfire] pano_yaw/low/high/brightness
+    std::atomic<float> campfirePanoYaw{0.0f}, campfirePanoLow{-60.0f}, campfirePanoHigh{90.0f}, campfirePanoBright{1.0f};   // [campfire] pano_yaw/low/high/brightness
     std::atomic<float> campfireMenuTop{0.78f};  // [campfire] menu_top: where the strip begins, a share of the game's menu band from its top
     std::atomic<float> campfirePickDist{22.0f};// [campfire] pick_distance: how far along the hand's ray the pointer is put, world units
     // [frontend] enabled: the main menu's act scenes (character select, biome act*_frontend_biome; one preset,
@@ -1720,6 +1734,15 @@ void LoadSettings() {
         g_set.campfireMenuWidth.store(std::clamp(IniF(L"campfire", L"menu_width", 1.1f), 0.3f, 3.0f));
         g_set.campfireMenuDistance.store(std::clamp(IniF(L"campfire", L"menu_distance", 1.0f), 0.4f, 3.0f));
         g_set.campfireMenuDrop.store(std::clamp(IniF(L"campfire", L"menu_drop", 0.9f), -0.5f, 1.5f));
+        g_set.stashScale.store(std::clamp(IniF(L"interactions", L"stash_scale", 2.0f), 0.5f, 4.0f));
+        g_set.stashDrop.store(std::clamp(IniF(L"interactions", L"stash_drop", 0.0f), -1.5f, 1.5f));
+        g_set.stashDistance.store(std::clamp(IniF(L"interactions", L"stash_distance", 0.25f), -0.5f, 1.5f));
+        g_set.stashWorld.store(IniB(L"interactions", L"stash_world", false));
+        g_set.collectionInUi.store(IniB(L"collection", L"in_ui", true));   // the page drawn into the game's UI image (variant B)
+        g_set.uiShotGrips.store(IniB(L"dev", L"ui_shot_grips", false));     // both grips: a UI shot (developer's tool)
+        g_set.collectionLog.store(IniB(L"dev", L"collection_log", false));  // the stash's timed diagnostic lines
+        g_set.tooltipHole.store(IniB(L"collection", L"tooltip_hole", true)); // the game's tooltip shows through the page
+        g_set.collectionGameTooltips.store(IniB(L"collection", L"game_tooltips", false));   // 0: the game's tooltips held back over the page
         g_set.campfireMenuTop.store(std::clamp(IniF(L"campfire", L"menu_top", 0.78f), 0.0f, 0.98f));
         {   // [frontend]
             const bool front = IniB(L"frontend", L"scene", true);   // the menu in 3D: on by default (2026-11-17)
@@ -1848,12 +1871,13 @@ void LoadSettings() {
         g_set.campfireLogsRadius.store(std::clamp(IniF(L"campfire", L"fire_logs_radius", 0.0f), 0.0f, 10.0f));
         g_set.campfireLogsHeight.store(std::clamp(IniF(L"campfire", L"fire_logs_height", 1.5f), 0.0f, 10.0f));
         g_set.campfirePanoYaw.store(std::clamp(IniF(L"campfire", L"pano_yaw", 0.0f), -360.0f, 360.0f));
-        {   // The campfire's panorama from photographs (#568) lies -90..90; the earlier template shipped -60 / 120 for the
-            // old picture, and an update keeps a player's saved ini - so exactly that old pair is read as the new one,
-            // and every updated install shows the panorama at its height with no setting to change. Any other pair is
-            // the player's own and is kept.
-            float low = IniF(L"campfire", L"pano_low", -90.0f), high = IniF(L"campfire", L"pano_high", 90.0f);
-            if (low == -60.0f && high == 120.0f) { low = -90.0f; high = 90.0f; }
+        {   // The campfire's panorama: its peaks stand round the picture's middle row, which -60 / 90 lifts to about
+            // 15 degrees over the horizon, over the scene's walls (owner 2026-11-23: at -90 / 90, the 1.0 template,
+            // they sank behind the walls, only one peak left in sight). Both pairs an earlier template shipped
+            // (-60 / 120, its 120 clamped to 90 anyway, and -90 / 90) are read as this one, so an update kept with a
+            // player's saved ini shows it right with nothing to set; any other pair is the player's own and is kept.
+            float low = IniF(L"campfire", L"pano_low", -60.0f), high = IniF(L"campfire", L"pano_high", 90.0f);
+            if ((low == -60.0f && high == 120.0f) || (low == -90.0f && high == 90.0f)) { low = -60.0f; high = 90.0f; }
             g_set.campfirePanoLow.store(std::clamp(low, -90.0f, 89.0f));
             g_set.campfirePanoHigh.store(std::clamp(high, -89.0f, 90.0f));
         }
@@ -6801,7 +6825,7 @@ void InstallStickHook() {
 }
 
 // 0xFE3B0(unit, type, x, y, flags) - the game's click on the map (move_recon.md
-// §5): type 0/1 the left button pressed/held, 3/4 the right; the 5th argument
+// Â§5): type 0/1 the left button pressed/held, 3/4 the right; the 5th argument
 // is 0x8AFD0's word, its low byte "Stand Still" (-> 0x20, attack in place),
 // the high byte Run. Inside, the target is 0xF1900(0x9A820(unit)) - the unit
 // under the pointer, null on bare ground - and a click with no target and no
@@ -7181,7 +7205,7 @@ void SequenceSkillPad(XINPUT_STATE* state,bool active) {
 template <int I> DWORD WINAPI XDetour(DWORD idx, XINPUT_STATE* s) {
     g_xhooks[I].calls++;
     // Flat without a pad: no controller anywhere, so no pad event ever asks
-    // the game for its controller UI (docs/move_recon.md §6).
+    // the game for its controller UI (docs/move_recon.md Â§6).
     if (FlatNoPad()) {
         if(idx==0)InteractButton(false,ActionsHeld());
         if (s) memset(s, 0, sizeof *s);
@@ -8031,6 +8055,17 @@ void CampfireTick() {
         framevr::SetCampfireMenu(g_set.frontendMenuWidth.load(), g_set.frontendMenuDistance.load(), g_set.frontendMenuDrop.load());
     else
         framevr::SetCampfireMenu(g_set.campfireMenuWidth.load(), g_set.campfireMenuDistance.load(), g_set.campfireMenuDrop.load());
+    framevr::SetStashScale(g_set.stashScale.load());   // the stash window's own scale (isolated to the stash)
+    framevr::SetStashDrop(g_set.stashDrop.load());     // and its extra lowering ([interaction] stash_drop)
+    framevr::SetStashDistance(g_set.stashDistance.load());   // and how far it is pushed away ([interaction] stash_distance)
+    framevr::SetStashWorld(g_set.stashWorld.load());         // and whether the world stays behind it ([interaction] stash_world)
+    framevr::SetCollectionInUi(g_set.collectionInUi.load()); // the Collection page in the game's UI image ([collection] in_ui)
+    framevr::SetUiShotGrips(g_set.uiShotGrips.load());       // [dev] ui_shot_grips
+    framevr::SetCollectionLog(g_set.collectionLog.load());   // [dev] collection_log
+    framevr::SetTooltipHole(g_set.tooltipHole.load());       // [collection] tooltip_hole
+    // The game's tooltips held back while the page covers the stash ([collection] game_tooltips=0): the mod draws them.
+    d2rcam::SetHideGameTooltips(!g_set.collectionGameTooltips.load() && framevr::collection::tooltip::ItemTextAvailable() &&
+                                framevr::CollectionCoversStash());
     {   // the caption over the heroes ([campfire] caption...)
         const float rect[4] = { g_set.campfireCaptionRect[0].load(), g_set.campfireCaptionRect[1].load(), g_set.campfireCaptionRect[2].load(), g_set.campfireCaptionRect[3].load() };
         framevr::SetCampfireCaption(g_campfire.load() && !g_frontend3d.load() && g_set.campfireMenuBoard.load() && g_set.campfireCaption.load(), rect,
@@ -11272,7 +11307,8 @@ bool WorldMenuBlocksEffects() {
     // The leather keeps the world round it (leather_world), so its effects too.
     // A cinematic: no sky, fog or ceiling over the movie (the game draws no world under it).
     if(gamestate::CinemaPlaying())return true;
-    return framevr::panels::BlockWorldEffects(gamestate::MenuOpen(),framevr::SpatialMenu(),gamestate::OpaqueMenuOpen()&&!framevr::LeatherMenuWorld());
+    return framevr::panels::BlockWorldEffects(gamestate::MenuOpen(),framevr::SpatialMenu(),
+        gamestate::OpaqueMenuOpen()&&!framevr::LeatherMenuWorld()&&!framevr::StashMenuWorld());
 #else
     return gamestate::MenuOpen();
 #endif
@@ -13316,6 +13352,7 @@ DWORD WINAPI UpdateThread(void*) {
     Key f12{VK_F12}, f11{VK_F11}, f10{VK_F10}, f9{VK_F9};
 #ifdef D2RVR_NATIVE_OPENXR
     Key f8{VK_F8}, f13{VK_F13};
+    Key f7{VK_F7};   // the Collection panel (the stash's own page), opened and closed
 #endif
     Key fView[5] = {{VK_F1}, {VK_F2}, {VK_F3}, {VK_F4}, {VK_F5}};   // the views, as on the Home page
     ULONGLONG nextState = 0, nextSlow = 0;
@@ -13351,6 +13388,22 @@ DWORD WINAPI UpdateThread(void*) {
 #endif
         const bool focus = GameFocused();
         if (f12.Pressed(focus)) Toggle();
+#ifdef D2RVR_NATIVE_OPENXR
+        // F7 (a test shortcut) only at the stash: anywhere else the page would dock on another menu
+        // (bearstonem's review of #608, point 2). The game keeps getting the key either way.
+        if (f7.Pressed(focus) && gamestate::StashButtonsShown()) {
+            framevr::collection::TabSetWanted(!framevr::collection::TabWanted());   // the Collection panel
+            LogF("vrcam: collection panel %s (F7)", framevr::collection::TabWanted() ? "asked for" : "put away");
+        }
+#endif
+        {   // the collection's affinity sweep: an item dropped in the stash goes to
+            // its collection tab, while the stash is open (collection_store.h)
+            static ULONGLONG nextCollection = 0;
+            if (nowMs >= nextCollection) {
+                nextCollection = nowMs + 250;
+                framevr::collection::TickStore(gamestate::StashButtonsShown());
+            }
+        }
         {   // the same from BodyWalk's mapping: the bridge's view actions, at the press
             static uint32_t was = 0;
             const uint32_t held = ActionsHeld(), pressed = held & ~was;
@@ -13881,6 +13934,12 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     OpenAfrBlock();
     gamestate::Init(ctx);
     gamecmd::Init(ctx);
+    framevr::collection::Init(ctx);        // collection tabs: the read-only catalog report (`collection scan`)
+    framevr::collection::InitTab(ctx);     // collection tabs: the catalog and what the shared stash holds
+    framevr::collection::tooltip::InitProvider(ctx);   // collection tabs: the pointed entry's game item text
+    framevr::collection::InitStore(ctx, IniB(L"collection", L"affinity", false),
+                                   int(IniF(L"collection", L"first_tab", 5.0f)),
+                                   int(IniF(L"collection", L"tabs", 40.0f)));   // collection tabs: affinity
 #ifdef D2RVR_NATIVE_OPENXR
     enemysight::Init(ctx);
     companionai::Init(ctx);
@@ -13926,6 +13985,10 @@ D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
     summonrange::Shutdown();
     framevr::scenedepth::Shutdown();
 #endif
+    framevr::collection::Shutdown();
+    framevr::collection::ShutdownTab();
+    framevr::collection::tooltip::ShutdownProvider();
+    framevr::collection::ShutdownStore();
     g_enabled.store(false);
     d2rcam::SetEnabled(false);
 #ifdef D2RVR_NATIVE_OPENXR
@@ -13944,6 +14007,25 @@ D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
 }
 // The monster nearest a cell (transport.h): an aimed throw's sigil takes the monster under it (toss.h).
 namespace framevr {
+// A picture of the game's own frame at the next present (shot::Take), saved as a PNG in
+// pcvr_shots\ beside the plugin: the picture Ctrl+F11 / [debug] shot take, for the in-headset
+// trigger transport binds to both grips (screenshot.h).
+void RequestScreenshot() { g_shotWanted.store(true); }
+// The mod's own captured UI layer, read back by transport, saved as a PNG in pcvr_shots\:
+// the interface itself (the tabs, the stash page), which the game's frame does not carry.
+void SaveUiPicture(std::vector<uint8_t> rgba, int width, int height) {
+    if (width <= 0 || height <= 0 || rgba.size() < size_t(width) * size_t(height) * 4) return;
+    std::wstring dir(g_iniPath);
+    dir.resize(dir.find_last_of(L'\\') + 1);
+    dir += L"pcvr_shots";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    wchar_t file[64];
+    swprintf_s(file, L"\\ui_%04u%02u%02u_%02u%02u%02u_%03u.png",
+               st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    fx::shot::Save(std::move(rgba), uint32_t(width), uint32_t(height), dir + file);
+}
 bool MonsterNearCell(float x, float y, float within, float& monsterX, float& monsterY, uint32_t* id) {
     const auto s = targetlock::Get();
     if (!s.at || GetTickCount64() - s.at > 500) return false;

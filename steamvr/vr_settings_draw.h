@@ -77,13 +77,24 @@ enum class Color : uint8_t {
     Tip,         // #090706 help card field (drawn at 86%)
     TipBody,     // #F0F0F0 help card body text
     GemTop,      // #C23A2B corner gem highlight
+    UniqueFill,  // #241A0E collection panel: a unique's slot, dark brown
+    SetFill,     // #0F1F0C collection panel: a set item's slot, dark green
+    // The Collection page in the D2R stash's own grey stone (owner's preview v3, 2026-11-20).
+    StashStone,  // #2C2B29 the page's stone
+    StashNiche,  // #0D0D0C a card's or control's recess, like a stash cell
+    StashLight,  // #4A4843 a chosen button's lighter stone
+    StashEdge,   // #5E5B55 the recess's lit lower-right bevel
+    StashShadow, // #030303 the recess's dark upper-left bevel
+    Silhouette,  // #BEBBB3 an item-type tile's light grey silhouette
+    Plate,       // #161514 a card's name plate
     Count
 };
 // 0xRRGGBB for a token (Horadric theme). B may tune values, never the names.
 constexpr uint32_t Rgb(Color c){
     constexpr uint32_t table[]={0x1A1612,0x110E0B,0x2A2119,0x0F0C0A,0x14100C,0x3A3022,0x0A0807,0x070504,0x4A3820,0xA07D47,0x5A4426,0xE8C77E,
         0x8D6C3F,0xDDB56C,0xFFF6E3,0xCCC3B0,0x949494,0x7D7364,0xC9A262,0xC7B377,0xE4D49C,0xC7B377,0xF6E2A8,0xF2DFA6,0x7A1712,0x5E120E,
-        0xAFB7FF,0xF0E06A,0x4ED24E,0xFFA800,0xFF6A5A,0xFF5A4A,0x090706,0xF0F0F0,0xC23A2B};
+        0xAFB7FF,0xF0E06A,0x4ED24E,0xFFA800,0xFF6A5A,0xFF5A4A,0x090706,0xF0F0F0,0xC23A2B,0x241A0E,0x0F1F0C,
+        0x2C2B29,0x0D0D0C,0x4A4843,0x5E5B55,0x030303,0xBEBBB3,0x161514};
     static_assert(sizeof table/sizeof table[0]==size_t(Color::Count),"one value per color token");
     return table[size_t(c)];
 }
@@ -237,6 +248,17 @@ public:
     // Footer and card buttons: icon + text centered as a pair. textSize 0: Value (30 px).
     void Button(RectF r,std::string_view utf8,Icon icon,ControlState s,Plate plate=Plate::Socket,float textSize=0);
     void IconAt(Icon icon,RectF r,Color c,float alpha=1.f);
+    // A decoded image (straight RGBA, width x height) scaled to fill r: the
+    // collection panel's item icons, which come from the mod's icon cache. A
+    // bitmap is made per call, so draw each icon once a frame.
+    void Image(RectF r,const uint8_t* rgba,int width,int height,float alpha=1.f);
+    // Exact colours (0xRRGGBB) and text sizes, for a page that copies the game's own look
+    // pixel for pixel (the Collection page, its owner's accepted mock-up): not theme tokens.
+    void FillRgb(RectF r,uint32_t rgb,float alpha=1.f);
+    void LineRgb(float x0,float y0,float x1,float y1,uint32_t rgb,float width=1.f,float alpha=1.f);
+    void OutlineRgb(RectF r,uint32_t rgb,float width=1.f,float alpha=1.f);
+    // One line (or wrapped, wrap=true) at the given size, with the style's family and shadow.
+    TextSize TextRgb(std::string_view utf8,TextStyle style,float size,RectF box,uint32_t rgb,Align align=Align::Center,bool wrap=false);
     // A rail tab: icon + name. chosen: the current page's tongue (crimson notch,
     // gold, bold) out to the seam; pointed: slab + ring; changed: the ember on the icon.
     // level 1: a page under its group, its icon (36 px) and name 22 px further in, on

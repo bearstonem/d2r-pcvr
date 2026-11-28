@@ -118,17 +118,37 @@ constexpr uint8_t ItemCursorSig[]={0xe8,0xc5,0x67,0xea,0xff,0x84,0xc0,0x75,0x2c}
 constexpr uint64_t ItemTooltipRva=0x2c3c30;
 constexpr uint8_t ItemTooltipSig[]={0x40,0x55,0x53,0x57,0x48,0x8d,0xac,0x24,0xc0,0xfd,0xff,0xff,0x48,0x81,0xec,0x40,0x03,0x00,0x00};
 using ItemTooltip=void(*)(uintptr_t,uintptr_t);
+// FocusManager's hovered widget is this one (its +0x178): the item grids' own test for reading the
+// cell under the cursor (ItemTooltipItem). Optional: without it the grid is taken as hovered.
+constexpr uint64_t WidgetHoveredRva=0x876180;
+constexpr uint8_t WidgetHoveredSig[]={0x40,0x53,0x48,0x83,0xec,0x20,0x48,0x8b,0xd9,0xe8,0x92,0xfe,0xfc,0xff,
+    0x48,0x39,0x98,0x78,0x01,0x00,0x00,0x0f,0x94,0xc0};
+using WidgetHovered=bool(*)(uintptr_t);
+WidgetHovered widgetHovered=nullptr;
 ItemTooltip originalItemTooltip=nullptr;
 uintptr_t itemCursorReturn=0;
 framevr::panels::TooltipDwell tooltipDwell;
 std::atomic<uint64_t> hoverGeneration{0};
 std::atomic<int> tooltipTiming{0};
+// [dev] collection_log: what the game did with its pointer since the last line (HoverStats).
+std::atomic<uint32_t> statMoves{0},statItemQueries{0},statItemNative{0},statTips{0},statTipItems{0},statTipShown{0};
+std::atomic<uintptr_t> statLastWidget{0},statLastItem{0};
 
 bool ItemHoverActive() {
     return tooltipsReady.load(std::memory_order_acquire)&&!bindingContext&&itemHover.Active(GetTickCount64());
 }
+bool Owns();   // below: the laser holds the game's pointer
+std::atomic<uint64_t> itemTooltipAt{0};   // the game asked for an item's tooltip: its cursor is on one
+std::atomic<uint64_t> itemTooltipShownAt{0};   // an item's tooltip went on to the game: it is drawn
 void OnItemTooltip(uintptr_t widget,uintptr_t item) {
-    if(ItemHoverActive()&&!tooltipDwell.Ready(widget,item,GetTickCount64(),tooltipTiming.load(),hoverGeneration.load()))return;
+    const uint64_t now=GetTickCount64();
+    if(item)itemTooltipAt.store(now);
+    ++statTips;if(item){++statTipItems;statLastWidget=widget;statLastItem=item;}
+    const bool hover=ItemHoverActive();
+    const bool under=!item||!hover||!widgetHovered||widgetHovered(widget);
+    const bool ready=item&&hover&&under&&tooltipDwell.Ready(widget,item,now,tooltipTiming.load(),hoverGeneration.load());
+    item=framevr::panels::ItemTooltipItem(item,hover,under,Owns(),ready);   // "nothing here" always reaches the game
+    if(item){++statTipShown;itemTooltipShownAt.store(now);}
     originalItemTooltip(widget,item);
 }
 int OnKey(int key) {
@@ -147,6 +167,9 @@ void InstallTooltips() {
     tooltipDelayReturn=d2rsig::Addr(TooltipDelayRva)+5;
     tooltipCompareReturn=d2rsig::Addr(TooltipCompareRva)+10;
     itemCursorReturn=d2rsig::Addr(ItemCursorRva)+5;
+    if(!widgetHovered&&d2rsig::Check(WidgetHoveredRva,WidgetHoveredSig,sizeof WidgetHoveredSig))
+        widgetHovered=reinterpret_cast<WidgetHovered>(d2rsig::Addr(WidgetHoveredRva));
+    if(!widgetHovered)framevr::logging::Write("Frame panels: the grids' hovered-widget test not found; a grid the laser left may keep its item's tooltip");
     if(!originalItemTooltip&&!d2rsig::Hook(ItemTooltipRva,ItemTooltipSig,sizeof ItemTooltipSig,reinterpret_cast<void*>(&OnItemTooltip),reinterpret_cast<void**>(&originalItemTooltip)))return;
     if(d2rsig::Hook(KeyRva,KeySig,sizeof KeySig,reinterpret_cast<void*>(&OnKey),reinterpret_cast<void**>(&originalKey))) {
         tooltipsReady.store(true,std::memory_order_release);
@@ -199,10 +222,13 @@ bool ControllerMode(){
 }
 bool CursorSnap(){
     const bool itemQuery=reinterpret_cast<uintptr_t>(_ReturnAddress())==itemCursorReturn;
-    return framevr::panels::ItemCursorSnap(ItemHoverActive(),itemQuery,
+    const bool snap=framevr::panels::ItemCursorSnap(ItemHoverActive(),itemQuery,
         framevr::panels::CursorSnapAllowed(pointerContext,bindingContext)&&originalCursorSnap());
+    if(itemQuery){++statItemQueries;if(snap)++statItemNative;}
+    return snap;
 }
 template<int I> bool OnPointer(void* event) {
+    if constexpr(I==0)++statMoves;
     return framevr::panels::RoutePointer(Owns(),pointerContext,[&]{return originalPointer[I](event);});
 }
 constexpr Activity pointerHooks[]={&OnPointer<0>,&OnPointer<1>,&OnPointer<2>,&OnPointer<3>,&OnPointer<4>,&OnPointer<5>};
@@ -212,9 +238,42 @@ void OnDispatch(const void* message) {
     framevr::panels::PointerScope scope(pointerContext,Owns()&&framevr::panels::PointerMessage(target,command));
     originalDispatch(message);
 }
+// FocusManager's own clear of a focus no control is near (0x867cf9..0x867d4e) and its mouse path
+// (0x867d89: hovered +0x178, vtable +0xb0 takes the focus). Checked before they are mirrored.
+constexpr uint64_t FocusClearRva=0x867cf9;
+constexpr uint8_t FocusClearSig[]={0x49,0x83,0xbf,0x90,0x01,0x00,0x00,0x00,0x74,0x4b,0x41,0x80,0xbf,0x80,0x01,0x00,0x00,0x00,
+    0x49,0x8b,0xbf,0x88,0x01,0x00,0x00,0x49,0x8b,0x8f,0x90,0x01,0x00,0x00,0x74,0x21,0x49,0xc7,0x87,0x88,0x01,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x49,0xc7,0x87,0x90,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x48,0x85,0xc9,0x74,0x06,0x48,0x8b,0x01,
+    0xff,0x50,0x78};
+constexpr uint64_t FocusMouseRva=0x867d89;
+constexpr uint8_t FocusMouseSig[]={0x4d,0x85,0xf6,0x74,0x3f,0x49,0x8b,0x06,0x49,0x8b,0xce,0xff,0x90,0xb0,0x00,0x00,0x00,0x84,0xc0};
+std::atomic<int> focusClear{-1};   // -1 unchecked, 0 not this build, 1 mirrored
+void ClearStaleFocus(void* self) {
+    if(focusClear.load()<0) {
+        const bool ok=d2rsig::Check(FocusClearRva,FocusClearSig,sizeof FocusClearSig)&&d2rsig::Check(FocusMouseRva,FocusMouseSig,sizeof FocusMouseSig);
+        focusClear=ok?1:0;
+        if(!ok)framevr::logging::Write("Frame panels: FocusManager's focus clear not found; a worn item's tooltip may stay over the background");
+    }
+    if(focusClear.load()!=1||!self)return;
+    auto* manager=static_cast<uint8_t*>(self);
+    uintptr_t hovered=0,focused=0;std::memcpy(&hovered,manager+0x178,8);std::memcpy(&focused,manager+0x190,8);
+    bool takes=false;
+    if(hovered){auto table=*reinterpret_cast<void***>(hovered);takes=reinterpret_cast<bool(*)(uintptr_t)>(table[0xb0/8])(hovered);}
+    if(!framevr::panels::ClearPointerFocus(framevr::panels::FocusUsesPointer(Owns(),pointerFocus.load()),focused!=0,takes))return;
+    uintptr_t previous=0;std::memcpy(&previous,manager+0x188,8);
+    const uintptr_t none=0;
+    if(manager[0x180]) {
+        std::memcpy(manager+0x188,&none,8);std::memcpy(manager+0x190,&none,8);
+        auto table=*reinterpret_cast<void***>(focused);reinterpret_cast<void(*)(uintptr_t)>(table[0x78/8])(focused);
+    }
+    std::memcpy(manager+0x188,&previous,8);std::memcpy(manager+0x190,&none,8);
+}
 void OnFocus(void* self,bool sound) {
-    framevr::panels::PointerScope scope(pointerContext,framevr::panels::FocusUsesPointer(Owns(),pointerFocus.load()));
-    originalFocus(self,sound);
+    {
+        framevr::panels::PointerScope scope(pointerContext,framevr::panels::FocusUsesPointer(Owns(),pointerFocus.load()));
+        originalFocus(self,sound);
+    }
+    ClearStaleFocus(self);
 }
 
 std::atomic<bool> textLayoutTold{false};
@@ -319,6 +378,15 @@ void MaintainWorldController(bool player,bool menu){
     }
 }
 bool BlocksWorld(){return Owns();}
+bool OverItem(){return GetTickCount64()-itemTooltipAt.load()<150;}
+uint64_t TooltipShownAgo(){const uint64_t at=itemTooltipShownAt.load();return at?GetTickCount64()-at:~0ull;}
+void HoverStats(char* out,size_t size){
+    if(!out||!size)return;
+    std::snprintf(out,size,"moves=%u itemQ=%u itemQnative=%u tips=%u tipsItem=%u tipsShown=%u last=%llx/%llx hover=%d",
+        statMoves.exchange(0),statItemQueries.exchange(0),statItemNative.exchange(0),statTips.exchange(0),
+        statTipItems.exchange(0),statTipShown.exchange(0),(unsigned long long)statLastWidget.load(),
+        (unsigned long long)statLastItem.load(),int(ItemHoverActive()));
+}
 bool ControllerAction(void (*action)(void*),void* data){
     if(!ready.load(std::memory_order_acquire)||!action)return false;
     const bool previous=bindingContext;bindingContext=true;

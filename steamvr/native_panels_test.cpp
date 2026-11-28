@@ -126,6 +126,17 @@ int main(){
     Check(dwell.Ready(1,4,2,2,2),"Original mode delegates delay to native producer");
     Check(!panels::ItemCursorSnap(true,true,true),"item draw uses laser coordinates outside pointer callbacks");
     Check(panels::ItemCursorSnap(false,true,true)&&panels::ItemCursorSnap(true,false,true),"desktop and unrelated cursor queries remain native");
+    Check(panels::ItemTooltipItem(0,true,true,true,false)==0&&panels::ItemTooltipItem(0,false,false,false,false)==0,
+        "no item under the laser reaches the game as no item (it clears the last tooltip)");
+    Check(panels::ItemTooltipItem(7,true,true,true,true)==7,"the laser's item shows once its dwell is ready");
+    Check(panels::ItemTooltipItem(7,true,true,true,false)==0,"a dwelling item shows no tooltip, not the previous one");
+    Check(panels::ItemTooltipItem(7,true,false,true,true)==0,"a grid the laser left keeps its stored cell: no tooltip");
+    Check(panels::ItemTooltipItem(7,false,false,true,true)==0,"laser off the game's spots: the controller focus's item shows none");
+    Check(panels::ItemTooltipItem(7,false,false,false,false)==7,"without the laser the native controller tooltip stays");
+    Check(panels::ClearPointerFocus(true,true,false),"the laser over the background clears the last control's focus");
+    Check(!panels::ClearPointerFocus(true,true,true)&&!panels::ClearPointerFocus(true,false,false),
+        "a control under the laser keeps the focus it took; no focus, nothing to clear");
+    Check(!panels::ClearPointerFocus(false,true,false),"the pad's focus stays native");
     Check(panels::CursorBoundsCaller(0x7f4b2)&&panels::CursorBoundsCaller(0x14fb2a),
         "native height and tail-called width clamp use full-source bounds");
     {

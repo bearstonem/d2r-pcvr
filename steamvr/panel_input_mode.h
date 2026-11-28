@@ -146,6 +146,30 @@ public:
     }
 };
 constexpr bool ItemCursorSnap(bool hover,bool itemQuery,bool native){return hover&&itemQuery?false:native;}
+// The item the game's tooltip producer is told about. Only the item under the laser has a tooltip.
+// A call with no item is the grid's "nothing here": it always reaches the game, or the last
+// tooltip stayed up after the laser left it (owner 2026-11-28: every item's did, wherever it lay;
+// the equipped-item comparison, gated by the hover, came and went as it should). While the laser
+// holds the pointer but is on none of the game's spots, no item has one either: the grid falls
+// back to its controller focus, the last item. An item still dwelling shows none yet.
+// A grid the pointer is not over has none: its hovered-item query (3.3.93787 0x2a89c0) reads the
+// cell under the cursor only while the grid is FocusManager's hovered widget (+0x178); otherwise,
+// while it keeps the focus (+0x190), it answers with its stored cell (+0x544) - the item the laser
+// left, past the grid's edge (owner 2026-11-28: worn items, the inventory's edges).
+constexpr uintptr_t ItemTooltipItem(uintptr_t item,bool hover,bool underPointer,bool laserOwns,bool dwellReady){
+    if(!item)return 0;
+    if(hover)return underPointer&&dwellReady?item:0;
+    return laserOwns?0:item;
+}
+// FocusManager's update after a MouseMove (3.3.93787 0x8676e0). With cursor snapping (the pad)
+// a cursor too far from every control clears the focus (0x867cf9). Without it (the laser's
+// pointer callbacks) the hovered widget takes the focus when it can (vtable +0xb0), and over the
+// background nothing happens: the focus stays on the last control the laser crossed, and a worn
+// item's slot shows its controller tooltip from the focus (owner 2026-11-28: worn items kept
+// their tooltips over the background). The laser's update clears it the native way then.
+constexpr bool ClearPointerFocus(bool laser,bool focused,bool hoveredTakesFocus){
+    return laser&&focused&&!hoveredTakesFocus;
+}
 template<class Callback> int ItemCompareKey(bool hover,bool compareCaller,int key,Callback native) {
     // VK_SHIFT, only at the native equipped-item comparison query. Never
     // synthesize a keyboard event: Shift also buys stacks and moves items.

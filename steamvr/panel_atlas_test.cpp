@@ -9,9 +9,9 @@ int main() {
     const Region statics[]={Gameplay,Pointer,Compass,Leather,Stats,StatsLit,
         Respec(0),Respec(1),Respec(2),Respec(3),Respec(4),Respec(5),Respec(6),Respec(7),Stash(0),Stash(1),Stash(2),Stash(3),
         Keyboard,KeyboardLit,KeyboardCaps,KeyboardCapsLit,TextKeyboard,TextKeyboardLit,TextKeyboardCaps,TextKeyboardCapsLit,GrabHint,
-        ChatKeyboard(0),ChatKeyboard(1),ChatKeyboard(2),ChatKeyboard(3),ChatKeyboard(4),ChatKeyboard(5)};
+        ChatKeyboard(0),ChatKeyboard(1),ChatKeyboard(2),ChatKeyboard(3),ChatKeyboard(4),ChatKeyboard(5),Digits,DigitsLit,TabHighlight};
     constexpr int Statics=int(sizeof statics/sizeof statics[0]);
-    static_assert(Statics==25+RespecPictures,"every static picture checked");
+    static_assert(Statics==28+RespecPictures,"every static picture checked");
     const Region shared[]={Settings,Blood,Strain,Notice,BowLaser,ArcaneDecay,Glyph};
     constexpr int Shared=int(sizeof shared/sizeof shared[0]);
     for(const auto& r:statics)assert(Inside(r,StaticWidth,StaticHeight));

@@ -2325,7 +2325,7 @@ Clang 21 with Windows SEH support, MinGW headers/static libraries, CMake 3.28+,
 Ninja, OpenXR SDK 1.1.62 and D2RLoader Plugin SDK. See steamvr/README.md for commands.
 SDK revisions used:
 
-- D2RLoader PluginSDK: `717f727a0ec52912d1558764345f8fa3453a2bd6`.
+- D2RLoader PluginSDK: `03a5af9e0feb3f95f95e148e330e01f6635950df` (0.4.0).
 - Khronos OpenXR-SDK: `57af7fc61f9f2d492580cb28aab6d0ea59d8d417`.
 
 Run native camera math and deferred-draw tests, `python3 steamvr/session_test.py`,

@@ -781,6 +781,16 @@ bool InstallCamera() {
 
 }   // namespace
 
+// TooltipsPanel's draw (game_layout.h TooltipDraw), held back while SetHideGameTooltips is on.
+// A widget draw: `this` and at most three more register arguments, all passed on unchanged.
+using TooltipDrawFn=void(__fastcall*)(void*,void*,void*,void*);
+TooltipDrawFn o_tooltipDraw=nullptr;
+std::atomic<bool> g_hideTooltips{false};
+void __fastcall HookTooltipDraw(void* a,void* b,void* c,void* d) {
+	if (g_hideTooltips.load(std::memory_order_relaxed)) return;
+	o_tooltipDraw(a,b,c,d);
+}
+
 bool Install(const D2RL::PluginContext* ctx) {
 	if (ctx == nullptr || ctx->exeBase == 0) {
 		return false;
@@ -814,6 +824,11 @@ bool Install(const D2RL::PluginContext* ctx) {
 #endif
         }
     }
+	if (cameraOk && o_tooltipDraw == nullptr) {
+		const bool tooltipsOk = Hook(TooltipDraw, &HookTooltipDraw, &o_tooltipDraw);
+		framevr::logging::Write(tooltipsOk ? "Frame collection: the game's tooltips can be held back over the Collection page"
+		                                   : "Frame collection: TooltipsPanel draw signature check failed; the game's tooltips stay");
+	}
 	const bool roomsOk  = drawdist::Install(ctx);
 	return cameraOk && roomsOk;
 }
@@ -837,6 +852,7 @@ MonsterPlates TakeMonsterPlates(){
     return p;
 }
 void SetMonsterDrawOrder(bool on){g_monsterDrawOrder.store(on);}
+void SetHideGameTooltips(bool on){g_hideTooltips.store(on,std::memory_order_relaxed);}
 void SetStereoUiEye(int eye){
 #ifdef D2RVR_NATIVE_OPENXR
     t_stereoUiEye=eye;
