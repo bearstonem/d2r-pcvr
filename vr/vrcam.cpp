@@ -399,6 +399,7 @@ struct Settings {
     std::atomic<float> stashDistance{0.25f}; // [interaction] stash_distance: extra metres to push the stash away
     std::atomic<bool> uiShotGrips{false};     // [dev] ui_shot_grips
     std::atomic<bool> collectionLog{false};   // [dev] collection_log
+    std::atomic<bool> tooltipHole{true};      // [collection] tooltip_hole
     std::atomic<bool> collectionGameTooltips{false};   // [collection] game_tooltips
     std::atomic<bool> collectionInUi{true};   // [collection] in_ui: the Collection page drawn into the game's UI image
     std::atomic<bool> stashWorld{false};    // [interaction] stash_world: keep the world behind the stash (experimental)
@@ -1740,6 +1741,7 @@ void LoadSettings() {
         g_set.collectionInUi.store(IniB(L"collection", L"in_ui", true));   // the page drawn into the game's UI image (variant B)
         g_set.uiShotGrips.store(IniB(L"dev", L"ui_shot_grips", false));     // both grips: a UI shot (developer's tool)
         g_set.collectionLog.store(IniB(L"dev", L"collection_log", false));  // the stash's timed diagnostic lines
+        g_set.tooltipHole.store(IniB(L"collection", L"tooltip_hole", true)); // the game's tooltip shows through the page
         g_set.collectionGameTooltips.store(IniB(L"collection", L"game_tooltips", false));   // 0: the game's tooltips held back over the page
         g_set.campfireMenuTop.store(std::clamp(IniF(L"campfire", L"menu_top", 0.78f), 0.0f, 0.98f));
         {   // [frontend]
@@ -8060,6 +8062,7 @@ void CampfireTick() {
     framevr::SetCollectionInUi(g_set.collectionInUi.load()); // the Collection page in the game's UI image ([collection] in_ui)
     framevr::SetUiShotGrips(g_set.uiShotGrips.load());       // [dev] ui_shot_grips
     framevr::SetCollectionLog(g_set.collectionLog.load());   // [dev] collection_log
+    framevr::SetTooltipHole(g_set.tooltipHole.load());       // [collection] tooltip_hole
     // The game's tooltips held back while the page covers the stash ([collection] game_tooltips=0): the mod draws them.
     d2rcam::SetHideGameTooltips(!g_set.collectionGameTooltips.load() && framevr::collection::tooltip::ItemTextAvailable() &&
                                 framevr::CollectionCoversStash());

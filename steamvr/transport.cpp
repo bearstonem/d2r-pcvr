@@ -826,7 +826,19 @@ struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_F
 // The stash's tab bar and shared page counter, read back from the game's UI image every frame
 // (stash_nav.h): a ring of three, each with its two strips, and the fence its copy waits on.
 struct StashStrip {Microsoft::WRL::ComPtr<ID3D12Resource> buffer;D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp{};int w=0,h=0;};
-struct StashRead {StashStrip tabs,counter,plaques;uint64_t fence=0;bool pending=false;};
+struct StashRead {StashStrip tabs,counter,plaques,page;uint64_t fence=0;bool pending=false,pageRead=false,pageRef=false,holeOk=false;};
+// The game's tooltip over the Collection page (an inventory or equipment item's, reaching left):
+// found on the game's own picture under the page (the page's rectangle read back with the stash's
+// strips) as the block that darkened against the same rectangle read while the laser was on the
+// page (no tooltip then). The page leaves that block out, so the game's tooltip shows whole
+// (owner 2026-11-28). Page-relative pixels of the 2244 x 2352 picture; x1 <= x0: none.
+std::atomic<int> tooltipHoleX0{0},tooltipHoleY0{0},tooltipHoleX1{0},tooltipHoleY1{0};
+std::atomic<bool> pageRefNow{false};      // the frame thread: the laser on the page, the hand empty (no game tooltip)
+std::atomic<bool> tooltipHoleOn{true};    // [collection] tooltip_hole
+std::vector<uint8_t> pageRef;             // the reference, a byte of brightness per 2 x 2 pixels (render thread)
+int pageRefW=0,pageRefH=0;
+std::array<std::vector<uint8_t>,8> pageRefs;   // one per stash tab under the page (stashnav tab 0..7)
+std::atomic<bool> holeAllowed{false};          // the frame thread: the laser on the inventory / equipment side
 std::array<StashRead,3> stashReads;int stashReadNext=0,stashReadRecorded=-1;unsigned stashReadsDone=0,stashReadsRecorded=0;
 // "Page N / 5" (stash_counter_art.h) in the UI image's format, laid over the game's counter.
 struct {Microsoft::WRL::ComPtr<ID3D12Resource> upload;D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp[5]{};bool tried=false;} counterUpload;
@@ -3193,6 +3205,20 @@ void MenuPointer(const menus::Pad& controls) {
     const bool overCollectionPage=collection::TabWanted()&&spatialReady&&pointerHit&&
         hit.u>=CollectionPageLeft&&hit.u<=CollectionPageRight&&hit.v>=CollectionPageTop&&hit.v<=CollectionPageBottom;
     const bool onCollectionPage=overCollectionPage;
+    {   // The laser onto the page with the hand empty: the game's cursor, which the page withholds,
+        // leaves the item it was on (owner 2026-11-28: the gloves' tooltip stayed up while the laser
+        // roamed the page) - once, to the stash's title over the tab bar, where no item is.
+        static bool wasOnPage=false;
+        if(onCollectionPage&&!wasOnPage&&!gamestate::CursorItemHeld()) {
+            RECT client{};math::Vec native{};POINT pixel{};
+            const float u=(CollectionPageLeft+CollectionPageRight)*.5f,v=120.f/2352.f;
+            if(GetClientRect(gameWindow,&client)&&journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},u,v,uiWidth,uiHeight,native)) {
+                pixel=POINT{LONG(native.x*(client.right-1)),LONG(native.y*(client.bottom-1))};
+                if(ClientToScreen(gameWindow,&pixel))SetCursorPos(pixel.x,pixel.y);
+            }
+        }
+        wasOnPage=onCollectionPage;
+    }
     // The shared page arrows (the LB / RB marks either side of the counter) stop at the player's
     // five pages: past them the collection keeps its items (stash_nav.h). A pull there is then
     // nobody's - no game cursor, no click.
@@ -3419,7 +3445,17 @@ void MenuPointer(const menus::Pad& controls) {
                 }
                 scrollWas=dir;
             }
-        } else {lbSpoiled=rbSpoiled=true;stickWas=0;queued=0;}
+        } else {
+            lbSpoiled=rbSpoiled=true;stickWas=0;queued=0;
+            static ULONGLONG toldAt=0;
+            const int x=std::abs(int(controls.lx))>std::abs(int(controls.rx))?controls.lx:controls.rx;
+            if(gamestate::StashButtonsShown()&&std::abs(x)>20000&&now-toldAt>1000) {
+                toldAt=now;char line[200];
+                std::snprintf(line,sizeof line,"Frame stash: a stick push turns no tab - controls %d (spatial %d journal %d native %d image %d), menu %d, focused %d",
+                    int(stashControls),int(spatialReady),int(journalMode),int(wasNative),int(stashImageSized.load()),int(uiActive),int(focused));
+                Say(line);
+            }
+        }
         rtWas=rt;ltWas=lt;lbWas=lb;rbWas=rb;
         if(plaquePull==0)tabPrev=true;
         else if(plaquePull==1)tabNext=true;
@@ -3521,7 +3557,12 @@ void MenuPointer(const menus::Pad& controls) {
     // 2026-11-20). With an item in the hand it follows the laser under the page, which hides
     // it (the page draws the item itself); empty-handed it rests on the stash's title bar,
     // where nothing is pointed at. The game's click stays withheld either way (onButton).
-    if(active&&overCollectionPage&&!dropOwns&&!handClicking) {
+    // The same on the mod's own controls at the stash (the tab bar, the plaques, the gold pad): the
+    // cursor off the last item, and the game told it is the pointer's (ItemHover below), or it went
+    // back to its controller focus and kept that item's tooltip up (owner 2026-11-28).
+    const bool parkOnTitle=active&&!dropOwns&&!handClicking&&
+        (overCollectionPage||(onButton&&pointerHit&&gamestate::StashButtonsShown()&&!gamestate::CursorItemHeld()));
+    if(parkOnTitle) {
         RECT client{};
         if(GetClientRect(gameWindow,&client)) {
             const bool holding=gamestate::CursorItemHeld();
@@ -3628,7 +3669,7 @@ void MenuPointer(const menus::Pad& controls) {
     PanelModifier(VK_SHIFT,modifiers&&!grabbing&&(controls.buttons&menus::RightBumper),shiftDown);
     laserClick.Step(pressed&&!grabbing&&!parkJump,(controls.buttons&menus::LeftBumper)!=0);   // a Jump's click the frame after
     const auto edges=panelMouse.Step(active,gamePointer,laserClick.Left(),laserClick.Right());
-    panelinput::ItemHover(active,gamePointer,panelMouse.down[0]||panelMouse.down[1]);
+    panelinput::ItemHover(active,gamePointer||parkOnTitle,panelMouse.down[0]||panelMouse.down[1]);
     // A held item released over the Collection page: the page takes it (DepositCarried), not
     // the stash cell under it. The game's button is left down for a moment - the item has to
     // leave the cursor first - and the up follows below, once the move has had its moment.
@@ -4224,6 +4265,15 @@ void CollectionPointer(bool grip) {
             if(gx>=0&&gx<10&&gy>=0&&gy<4){cx=int(gx);cy=int(gy);}
         }
         if(cx!=askedX||cy!=askedY){askedX=cx;askedY=cy;collection::tooltip::RequestInventory(cx,cy);}
+    }
+    {   // the laser on the page for a moment (the game's cursor moved off its item and the game took
+        // the tooltip down): no game tooltip there, so the picture under the page may be taken
+        static ULONGLONG onPageSince=0;
+        const ULONGLONG now=GetTickCount64();
+        const bool onPage=canvasX>=0&&!gamestate::CursorItemHeld();
+        if(!onPage)onPageSince=0;else if(onPageSince==0)onPageSince=now;
+        pageRefNow.store(onPage&&now-onPageSince>=250);
+        holeAllowed.store(pointerHit&&!keyboardPointer&&uiCursorU>CollectionPageRight+.01f);
     }
     collectionTriggerWas=collectionTriggerDown;
     collection::TabSetHover(collectionHover);   // the picture lights what the laser is over
@@ -8783,7 +8833,22 @@ bool CopyCollectionIntoUi(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,u
     list->ResourceBarrier(1,&b);
     D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=dest;to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;to.SubresourceIndex=0;
     D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=u.upload.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;from.PlacedFootprint=u.footprint;
-    list->CopyTextureRegion(&to,UINT(x0),UINT(y0),0,&from,nullptr);
+    {   // round the game's tooltip, when one reaches over the page (tooltipHole*): up to four pieces
+        int hx0=std::clamp(tooltipHoleX0.load(),0,u.w),hx1=std::clamp(tooltipHoleX1.load(),0,u.w);
+        int hy0=std::clamp(tooltipHoleY0.load(),0,u.h),hy1=std::clamp(tooltipHoleY1.load(),0,u.h);
+        if(!(tooltipHoleOn.load()&&stashImageSized.load()&&hx1>hx0&&hy1>hy0))list->CopyTextureRegion(&to,UINT(x0),UINT(y0),0,&from,nullptr);
+        else {
+            const auto piece=[&](int a0,int b0,int a1,int b1){
+                if(a1<=a0||b1<=b0)return;
+                const D3D12_BOX box{UINT(a0),UINT(b0),0,UINT(a1),UINT(b1),1};
+                list->CopyTextureRegion(&to,UINT(x0+a0),UINT(y0+b0),0,&from,&box);
+            };
+            piece(0,0,u.w,hy0);          // above
+            piece(0,hy1,u.w,u.h);        // below
+            piece(0,hy0,hx0,hy1);        // left
+            piece(hx1,hy0,u.w,hy1);      // right
+        }
+    }
     // The tab bar: Collection lit, the game's tabs idle (only at the shot's own size, where the
     // art's place is known).
     auto& t=collectionTabsUpload;
@@ -8966,6 +9031,68 @@ void CollectStashReads() {
         };
         std::vector<uint8_t> tabs,counter,plaques;
         if(!read(r.tabs,tabs)||!read(r.counter,counter))continue;
+        if(r.pageRead) {
+            std::vector<uint8_t> page;
+            if(read(r.page,page)) {
+                const int W=r.page.w/2,H=r.page.h/2;
+                std::vector<uint8_t> lum(size_t(W)*size_t(H));
+                for(int y=0;y<H;++y)for(int x=0;x<W;++x) {
+                    int sum=0;
+                    for(int dy=0;dy<2;++dy)for(int dx=0;dx<2;++dx) {
+                        const uint8_t* p=page.data()+((size_t(y*2+dy)*size_t(r.page.w))+size_t(x*2+dx))*4;
+                        sum+=p[0]*3+p[1]*6+p[2];
+                    }
+                    lum[size_t(y)*W+x]=uint8_t(sum/40);
+                }
+                const int under=stashnav::Last().tab.load();
+                auto* ref=under>=0&&under<int(pageRefs.size())?&pageRefs[size_t(under)]:nullptr;
+                pageRefW=W;pageRefH=H;
+                bool found=false;int hx0=0,hy0=0,hx1=0,hy1=0;
+                // The laser rests on the page: the picture under it, kept as the brightest seen at each
+                // point - a tooltip the game was slow to take down (near-black) leaves it at the next look.
+                if(r.pageRef){
+                    if(ref&&ref->size()==lum.size())for(size_t i=0;i<lum.size();++i)(*ref)[i]=std::max((*ref)[i],lum[i]);
+                    else if(ref)*ref=std::move(lum);
+                }
+                else if(r.holeOk&&ref&&ref->size()==lum.size()) {
+                    // The first search (owner 2026-11-28: "it cut the hole well"): a cell counts where it
+                    // darkened by 24 or more; the box is the rows and columns holding at least 6 such cells.
+                    std::vector<int> rows(static_cast<size_t>(H)),cols(static_cast<size_t>(W));
+                    for(int y=0;y<H;++y)for(int x=0;x<W;++x)
+                        if(int((*ref)[size_t(y)*W+x])-int(lum[size_t(y)*W+x])>=24){++rows[size_t(y)];++cols[size_t(x)];}
+                    int x0=W,x1=-1,y0=H,y1=-1;
+                    for(int y=0;y<H;++y)if(rows[size_t(y)]>=6){y0=std::min(y0,y);y1=y;}
+                    for(int x=0;x<W;++x)if(cols[size_t(x)]>=6){x0=std::min(x0,x);x1=x;}
+                    const bool box=x1>=x0&&y1>=y0&&(x1-x0)>=10&&(y1-y0)>=6;
+                    found=box&&(x1-x0+1)*(y1-y0+1)*100<=W*H*45;
+                    if(found){hx0=x0*2-4;hy0=y0*2-4;hx1=x1*2+6;hy1=y1*2+6;}
+                    else if(box)ref->clear();   // most of the page changed: the picture under it is another now
+                } else if(r.holeOk) {
+                    static ULONGLONG toldAt=0;
+                    if(GetTickCount64()-toldAt>2000){toldAt=GetTickCount64();char line[120];
+                        std::snprintf(line,sizeof line,"Frame collection: no picture of tab %d under the page yet - rest the laser on the page",under);Say(line);}
+                }
+                {
+                    // Held a moment: the search misses the box on some reads (owner 2026-11-28: the hole came
+                    // and went within 100 ms), so a found box stays left out until 450 ms without one, or
+                    // until the laser leaves the inventory side.
+                    static ULONGLONG lastFound=0;
+                    const ULONGLONG nowMs=GetTickCount64();
+                    if(found)lastFound=nowMs;
+                    else if(false&&nowMs-lastFound<450) {
+                        hx0=tooltipHoleX0.load();hy0=tooltipHoleY0.load();hx1=tooltipHoleX1.load();hy1=tooltipHoleY1.load();found=true;
+                    }
+                    if(hx0!=tooltipHoleX0.load()||hy0!=tooltipHoleY0.load()||hx1!=tooltipHoleX1.load()||hy1!=tooltipHoleY1.load()) {
+                        tooltipHoleX0.store(hx0);tooltipHoleY0.store(hy0);tooltipHoleX1.store(hx1);tooltipHoleY1.store(hy1);
+                        char line[160];
+                        if(found)std::snprintf(line,sizeof line,"Frame collection: the game's tooltip over the page at %d,%d %dx%d (page pixels); the page leaves it out",
+                                               hx0,hy0,hx1-hx0,hy1-hy0);
+                        else std::snprintf(line,sizeof line,"Frame collection: no game tooltip over the page");
+                        Say(line);
+                    }
+                }
+            }
+        } else if(!collectionInUiShown){tooltipHoleX0.store(0);tooltipHoleX1.store(0);}
         if(read(r.plaques,plaques)) {   // where the game draws something over the bare carving
             using namespace stashplaques;
             const auto bits=[](uint64_t v){int n=0;while(v){v&=v-1;++n;}return n;};
@@ -9045,7 +9172,7 @@ void RecordStashReads(ID3D12GraphicsCommandList* list,ID3D12Resource* src,uint32
     };
     {   // diagnostic (owner's test 2026-11-21 read nothing and logged nothing): every 3 s, the gate
         static ULONGLONG heardAt=0;
-        if(GetTickCount64()-heardAt>3000) {
+        if(collectionLog.load()&&GetTickCount64()-heardAt>3000) {
             heardAt=GetTickCount64();
             char line[200];std::snprintf(line,sizeof line,"Frame stash: copy step - stash %d, %u recorded, %u read, slots pending %d%d%d",
                 int(gamestate::StashButtonsShown()),stashReadsRecorded,stashReadsDone,
@@ -9085,6 +9212,12 @@ void RecordStashReads(ID3D12GraphicsCommandList* list,ID3D12Resource* src,uint32
     copy(r.tabs,stashnav::TabsX,stashnav::TabsY);
     copy(r.counter,stashnav::CounterX,stashnav::CounterY);
     copy(r.plaques,stashplaques::PreviousX,stashplaques::Y);
+    r.pageRead=false;
+    if(collectionInUiShown&&tooltipHoleOn.load()) {
+        const int px0=int(CollectionPageLeft*2244.f+.5f),px1=int(CollectionPageRight*2244.f+.5f);
+        const int py0=int(CollectionPageTop*2352.f+.5f),py1=int(CollectionPageBottom*2352.f+.5f);
+        if(make(r.page,px1-px0,py1-py0)){copy(r.page,px0,py0);r.pageRead=true;r.pageRef=pageRefNow.load();r.holeOk=holeAllowed.load();}
+    }
     std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
     list->ResourceBarrier(1,&b);
     stashReadRecorded=stashReadNext;
@@ -9670,6 +9803,7 @@ void SetStashWorld(bool on){stashWorld.store(on);}
 void SetCollectionInUi(bool on){collectionInUi.store(on);}
 void SetUiShotGrips(bool on){uiShotGrips.store(on,std::memory_order_relaxed);}
 void SetCollectionLog(bool on){collectionLog.store(on,std::memory_order_relaxed);}
+void SetTooltipHole(bool on){tooltipHoleOn.store(on,std::memory_order_relaxed);}
 bool CollectionCoversStash(){
     return collectionCoversStash.load(std::memory_order_relaxed)&&GetTickCount64()-collectionCoversAt.load(std::memory_order_relaxed)<250;
 }

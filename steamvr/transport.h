@@ -164,6 +164,8 @@ void SetCollectionInUi(bool on);
 void SetUiShotGrips(bool on);
 // [dev] collection_log: the stash's and the Collection page's timed diagnostic lines (off by default).
 void SetCollectionLog(bool on);
+// [collection] tooltip_hole: the page leaves out the block where the game's tooltip reaches over it (on by default).
+void SetTooltipHole(bool on);
 // The last CopyUi put the Collection page into the UI image (it covers the stash's grid).
 bool CollectionCoversStash();
 bool StashMenuWorld();
