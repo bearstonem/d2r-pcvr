@@ -397,7 +397,7 @@ class NativeSetupTests(unittest.TestCase):
                             native.validate_choices({**values, 'headset': 'Quest 3', 'connections': 'vdxr'}, app)
                     with patch('launch_windows.vdxr_manifest', return_value=client / 'steamapps/common/SteamVR/steamxr_win64.json'):
                         selected = native.validate_choices({**values, 'headset': 'Quest 3', 'connections': 'steamvr,vdxr'}, app)
-                        self.assertEqual(selected['connections'], ['steamvr', 'vdxr'])
+                        self.assertEqual(selected['connections'], ['steamvr', 'vdxr', 'flatscreen'])
 
     def test_rejects_missing_battlenet_payload_but_no_game_build_before_writes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -778,8 +778,10 @@ class NativeSetupTests(unittest.TestCase):
                 record = install.read_record(game)
                 self.assertEqual(record['steam_profiles'][str(profile.resolve())]['previous_launch_options'], '-original-option')
                 entries = steam.decode_binary((profile / 'config/shortcuts.vdf').read_bytes())['shortcuts']
-                self.assertEqual(len(entries), 1)
+                self.assertEqual(len(entries), 2)
                 self.assertEqual(entries['0']['OpenVR'], 1)
+                self.assertEqual(entries['1']['OpenVR'], 0)
+                self.assertIn('--frame-desktop', entries['1']['LaunchOptions'])
                 native.remove_managed(app)
             self.assertEqual((profile / 'config/localconfig.vdf').read_text(), LOCAL)
             self.assertEqual(steam.decode_binary((profile / 'config/shortcuts.vdf').read_bytes())['shortcuts'], {})
