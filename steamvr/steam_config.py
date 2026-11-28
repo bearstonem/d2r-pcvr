@@ -12,7 +12,9 @@ import tempfile
 import zlib
 
 APP_ID = '2536520'
+BNET_FLATSCREEN = 'Diablo II: Resurrected (Battle.net) - Flatscreen'
 SHORTCUTS = {
+    'flatscreen': ('Diablo II: Resurrected - Flatscreen', '-applaunch ' + APP_ID + ' --frame-desktop', 0),
     'steamvr': ('Diablo II: Resurrected VR - SteamVR', '-applaunch 2536520 --frame-vr', 1),
     'vdxr': ('Diablo II: Resurrected VR - Virtual Desktop', '-applaunch 2536520 --frame-vr --frame-vdxr', 0),
 }
@@ -186,12 +188,13 @@ def shortcut_specs(steam, game, store='steam', python=None, wrapper=None, runtim
     if store != 'battlenet' or python is None or wrapper is None:
         raise ValueError('Battle.net shortcuts require the Python interpreter and launch wrapper')
     common = [str(wrapper), '--battlenet-game=' + str(game),
-              '--experimental-battlenet', '--frame-vr']
-    result = {}
+              '--experimental-battlenet']
+    result = {'flatscreen': (BNET_FLATSCREEN, subprocess.list2cmdline(common + ['--frame-desktop']),
+                            0, python, wrapper.parent)}
     for connection, suffix in [('steamvr', 'SteamVR'), ('vdxr', 'Virtual Desktop')]:
         if connection == 'steamvr' and runtime is None:
             continue
-        arguments = common + (['--frame-openxr-runtime=' + str(runtime)]
+        arguments = common + ['--frame-vr'] + (['--frame-openxr-runtime=' + str(runtime)]
                               if connection == 'steamvr' else ['--frame-vdxr'])
         name = 'Diablo II: Resurrected VR (Battle.net) - ' + suffix
         result[connection] = (name, subprocess.list2cmdline(arguments),
@@ -256,7 +259,7 @@ def uninstall_updates(profile, game, store, state=None):
             raise ValueError('Steam shortcuts cannot be safely edited. No files were removed.')
         names = {name for name, _, _ in SHORTCUTS.values()} if store == 'steam' else {
             'Diablo II: Resurrected VR (Battle.net) - SteamVR',
-            'Diablo II: Resurrected VR (Battle.net) - Virtual Desktop'}
+            'Diablo II: Resurrected VR (Battle.net) - Virtual Desktop', BNET_FLATSCREEN}
         removed = False
         for key, entry in list(root['shortcuts'].items()):
             if not isinstance(entry, dict):
@@ -264,8 +267,10 @@ def uninstall_updates(profile, game, store, state=None):
             options = entry.get('LaunchOptions', '')
             marker = '-applaunch ' + APP_ID if store == 'steam' else '--battlenet-game='
             icon = entry.get('icon', '')
-            if (entry.get('appname', entry.get('AppName')) in names and isinstance(options, str)
-                    and marker in options and '--frame-vr' in options and isinstance(icon, str)
+            name = entry.get('appname', entry.get('AppName'))
+            flag = '--frame-desktop' if name in (SHORTCUTS['flatscreen'][0], BNET_FLATSCREEN) else '--frame-vr'
+            if (name in names and isinstance(options, str)
+                    and marker in options and flag in options and isinstance(icon, str)
                     and Path(icon).resolve() == (game / 'D2R.exe').resolve()):
                 del root['shortcuts'][key]
                 removed = True

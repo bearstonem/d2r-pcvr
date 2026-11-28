@@ -20,6 +20,30 @@ LOCAL = '"UserLocalConfigStore"\r\n{\r\n// untouched comment\r\n"friends" { "Per
 
 
 class SteamSetupTests(unittest.TestCase):
+    def test_flatscreen_install_repair_and_edition_specific_removal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            profile = root / 'profile'
+            shortcuts = profile / 'config/shortcuts.vdf'
+            shortcuts.parent.mkdir(parents=True)
+            steam, game = root / 'Steam', root / 'Game with spaces'
+            original = config.update_shortcuts(None, steam, game, ['steamvr'])
+            data = original
+            for store in ('steam', 'battlenet'):
+                routing = dict(store=store, python=root / 'python.exe', wrapper=root / 'launch_windows.py')
+                data = config.update_shortcuts(data, steam, game, ['flatscreen'], **routing)
+                self.assertEqual(data, config.update_shortcuts(data, steam, game, ['flatscreen'], **routing))
+            entries = list(config.decode_binary(data)['shortcuts'].values())
+            self.assertEqual(entries[0], config.decode_binary(original)['shortcuts']['0'])
+            self.assertEqual(len(entries), 3)
+            for entry in entries[1:]:
+                self.assertIn('--frame-desktop', entry['LaunchOptions'])
+                self.assertNotIn('--frame-vr', entry['LaunchOptions'])
+                self.assertEqual(entry['OpenVR'], 0)
+            shortcuts.write_bytes(data)
+            remaining = config.uninstall_updates(profile, game, 'battlenet')[shortcuts]
+            self.assertEqual(list(config.decode_binary(remaining)['shortcuts'].values()), entries[:2])
+
     def test_release_integrity_rejects_changed_file_and_escaping_path(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -200,7 +224,7 @@ class SteamSetupTests(unittest.TestCase):
                 self.assertEqual(state['previous_launch_options'], 'old option')
                 self.assertEqual(state['installed_launch_options'], result['launch_options'])
                 self.assertEqual('Which game installation?' in output.getvalue(), battlenet_in_package)
-                self.assertEqual(result['connections'], ['vdxr'] if quest else ['steamvr'])
+                self.assertEqual(result['connections'], ['vdxr' if quest else 'steamvr', 'flatscreen'])
                 entries = config.decode_binary((profile / 'config/shortcuts.vdf').read_bytes())['shortcuts']
                 self.assertEqual(entries['0']['OpenVR'], 0 if quest else 1)
                 if quest:

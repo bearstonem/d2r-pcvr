@@ -48,12 +48,13 @@ Rerun Setup to update or repair while keeping calibration and video settings.
 For the portable option (including v0.3.7), download **d2r-pcvr-windows.zip**,
 extract it to a permanent folder, then double-click **Install-Windows.cmd**.
 The setup wizard installs the mod, lets you choose your headset and connection,
-and adds the matching Steam library shortcuts. It asks which game edition to
+and adds the matching VR shortcuts plus a **Flatscreen** shortcut to your Steam library.
+Choose **Flatscreen** to play the mod on a monitor; **Virtual Desktop** is for VR. It asks which game edition to
 use and detects its installation folder.
 No separate Python install is needed.
 The ZIP also includes **Uninstall-Windows.cmd**. It keeps
 your current characters and shared stash, restores files from the installation
-backups and removes the selected edition's VR shortcuts. Keep the installation
+backups and removes the selected edition's mod shortcuts. Keep the installation
 backups, including those in older release folders, until removal is complete.
 
 ## What you need

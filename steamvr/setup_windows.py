@@ -292,8 +292,9 @@ def main():
     if headset in ('Quest 2', 'Quest 3'):
         if headset == 'Quest 2':
             print('Quest 2 uses the Quest controls; compatibility is not yet confirmed.')
-        connection = choose('How will the Quest connect to this PC?', ['Steam Link / SteamVR', 'Virtual Desktop / VDXR', 'Both (create two shortcuts)'])
+        connection = choose('How will the Quest connect to this PC?', ['Steam Link / SteamVR', 'Virtual Desktop / VDXR', 'Both VR shortcuts'])
         connections = [['steamvr'], ['vdxr'], ['steamvr', 'vdxr']][connection]
+    connections.append('flatscreen')
     steam = folder('Steam installation folder', steam_location(), 'steam.exe')
     roots = libraries(steam)
     default_game = app_folder(roots, steam_config.APP_ID) if store == 'steam' else battlenet_location()
@@ -347,6 +348,7 @@ def main():
     apply_setup(manifest, store, version, headset, connections, steam, game, profile, saves, runtime, mode)
     print('\nSetup complete. Steam library shortcuts have been created.')
     print(f'Backups: {ROOT / "setup-backups"}')
+    print('For monitor play with the mod, open the Flatscreen shortcut in Steam.')
     print('Start Steam, connect your headset and play the matching VR shortcut using an OFFLINE character.')
     print('Normal launcher Play stays stock. For multiplayer, fully exit VR and use normal Play.')
     print('First VR load asks for body calibration. Controls: CONTROLS.md. Help: INSTALL-WINDOWS.md.')

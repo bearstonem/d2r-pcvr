@@ -391,6 +391,7 @@ def validate_choices(values, root, managed_root=None):
     options = setup.launch_options(target / '.runtime/python/python.exe', target / 'steamvr/launch_windows.py', runtime) if store == 'steam' else None
     routing = {} if store == 'steam' else {'store': store, 'python': target / '.runtime/python/python.exe',
                                           'wrapper': target / 'steamvr/launch_windows.py', 'runtime': runtime}
+    connections.append('flatscreen')
     setup.preflight_steam(profile, steam, game, options, connections, **routing)
     check_backups(game, target, legacy)
     managed_state(target)
