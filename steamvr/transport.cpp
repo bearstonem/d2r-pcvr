@@ -3519,6 +3519,10 @@ void MenuPointer(const menus::Pad& controls) {
             nativeMenuPad.lt=nativeMenuPad.rt=0;
             nativeMenuPad.buttons&=uint16_t(~(menus::LeftBumper|menus::RightBumper));
         }
+        // On the Collection page (the laser's) A does not reach the game: it acted on the controller
+        // focus hidden under the page (bearstonem's review of #608, point 6). B stays the game's and
+        // closes the stash (owner 2026-11-28).
+        if(up&&collection::TabWanted())nativeMenuPad.buttons&=uint16_t(~menus::A);
         if(now<pulseUntil) {
             nativeMenuPad.buttons|=pulse.buttons;
             nativeMenuPad.lt=std::max(nativeMenuPad.lt,pulse.lt);nativeMenuPad.rt=std::max(nativeMenuPad.rt,pulse.rt);
@@ -9078,7 +9082,7 @@ void CollectStashReads() {
                     found=box&&(x1-x0+1)*(y1-y0+1)*100<=W*H*45;
                     if(found){hx0=x0*2-4;hy0=y0*2-4;hx1=x1*2+6;hy1=y1*2+6;}
                     else if(box)ref->clear();   // most of the page changed: the picture under it is another now
-                } else if(r.holeOk) {
+                } else if(r.holeOk&&collectionLog.load()) {
                     static ULONGLONG toldAt=0;
                     if(GetTickCount64()-toldAt>2000){toldAt=GetTickCount64();char line[120];
                         std::snprintf(line,sizeof line,"Frame collection: no picture of tab %d under the page yet (taken with the laser on the stash side)",under);Say(line);}
@@ -9099,7 +9103,7 @@ void CollectStashReads() {
                         if(found)std::snprintf(line,sizeof line,"Frame collection: the game's tooltip over the page at %d,%d %dx%d (page pixels); the page leaves it out",
                                                hx0,hy0,hx1-hx0,hy1-hy0);
                         else std::snprintf(line,sizeof line,"Frame collection: no game tooltip over the page");
-                        Say(line);
+                        if(collectionLog.load())Say(line);
                     }
                 }
             }
