@@ -3670,6 +3670,17 @@ void MenuPointer(const menus::Pad& controls) {
     laserClick.Step(pressed&&!grabbing&&!parkJump,(controls.buttons&menus::LeftBumper)!=0);   // a Jump's click the frame after
     const auto edges=panelMouse.Step(active,gamePointer,laserClick.Left(),laserClick.Right());
     panelinput::ItemHover(active,gamePointer||parkOnTitle,panelMouse.down[0]||panelMouse.down[1]);
+    if(collectionLog.load()&&gamestate::StashButtonsShown()) {   // [dev] the stuck inventory tooltip (2026-11-28)
+        static ULONGLONG hoverLogAt=0;const ULONGLONG nowLog=GetTickCount64();
+        if(nowLog>=hoverLogAt) {
+            hoverLogAt=nowLog+500;POINT cursor{};GetCursorPos(&cursor);
+            char stats[200];panelinput::HoverStats(stats,sizeof stats);
+            char line[400];std::snprintf(line,sizeof line,"Frame collection hover: active=%d hit=%d onButton=%d page=%d park=%d gamePointer=%d uv=%.3f,%.3f cursor=%ld,%ld %s",
+                int(active),int(pointerHit),int(onButton),int(overCollectionPage),int(parkOnTitle),int(gamePointer),
+                hit.u,hit.v,cursor.x,cursor.y,stats);
+            Say(line);
+        }
+    }
     // A held item released over the Collection page: the page takes it (DepositCarried), not
     // the stash cell under it. The game's button is left down for a moment - the item has to
     // leave the cursor first - and the up follows below, once the move has had its moment.
