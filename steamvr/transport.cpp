@@ -4277,14 +4277,17 @@ void CollectionPointer(bool grip) {
         }
         if(cx!=askedX||cy!=askedY){askedX=cx;askedY=cy;collection::tooltip::RequestInventory(cx,cy);}
     }
-    {   // the laser on the page for a moment (the game's cursor moved off its item and the game took
-        // the tooltip down): no game tooltip there, so the picture under the page may be taken
-        static ULONGLONG onPageSince=0;
+    {   // The picture under the page: the laser on the stash side (page, tab bar) for 300 ms, nothing in
+        // hand and no item tooltip let through for 400 ms. The game keeps drawing a tooltip between its
+        // calls (owner 2026-11-28 14:19: the picture was taken with it, the hole only 58x24), so the
+        // calls alone do not say none is drawn. The hole: the laser on the inventory / equipment side.
+        static ULONGLONG stashSideSince=0;
         const ULONGLONG now=GetTickCount64();
-        const bool onPage=canvasX>=0&&!gamestate::CursorItemHeld();
-        if(!onPage)onPageSince=0;else if(onPageSince==0)onPageSince=now;
-        pageRefNow.store(onPage&&now-onPageSince>=250);
-        holeAllowed.store(pointerHit&&!keyboardPointer&&uiCursorU>CollectionPageRight+.01f);
+        const bool inventorySide=pointerHit&&!keyboardPointer&&uiCursorU>CollectionPageRight+.01f;
+        const bool stashSide=(canvasX>=0||(pointerHit&&!keyboardPointer&&!inventorySide))&&!gamestate::CursorItemHeld();
+        if(!stashSide)stashSideSince=0;else if(stashSideSince==0)stashSideSince=now;
+        pageRefNow.store(stashSide&&now-stashSideSince>=300&&panelinput::TooltipShownAgo()>=400);
+        holeAllowed.store(inventorySide);
     }
     collectionTriggerWas=collectionTriggerDown;
     collection::TabSetHover(collectionHover);   // the picture lights what the laser is over
@@ -9059,12 +9062,9 @@ void CollectStashReads() {
                 auto* ref=under>=0&&under<int(pageRefs.size())?&pageRefs[size_t(under)]:nullptr;
                 pageRefW=W;pageRefH=H;
                 bool found=false;int hx0=0,hy0=0,hx1=0,hy1=0;
-                // The laser rests on the page: the picture under it, kept as the brightest seen at each
-                // point - a tooltip the game was slow to take down (near-black) leaves it at the next look.
-                if(r.pageRef){
-                    if(ref&&ref->size()==lum.size())for(size_t i=0;i<lum.size();++i)(*ref)[i]=std::max((*ref)[i],lum[i]);
-                    else if(ref)*ref=std::move(lum);
-                }
+                // No game tooltip drawn: the picture under the page, taken fresh each look (an item moved
+                // in the stash under it is in the next one).
+                if(r.pageRef){if(ref)*ref=std::move(lum);}
                 else if(r.holeOk&&ref&&ref->size()==lum.size()) {
                     // The first search (owner 2026-11-28: "it cut the hole well"): a cell counts where it
                     // darkened by 24 or more; the box is the rows and columns holding at least 6 such cells.
@@ -9081,7 +9081,7 @@ void CollectStashReads() {
                 } else if(r.holeOk) {
                     static ULONGLONG toldAt=0;
                     if(GetTickCount64()-toldAt>2000){toldAt=GetTickCount64();char line[120];
-                        std::snprintf(line,sizeof line,"Frame collection: no picture of tab %d under the page yet - rest the laser on the page",under);Say(line);}
+                        std::snprintf(line,sizeof line,"Frame collection: no picture of tab %d under the page yet (taken with the laser on the stash side)",under);Say(line);}
                 }
                 {
                     // Held a moment: the search misses the box on some reads (owner 2026-11-28: the hole came

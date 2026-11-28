@@ -5,7 +5,6 @@
 #include <atomic>
 #include <cstring>
 #include <utility>
-#include <string>
 #include "panel_input.h"
 #include "panel_input_mode.h"
 #include "render_resolution.h"
@@ -140,6 +139,7 @@ bool ItemHoverActive() {
 }
 bool Owns();   // below: the laser holds the game's pointer
 std::atomic<uint64_t> itemTooltipAt{0};   // the game asked for an item's tooltip: its cursor is on one
+std::atomic<uint64_t> itemTooltipShownAt{0};   // an item's tooltip went on to the game: it is drawn
 void OnItemTooltip(uintptr_t widget,uintptr_t item) {
     const uint64_t now=GetTickCount64();
     if(item)itemTooltipAt.store(now);
@@ -148,31 +148,13 @@ void OnItemTooltip(uintptr_t widget,uintptr_t item) {
     const bool under=!item||!hover||!widgetHovered||widgetHovered(widget);
     const bool ready=item&&hover&&under&&tooltipDwell.Ready(widget,item,now,tooltipTiming.load(),hoverGeneration.load());
     item=framevr::panels::ItemTooltipItem(item,hover,under,Owns(),ready);   // "nothing here" always reaches the game
-    if(item)++statTipShown;
+    if(item){++statTipShown;itemTooltipShownAt.store(now);}
     originalItemTooltip(widget,item);
 }
 int OnKey(int key) {
     const auto caller=reinterpret_cast<uintptr_t>(_ReturnAddress());
     return framevr::panels::ItemCompareKey(ItemHoverActive(),caller==tooltipCompareReturn,key,
         [](int k){return originalKey(k);});
-}
-// [dev] With a folder %TEMP%\pcvr_code present, the game's decrypted code (its first 0x1400000 bytes)
-// is written there once, as d2r_code.bin, for reading the item grids' hover offline (2026-11-28).
-void DumpCodeOnce() {
-    static bool done=false;if(done)return;done=true;
-    char dir[MAX_PATH]{};GetTempPathA(MAX_PATH,dir);std::string folder=std::string(dir)+"pcvr_code";
-    const DWORD attributes=GetFileAttributesA(folder.c_str());
-    if(attributes==INVALID_FILE_ATTRIBUTES||!(attributes&FILE_ATTRIBUTE_DIRECTORY))return;
-    FILE* file=nullptr;if(fopen_s(&file,(folder+"\\d2r_code.bin").c_str(),"wb")||!file)return;
-    const uintptr_t base=reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));static uint8_t page[4096];
-    for(uintptr_t offset=0;offset<0x1400000;offset+=sizeof page) {
-        SIZE_T got=0;
-        if(!ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<const void*>(base+offset),page,sizeof page,&got)||got!=sizeof page)
-            std::memset(page,0,sizeof page);
-        fwrite(page,1,sizeof page,file);
-    }
-    fclose(file);
-    framevr::logging::Write("Frame panels: [dev] the game's code written to %TEMP%\\pcvr_code\\d2r_code.bin");
 }
 void InstallTooltips() {
     if(tooltipsReady.load())return;
@@ -191,7 +173,6 @@ void InstallTooltips() {
     if(!originalItemTooltip&&!d2rsig::Hook(ItemTooltipRva,ItemTooltipSig,sizeof ItemTooltipSig,reinterpret_cast<void*>(&OnItemTooltip),reinterpret_cast<void**>(&originalItemTooltip)))return;
     if(d2rsig::Hook(KeyRva,KeySig,sizeof KeySig,reinterpret_cast<void*>(&OnKey),reinterpret_cast<void**>(&originalKey))) {
         tooltipsReady.store(true,std::memory_order_release);
-        DumpCodeOnce();
         framevr::logging::Write("Frame panels: exact item hover, selectable tooltip timing and native equipped-item comparison installed");
     }
 }
@@ -398,6 +379,7 @@ void MaintainWorldController(bool player,bool menu){
 }
 bool BlocksWorld(){return Owns();}
 bool OverItem(){return GetTickCount64()-itemTooltipAt.load()<150;}
+uint64_t TooltipShownAgo(){const uint64_t at=itemTooltipShownAt.load();return at?GetTickCount64()-at:~0ull;}
 void HoverStats(char* out,size_t size){
     if(!out||!size)return;
     std::snprintf(out,size,"moves=%u itemQ=%u itemQnative=%u tips=%u tipsItem=%u tipsShown=%u last=%llx/%llx hover=%d",

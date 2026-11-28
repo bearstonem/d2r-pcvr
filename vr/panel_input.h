@@ -12,6 +12,7 @@ uint32_t TextFocusOns(); // how many times a text box took the focus (a closed V
 void MaintainWorldController(bool player,bool menu); // UI thread: restore native interaction targeting
 bool BlocksWorld(); // includes queued release after the menu closes
 bool OverItem(); // the game's cursor is on an item (its tooltip was asked for in the last 150 ms)
+uint64_t TooltipShownAgo(); // ms since an item's tooltip was last let through to the game (drawn); huge if never
 void HoverStats(char* out,size_t size); // [dev] collection_log: pointer moves, item-grid cursor queries, tooltip calls since the last call
 
 bool ControllerReady(); // UI thread: request native controller mode, report when committed
