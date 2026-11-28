@@ -99,6 +99,23 @@ Open either hand's wheel and choose **DEV**. Its tabs are grouped by purpose:
 - **Act III:** Kurast regions, sewer entrances, jungle areas and bosses.
 - **Act IV - V:** later-act combat areas and filming locations, the
   Frozen Tundra crash repro (below) and the Worldstone Keep.
+- **BODIES:** the pushable bodies' values (each press steps one and saves it).
+- **STASH:** kits for the stash's Collection (#608). Each is one transaction
+  into the inventory, so empty the inventory first. Every unique and set item is
+  forced by its table row and made at item level 99. All are identified unless
+  noted.
+  - **Collection uniques:** two Stones of Jordan (only one copy is kept),
+    Nagelring, Mara's Kaleidoscope, Annihilus, a Hellfire Torch, Gheed's
+    Fortune, a Rainbow Facet, Ormus' Robes, Windforce, and a Harlequin Crest
+    left unidentified (never collected). 29 cells.
+  - **Collection sets:** all of Angelic Raiment (Sickle, Mantle, Halo, Wings) for
+    the full set's bonus, and Cathan's Seal and Sigil for a part set. 13 cells.
+  - **Collection runewords:** a 2-socket Quilted Armor with Tal and Eth
+    (Stealth), plus a 4-socket Crystal Sword and a 4-socket Monarch with Tal, Thul,
+    Ort and Amn each (Spirit, both cards). Socket the runes by hand. 28 cells.
+  - **Collection gems + runes:** seven gems from chipped to perfect, and El,
+    Ral, Ber, Jah and Zod, which the collection leaves to the stash's own tabs.
+    12 cells.
 
 Preparation applies exact values to the current class. Skill ranks are capped
 at 20 and at `character level - required level + 1`; locked skills are explicitly

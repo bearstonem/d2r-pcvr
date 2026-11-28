@@ -58,6 +58,10 @@ inline constexpr int TundraReproSteps=10;
 // Throne of Destruction, the Worldstone Chamber and Mephisto's chamber are here already), and a kit of flails with life
 // and mana steal (FlailKit below).
 inline constexpr int WorldstoneKeepChoice=TundraReproChoice+1,FlailsChoice=TundraReproChoice+2;
+// The stash's Collection (owner, 2026-11-25, to test #608): four kits of named items
+// (CollectionKit below), on the STASH page - uniques, set items, runeword bases with their runes, gems and runes.
+inline constexpr int CollectUniquesChoice=FlailsChoice+1,CollectSetsChoice=FlailsChoice+2,
+                     CollectRunewordsChoice=FlailsChoice+3,CollectGemsChoice=FlailsChoice+4;
 struct ReproStep {int step;const char* command;const char* place;};
 // The press'th press (0 first): steps 1 to TundraReproSteps and round again, odd ones to the ice cave.
 inline ReproStep TundraReproStep(unsigned press){
@@ -65,7 +69,7 @@ inline ReproStep TundraReproStep(unsigned press){
     return step%2?ReproStep{step,"goto 115","Glacial Trail"}:ReproStep{step,"goto 117","Frozen Tundra"};
 }
 inline constexpr int PageSize=14;
-inline constexpr std::array<Choice,FlailsChoice+1> Choices{{
+inline constexpr std::array<Choice,CollectGemsChoice+1> Choices{{
     {"Level 90", "All class skills rank 20 / test attributes", nullptr},
     {"Primary gear", "Class-specific unique equipment", nullptr},
     {"Alternate gear", "Equipment for the other class abilities", nullptr},
@@ -143,18 +147,23 @@ inline constexpr std::array<Choice,FlailsChoice+1> Choices{{
     // levels.txt 128 (129 and 130 below it, then the Throne 131 and the Worldstone Chamber 132)
     {"Worldstone Keep", "Act V / Level 1: its ceiling over the pillars and stairs", "goto 128"},
     {"Flails + steal", "Tan Do Li Ga (mana steal), Bloodrise (life steal), Flail, Scourge", nullptr},
+    {"Collection uniques", "SoJ twice, charms, Facet, Ormus', Windforce, a Shako unread", nullptr},
+    {"Collection sets", "Angelic Raiment, all four / Cathan's Seal and Sigil", nullptr},
+    {"Collection runewords", "Socketed bases and runes: Stealth, Spirit sword and shield", nullptr},
+    {"Collection gems + runes", "Seven gems, El, Ral, Ber, Jah, Zod / the stash's own tabs", nullptr},
 }};
 static_assert(limbs::Knobs==10,"one BODIES choice per knob");
 // Stable action IDs are independent of their presentation order.
-inline constexpr int PageCount=6;
-inline constexpr const char* PageNames[]={"HERO","GEAR","ACT I-II","ACT III","ACT IV-V","BODIES"};
+inline constexpr int PageCount=7;
+inline constexpr const char* PageNames[]={"HERO","GEAR","ACT I-II","ACT III","ACT IV-V","BODIES","STASH"};
 inline constexpr const char* PageHelp[]={
     "Test presets replace stats and skills; gear and button bindings stay as they are.",
     "Starter kits work at low levels; unique kits are for level 90. Equip in Inventory.",
     "Area entrances and inspection spots. Bosses depend on this test character's save.",
     "Kurast Sewers: take the stairs back outside to inspect the entrance and interaction.",
     "Area entrances. Travel does not complete quests, reset bosses or change difficulty.",
-    "Each press steps a value and saves it in the dev INI's [bodies]. Then push a body to feel it."
+    "Each press steps a value and saves it in the dev INI's [bodies]. Then push a body to feel it.",
+    "For the stash's Collection. Empty the inventory first, then open the stash in Harrogath (ACT IV-V)."
 };
 inline constexpr std::array<std::array<int,PageSize>,PageCount> Pages{{
     {{Level10Choice,Level30Choice,Level60Choice,0,HealChoice,UnlockQuestsChoice,ThrowingPotionsChoice,TurnsRimsChoice,SkyRimsChoice,LootBeamsChoice,ItemBowsChoice,FlailsChoice,-1,-1}},
@@ -163,7 +172,8 @@ inline constexpr std::array<std::array<int,PageSize>,PageCount> Pages{{
     {{17,UpperKurastChoice,KurastSewersChoice,18,19,26,27,-1,-1,-1,-1,-1,-1,-1}},
     {{6,7,20,21,22,23,24,25,GlacialTrailChoice,FrozenTundraChoice,TundraReproChoice,WorldstoneKeepChoice,-1,-1}},
     {{BodyKnobChoice,BodyKnobChoice+1,BodyKnobChoice+2,BodyKnobChoice+3,BodyKnobChoice+4,BodyKnobChoice+5,BodyKnobChoice+6,
-      BodyKnobChoice+7,BodyKnobChoice+8,BodyKnobChoice+9,BodyResetChoice,-1,-1,-1}}
+      BodyKnobChoice+7,BodyKnobChoice+8,BodyKnobChoice+9,BodyResetChoice,-1,-1,-1}},
+    {{CollectUniquesChoice,CollectSetsChoice,CollectRunewordsChoice,CollectGemsChoice,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1}}
 }};
 inline int PageFor(int choice){for(int p=0;p<PageCount;++p)for(int id:Pages[p])if(id==choice&&id>=0)return p;return -1;}
 inline int SlotFor(int choice){for(const auto& page:Pages)for(int i=0;i<PageSize;++i)if(page[i]==choice&&choice>=0)return i;return -1;}
@@ -303,6 +313,54 @@ inline constexpr std::array<KitItem,4> FlailKit{{
     {"fla",KitQuality::Unique,99,true},{"mst",KitQuality::Unique,99,true},{"fla",KitQuality::Normal,1,true},{"7fl",KitQuality::Normal,1,true}
 }};
 inline constexpr std::array<uint32_t,2> FlailKitUniques{21,20};
+// The Collection kits (#608, owner 2026-11-25): named items. A unique or set item is forced by its row, zero-based as
+// the SDK takes it: the UniqueItems / SetItems *ID column, which is the Collection catalog's recordId
+// (steamvr/prepare_collection.py; read from Steam 3.4.95041's own tables on 2026-11-25). Any other item is made from
+// its code alone (row -1). Sockets are exact (0: none). Every item is made at item level 99 and identified unless
+// marked. Each kit fits an empty 40-cell inventory.
+struct NamedItem {const char* code;KitQuality quality;int row;int sockets;bool identified;};
+inline constexpr size_t NamedKitMost=16;
+using NamedKit=std::array<NamedItem,NamedKitMost>;
+// Uniques. Two Stones of Jordan: only one copy of an entry is kept. Nagelring and Mara's Kaleidoscope. The three
+// charms: Annihilus, the Hellfire Torch (a card per class) and Gheed's Fortune. A Rainbow Facet (eight rows) and
+// Ormus' Robes (five cards). Windforce, a two-handed bow. A Harlequin Crest left unidentified, which is never
+// collected. 29 cells.
+inline constexpr NamedKit CollectUniquesKit{{
+    {"rin",KitQuality::Unique,122,0,true},{"rin",KitQuality::Unique,122,0,true},{"rin",KitQuality::Unique,120,0,true},
+    {"amu",KitQuality::Unique,272,0,true},{"cm1",KitQuality::Unique,381,0,true},{"cm2",KitQuality::Unique,400,0,true},
+    {"cm3",KitQuality::Unique,359,0,true},{"jew",KitQuality::Unique,392,0,true},{"uui",KitQuality::Unique,358,0,true},
+    {"6lw",KitQuality::Unique,266,0,true},{"uap",KitQuality::Unique,248,0,false}
+}};
+// Sets. All of Angelic Raiment (Sickle, Mantle, Halo, Wings) for the full set's bonus. Two of Cathan's Traps' five
+// (Seal, Sigil) for a part set's dots and bonuses. 13 cells.
+inline constexpr NamedKit CollectSetsKit{{
+    {"sbr",KitQuality::Set,50,0,true},{"rng",KitQuality::Set,51,0,true},{"rin",KitQuality::Set,52,0,true},
+    {"amu",KitQuality::Set,53,0,true},{"rin",KitQuality::Set,29,0,true},{"amu",KitQuality::Set,28,0,true}
+}};
+// Runewords, made by hand in the game from normal bases:
+// - Stealth: a 2-socket Quilted Armor with Tal and Eth.
+// - Spirit's two cards: a 4-socket Crystal Sword and a 4-socket Monarch, with Tal, Thul, Ort and Amn for each.
+// 28 cells.
+inline constexpr NamedKit CollectRunewordsKit{{
+    {"qui",KitQuality::Normal,-1,2,true},{"crs",KitQuality::Normal,-1,4,true},{"uit",KitQuality::Normal,-1,4,true},
+    {"r07",KitQuality::Normal,-1,0,true},{"r05",KitQuality::Normal,-1,0,true},
+    {"r07",KitQuality::Normal,-1,0,true},{"r10",KitQuality::Normal,-1,0,true},{"r09",KitQuality::Normal,-1,0,true},{"r11",KitQuality::Normal,-1,0,true},
+    {"r07",KitQuality::Normal,-1,0,true},{"r10",KitQuality::Normal,-1,0,true},{"r09",KitQuality::Normal,-1,0,true},{"r11",KitQuality::Normal,-1,0,true}
+}};
+// Gems and runes, which the collection leaves to the stash's own Gems and Runes tabs. One of each gem kind, from
+// chipped to perfect: Perfect Amethyst, Flawless Ruby, Topaz, Flawed Sapphire, Chipped Emerald, Perfect Diamond,
+// Perfect Skull. Then El, Ral, Ber, Jah and Zod. 12 cells.
+inline constexpr NamedKit CollectGemsKit{{
+    {"gpv",KitQuality::Normal,-1,0,true},{"glr",KitQuality::Normal,-1,0,true},{"gsy",KitQuality::Normal,-1,0,true},
+    {"gfb",KitQuality::Normal,-1,0,true},{"gcg",KitQuality::Normal,-1,0,true},{"gpw",KitQuality::Normal,-1,0,true},
+    {"skz",KitQuality::Normal,-1,0,true},{"r01",KitQuality::Normal,-1,0,true},{"r08",KitQuality::Normal,-1,0,true},
+    {"r30",KitQuality::Normal,-1,0,true},{"r31",KitQuality::Normal,-1,0,true},{"r33",KitQuality::Normal,-1,0,true}
+}};
+inline const NamedKit* CollectionKit(int choice){
+    return choice==CollectUniquesChoice?&CollectUniquesKit:choice==CollectSetsChoice?&CollectSetsKit:
+           choice==CollectRunewordsChoice?&CollectRunewordsKit:choice==CollectGemsChoice?&CollectGemsKit:nullptr;
+}
+inline size_t NamedCount(const NamedKit& kit){size_t n=0;for(const auto& item:kit)n+=item.code!=nullptr;return n;}
 // Native unique generation selects eligible unique rows and random stat rolls.
 // nullptr skips an off-hand item for a two-handed staff/maul.
 inline std::array<const char*,10> Kit(int cls,int choice){
@@ -356,6 +414,6 @@ inline bool ValidChoice(int choice){return choice>=0&&choice<int(Choices.size())
 inline bool StarterKit(int choice){return choice==StarterPrimaryChoice||choice==StarterAlternateChoice;}
 // Normal quality at item level 1, usable at once; the other kits roll uniques at 99.
 inline bool NormalKit(int choice){return StarterKit(choice)||choice==ThrowingChoice||choice==PotionsChoice||choice==TorchChoice||choice==ThrowingPotionsChoice||choice==LootBeamsChoice;}
-inline bool IsKit(int choice){return choice==1||choice==2||choice==CrossbowChoice||choice==BowChoice||choice==SmallShieldChoice||choice==ItemBowsChoice||choice==FlailsChoice||NormalKit(choice);}
+inline bool IsKit(int choice){return choice==1||choice==2||choice==CrossbowChoice||choice==BowChoice||choice==SmallShieldChoice||choice==ItemBowsChoice||choice==FlailsChoice||NormalKit(choice)||CollectionKit(choice);}
 inline bool Isolated(std::string_view mod,std::string_view metadata){return mod==Mod&&metadata==ModInfo;}
 }
